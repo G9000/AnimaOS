@@ -1892,39 +1892,11 @@ impl AgentRuntime {
     fn build_system_prompt(&self, context_parts: &[String]) -> String {
         let mut parts = Vec::new();
 
+        let (legacy_before, legacy_after) = self.state.config.legacy_personality_parts();
         if let Some(identity) = &self.agent_files.identity {
             parts.push(identity.text.clone());
         } else {
-            if let Some(bio) = &self.state.config.bio {
-                parts.push(format!("## Who You Are\n{bio}"));
-            }
-            if let Some(lore) = &self.state.config.lore {
-                parts.push(format!("## Your Backstory\n{lore}"));
-            }
-            if let Some(adjectives) = self
-                .state
-                .config
-                .adjectives
-                .as_ref()
-                .filter(|values| !values.is_empty())
-            {
-                parts.push(format!(
-                    "## Your Personality\nYou are {}.",
-                    adjectives.join(", ")
-                ));
-            }
-            if let Some(topics) = self
-                .state
-                .config
-                .topics
-                .as_ref()
-                .filter(|values| !values.is_empty())
-            {
-                parts.push(format!(
-                    "## Your Expertise\nYou specialize in: {}.",
-                    topics.join(", ")
-                ));
-            }
+            parts.extend(legacy_before);
         }
         if let Some(knowledge) = self
             .state
@@ -1943,16 +1915,7 @@ impl AgentRuntime {
             ));
         }
         if self.agent_files.identity.is_none() {
-            if let Some(style) = &self.state.config.style {
-                parts.push(format!("## How You Communicate\n{style}"));
-            }
-            parts.push(
-                self.state
-                    .config
-                    .system
-                    .clone()
-                    .unwrap_or_else(|| "You are a helpful task agent.".to_string()),
-            );
+            parts.extend(legacy_after);
         }
         if !self.agent_files.project_context.is_empty() {
             parts.push(self.agent_files.project_context.clone());

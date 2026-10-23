@@ -308,8 +308,7 @@ export interface ConnectorMessage {
 
 export type ScheduleTrigger = AutomationTrigger;
 export type ScheduleTarget =
-  | { type: 'workspace' }
-  | { type: 'connector'; connectorId: string };
+  { type: 'workspace' } | { type: 'connector'; connectorId: string };
 export interface ScheduleOutcome {
   status: 'silent' | 'spoke' | 'error' | 'stopped';
   occurredAtMs: number;
@@ -578,6 +577,12 @@ export const daemon = {
   browserScopes: setupClient.browserScopes,
   agentFilesPreview: (id: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.agentFiles.preview(id, options),
+  agentPersonality: (id: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.agentFiles.personality(id, options),
+  saveAgentPersonality: (
+    id: string,
+    input: import('@animaos/sdk').SaveAgentPersonality,
+  ) => setupClient.agentFiles.savePersonality(id, input),
   capabilities: () => setupClient.capabilities(),
   listWorkspaceFiles: () => setupClient.workspace.listFiles(),
   readWorkspaceFile: (path: string) => setupClient.workspace.readFile(path),

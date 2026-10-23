@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import type { Session } from '@animaos/sdk';
+import { usePublishHeaderSummary } from '../../lib/header-context';
 import { KeptSummary } from './TranscriptNotes';
 import './session-continuity.css';
 
@@ -20,9 +21,11 @@ function validUsage(usage: Session['contextUsage']): usage is ContextUsage {
   );
 }
 
-/** What the agent kept from earlier in the chat, at the top of the thread. */
+/** What the agent kept from earlier in the chat. The top bar shows it when
+ *  there is one; a view without a top bar keeps it at the top of the thread. */
 export function SessionContinuity({ session }: { session: Session }) {
-  return session.summary ? (
+  const inHeader = usePublishHeaderSummary(session.summary ?? null);
+  return session.summary && !inHeader ? (
     <div className="session-continuity">
       <KeptSummary summary={session.summary} />
     </div>

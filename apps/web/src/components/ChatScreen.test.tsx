@@ -526,8 +526,7 @@ describe('MessageList', () => {
       screen.queryByRole('button', { name: '↓ Jump to latest' }),
     ).not.toBeInTheDocument();
   });
-  it('searches literal conversation text and reports no matches', async () => {
-    const user = userEvent.setup();
+  it('keeps search and export in the command menu, not in a row above the chat', () => {
     render(
       <MessageList
         agent={agent}
@@ -536,22 +535,10 @@ describe('MessageList', () => {
         onSuggestion={vi.fn()}
       />,
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Search conversation' }),
-    );
-    await user.type(
-      screen.getByRole('searchbox', { name: 'Search messages' }),
-      'Heading',
-    );
-    expect(screen.getByRole('status')).toHaveTextContent('1 of 1');
-    await user.clear(
-      screen.getByRole('searchbox', { name: 'Search messages' }),
-    );
-    fireEvent.change(
-      screen.getByRole('searchbox', { name: 'Search messages' }),
-      { target: { value: '[missing]' } },
-    );
-    expect(screen.getByRole('status')).toHaveTextContent('No matches');
+    expect(
+      screen.queryByRole('button', { name: 'Search conversation' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/loaded messages/)).not.toBeInTheDocument();
   });
 
   it('waits for a route target to mount, jumps once and replays only for a new request key', () => {
@@ -853,7 +840,7 @@ describe('MessageList', () => {
     expect(screen.getByText('Incomplete')).toBeVisible();
   });
 
-  it('anchors a message id shared by a bubble and its tool block to the bubble alone', async () => {
+  it('anchors a message id shared by a bubble and its tool block to the bubble alone', () => {
     // An assistant message with both text and tool calls produces two
     // transcript items that both cite its id; only one may own it, or
     // jump/highlight are ambiguous and unmounting either item deletes the
@@ -864,9 +851,9 @@ describe('MessageList', () => {
       calledOn.push(this);
     };
     try {
-      const user = userEvent.setup();
       render(
         <MessageList
+          highlightMessageId="a1"
           agent={{
             ...agent,
             messages: [
@@ -898,20 +885,8 @@ describe('MessageList', () => {
       expect(bubbleAnchor).not.toBeNull();
       expect(bubbleAnchor).not.toBe(toolAnchor);
 
-      await user.click(
-        screen.getByRole('button', { name: 'Search conversation' }),
-      );
-      await user.type(
-        screen.getByRole('searchbox', { name: 'Search messages' }),
-        'Let me check',
-      );
       expect(bubbleAnchor).toHaveAttribute('data-search-match', 'true');
       expect(toolAnchor).not.toHaveAttribute('data-search-match');
-
-      fireEvent.keyDown(
-        screen.getByRole('searchbox', { name: 'Search messages' }),
-        { key: 'Enter' },
-      );
       expect(calledOn).toContain(bubbleAnchor);
       expect(calledOn).not.toContain(toolAnchor);
     } finally {

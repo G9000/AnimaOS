@@ -269,6 +269,86 @@ impl WorkspaceBytes {
         file.sync_all()?;
         Ok(())
     }
+    /// Replace an existing instruction through the retained parent capability.
+    /// A synchronized exclusive sibling is published only after exact preimage,
+    /// single-link, permission, and caller authority checks succeed.
+    pub(crate) fn compare_replace_instruction_file<G>(
+        &self,
+        relative: &str,
+        expected: &[u8],
+        replacement: &[u8],
+        authorize: impl FnOnce() -> io::Result<G>,
+    ) -> io::Result<()> {
+        use cap_fs_ext::MetadataExt;
+        let (directory, name) = self.parent(relative, false)?;
+        let original = open_regular_file(&directory, &name)?;
+        let metadata = original.metadata()?;
+        if metadata.nlink() != 1 || metadata.permissions().readonly() {
+            return Err(unavailable());
+        }
+        let same_preimage = || -> io::Result<()> {
+            let named = open_regular_file(&directory, &name)?;
+            let current = named.metadata()?;
+            if current.nlink() != 1
+                || (current.dev(), current.ino()) != (metadata.dev(), metadata.ino())
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Personality source changed; reload before saving",
+                ));
+            }
+            let mut bytes = Vec::new();
+            (&named)
+                .take(expected.len().saturating_add(1) as u64)
+                .read_to_end(&mut bytes)?;
+            if bytes != expected || named.metadata()?.len() != expected.len() as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Personality source changed; reload before saving",
+                ));
+            }
+            Ok(())
+        };
+        same_preimage()?;
+        let temporary = format!(".anima-personality-{}.tmp", uuid::Uuid::new_v4());
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No)
+            .nonblock(true);
+        // The temporary has no broader POSIX mode even during creation.
+        #[cfg(unix)]
+        {
+            use cap_std::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(metadata.permissions().mode() & 0o777);
+        }
+        let mut file = directory.open_with(&temporary, &options)?;
+        let result = (|| -> io::Result<()> {
+            file.set_permissions(metadata.permissions())?;
+            ensure_same_instruction_permissions(&original, &file)?;
+            file.write_all(replacement)?;
+            file.sync_all()?;
+            same_preimage()?;
+            ensure_same_instruction_permissions(&original, &file)?;
+            let authority = authorize()?;
+            // Windows rename needs the temporary's writable handle closed first.
+            drop(file);
+            directory.rename(&temporary, &directory, &name)?;
+            drop(authority);
+            #[cfg(unix)]
+            directory
+                .try_clone()
+                .and_then(|held| held.into_std_file().sync_all())
+                .map_err(|_| crate::control_plane_store::durability_uncertain_error())?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = directory.remove_file(&temporary);
+        }
+        result
+    }
+
     pub(crate) fn read_bounded(
         &self,
         relative: &str,
@@ -302,6 +382,90 @@ impl WorkspaceBytes {
     }
 }
 
+fn ensure_same_instruction_permissions(original: &File, temporary: &File) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        ensure_same_windows_acl(original, temporary)?;
+    }
+    #[cfg(unix)]
+    {
+        use cap_std::fs::MetadataExt;
+        let before = original.metadata()?;
+        let after = temporary.metadata()?;
+        if before.uid() != after.uid()
+            || before.gid() != after.gid()
+            || before.mode() != after.mode()
+        {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "SOUL.md ownership or permissions cannot be preserved safely; edit this file directly"));
+        }
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "hurd"
+        ))]
+        {
+            // A replacement inode could lose ACLs, labels, or other access
+            // metadata. Refuse any extended attributes rather than weaken them.
+            for file in [original, temporary] {
+                match rustix::fs::flistxattr(file, &mut [] as &mut [u8]) {
+                    Ok(0) => {},
+                    Err(rustix::io::Errno::NOTSUP) => {},
+                    _ => return Err(io::Error::new(io::ErrorKind::PermissionDenied, "SOUL.md extended access metadata cannot be preserved safely; edit this file directly")),
+                }
+            }
+        }
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "hurd"
+        )))]
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "SOUL.md access metadata cannot be verified on this platform; edit this file directly",
+        ));
+    }
+    Ok(())
+}
+
+/// Version-bound adapter for win-custody exactly =0.1.1. Its validated owner
+/// and DACL derive Debug recursively from complete SID byte vectors and ordered
+/// ACE flags/masks; unlike ObjectSecurityDescriptor, these contain no pointers.
+/// Reinspect these private representations and rerun the arbitrary-trustee and
+/// access-change regressions before upgrading the dependency. Unsupported ACEs
+/// still fail closed through dacl() validation.
+#[cfg(windows)]
+fn ensure_same_windows_acl(original: &File, temporary: &File) -> io::Result<()> {
+    use win_custody::ObjectSecurityDescriptor;
+    let acl_error = || {
+        io::Error::new(io::ErrorKind::PermissionDenied,
+        "SOUL.md has custom permissions that cannot be preserved safely; edit this file directly")
+    };
+    let fingerprint = |file: &File| -> io::Result<_> {
+        let descriptor = ObjectSecurityDescriptor::query_kernel_object(file)?;
+        let owner = descriptor.owner().map_err(|_| acl_error())?;
+        let acl = descriptor.dacl().map_err(|_| acl_error())?;
+        Ok((
+            descriptor.control()?,
+            format!("{owner:?}"),
+            format!("{acl:?}"),
+        ))
+    };
+    if fingerprint(original)? != fingerprint(temporary)? {
+        return Err(acl_error());
+    }
+    Ok(())
+}
+
 pub(crate) fn open_regular_file(directory: &Dir, name: &str) -> io::Result<File> {
     // Precheck rejects known special files. The held no-follow/nonblocking handle
     // check closes the replacement gap without waiting on a replaced FIFO.
@@ -322,6 +486,143 @@ pub(crate) fn open_regular_file(directory: &Dir, name: &str) -> io::Result<File>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn personality_windows_acl_comparison_preserves_arbitrary_trustees_and_access_fields() {
+        let base = tempfile::tempdir().unwrap();
+        let held = WorkspaceBytes::open(base.path()).unwrap();
+        let user = win_custody::current_user_sid_string().unwrap();
+        let own = format!("(A;;FA;;;{user})");
+        let first = "S-1-5-21-111-222-333-4444";
+        let second = "S-1-5-21-111-222-333-5555";
+        let allow = format!("D:P{own}(A;;FR;;;{first})");
+        let cases = [
+            ("same arbitrary trustee", allow.clone(), true, true),
+            (
+                "different arbitrary trustee",
+                format!("D:P{own}(A;;FR;;;{second})"),
+                true,
+                false,
+            ),
+            (
+                "different access mask",
+                format!("D:P{own}(A;;FW;;;{first})"),
+                true,
+                false,
+            ),
+            (
+                "different protection control",
+                format!("D:{own}(A;;FR;;;{first})"),
+                false,
+                false,
+            ),
+            (
+                "unsupported deny ACE",
+                format!("D:P{own}(D;;FW;;;{first})"),
+                true,
+                false,
+            ),
+        ];
+        for (index, (label, candidate, protect, equal)) in cases.into_iter().enumerate() {
+            let left = format!("left-{index}");
+            let right = format!("right-{index}");
+            std::fs::write(base.path().join(&left), "left").unwrap();
+            std::fs::write(base.path().join(&right), "right").unwrap();
+            win_custody::SecurityDescriptor::from_sddl(&allow)
+                .unwrap()
+                .apply_to_tree(&base.path().join(&left), true)
+                .unwrap();
+            win_custody::SecurityDescriptor::from_sddl(&candidate)
+                .unwrap()
+                .apply_to_tree(&base.path().join(&right), protect)
+                .unwrap();
+            assert_eq!(
+                ensure_same_windows_acl(
+                    &held.directory.open(&left).unwrap(),
+                    &held.directory.open(&right).unwrap()
+                )
+                .is_ok(),
+                equal,
+                "{label}"
+            );
+        }
+        for (name, acl) in [
+            ("flags-left", format!("D:P{own}(A;OICI;FR;;;{first})")),
+            ("flags-right", format!("D:P{own}(A;CI;FR;;;{first})")),
+        ] {
+            std::fs::create_dir(base.path().join(name)).unwrap();
+            win_custody::SecurityDescriptor::from_sddl(&acl)
+                .unwrap()
+                .apply_to_tree(&base.path().join(name), true)
+                .unwrap();
+        }
+        let flags_left = File::from_std(
+            held.directory
+                .open_dir("flags-left")
+                .unwrap()
+                .into_std_file(),
+        );
+        let flags_right = File::from_std(
+            held.directory
+                .open_dir("flags-right")
+                .unwrap()
+                .into_std_file(),
+        );
+        assert!(ensure_same_windows_acl(&flags_left, &flags_right).is_err());
+        for (name, acl) in [
+            (
+                "ordered-left",
+                format!("D:P{own}(A;;FR;;;{first})(A;;FR;;;{second})"),
+            ),
+            (
+                "ordered-right",
+                format!("D:P{own}(A;;FR;;;{second})(A;;FR;;;{first})"),
+            ),
+        ] {
+            std::fs::write(base.path().join(name), "order").unwrap();
+            win_custody::SecurityDescriptor::from_sddl(&acl)
+                .unwrap()
+                .apply_to_tree(&base.path().join(name), true)
+                .unwrap();
+        }
+        assert!(ensure_same_windows_acl(
+            &held.directory.open("ordered-left").unwrap(),
+            &held.directory.open("ordered-right").unwrap()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn personality_atomic_preimage_and_authority_failures_leave_original_untouched() {
+        let base = tempfile::tempdir().unwrap();
+        std::fs::write(base.path().join("SOUL.md"), "original").unwrap();
+        let held = WorkspaceBytes::open(base.path()).unwrap();
+        let error = held
+            .compare_replace_instruction_file("SOUL.md", b"stale", b"new", || Ok(()))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        let error = held
+            .compare_replace_instruction_file("SOUL.md", b"original", b"new", || {
+                Err::<(), _>(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "owner lost",
+                ))
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            std::fs::read(base.path().join("SOUL.md")).unwrap(),
+            b"original"
+        );
+        assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 1);
+        held.compare_replace_instruction_file("SOUL.md", b"original", b"saved", || Ok(()))
+            .unwrap();
+        assert_eq!(
+            std::fs::read(base.path().join("SOUL.md")).unwrap(),
+            b"saved"
+        );
+    }
+
     #[test]
     fn workspace_bytes_reparse_attributes_are_refused() {
         assert!(reparse_attributes(0x400));

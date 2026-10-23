@@ -18,19 +18,13 @@ import {
   type AgentUpdateInput,
   type DaemonProvider,
 } from '../lib/daemon-api';
-import {
-  AlertIcon,
-  ChipIcon,
-  FolderIcon,
-  ScrollTextIcon,
-  SparkIcon,
-  TrashIcon,
-} from './icons';
+import { AlertIcon, ChipIcon, FolderIcon, TrashIcon } from './icons';
 import { ProfileVoice } from './ProfileVoice';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
+import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
 import { ProviderKeys } from './models/ProviderKeys';
 import { SideModel } from './models/SideModel';
@@ -46,16 +40,6 @@ const ACCESS_ORDER: readonly AccessProfile[] = [
   'collaborate',
   'operate',
 ];
-
-const PERSONALITY_STYLES: Record<string, string> = {
-  calm: 'Be calm, patient, and thoughtful. Explain clearly and ask when the request is ambiguous.',
-  creative:
-    'Be imaginative, curious, and encouraging. Offer concrete creative options and help develop promising ideas.',
-  direct:
-    'Be direct, practical, and concise. Lead with the outcome and explain important trade-offs.',
-  proactive:
-    'Be organized and proactive during assigned work. Identify useful next steps within the agreed scope and existing tool permissions. Do not assume permission for external actions or background work.',
-};
 
 function AbilityToggle({
   id,
@@ -164,7 +148,6 @@ export function SettingsPanel({
     seedModel === '__custom__' ? agent.model : '',
   );
   const [modelScope, setModelScope] = useState({ revision: 0, pending: false });
-  const [system, setSystem] = useState(agent.system ?? '');
   const [accessSelection, setAccessSelection] = useState<AccessProfile | null>(
     derivedAccess === 'custom' ? null : derivedAccess,
   );
@@ -226,7 +209,6 @@ export function SettingsPanel({
     setProvider(agent.provider);
     setModel(seeded);
     setCustomModel(seeded === '__custom__' ? agent.model : '');
-    setSystem(agent.system ?? '');
     setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
     setAccessChanged(false);
     setBrowserGrants(agent.toolNames.filter(isBrowserTool));
@@ -247,7 +229,6 @@ export function SettingsPanel({
     agent.name,
     agent.provider,
     agent.model,
-    agent.system,
     agentToolsKey,
     hasMemoryRemove,
     hasMemoryConsolidate,
@@ -305,7 +286,6 @@ export function SettingsPanel({
     name.trim() !== agent.name ||
     provider !== agent.provider ||
     resolvedModel !== agent.model ||
-    system !== (agent.system ?? '') ||
     toolsDirty;
 
   const save = async () => {
@@ -314,8 +294,6 @@ export function SettingsPanel({
     if (provider !== agent.provider) patch.provider = provider;
     if (resolvedModel && resolvedModel !== agent.model)
       patch.model = resolvedModel;
-    // Empty string clears the prompt back to the daemon default.
-    if (system !== (agent.system ?? '')) patch.system = system;
     if (toolsDirty) {
       const selectedTools =
         accessDirty && accessSelection
@@ -524,88 +502,15 @@ export function SettingsPanel({
                       className="field"
                     />
                   </div>
-                  <div>
-                    <label className={labelCls} htmlFor="settings-owner">
-                      Calls you
-                    </label>
-                    <input
-                      id="settings-owner"
-                      value={
-                        system.match(/^The owner's name is (.*)\.$/m)?.[1] ?? ''
-                      }
-                      onChange={(event) => {
-                        const owner = event.target.value;
-                        setSystem((current) => {
-                          const line = owner
-                            ? `The owner's name is ${owner}.`
-                            : '';
-                          return /^The owner's name is .*\.$/m.test(current)
-                            ? current.replace(
-                                /^The owner's name is .*\.$/m,
-                                () => line,
-                              )
-                            : [current.trim(), line]
-                                .filter(Boolean)
-                                .join('\n\n');
-                        });
-                      }}
-                      disabled={controlsDisabled}
-                      className="field"
-                    />
-                  </div>
                 </div>
               </AgentProfileDetails>
-              <fieldset
-                className="profile-personality settings-item"
-                disabled={controlsDisabled}
-              >
-                <legend className="sr-only">Personality</legend>
-                <span className="settings-item-icon" aria-hidden="true">
-                  <SparkIcon size={16} />
-                </span>
-                <div className="settings-item-text" aria-hidden="true">
-                  <strong>Personality</strong>
-                  <small>How it talks and how much it takes the lead.</small>
-                </div>
-                <div className="profile-personality-options">
-                  {(
-                    [
-                      ['calm', 'Calm & thoughtful'],
-                      ['direct', 'Direct & practical'],
-                      ['creative', 'Creative & curious'],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <label key={value}>
-                      <input
-                        type="radio"
-                        name="personality"
-                        value={value}
-                        checked={system.includes(
-                          `[Personality style]\n${PERSONALITY_STYLES[value]}\n[/Personality style]`,
-                        )}
-                        onChange={() =>
-                          setSystem((current) =>
-                            [
-                              current
-                                .replace(
-                                  /(?:^|\n\n)\[Personality style\][\s\S]*?\[\/Personality style\]/g,
-                                  '',
-                                )
-                                .trim(),
-                              `[Personality style]\n${PERSONALITY_STYLES[value]}\n[/Personality style]`,
-                            ]
-                              .filter(Boolean)
-                              .join('\n\n'),
-                          )
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
             </div>
           </section>
+          <PersonalityEditor
+            key={agent.id}
+            agentId={agent.id}
+            disabled={controlsDisabled}
+          />
           {!shows('model') && (
             <section
               className="settings-group"
@@ -656,34 +561,6 @@ export function SettingsPanel({
               Advanced
             </h3>
             <div className="settings-list">
-              <details
-                className="profile-prompt-editor settings-item"
-                open={sections.length > 1 || undefined}
-              >
-                <summary>
-                  <span className="settings-item-icon" aria-hidden="true">
-                    <ScrollTextIcon size={16} />
-                  </span>
-                  <span className="settings-item-text">
-                    <strong>System prompt</strong>
-                    <small>
-                      Edit the instructions {name || agent.name} starts every
-                      chat with.
-                    </small>
-                  </span>
-                  <span className="profile-edit-label">Edit</span>
-                </summary>
-                <textarea
-                  aria-label="System prompt"
-                  value={system}
-                  onChange={(e) => setSystem(e.target.value)}
-                  disabled={controlsDisabled}
-                  rows={7}
-                  placeholder="Leave empty to use the default built from this profile."
-                  className="field resize-y leading-relaxed"
-                />
-              </details>
-
               <details className="settings-item settings-advanced">
                 <summary>
                   <span className="settings-item-icon" aria-hidden="true">

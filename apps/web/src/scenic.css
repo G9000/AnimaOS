@@ -141,7 +141,6 @@
 }
 
 .scenic-shell[data-presence='listening'] .studio-message-scroller,
-.scenic-shell[data-presence='listening'] .studio-conversation-tools,
 .scenic-shell[data-presence='listening'] .session-view-header {
   filter: blur(6px);
   opacity: 0.5;
@@ -175,10 +174,54 @@
   text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
 }
 
-/* Messages fade out under the top bar instead of being cut by it. */
+/* The bar is clear and the chat reaches up behind it: history scrolls under
+ * the day and dissolves into the scene instead of stopping at an edge. The
+ * scroller starts at the top of the window; its own padding keeps the first
+ * message below the bar. */
+.scenic-shell {
+  --scenic-topbar-h: 70px;
+}
+
+@media (max-width: 767px) {
+  .scenic-shell {
+    --scenic-topbar-h: 58px;
+  }
+}
+
+.scenic-shell .studio-view:has(.companion-chat-panel:not([hidden])) {
+  overflow: visible;
+}
+
+.scenic-shell .studio-conversation-body {
+  margin-top: calc(var(--scenic-topbar-h) * -1);
+}
+
+.scenic-shell .studio-message-scroller {
+  padding-top: var(--scenic-topbar-h);
+}
+
+/* Anything stacked above the chat (a side thread's header, notices) stays
+ * on top of it and clickable. */
+.scenic-shell :has(> .studio-conversation-body) > :has(~ .studio-conversation-body) {
+  position: relative;
+  z-index: 2;
+}
+
+/* History fades out at the bottom of whatever is stacked above the chat (the
+ * top bar, and any row under it), so it never runs behind those rows. */
 .scenic-shell .studio-message-scroller:has(.studio-messages) {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent calc(var(--scenic-topbar-h) - 18px),
+    rgb(0 0 0 / 0.45) calc(var(--scenic-topbar-h) + 2px),
+    #000 calc(var(--scenic-topbar-h) + 22px)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent calc(var(--scenic-topbar-h) - 18px),
+    rgb(0 0 0 / 0.45) calc(var(--scenic-topbar-h) + 2px),
+    #000 calc(var(--scenic-topbar-h) + 22px)
+  );
 }
 
 /* Settings sit over a dimmed orb. */
@@ -202,10 +245,108 @@
 .scenic-shell .studio-topbar.scenic-topbar {
   position: relative;
   z-index: 3;
-  min-height: 88px;
-  padding: 22px 32px;
+  min-height: 70px;
+  padding: 16px 28px;
   border: 0;
   background: transparent;
+}
+
+/* The bar's middle: the day at the top of the screen, and what anima kept
+ * from earlier. History fades out below it instead of ending in a row. */
+.scenic-shell .header-context {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+}
+
+.scenic-shell .header-context-day {
+  flex: none;
+  color: rgb(236 230 218 / 0.7);
+}
+
+.scenic-shell .header-context-rule {
+  flex: none;
+  width: 1px;
+  height: 10px;
+  background: rgb(236 230 218 / 0.2);
+}
+
+.scenic-shell .header-context-note {
+  overflow: hidden;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-overflow: ellipsis;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.scenic-shell .header-context-link {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.scenic-shell .header-context-link:hover,
+.scenic-shell .header-context-link[aria-expanded='true'] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.scenic-shell .header-summary-panel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  z-index: 5;
+  width: min(560px, calc(100% - 56px));
+  max-height: min(60vh, 440px);
+  margin-top: -6px;
+  padding: 14px 16px;
+  overflow: auto;
+  translate: -50% 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+  background: rgb(15 19 22 / 0.96);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(24px);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.scenic-shell .header-summary-meta {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(236 230 218 / 0.45);
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .header-context-note,
+  .scenic-shell .header-context-rule {
+    display: none;
+  }
 }
 
 .scenic-identity {
@@ -795,24 +936,6 @@ button.scenic-thread[aria-expanded='true'] {
 .scenic-shell .session-usage-line {
   font-size: 11px;
   color: rgb(255 255 255 / 0.6);
-}
-
-.scenic-shell .studio-conversation-tools {
-  max-width: 760px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 6px 24px 0;
-  border-bottom: 0;
-}
-
-.scenic-shell .studio-conversation-toolbar strong,
-.scenic-shell .studio-conversation-toolbar small {
-  color: rgb(255 255 255 / 0.7);
-}
-
-.scenic-shell .studio-conversation-toolbar button {
-  border-radius: 2px;
-  background: rgb(22 28 33 / 0.55);
 }
 
 .session-source {
@@ -2234,7 +2357,7 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .day-rail {
   position: absolute;
-  top: 80px;
+  top: calc(var(--scenic-topbar-h) + 80px);
   right: 24px;
   z-index: 2;
   display: flex;
@@ -2386,26 +2509,6 @@ button.scenic-thread[aria-expanded='true'] {
   max-width: 100%;
 }
 
-/* The conversation toolbar keeps Search and Export; its label is for
- * assistive tech only. */
-.scenic-shell .studio-conversation-toolbar > span {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-.scenic-shell .studio-conversation-toolbar {
-  justify-content: flex-end;
-}
-
-.scenic-shell .studio-conversation-tools {
-  padding-top: 0;
-}
-
-.scenic-shell .studio-conversation-toolbar button,
 .scenic-shell .session-view-header button {
   border-color: transparent;
   background: transparent;
@@ -2413,7 +2516,6 @@ button.scenic-thread[aria-expanded='true'] {
   backdrop-filter: none;
 }
 
-.scenic-shell .studio-conversation-toolbar button:hover,
 .scenic-shell .session-view-header button:hover {
   border-color: rgb(255 255 255 / 0.16);
   color: #fff;
@@ -3771,15 +3873,6 @@ button.scenic-thread[aria-expanded='true'] {
   .settings-workspace-identity {
     margin-inline: 24px;
   }
-}
-
-/* The agent's status under its name: a small mono label, as in the design. */
-.scenic-shell .agent-switch-trigger .companion-status {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgb(236 230 218 / 0.45);
 }
 
 /* A plan or an approval that is waiting on you (or running) is the live item:
@@ -6040,4 +6133,468 @@ details.settings-item > :not(summary) {
   .settings-window .system-log-message {
     grid-column: 1 / -1;
   }
+}
+
+/* ── Navigation bar ──
+ * The design: a ringed avatar with the name and what it is doing; a rule;
+ * the other agents as a stack of coins. The name opens the agent's menu, the
+ * coins switch agent. On the right, "Needs you" when something waits, and
+ * search. History and settings live in the name menu. */
+
+.scenic-shell .scenic-identity {
+  gap: 18px;
+}
+
+.scenic-shell .scenic-back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgb(236 230 218 / 0.15);
+  border-radius: 6px;
+  background: none;
+  color: rgb(236 230 218 / 0.6);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.scenic-shell .scenic-back:hover {
+  border-color: rgb(236 230 218 / 0.3);
+  color: #ece6da;
+}
+
+.agent-switch {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.agent-switch-who,
+.agent-switch-others {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-switch-trigger,
+.agent-switch-trigger:hover,
+.agent-switch-trigger[aria-expanded='true'] {
+  gap: 10px;
+  max-width: min(320px, 42vw);
+  padding: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  color: #ece6da;
+}
+
+.agent-switch-ring {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+}
+
+.agent-switch-ring.is-thread {
+  border-color: transparent;
+}
+
+.agent-switch-ring .agent-avatar,
+.agent-coin .agent-avatar {
+  border-radius: 50%;
+  background: #0b0b0a;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.agent-switch-ring .agent-avatar::after,
+.agent-coin .agent-avatar::after {
+  display: none;
+}
+
+.agent-switch-notch {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #0b0b0a;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.agent-switch-name {
+  gap: 4px;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.agent-switch-name .scenic-wordmark {
+  max-width: 220px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 19px;
+  color: #ece6da;
+}
+
+.agent-switch-trigger:hover .agent-switch-name .scenic-wordmark {
+  color: #fff;
+}
+
+.scenic-shell .agent-switch-trigger .companion-status {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgb(236 230 218 / 0.4);
+  text-shadow: none;
+}
+
+.scenic-shell .agent-switch-trigger .companion-status.is-busy {
+  color: var(--color-accent);
+}
+
+.scenic-shell .agent-switch-trigger .companion-status.is-offline {
+  color: var(--color-danger);
+}
+
+.agent-switch-divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  background: rgb(236 230 218 / 0.1);
+}
+
+.agent-stack {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+}
+
+.agent-coin {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: -9px;
+  overflow: hidden;
+  border: 2px solid #0b0b0a;
+  border-radius: 50%;
+  background: #0b0b0a;
+}
+
+.agent-coin:first-child {
+  margin-left: 0;
+}
+
+.agent-coin.is-more {
+  background: #1e1e1c;
+  color: rgb(236 230 218 / 0.6);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.agent-stack:hover .agent-coin.is-more,
+.agent-stack[aria-expanded='true'] .agent-coin.is-more {
+  color: #ece6da;
+}
+
+.agent-stack:focus-visible,
+.agent-switch-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.agent-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: 250px;
+  max-width: calc(100vw - 28px);
+  overflow: hidden;
+  border: 1px solid rgb(236 230 218 / 0.18);
+  border-radius: 12px;
+  background: rgb(22 22 21 / 0.95);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.7);
+  backdrop-filter: blur(24px);
+}
+
+.agent-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  color: #ece6da;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-menu-item > svg {
+  flex: none;
+  color: rgb(236 230 218 / 0.6);
+}
+
+.agent-menu-item[data-first] {
+  background: rgb(233 77 171 / 0.1);
+}
+
+.agent-menu-item[data-first] > svg {
+  color: var(--color-accent);
+}
+
+.agent-menu-item:hover,
+.agent-menu-item:focus-visible {
+  background: rgb(236 230 218 / 0.08);
+}
+
+.scenic-shell .studio-topbar-actions {
+  gap: 10px;
+}
+
+.scenic-shell .scenic-topbar .studio-topbar-actions > .studio-command-trigger {
+  height: 28px;
+  min-height: 28px;
+  gap: 8px;
+  padding: 6px 11px;
+  border: 1px solid rgb(236 230 218 / 0.15);
+  border-radius: 6px;
+  background: none;
+  backdrop-filter: none;
+  color: rgb(236 230 218 / 0.35);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.scenic-shell
+  .scenic-topbar
+  .studio-topbar-actions
+  > .studio-command-trigger:hover {
+  border-color: rgb(236 230 218 / 0.3);
+  background: none;
+  color: rgb(236 230 218 / 0.7);
+}
+
+.scenic-topbar .studio-command-trigger kbd {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 9px/12px var(--font-mono);
+  letter-spacing: 0.12em;
+  color: rgb(236 230 218 / 0.35);
+}
+
+.scenic-shell .scenic-topbar .studio-topbar-actions .needs-you-button,
+.scenic-shell .scenic-topbar .studio-topbar-actions .scenic-waiting {
+  height: 28px;
+  min-height: 28px;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid rgb(236 230 218 / 0.15);
+  border-radius: 6px;
+  background: none;
+  color: rgb(236 230 218 / 0.5);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.scenic-shell .scenic-topbar .studio-topbar-actions .needs-you-button.has-items,
+.scenic-shell .scenic-topbar .studio-topbar-actions .scenic-waiting {
+  border-color: rgb(233 77 171 / 0.35);
+  border-radius: 999px;
+  background: rgb(233 77 171 / 0.12);
+  color: #ece6da;
+  font-weight: 400;
+}
+
+/* ── Chat background ──
+ * Full: the orb behind the chat. Quiet: it rests in the margin beside the
+ * column, half out of the window, so the text sits on clean dark; a soft wash
+ * of the accent colour falls from the top. Off: the plain field. An empty chat
+ * and the owner talking still bring the orb to the middle. */
+
+.halo-wash {
+  position: absolute;
+  top: -310px;
+  left: 50%;
+  width: 960px;
+  height: 520px;
+  translate: -50% 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(var(--color-accent-rgb) / 0.2) 0%,
+    transparent 70%
+  );
+}
+
+.halo-backdrop[data-variant='off']::after {
+  display: none;
+}
+
+.halo-backdrop-orb,
+.halo-glow {
+  transition:
+    left 600ms ease,
+    opacity 500ms ease,
+    scale 600ms ease,
+    background 600ms ease;
+}
+
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
+  :is(.halo-backdrop-orb, .halo-glow) {
+  /* 100px short of the column, but never so far out that none of it shows. */
+  left: max(
+    calc((100% - 760px) / 2 - 420px),
+    calc(min(72vmin, 640px) / -2 + 90px)
+  );
+}
+
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
+  .halo-glow {
+  width: 800px;
+}
+
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
+  .halo-backdrop-orb {
+  opacity: 0.42;
+}
+
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet'][data-mode='thinking'] .halo-backdrop-orb,
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet'][data-mode='speaking'] .halo-backdrop-orb,
+.scenic-shell:has(.studio-messages)
+  .halo-backdrop[data-variant='quiet'][data-mode='attention']
+  .halo-backdrop-orb {
+  opacity: 0.6;
+}
+
+@media (max-width: 899px) {
+  .scenic-shell:has(.studio-messages)
+    .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
+    .halo-backdrop-orb {
+    opacity: 0.28;
+  }
+}
+
+/* The reading lane is for an orb behind the text; at the edge it has no job. */
+.scenic-shell:has(.studio-messages) .halo-backdrop[data-variant='quiet']::after {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halo-backdrop-orb,
+  .halo-glow {
+    transition: none;
+  }
+}
+
+/* The Appearance page's three choices, drawn small. */
+.appearance-preview {
+  position: relative;
+  display: block;
+  height: 72px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  background: #0b0b0a;
+}
+
+.appearance-preview::before {
+  content: '';
+  position: absolute;
+  background: radial-gradient(
+    circle,
+    rgb(var(--color-accent-rgb) / 0.55),
+    transparent 68%
+  );
+}
+
+.appearance-preview::after {
+  content: '';
+  position: absolute;
+  right: 12%;
+  bottom: 10px;
+  left: 30%;
+  height: 10px;
+  border: 1px solid rgb(236 230 218 / 0.18);
+}
+
+.appearance-preview[data-variant='full']::before {
+  inset: -40% 20%;
+}
+
+.appearance-preview[data-variant='quiet']::before {
+  top: -30%;
+  bottom: -30%;
+  left: -34%;
+  width: 70%;
+}
+
+.appearance-preview[data-variant='off']::before {
+  display: none;
+}
+
+/* ── Messages ──
+ * The owner's words sit in a near-black bubble with a small corner at the
+ * bottom right; the agent's reply is plain text under its time. */
+
+.scenic-shell .chat-turn .scenic-user-bubble {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 14px 14px 4px 14px;
+  background: #1b1a19f2;
+  backdrop-filter: none;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #ece6da;
+}
+
+.scenic-shell .chat-turn .scenic-agent-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #ece6da;
+}
+
+/* The reply is under its time, as in the design; the name stays for assistive
+ * technology. */
+.scenic-shell .chat-agent-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.scenic-shell .chat-time,
+.scenic-shell .chat-turn.is-user .chat-time,
+.scenic-shell .chat-turn.is-user .chat-source {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgb(236 230 218 / 0.35);
 }

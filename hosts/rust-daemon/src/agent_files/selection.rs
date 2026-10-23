@@ -38,7 +38,7 @@ pub(crate) fn profile_relative(agent_id: &str) -> String {
         .collect();
     format!(".animaos-swarm/agent-profiles/{hex}")
 }
-pub(super) fn soul(scope: &AgentFileScope) -> Option<String> {
+pub(crate) fn soul(scope: &AgentFileScope) -> Option<String> {
     if scope.profile_enabled {
         Some(path(&profile_relative(&scope.agent_id), "SOUL.md"))
     } else if scope.companion {

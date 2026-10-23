@@ -69,6 +69,45 @@ pub struct ModelChoice {
 }
 
 impl AgentConfig {
+    /// Complete legacy personality document; knowledge and runtime context stay separate.
+    pub fn legacy_personality(&self) -> String {
+        let (mut before_knowledge, after_knowledge) = self.legacy_personality_parts();
+        before_knowledge.extend(after_knowledge);
+        before_knowledge.join("\n\n")
+    }
+
+    pub(crate) fn legacy_personality_parts(&self) -> (Vec<String>, Vec<String>) {
+        let mut before = Vec::new();
+        if let Some(bio) = &self.bio {
+            before.push(format!("## Who You Are\n{bio}"));
+        }
+        if let Some(lore) = &self.lore {
+            before.push(format!("## Your Backstory\n{lore}"));
+        }
+        if let Some(values) = self.adjectives.as_ref().filter(|values| !values.is_empty()) {
+            before.push(format!(
+                "## Your Personality\nYou are {}.",
+                values.join(", ")
+            ));
+        }
+        if let Some(values) = self.topics.as_ref().filter(|values| !values.is_empty()) {
+            before.push(format!(
+                "## Your Expertise\nYou specialize in: {}.",
+                values.join(", ")
+            ));
+        }
+        let mut after = Vec::new();
+        if let Some(style) = &self.style {
+            after.push(format!("## How You Communicate\n{style}"));
+        }
+        after.push(
+            self.system
+                .clone()
+                .unwrap_or_else(|| "You are a helpful task agent.".into()),
+        );
+        (before, after)
+    }
+
     pub fn allows_tool(&self, tool_name: &str) -> bool {
         self.tools
             .as_ref()

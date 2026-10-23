@@ -439,8 +439,13 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST` | `/api/agents/{agent_id}/paired-devices` |
 | `POST` | `/api/agents/{agent_id}/paired-devices/{device_id}/revoke` |
 
+| `GET` | `/api/agents/{agent_id}/personality` | Read the active personality source |
+| `PUT` | `/api/agents/{agent_id}/personality` | Save a revision-checked personality |
+
 | `POST` | `/api/agents/{agent_id}/sessions/{session_id}/revise` |
+
 | `PATCH` | `/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}` |
+
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -657,7 +662,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 293 operations, including main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 295 operations, including active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 
@@ -1404,6 +1409,19 @@ accepted prompt text. The Settings preview and owner-authorized
 counts, digests and threat IDs only. `mode: current_preview` and `capturedAtMs`
 explicitly describe a current load, which can differ from an active run's snapshot.
 Refresh does not reload an active run.
+
+Settings > Profile edits the active personality through owner-only, no-store
+`GET /api/agents/{agent_id}/personality` and `PUT` at the same path. Reads return
+`{ source, path, content, revision, maxChars }`; saves accept `{ content, revision }`.
+The source is the admitted workspace/profile SOUL file, or the shared rendering of
+the saved agent personality when no SOUL is active. The guided fields and raw
+Markdown view edit one document. Saves accept up to 16,000 Unicode scalar values,
+reject unsafe or empty content, and return `409` when the source or configuration
+changed. SOUL writes atomically replace the existing file without widening its
+access; configuration writes require durable control-plane storage. New turns
+admitted after a successful save use the saved instructions, subject to the runtime
+context budget. Already admitted turns retain their snapshot. This dedicated
+endpoint returns editable content; the file preview above remains metadata only.
 
 Reads are capability-relative, reject linked/reparse/nonregular files and stay
 within the configured workspace. Bounds are 262,144 bytes per file, 1,048,576

@@ -174,7 +174,11 @@ export function registerAttachmentJourneys({
           );
           await user.keyboard('{Enter}');
         } else {
-          await user.click(screen.getByRole('button', { name: destination }));
+          // Settings open from the agent's menu in the top bar.
+          await user.click(screen.getByRole('button', { name: /, menu$/ }));
+          await user.click(
+            screen.getByRole('menuitem', { name: /'s settings$/ }),
+          );
         }
         expect(recognition.abort).toHaveBeenCalledOnce();
         expect(cancel).toHaveBeenCalledTimes(2);
@@ -329,7 +333,10 @@ export function registerAttachmentJourneys({
       new File(['one'], 'ongoing.txt'),
     );
     await waitFor(() => expect(upload).toHaveBeenCalledOnce());
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: /, menu$/ }));
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Other conversations' }),
+    );
     await user.click(
       within(screen.getByRole('dialog', { name: 'History' })).getByRole(
         'button',
@@ -446,6 +453,9 @@ export function registerAttachmentJourneys({
     vi.mocked(daemon.startRun).mockRejectedValueOnce(new Error('Rejected'));
     render(<ViewHarness />);
     await screen.findByPlaceholderText('Message Alpha…');
+    await waitFor(() =>
+      expect(screen.getByLabelText('Choose attachments')).toBeEnabled(),
+    );
     await user.upload(
       screen.getByLabelText('Choose attachments'),
       new File(['one'], 'brief.txt'),

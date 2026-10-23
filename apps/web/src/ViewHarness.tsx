@@ -1792,6 +1792,11 @@ export function ViewHarness() {
             />
           }
           onOpenReport={agent ? () => setReportOpen(true) : undefined}
+          onExportConversation={
+            activeSession?.capabilities.export
+              ? () => void exportSession(activeSession)
+              : undefined
+          }
           inbox={
             agent
               ? {

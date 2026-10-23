@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { ConversationTools } from './ConversationTools';
 import { HaloOrb } from './halo/HaloOrb';
 import { usePresenceSignals } from '../lib/presence';
 import { CopyMessage } from './CopyMessage';
@@ -62,6 +61,7 @@ import {
 import { ReadAloud } from './voice/ReadAloud';
 import type { ReadAloudController } from '../hooks/useReadAloud';
 import { revealInvisible } from '../lib/skills';
+import { usePublishHeaderDay } from '../lib/header-context';
 import {
   EMPTY_RUN_ATTACHMENTS,
   type KnownRunAttachments,
@@ -554,9 +554,7 @@ export const MessageList = memo(function MessageList({
   useEffect(() => {
     onAtBottomChange?.(!awayFromBottom);
   }, [awayFromBottom, onAtBottomChange]);
-  const [highlight, setHighlight] = useState<string | null>(null);
-  const highlightedMessageId =
-    highlight ?? (jumpReady ? highlightMessageId : null);
+  const highlightedMessageId = jumpReady ? highlightMessageId : null;
   const atBottom = useRef(true);
   const tailRef = useRef<HTMLDivElement>(null);
   const hasTail = tail != null;
@@ -598,6 +596,69 @@ export const MessageList = memo(function MessageList({
     [transcript],
   );
   const days = useMemo(() => dayDividers(transcript), [transcript]);
+  const dayKeys = useMemo(
+    () =>
+      transcript.map((item) => {
+        const ms = itemTime(item);
+        return ms === null ? null : new Date(ms).toDateString();
+      }),
+    [transcript],
+  );
+  const dayNames = useMemo(() => {
+    const names = new Map<string, string>();
+    transcript.forEach((item, index) => {
+      const key = dayKeys[index];
+      const ms = itemTime(item);
+      if (key && ms !== null && !names.has(key)) names.set(key, dayLabel(ms));
+    });
+    return names;
+  }, [transcript, dayKeys]);
+  // The day at the top of the screen follows the scroll; before any scroll it
+  // is the newest day, since the chat opens at the bottom.
+  const [topDay, setTopDay] = useState<string | null>(null);
+  const newestDay = useMemo(() => {
+    for (let index = dayKeys.length - 1; index >= 0; index--) {
+      const key = dayKeys[index];
+      if (key) return key;
+    }
+    return null;
+  }, [dayKeys]);
+  const currentDay =
+    topDay !== null && dayNames.has(topDay) ? topDay : newestDay;
+  usePublishHeaderDay(currentDay ? (dayNames.get(currentDay) ?? null) : null);
+  const trackFrame = useRef<number | null>(null);
+  const trackTopDay = useCallback(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const top = scroller.getBoundingClientRect().top;
+    let found: string | null = null;
+    for (const element of scroller.querySelectorAll<HTMLElement>(
+      '[data-day]',
+    )) {
+      if (element.getBoundingClientRect().bottom > top + 4) {
+        found = element.dataset.day ?? null;
+        break;
+      }
+    }
+    setTopDay(found);
+  }, [scrollerRef]);
+  const scheduleTrackTopDay = useCallback(() => {
+    if (typeof requestAnimationFrame !== 'function') {
+      trackTopDay();
+      return;
+    }
+    if (trackFrame.current !== null) return;
+    trackFrame.current = requestAnimationFrame(() => {
+      trackFrame.current = null;
+      trackTopDay();
+    });
+  }, [trackTopDay]);
+  useEffect(
+    () => () => {
+      if (trackFrame.current !== null) cancelAnimationFrame(trackFrame.current);
+    },
+    [],
+  );
   /** Where each loaded day begins, for the rail beside the transcript. */
   const dayStops = useMemo(() => {
     const stops: { key: string; label: string; id: string }[] = [];
@@ -641,7 +702,6 @@ export const MessageList = memo(function MessageList({
         agentId: agent.id,
         done: false,
       };
-      setHighlight(null);
       if (!highlightMessageId && previous.messageId) {
         atBottom.current = true;
         setAwayFromBottom(false);
@@ -698,16 +758,13 @@ export const MessageList = memo(function MessageList({
     }
     anchor.current = { firstId: firstMessageId, height };
   }, [firstMessageId, agent.messages, scrollerRef]);
+  // After the effects above settle the scroll position.
+  useLayoutEffect(() => {
+    trackTopDay();
+  }, [transcript, trackTopDay]);
 
   return (
     <>
-      {agent.messages.length > 0 && (
-        <ConversationTools
-          agent={agent}
-          onJump={jumpToMessage}
-          onHighlight={setHighlight}
-        />
-      )}
       <div className="studio-conversation-body">
         {dayStops.length > 1 && (
           <nav className="day-rail" aria-label="Jump to a day">
@@ -716,7 +773,7 @@ export const MessageList = memo(function MessageList({
                 key={stop.key}
                 type="button"
                 className="day-rail-stop"
-                data-current={index === dayStops.length - 1 || undefined}
+                data-current={stop.key === currentDay || undefined}
                 onClick={() => jumpToMessage(stop.id)}
               >
                 {stop.label}
@@ -735,6 +792,7 @@ export const MessageList = memo(function MessageList({
               element.scrollHeight - element.scrollTop - element.clientHeight <
               80;
             setAwayFromBottom(!atBottom.current);
+            scheduleTrackTopDay();
             if (
               element.scrollTop < 40 &&
               hasOlder &&
@@ -794,6 +852,7 @@ export const MessageList = memo(function MessageList({
                           ids.includes(highlightedMessageId)) ||
                         undefined
                       }
+                      data-day={dayKeys[index] ?? undefined}
                       className="studio-message-anchor"
                     >
                       {days[index] && (

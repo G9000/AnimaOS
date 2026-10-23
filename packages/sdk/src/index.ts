@@ -1,5 +1,6 @@
 export { AgentsClient, agent } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
+export type { AgentPersonality, SaveAgentPersonality } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { VoiceClient } from './voice.js';
 export { SpeechClient, speechTextIsValid } from './speech.js';

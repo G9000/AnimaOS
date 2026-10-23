@@ -75,6 +75,13 @@ import { registerAttachmentJourneys } from './test/view-harness-attachments';
 // The controller journeys exercise the real child panel against an offline preview.
 // Error and stale-response behavior is covered in AgentFilesPanel.test.tsx.
 beforeEach(() => {
+  vi.spyOn(daemon, 'agentPersonality').mockResolvedValue({
+    source: 'agent_config',
+    path: null,
+    content: '## Communication\nSaved instructions.',
+    revision: 'offline-personality',
+    maxChars: 16000,
+  });
   vi.spyOn(daemon, 'agentFilesPreview').mockResolvedValue({
     mode: 'current_preview',
     availability: 'unavailable_workspace',
@@ -135,10 +142,24 @@ async function openChat() {
   await screen.findByRole('button', { name: /, switch agent$/ });
 }
 
+/** Opens an item of the agent's menu in the top bar. */
+async function pickFromAgentMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp,
+) {
+  await user.click(await screen.findByRole('button', { name: /, menu$/ }));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
+
 /** Opens the thread switcher, where the sessions list lives. */
 async function openSessions(user: ReturnType<typeof userEvent.setup>) {
   if (screen.queryByRole('dialog', { name: 'History' })) return;
-  await user.click(await screen.findByRole('button', { name: 'History' }));
+  await pickFromAgentMenu(user, 'Other conversations');
+}
+
+/** Opens the agent's settings from its menu. */
+async function openSettings(user: ReturnType<typeof userEvent.setup>) {
+  await pickFromAgentMenu(user, /'s settings$/);
 }
 
 /** Opens a settings page the way the owner does: through the command menu. */
@@ -253,16 +274,14 @@ function messagesFromSnapshot(snapshotOf: () => DaemonSnapshot) {
     async (_agentId, sessionId) => ({
       messages: snapshotOf()
         .messages.filter((message) => message.roomId === sessionId)
-        .map(
-          (message): SessionMessage => ({
-            id: message.id,
-            role: message.role as SessionMessage['role'],
-            text: message.content.text,
-            attachments: [],
-            metadata: message.content.metadata ?? {},
-            createdAtMs: message.createdAtMs,
-          }),
-        ),
+        .map((message): SessionMessage => ({
+          id: message.id,
+          role: message.role as SessionMessage['role'],
+          text: message.content.text,
+          attachments: [],
+          metadata: message.content.metadata ?? {},
+          createdAtMs: message.createdAtMs,
+        })),
       nextBefore: null,
     }),
   );
@@ -750,7 +769,7 @@ it('retains a completed reply after opening Work and keeps settings on the compa
     run.resolve(acceptedRun('alpha', 'chat:new-1', 'Alpha request')),
   );
   expect(await screen.findByText('Alpha finished')).not.toBeVisible();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   expect(
     within(screen.getByRole('region', { name: 'Settings' })).getByDisplayValue(
       'Alpha',
@@ -874,6 +893,7 @@ beforeEach(() => {
   });
   vi.spyOn(daemon, 'listSkills').mockResolvedValue([]);
   vi.spyOn(daemon, 'listAutomations').mockResolvedValue([]);
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([]);
   vi.spyOn(daemon, 'recentMemories').mockResolvedValue([]);
   vi.spyOn(daemon, 'searchMemories').mockResolvedValue([]);
   vi.spyOn(daemon, 'listFacts').mockResolvedValue([]);
@@ -1227,7 +1247,7 @@ describe('persistent main conversation', () => {
     vi.mocked(daemon.ensureMainSession).mockReturnValueOnce(oldMain.promise);
     render(<ViewHarness />);
     expect(await screen.findByPlaceholderText('Message First…')).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
     await screen.findByRole('heading', { name: 'Say something to Next' });
     await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
@@ -1356,8 +1376,9 @@ describe('ViewHarness workspace controller', () => {
     });
 
     render(<ViewHarness />);
-    // The workspace identity lives in the Settings window's sidebar.
-    await goToPage(user, 'Work');
+    // The workspace identity lives in the agent's Profile settings.
+    await openSettings(user);
+    await user.click(screen.getByText('Workspace identity', { exact: true }));
 
     const input = await screen.findByLabelText('Workspace avatar image file');
     const file = new File(['avatar'], 'avatar.png', { type: 'image/png' });
@@ -1412,7 +1433,7 @@ describe('ViewHarness workspace controller', () => {
     // The main chat resolves first; typing before that goes nowhere.
     await waitFor(() => expect(composer).toBeEnabled());
     await user.type(composer, 'Half-written thought');
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     expect(window.location.hash).toBe('#/profile');
     const settings = screen.getByRole('region', { name: 'Settings' });
     expect(within(settings).getByDisplayValue('Nova')).toBeVisible();
@@ -1556,7 +1577,7 @@ describe('ViewHarness workspace controller', () => {
       screen.queryByRole('button', { name: 'Message Beta' }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
     expect(screen.getByDisplayValue('Alpha')).toBeVisible();
   });
@@ -1574,7 +1595,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to First' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
@@ -1610,7 +1631,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to First' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
@@ -1637,7 +1658,7 @@ describe('ViewHarness workspace controller', () => {
     expect(await screen.findByText('Next is responsive')).toBeVisible();
   });
 
-  it('patches main identity, provider, model, system, and deliberate access while preserving its messages', async () => {
+  it('patches main identity, personality, provider, model, and deliberate access while preserving its messages', async () => {
     const user = userEvent.setup();
     const nova = snapshot('agent-main', 'Nova', 1);
     nova.messages = [
@@ -1684,17 +1705,32 @@ describe('ViewHarness workspace controller', () => {
     render(<ViewHarness />);
 
     await screen.findByText('Existing conversation');
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Nova Prime');
-    const system = screen.getByRole('textbox', { name: 'System prompt' });
-    await user.clear(system);
-    await user.type(system, 'Be concise');
+    const savePersonality = vi
+      .spyOn(daemon, 'saveAgentPersonality')
+      .mockImplementation(async (_id, input) => ({
+        source: 'agent_config',
+        path: null,
+        content: input.content,
+        revision: 'saved-personality',
+        maxChars: 16000,
+      }));
+    const communication = await screen.findByRole('textbox', {
+      name: 'Communication',
+    });
+    await user.clear(communication);
+    await user.type(communication, 'Be concise');
+    await user.click(screen.getByRole('button', { name: 'Save personality' }));
+    expect(savePersonality).toHaveBeenCalledWith('agent-main', {
+      content: '## Communication\nBe concise',
+      revision: 'offline-personality',
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(updateAgent).toHaveBeenLastCalledWith('agent-main', {
       name: 'Nova Prime',
-      system: 'Be concise',
     });
     expect(await screen.findByDisplayValue('Nova Prime')).toBeVisible();
 
@@ -1758,7 +1794,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Nova' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Nova Prime');
@@ -1806,7 +1842,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Nova' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
@@ -1893,7 +1929,7 @@ describe('ViewHarness workspace controller', () => {
       'Keep this request',
     );
     await user.click(screen.getByRole('button', { name: 'Send' }));
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const nameField = screen.getByDisplayValue('Nova');
     await user.clear(nameField);
     await user.type(nameField, 'Nova Prime');
@@ -1939,7 +1975,7 @@ describe('ViewHarness workspace controller', () => {
     expect(
       await screen.findByText('workspace connection failed'),
     ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
 
     const panel = screen.getByRole('region', { name: 'Settings' });
     expect(
@@ -1964,13 +2000,15 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Nova' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
-    const system = screen.getByRole('textbox', { name: 'System prompt' });
-    await user.clear(system);
-    await user.type(system, 'Unsaved system');
+    const communication = await screen.findByRole('textbox', {
+      name: 'Communication',
+    });
+    await user.clear(communication);
+    await user.type(communication, 'Unsaved personality');
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     const close = screen.getByRole('button', { name: 'Open companion chat' });
@@ -1998,7 +2036,7 @@ describe('ViewHarness workspace controller', () => {
       screen.getByRole('button', { name: 'Save changes' }),
     ).not.toHaveAttribute('aria-describedby');
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByDisplayValue('Unsaved system')).toBeVisible();
+    expect(screen.getByDisplayValue('Unsaved personality')).toBeVisible();
     expect(close).toBeEnabled();
     await user.click(close);
     expect(
@@ -2039,18 +2077,19 @@ describe('ViewHarness workspace controller', () => {
     expect(
       screen.getByRole('heading', { name: 'Nova', level: 1 }),
     ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
-    const system = screen.getByRole('textbox', { name: 'System prompt' });
-    await user.clear(system);
-    await user.type(system, 'Unsaved system');
+    const communication = await screen.findByRole('textbox', {
+      name: 'Communication',
+    });
+    await user.clear(communication);
+    await user.type(communication, 'Unsaved personality');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(updateAgent).toHaveBeenCalledWith('agent-main', {
       name: 'Unsaved Nova',
-      system: 'Unsaved system',
     });
     const close = screen.getByRole('button', { name: 'Open companion chat' });
     expect(close).toBeDisabled();
@@ -2068,7 +2107,7 @@ describe('ViewHarness workspace controller', () => {
     expect(alert).toHaveAttribute('aria-live', 'assertive');
     expect(alert).toHaveFocus();
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByDisplayValue('Unsaved system')).toBeVisible();
+    expect(screen.getByDisplayValue('Unsaved personality')).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Nova', level: 1, hidden: true }),
     ).toBeInTheDocument();
@@ -2093,7 +2132,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Only' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
@@ -2119,7 +2158,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Only' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
 
     expect(
@@ -2157,7 +2196,7 @@ describe('ViewHarness workspace controller', () => {
     await openChat();
 
     await screen.findByRole('heading', { name: 'Say something to Nova' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     await user.click(screen.getByRole('button', { name: 'Reset' }));
     act(() => runPoll?.());
     expect(listAgents).toHaveBeenCalledTimes(2);
@@ -2207,7 +2246,7 @@ describe('ViewHarness workspace controller', () => {
     expect(
       screen.getByRole('heading', { name: 'Say something to Nova' }),
     ).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /, menu$/ })).toBeVisible();
     expect(daemon.listAgents).toHaveBeenCalledTimes(2);
     const startRun = vi.mocked(daemon.startRun);
     const input = screen.getByPlaceholderText('Message Nova…');
@@ -2288,7 +2327,7 @@ describe('ViewHarness workspace controller', () => {
     render(<ViewHarness />);
     await openChat();
     await screen.findByRole('heading', { name: 'Say something to Alpha' });
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await openSettings(user);
     const name = screen.getByDisplayValue('Alpha');
     await user.clear(name);
     await user.type(name, 'Alpha draft');
@@ -3687,10 +3726,11 @@ it('M45 reconciles acknowledged bundle removal permissions without overwriting n
       screen.getByRole('button', { name: 'Refresh bundle status' }),
     ).toBeEnabled(),
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   expect(screen.getByDisplayValue('Nova Prime')).toBeVisible();
-  expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
-    'Newer instructions',
+  await user.click(screen.getByRole('button', { name: 'Model' }));
+  expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+    'gpt-4.1-mini',
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   expect(screen.getByText('read_file, unknown_custom')).toBeVisible();
@@ -3749,7 +3789,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
     await removal.promise;
   });
   expect(daemon.getAgent).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
@@ -3779,7 +3819,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
       screen.queryByText(/After the current request finishes, refresh status/),
     ).not.toBeInTheDocument(),
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
@@ -3842,10 +3882,11 @@ it('M43 reconciles canonical grant descriptors without overwriting newer setting
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   expect(screen.getByDisplayValue('Nova Prime')).toBeVisible();
-  expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
-    'Newer instructions',
+  await user.click(screen.getByRole('button', { name: 'Model' }));
+  expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
+    'gpt-4.1-mini',
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   expect(
@@ -3899,7 +3940,7 @@ it('M43 reconciles deleted aliases while preserving actual native and unrelated 
       screen.getByRole('button', { name: 'Refresh status' }),
     ).toBeEnabled(),
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   expect(
     screen.getByText(['read_file', dormant, 'unknown_custom'].join(', ')),
@@ -3936,7 +3977,7 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
   await screen.findByText(
     'The result could not be confirmed. Refresh status before taking another action.',
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   const name = screen.getByDisplayValue('Nova');
   await user.clear(name);
   await user.type(name, 'Edited Nova');
@@ -3967,7 +4008,7 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
     expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
   );
   expect(mcpOwnerApi.setGrant).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   expect(
     screen.getByText(
@@ -4020,7 +4061,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
     await pending.promise;
   });
   expect(daemon.getAgent).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
@@ -4045,7 +4086,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
   );
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
@@ -4099,7 +4140,7 @@ it('M43 never adds an old owner back when the canonical permission read settles 
   expect(
     screen.getByRole('heading', { name: 'Say something to Beta' }),
   ).toBeVisible();
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   expect(screen.getByDisplayValue('Beta')).toBeVisible();
   expect(screen.queryByDisplayValue('Alpha')).not.toBeInTheDocument();
 });
@@ -4734,9 +4775,8 @@ it('runs slash commands instead of sending them', async () => {
   const { input } = await openLiveSession();
   const compact = vi
     .spyOn(daemon, 'compactSession')
-    .mockImplementation(
-      async (_agentId, sessionId) =>
-        routes.sessions.find((item) => item.id === sessionId)!,
+    .mockImplementation(async (_agentId, sessionId) =>
+      routes.sessions.find((item) => item.id === sessionId)!,
     );
 
   await user.type(input, '/compact{Enter}');
@@ -5727,7 +5767,7 @@ it('polls slowly while the stream is open and reads full records for Settings', 
   expect(calls().sessions).toBeGreaterThan(opened.sessions);
 
   const fullReads = vi.mocked(daemon.listAgents).mock.calls.length;
-  await user.click(screen.getByRole('button', { name: 'Settings' }));
+  await openSettings(user);
   await waitFor(() =>
     expect(vi.mocked(daemon.listAgents).mock.calls.length).toBe(fullReads + 1),
   );

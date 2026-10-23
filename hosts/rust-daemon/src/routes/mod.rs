@@ -45,6 +45,7 @@ mod queue_controls;
 mod standing_intents;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod oauth_apps;
+mod personality;
 mod profile;
 mod provider_keys;
 mod run_recovery;
@@ -172,6 +173,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         get_agent_avatar_entry,
         get_agent_tasks_entry,
         agent_files::preview,
+        personality::get, personality::put,
         put_agent_tasks_entry,
         put_agent_avatar_entry,
         delete_agent_avatar_entry,
@@ -1362,6 +1364,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/agent-files",
             get(agent_files::preview),
+        )
+        .route(
+            "/api/agents/{agent_id}/personality",
+            get(personality::get).put(personality::put),
         )
         .route(
             "/api/agents/{agent_id}/avatar",
@@ -2932,6 +2938,7 @@ mod tests {
     mod logs;
     mod memory_edits;
     mod memory_export;
+    mod personality;
     mod provider_keys;
     mod runs;
     mod sessions;

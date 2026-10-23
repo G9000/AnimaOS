@@ -62,6 +62,15 @@ function Shell({ initialRoute = { kind: 'home' }, ...props }: ShellProps) {
   );
 }
 
+/** The agent's menu in the top bar: open it and pick an item. */
+async function pickFromAgentMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp,
+) {
+  await user.click(screen.getByRole('button', { name: /, menu$/ }));
+  await user.click(screen.getByRole('menuitem', { name }));
+}
+
 function mobile() {
   vi.stubGlobal(
     'matchMedia',
@@ -270,7 +279,7 @@ describe('WorkspaceShell', () => {
     expect(
       screen.getByRole('button', { name: 'Main chat', exact: true }),
     ).not.toHaveAttribute('aria-current');
-    expect(screen.getByRole('button', { name: 'History' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Nova, menu' })).toBeVisible();
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
   });
 
@@ -344,6 +353,28 @@ describe('WorkspaceShell', () => {
     );
     await user.keyboard('{Enter}');
     expect(screen.getByText('Manage connections')).toBeVisible();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('offers Export in commands only when the conversation can be exported', async () => {
+    const user = userEvent.setup();
+    const onExportConversation = vi.fn();
+    const view = render(<Shell />);
+    await user.keyboard('{Control>}k{/Control}');
+    expect(
+      screen.queryByRole('option', { name: /Export this conversation/ }),
+    ).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    view.unmount();
+
+    render(<Shell onExportConversation={onExportConversation} />);
+    await user.keyboard('{Control>}k{/Control}');
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search commands' }),
+      'export',
+    );
+    await user.keyboard('{Enter}');
+    expect(onExportConversation).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -487,6 +518,7 @@ describe('WorkspaceShell', () => {
       'Automations',
       'Work',
       'Files',
+      'Appearance',
       'Runtime',
       'Usage',
       'Diagnostics',
@@ -503,6 +535,18 @@ describe('WorkspaceShell', () => {
       'Activity',
       'App · all agents',
     ]);
+  });
+
+  it('opens Appearance as an app-wide page with the chat background choice', () => {
+    render(<Shell initialRoute={{ kind: 'page', page: 'appearance' }} />);
+    expect(screen.getByText('All agents')).toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Chat background' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   it('says whose a page is under its title', () => {
@@ -754,7 +798,7 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup();
     render(<Shell sidebar={<div>Sessions list</div>} />);
     expect(screen.queryByText('Sessions list')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await pickFromAgentMenu(user, 'Other conversations');
     const drawer = screen.getByRole('dialog', { name: 'History' });
     expect(within(drawer).getByText('Sessions list')).toBeVisible();
     await user.click(
@@ -769,8 +813,8 @@ describe('WorkspaceShell', () => {
     mobile();
     const user = userEvent.setup();
     render(<Shell sidebar={<input aria-label="Search sessions" />} />);
-    const opener = screen.getByRole('button', { name: 'History' });
-    await user.click(opener);
+    const opener = screen.getByRole('button', { name: 'Nova, menu' });
+    await pickFromAgentMenu(user, 'Other conversations');
     const drawer = screen.getByRole('dialog', { name: 'History' });
     const newChat = within(drawer).getByRole('button', { name: 'Main chat' });
     const search = within(drawer).getByRole('textbox', {
@@ -827,8 +871,8 @@ describe('WorkspaceShell', () => {
         }
       />,
     );
-    const opener = screen.getByRole('button', { name: 'History' });
-    await user.click(opener);
+    const opener = screen.getByRole('button', { name: 'Nova, menu' });
+    await pickFromAgentMenu(user, 'Other conversations');
     const drawer = screen.getByRole('dialog', { name: 'History' });
     // Everything behind the drawer is out of reach while it is open.
     expect(opener.closest('[inert]')).not.toBeNull();
@@ -854,7 +898,7 @@ describe('WorkspaceShell', () => {
     expect(opener.closest('[inert]')).toBeNull();
 
     // Escape in a row menu or the rename field closes only that.
-    await user.click(opener);
+    await pickFromAgentMenu(user, 'Other conversations');
     const reopened = screen.getByRole('dialog', { name: 'History' });
     await user.click(
       within(reopened).getByRole('button', { name: 'Actions for Trip ideas' }),
@@ -915,7 +959,7 @@ describe('WorkspaceShell', () => {
       );
     }
     render(<Shell sidebar={<ListedSidebar />} />);
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await pickFromAgentMenu(user, 'Other conversations');
     const drawer = screen.getByRole('dialog', { name: 'History' });
 
     await user.click(
@@ -955,9 +999,7 @@ describe('WorkspaceShell', () => {
 
   it('opens Settings on the companion profile from the top bar', async () => {
     render(<Shell profile={<p>Profile page</p>} />);
-    const settings = screen.getByRole('button', { name: 'Settings' });
-    expect(settings).toHaveAttribute('title', 'Settings for Nova');
-    await userEvent.click(settings);
+    await pickFromAgentMenu(userEvent.setup(), "Nova's settings");
     expect(screen.getByText('Profile page')).toBeVisible();
     expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
   });
@@ -1014,7 +1056,7 @@ it('filters settings destinations and restores the complete sidebar after naviga
   await user.click(within(nav).getByRole('button', { name: 'Model' }));
   expect(screen.getByText('Model page')).toBeVisible();
   expect(search).toHaveValue('');
-  expect(within(nav).getAllByRole('button')).toHaveLength(14);
+  expect(within(nav).getAllByRole('button')).toHaveLength(15);
   expect(within(nav).getByRole('button', { name: 'Model' })).toHaveAttribute(
     'aria-current',
     'page',

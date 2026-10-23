@@ -32,15 +32,17 @@ import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey, shouldShowSession } from '../lib/session-groups';
 import {
   ChevronIcon,
-  GearIcon,
   GlobeIcon,
-  HistoryIcon,
   InboxIcon,
   SearchIcon,
   XIcon,
 } from './icons';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
 import { onOpenInbox } from '../lib/inbox-events';
+import { HeaderContextProvider } from '../lib/header-context';
+import { HeaderContextLine } from './HeaderContextLine';
+import { AppearancePage } from './AppearancePage';
+import { useChatBackground } from '../lib/chat-background';
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
@@ -49,6 +51,7 @@ export const AVAILABLE_PAGES = [
   'new-agent',
   'profile',
   'model',
+  'appearance',
   'runtime',
   'approvals',
   'automations',
@@ -287,6 +290,7 @@ export function WorkspaceShell({
   onOpenMessage,
   inbox = null,
   onOpenReport,
+  onExportConversation,
 }: {
   mainAgent: AgentDetail;
   agents: readonly AgentDetail[];
@@ -345,8 +349,12 @@ export function WorkspaceShell({
   } | null;
   /** Opens the weekly report. */
   onOpenReport?: () => void;
+  /** Downloads the conversation on screen as Markdown; absent when it
+   *  cannot be exported. */
+  onExportConversation?: () => void;
 }) {
   const page = availablePage(route);
+  const [chatBackground] = useChatBackground();
   const presenceSignals = usePresenceSignals();
   const presence = presenceMode({
     signals: presenceSignals,
@@ -454,6 +462,17 @@ export function WorkspaceShell({
           },
         ]
       : []),
+    ...(onExportConversation
+      ? [
+          {
+            id: 'export-conversation',
+            title: 'Export this conversation',
+            description: 'Download it as Markdown',
+            group: 'Conversation',
+            run: onExportConversation,
+          },
+        ]
+      : []),
     ...SETTINGS_DESTINATIONS.map((item) => ({
       id: item.page,
       title: `Go to ${item.label}`,
@@ -503,7 +522,7 @@ export function WorkspaceShell({
           : null;
 
   return (
-    <>
+    <HeaderContextProvider>
       <div
         className="studio-shell companion-shell scenic-shell relative z-[1] flex min-h-0 flex-1 flex-col"
         data-presence={page === null ? presence : 'calm'}
@@ -513,11 +532,22 @@ export function WorkspaceShell({
         <div className="studio-frame relative flex min-h-0 flex-1">
           <main className="studio-main workspace-mobile-safe relative min-h-0 min-w-0 flex-1">
             <HaloBackdrop
+              variant={chatBackground}
               mode={page === null ? presence : 'calm'}
               words={presenceSignals.listening?.words}
             />
             <div className="studio-topbar scenic-topbar">
               <div className="scenic-identity">
+                {sideThread && (
+                  <button
+                    type="button"
+                    className="scenic-back"
+                    onClick={newChat}
+                  >
+                    <ChevronIcon size={12} className="rotate-90" />
+                    <span>Main chat</span>
+                  </button>
+                )}
                 <AgentSwitcher
                   agent={mainAgent}
                   agents={agents}
@@ -532,36 +562,31 @@ export function WorkspaceShell({
                   onManageAgents={() =>
                     navigate({ kind: 'page', page: 'agents' })
                   }
+                  title={sideThread?.title}
+                  subtitle={
+                    sideThread
+                      ? sideThread.kind === 'telegram'
+                        ? 'Telegram chat'
+                        : sideThread.kind === 'discord'
+                          ? 'Discord chat'
+                          : 'Side thread'
+                      : undefined
+                  }
+                  needsYou={(inbox?.count ?? 0) > 0}
+                  onOpenConversations={
+                    sidebar !== null ? () => setDrawerOpen(true) : undefined
+                  }
+                  onImport={() => setImportOpen(true)}
+                  onOpenMemory={() =>
+                    navigate({ kind: 'page', page: 'memory' })
+                  }
+                  onOpenSettings={() =>
+                    navigate({ kind: 'page', page: 'profile' })
+                  }
+                  menuTriggerRef={sessionsButtonRef}
                 />
-                {sideThread && (
-                  <>
-                    <button
-                      type="button"
-                      className="scenic-thread is-back"
-                      onClick={newChat}
-                    >
-                      <ChevronIcon size={13} className="rotate-90" />
-                      <span className="scenic-thread-title">Main chat</span>
-                    </button>
-                    <span
-                      className="scenic-side-thread"
-                      title={sideThread.title}
-                    >
-                      {(sideThread.kind === 'telegram' ||
-                        sideThread.kind === 'discord') && (
-                        <span className="session-kind-badge">
-                          {sideThread.kind === 'telegram'
-                            ? 'Telegram'
-                            : 'Discord'}
-                        </span>
-                      )}
-                      <span className="scenic-thread-title">
-                        {sideThread.title}
-                      </span>
-                    </span>
-                  </>
-                )}
               </div>
+              {page === null && <HeaderContextLine />}
               <div className="studio-topbar-actions">
                 {inbox ? (
                   <InboxButton inbox={inbox} />
@@ -580,43 +605,17 @@ export function WorkspaceShell({
                     </button>
                   )
                 )}
-                {sidebar !== null && (
-                  <button
-                    ref={sessionsButtonRef}
-                    type="button"
-                    className="studio-tool-button"
-                    aria-label="History"
-                    aria-expanded={drawerOpen}
-                    aria-haspopup="dialog"
-                    onClick={() => setDrawerOpen(true)}
-                  >
-                    <HistoryIcon size={14} />
-                    <span className="scenic-hide-narrow" aria-hidden>
-                      History
-                    </span>
-                  </button>
-                )}
                 <button
                   type="button"
                   className="studio-command-trigger"
                   onClick={() => setCommandsOpen(true)}
                   aria-label="Open command menu"
                 >
-                  <SearchIcon size={14} />
+                  <SearchIcon size={12} />
                   <span className="studio-command-trigger-label">
                     Search or do anything
                   </span>
                   <kbd>{isMacPlatform() ? '⌘K' : 'Ctrl K'}</kbd>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate({ kind: 'page', page: 'profile' })}
-                  aria-current={page !== null ? 'page' : undefined}
-                  className="studio-tool-button scenic-settings"
-                  aria-label="Settings"
-                  title={`Settings for ${mainAgent.name}`}
-                >
-                  <GearIcon size={14} />
                 </button>
               </div>
             </div>
@@ -722,6 +721,8 @@ export function WorkspaceShell({
                         </>
                       ) : page === 'model' ? (
                         model
+                      ) : page === 'appearance' ? (
+                        <AppearancePage />
                       ) : page === 'runtime' ? (
                         runtime
                       ) : page === 'approvals' ? (
@@ -808,7 +809,7 @@ export function WorkspaceShell({
           onOpenMessage={onOpenMessage}
         />
       )}
-    </>
+    </HeaderContextProvider>
   );
 }
 

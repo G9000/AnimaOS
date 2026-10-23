@@ -18,6 +18,7 @@ import {
   PulseIcon,
   ScrollTextIcon,
   SearchIcon,
+  SlidersIcon,
 } from './icons';
 
 interface Destination {
@@ -78,6 +79,11 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
   {
     label: 'App · all agents',
     items: [
+      {
+        page: 'appearance',
+        label: 'Appearance',
+        icon: <SlidersIcon size={15} />,
+      },
       { page: 'runtime', label: 'Runtime', icon: <ServerIcon size={15} /> },
       { page: 'usage', label: 'Usage', icon: <ChartIcon size={15} /> },
       { page: 'health', label: 'Diagnostics', icon: <PulseIcon size={15} /> },
@@ -142,6 +148,11 @@ export const SETTINGS_PAGE_META: Partial<
   files: {
     scope: 'agent',
     description: (agent) => `Everything in ${agent}'s workspace folder.`,
+  },
+  appearance: {
+    scope: 'all',
+    description: () =>
+      'How anima looks on this computer. Your chats and settings stay the same.',
   },
   runtime: {
     scope: 'all',

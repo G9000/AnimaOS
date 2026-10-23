@@ -6,6 +6,69 @@ import {
 } from './index.js';
 
 describe('agent file preview client', () => {
+  it('reads the effective personality and saves its exact revision', async () => {
+    const calls: {
+      url: string;
+      method?: string;
+      body?: unknown;
+      signal?: AbortSignal | null;
+    }[] = [];
+    const signal = new AbortController().signal;
+    const personality = {
+      source: 'profile_soul',
+      path: '.animaos-swarm/agent-profiles/61/SOUL.md',
+      content: 'Be curious.',
+      revision: 'r1',
+      maxChars: 16000,
+    };
+    const client = createDaemonClient({
+      baseUrl: '',
+      fetch: async (url, init) => {
+        calls.push({
+          url: String(url),
+          method: init?.method,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          signal: init?.signal,
+        });
+        return Response.json(personality);
+      },
+    });
+    expect(await client.agentFiles.personality('a/b', { signal })).toEqual(
+      personality,
+    );
+    expect(
+      await client.agentFiles.savePersonality('a/b', {
+        content: 'Be curious.',
+        revision: 'r1',
+      }),
+    ).toEqual(personality);
+    expect(calls[0]).toMatchObject({
+      url: '/api/agents/a%2Fb/personality',
+      signal,
+    });
+    expect(calls[1]).toMatchObject({
+      url: '/api/agents/a%2Fb/personality',
+      method: 'PUT',
+      body: { content: 'Be curious.', revision: 'r1' },
+    });
+  });
+
+  it('preserves a stale personality conflict for the editor', async () => {
+    const client = createDaemonClient({
+      baseUrl: '',
+      fetch: async () =>
+        Response.json(
+          { error: 'Personality changed; reload before saving' },
+          { status: 409 },
+        ),
+    });
+    await expect(
+      client.agentFiles.savePersonality('a', {
+        content: 'draft',
+        revision: 'old',
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
   it('encodes the agent ID, propagates cancellation and returns content-free metadata', async () => {
     const signal = new AbortController().signal;
     const manifest: AgentFilesPreview = {

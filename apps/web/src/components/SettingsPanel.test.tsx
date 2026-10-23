@@ -30,6 +30,35 @@ vi.mock('./AgentFilesPanel', () => ({
     <section aria-label="Agent files" data-agent-id={agentId} />
   ),
 }));
+// The active editor owns its read/save lifecycle, covered in PersonalityEditor.test.tsx.
+vi.mock('./personality/PersonalityEditor', () => ({
+  PersonalityEditor: ({
+    agentId,
+    disabled,
+  }: {
+    agentId: string;
+    disabled: boolean;
+  }) => (
+    <section
+      aria-label="Active personality editor"
+      data-agent-id={agentId}
+      data-disabled={String(disabled)}
+    />
+  ),
+}));
+
+it('renders the active personality editor instead of editing an inactive legacy prompt', () => {
+  renderPanel(agent({ system: 'This can be shadowed by SOUL.md.' }), {
+    sections: ['profile'],
+  });
+  expect(
+    screen.getByRole('region', { name: 'Active personality editor' }),
+  ).toHaveAttribute('data-agent-id', 'agent-main');
+  expect(screen.queryByLabelText('System prompt')).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('radio', { name: 'Direct & practical' }),
+  ).not.toBeInTheDocument();
+});
 
 const providers: DaemonProvider[] = [
   {
@@ -609,17 +638,11 @@ describe('M49 Settings subscription models', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
       target: { value: 'Unsaved name' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'System prompt' }), {
-      target: { value: 'Unsaved system' },
-    });
     await act(async () =>
       complete(metadata({ models: [{ id: 'different-model' }] })),
     );
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
       'Unsaved name',
-    );
-    expect(screen.getByRole('textbox', { name: 'System prompt' })).toHaveValue(
-      'Unsaved system',
     );
     expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
       'Saved.Exact/Model',
@@ -627,7 +650,6 @@ describe('M49 Settings subscription models', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(saveSettings).toHaveBeenCalledWith({
       name: 'Unsaved name',
-      system: 'Unsaved system',
     });
     expect(saveSettings.mock.calls[0][0]).not.toHaveProperty('tools');
     expect(saveSettings.mock.calls[0][0]).not.toHaveProperty('model');
@@ -1164,9 +1186,8 @@ describe('SettingsPanel access', () => {
 
     view.rerender(<SettingsPanel {...view.props} sections={['profile']} />);
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeVisible();
-    fireEvent.click(screen.getByText('Edit', { exact: true }));
     expect(
-      screen.getByRole('textbox', { name: 'System prompt' }),
+      screen.getByRole('region', { name: 'Active personality editor' }),
     ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reset' })).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
@@ -1254,16 +1275,12 @@ describe('SettingsPanel access', () => {
       screen.getByPlaceholderText('model id, e.g. llama3.1'),
       'anthropic/custom-model',
     );
-    const system = screen.getByRole('textbox', { name: 'System prompt' });
-    await user.clear(system);
-    await user.type(system, 'Be concise');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(saveSettings).toHaveBeenCalledWith({
       name: 'Nova Prime',
       provider: 'anthropic',
       model: 'anthropic/custom-model',
-      system: 'Be concise',
       tools: toolNamesForProfile('operate'),
     });
   });
@@ -1444,17 +1461,20 @@ it('M43 deliberate standard access selection replaces external grants without re
   });
 });
 
-it('replaces a personality style saved at the start of an otherwise empty prompt', async () => {
-  renderPanel(
-    agent({ system: '[Personality style]\nBe calm.\n[/Personality style]' }),
+it('keys the active personality editor to the selected agent and disables it during reset', () => {
+  const view = renderPanel(agent(), { sections: ['profile'] });
+  view.rerender(
+    <SettingsPanel
+      {...view.props}
+      agent={agent({ id: 'agent-next' })}
+      resetting
+    />,
   );
-  fireEvent.click(screen.getByRole('radio', { name: 'Direct & practical' }));
-  const prompt = screen.getByRole('textbox', {
-    name: 'System prompt',
-  }) as HTMLTextAreaElement;
-  expect(prompt.value).toContain('Be direct, practical, and concise.');
-  expect(prompt.value).not.toContain('Be calm.');
-  expect(prompt.value.match(/\[Personality style\]/g)).toHaveLength(1);
+  const editor = screen.getByRole('region', {
+    name: 'Active personality editor',
+  });
+  expect(editor).toHaveAttribute('data-agent-id', 'agent-next');
+  expect(editor).toHaveAttribute('data-disabled', 'true');
 });
 
 it('m67_read_document_is_off_when_absent_and_unrelated_saves_do_not_grant_it', async () => {
@@ -1547,32 +1567,25 @@ it('m67_read_document_profile_replacement_clears_the_opt_in_until_reselected', a
   expect(toolNamesForProfile('collaborate')).not.toContain('read_document');
 });
 
-it('edits identity beside the avatar and preserves instructions when changing personality', async () => {
+it('keeps avatar and name controls beside the active personality editor', async () => {
   const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
-  renderPanel(
-    agent({
-      system: "The owner's name is Julio.\n\nKeep my project instructions.",
-    }),
-    { sections: ['profile'], saveSettings },
-  );
-  expect(screen.getByLabelText('Calls you')).toHaveValue('Julio');
+  renderPanel(agent({ system: 'Keep my project instructions.' }), {
+    sections: ['profile'],
+    saveSettings,
+  });
   expect(
     screen.getByRole('button', { name: 'Change agent avatar' }),
   ).toBeVisible();
-  fireEvent.change(screen.getByLabelText('Calls you'), {
-    target: { value: 'Leo' },
+  expect(
+    screen.getByRole('region', { name: 'Active personality editor' }),
+  ).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Alice' },
   });
-  fireEvent.click(screen.getByRole('radio', { name: 'Direct & practical' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   await waitFor(() =>
-    expect(saveSettings).toHaveBeenCalledWith({
-      system: expect.stringContaining("The owner's name is Leo."),
-    }),
+    expect(saveSettings).toHaveBeenCalledWith({ name: 'Alice' }),
   );
-  const prompt = saveSettings.mock.calls[0][0].system;
-  expect(prompt).toContain('Keep my project instructions.');
-  expect(prompt).toContain('Be direct, practical, and concise.');
-  expect(prompt).not.toContain('Julio');
 });
 
 it('keeps profile drafts when switching models is unavailable during unsaved changes', () => {

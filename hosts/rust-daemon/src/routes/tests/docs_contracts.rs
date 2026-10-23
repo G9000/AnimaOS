@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 293, "complete registered operation count");
+    assert_eq!(actual.len(), 295, "complete registered operation count");
     let runtime_capability_additions = [
         ("GET", "/api/doctor"),
         ("GET", "/api/doctor/memory-index"),
@@ -220,6 +220,18 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         );
     }
     let main_chat_additions = [
+        ("POST", "/api/agents/{agent_id}/main-chat"),
+        ("POST", "/api/agents/{agent_id}/sessions/{session_id}/clear"),
+    ];
+    for (method, path) in main_chat_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "main chat resolution and clearing must be registered"
+        );
+    }
+    let owner_editing_additions = [
+        ("GET", "/api/agents/{agent_id}/personality"),
+        ("PUT", "/api/agents/{agent_id}/personality"),
         (
             "POST",
             "/api/agents/{agent_id}/sessions/{session_id}/revise",
@@ -228,13 +240,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "PATCH",
             "/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}",
         ),
-        ("POST", "/api/agents/{agent_id}/main-chat"),
-        ("POST", "/api/agents/{agent_id}/sessions/{session_id}/clear"),
     ];
-    for (method, path) in main_chat_additions {
+    for (method, path) in owner_editing_additions {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
-            "main chat resolution and clearing must be registered"
+            "owner editing operation must be registered"
         );
     }
     let report_additions = [("GET", "/api/workspace/file/download")];
@@ -445,6 +455,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !credential_additions.contains(&(method.as_str(), path.as_str()))
                     && !report_additions.contains(&(method.as_str(), path.as_str()))
                     && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
+                    && !owner_editing_additions.contains(&(method.as_str(), path.as_str()))
                     && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                     && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                     && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
@@ -495,6 +506,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 && !credential_additions.contains(&(method.as_str(), path.as_str()))
                 && !report_additions.contains(&(method.as_str(), path.as_str()))
                 && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
+                && !owner_editing_additions.contains(&(method.as_str(), path.as_str()))
                 && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
                 && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
                 && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))

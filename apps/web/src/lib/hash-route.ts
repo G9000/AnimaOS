@@ -6,6 +6,7 @@ export const HASH_PAGES = [
   'new-agent',
   'profile',
   'model',
+  'appearance',
   'runtime',
   'approvals',
   'automations',

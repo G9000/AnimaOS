@@ -319,3 +319,5 @@ export const SquareDotIcon = (p: IconProps) =>
   );
 export const SquareIcon = (p: IconProps) =>
   base(p, <rect x="3" y="3" width="18" height="18" rx="2" />);
+export const DownloadIcon = (p: IconProps) =>
+  base(p, <path d="M12 3v12m-5-5 5 5 5-5M5 21h14" />);
