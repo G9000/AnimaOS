@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub(crate) const NAME: &str = "manage_mcp";
-const INVALID: &str = "Invalid MCP setup arguments. Use one supported server definition; do not include secrets, headers, env, cwd, OAuth, or installer commands. Enter HTTPS Bearer credentials in Connectors > MCP.";
+const INVALID: &str = "Invalid MCP setup arguments. Use one supported server definition; do not include secrets, headers, env, cwd, OAuth, or installer commands. Enter Bearer credentials for HTTPS or local loopback HTTP in Connectors > MCP.";
 
 pub(super) fn register(registry: &mut ToolRegistry) {
     let mut schema = object_parameters(vec![

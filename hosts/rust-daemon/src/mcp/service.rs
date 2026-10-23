@@ -286,7 +286,7 @@ impl McpManager {
                 return Err(McpServiceError::Unavailable);
             }
         }
-        if token.is_some() && (old.stdio.is_some() || !old.endpoint.starts_with("https://")) {
+        if token.is_some() && (old.stdio.is_some() || !credential_endpoint_valid(&old.endpoint)) {
             return Err(McpServiceError::InvalidRequest);
         }
         if token.is_none() && old.bearer_credential_ref.is_none() {

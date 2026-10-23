@@ -679,7 +679,10 @@ function ConnectionCard({
     setConfirmRemove(null);
   });
   const local = row.transport === 'stdio';
-  const bearerEligible = !local && row.endpoint.startsWith('https://');
+  const bearerEligible =
+    !local &&
+    (row.endpoint.startsWith('https://') ||
+      /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/.test(row.endpoint));
   const wireBusy =
     row.state === 'stopping' ||
     row.state === 'connecting' ||

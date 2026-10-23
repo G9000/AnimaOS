@@ -172,7 +172,7 @@ impl McpTransportSession for FakeSession {
 }
 
 #[derive(Default)]
-struct M65Store {
+struct TestCredentialStore {
     inner: super::credentials::InMemoryMcpCredentialStore,
     reads: AtomicUsize,
     puts: AtomicUsize,
@@ -183,7 +183,7 @@ struct M65Store {
     read_gate: StdMutex<Option<(Arc<Semaphore>, Arc<Semaphore>)>>,
 }
 #[async_trait::async_trait]
-impl super::credentials::McpCredentialStore for M65Store {
+impl super::credentials::McpCredentialStore for TestCredentialStore {
     async fn load(
         &self,
         id: &str,
@@ -239,7 +239,7 @@ struct Fixture {
     manager: McpManager,
     agent: String,
     factory: Arc<FakeFactory>,
-    credentials: Arc<M65Store>,
+    credentials: Arc<TestCredentialStore>,
     folder: PathBuf,
 }
 impl Fixture {
@@ -258,7 +258,7 @@ impl Fixture {
         let publication = daemon.mcp_publication.clone();
         let state = Arc::new(RwLock::new(daemon));
         let factory = Arc::new(FakeFactory::default());
-        let credentials = Arc::new(M65Store::default());
+        let credentials = Arc::new(TestCredentialStore::default());
         let manager = McpManager::with_credentials(
             Arc::downgrade(&state),
             Arc::new(Mutex::new(())),
@@ -408,36 +408,36 @@ impl Drop for Fixture {
     }
 }
 
-// M65 uses only the existing fake transport and an isolated synthetic control plane.
+// Bearer tests use only the existing fake transport and an isolated synthetic control plane.
 // The production credential-store seam must keep this deterministic constructor local.
-async fn m65_https(fixture: &Fixture) -> McpConnectionView {
+async fn https_connection(fixture: &Fixture) -> McpConnectionView {
     fixture
         .manager
         .create(
             &fixture.agent,
             CreateMcpConnection {
                 label: "Synthetic bearer".into(),
-                endpoint: "https://m65.invalid/mcp".into(),
+                endpoint: "https://bearer.invalid/mcp".into(),
             },
         )
         .await
         .unwrap()
 }
 
-async fn m65_saved(fixture: &Fixture) -> McpConnectionView {
-    let view = m65_https(fixture).await;
+async fn saved_bearer_connection(fixture: &Fixture) -> McpConnectionView {
+    let view = https_connection(fixture).await;
     fixture
         .manager
         .set_bearer(
             &fixture.agent,
             &view.record.id,
             1,
-            McpBearerToken::parse("m65-first-secret".into()).unwrap(),
+            McpBearerToken::parse("bearer-first-secret".into()).unwrap(),
         )
         .await
         .unwrap()
 }
-async fn m65_enabled(fixture: &Fixture, view: &McpConnectionView) -> McpConnectionView {
+async fn enabled_connection(fixture: &Fixture, view: &McpConnectionView) -> McpConnectionView {
     fixture
         .manager
         .update(
@@ -455,9 +455,9 @@ async fn m65_enabled(fixture: &Fixture, view: &McpConnectionView) -> McpConnecti
 }
 
 #[tokio::test]
-async fn m65_reference_replacement_endpoint_change_and_fresh_restore_never_resurrect_old_auth() {
+async fn reference_replacement_endpoint_change_and_fresh_restore_never_resurrect_old_auth() {
     let fixture = Fixture::new().await;
-    let first = m65_saved(&fixture).await;
+    let first = saved_bearer_connection(&fixture).await;
     let old_ref = first.record.bearer_credential_ref.clone().unwrap();
     let second = fixture
         .manager
@@ -465,7 +465,7 @@ async fn m65_reference_replacement_endpoint_change_and_fresh_restore_never_resur
             &fixture.agent,
             &first.record.id,
             first.record.version,
-            McpBearerToken::parse("m65-second-secret".into()).unwrap(),
+            McpBearerToken::parse("bearer-second-secret".into()).unwrap(),
         )
         .await
         .unwrap();
@@ -485,7 +485,7 @@ async fn m65_reference_replacement_endpoint_change_and_fresh_restore_never_resur
             UpdateMcpConnection {
                 expected_version: second.record.version,
                 label: None,
-                endpoint: Some("https://m65.invalid/other".into()),
+                endpoint: Some("https://bearer.invalid/other".into()),
                 enabled: None,
             },
         )
@@ -527,15 +527,15 @@ async fn m65_reference_replacement_endpoint_change_and_fresh_restore_never_resur
         !encoded.contains("bearerCredentialRef"),
         "legacy uncredentialed rows preserve omission"
     );
-    assert!(!encoded.contains("m65-first-secret") && !encoded.contains("m65-second-secret"));
+    assert!(!encoded.contains("bearer-first-secret") && !encoded.contains("bearer-second-secret"));
 }
 
 #[tokio::test]
-async fn m65_list_get_are_vault_free_and_missing_or_unreadable_credentials_never_dispatch() {
+async fn list_get_are_vault_free_and_missing_or_unreadable_credentials_never_dispatch() {
     for missing in [true, false] {
         let fixture = Fixture::new().await;
-        let saved = m65_saved(&fixture).await;
-        let enabled = m65_enabled(&fixture, &saved).await;
+        let saved = saved_bearer_connection(&fixture).await;
+        let enabled = enabled_connection(&fixture, &saved).await;
         if missing {
             fixture
                 .credentials
@@ -558,13 +558,13 @@ async fn m65_list_get_are_vault_free_and_missing_or_unreadable_credentials_never
             ),
         ] {
             let (status, cache, body) =
-                m65_http(&app, "GET", &uri, "http://localhost:4200", json!({})).await;
+                credential_request(&app, "GET", &uri, "http://localhost:4200", json!({})).await;
             assert_eq!(status, axum::http::StatusCode::OK);
             assert_eq!(cache, "no-store");
             let text = body.to_string();
             assert!(text.contains("\"hasBearerCredential\":true"));
             assert!(!text.contains(saved.record.bearer_credential_ref.as_ref().unwrap()));
-            assert!(!text.contains("m65-first-secret"));
+            assert!(!text.contains("bearer-first-secret"));
         }
         assert_eq!(fixture.credentials.reads.load(Ordering::SeqCst), reads);
         assert_eq!(
@@ -592,11 +592,11 @@ async fn m65_list_get_are_vault_free_and_missing_or_unreadable_credentials_never
 }
 
 #[tokio::test]
-async fn m65_replace_owns_retirement_and_completion_after_http_caller_drop() {
+async fn replace_owns_retirement_and_completion_after_http_caller_drop() {
     use futures::FutureExt;
     let fixture = Fixture::new().await;
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     fixture
         .manager
         .connect(&fixture.agent, &saved.record.id, enabled.record.version)
@@ -614,7 +614,7 @@ async fn m65_replace_owns_retirement_and_completion_after_http_caller_drop() {
                 &agent,
                 &id,
                 version,
-                McpBearerToken::parse("m65-after-drop-secret".into()).unwrap(),
+                McpBearerToken::parse("bearer-after-drop-secret".into()).unwrap(),
             )
             .await
     });
@@ -671,7 +671,7 @@ async fn m65_replace_owns_retirement_and_completion_after_http_caller_drop() {
         fixture.factory.bearer_launches.lock().unwrap()[0]
             .1
             .expose(),
-        "m65-first-secret"
+        "bearer-first-secret"
     );
     assert_eq!(fixture.credentials.puts.load(Ordering::SeqCst), 2);
     let current = fixture
@@ -686,10 +686,10 @@ async fn m65_replace_owns_retirement_and_completion_after_http_caller_drop() {
 }
 
 #[tokio::test]
-async fn m65_close_failure_refuses_secret_mutation_and_keeps_old_reference() {
+async fn close_failure_refuses_secret_mutation_and_keeps_old_reference() {
     let fixture = Fixture::new().await;
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     fixture
         .manager
         .connect(&fixture.agent, &saved.record.id, enabled.record.version)
@@ -732,18 +732,18 @@ async fn m65_close_failure_refuses_secret_mutation_and_keeps_old_reference() {
             .unwrap()
             .unwrap()
             .expose(),
-        "m65-first-secret"
+        "bearer-first-secret"
     );
     assert_eq!(session.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn m65_clear_joins_active_call_and_revokes_old_dispatch_without_broadening_grants() {
+async fn clear_joins_active_call_and_revokes_old_dispatch_without_broadening_grants() {
     use futures::FutureExt;
     let fixture = Fixture::new().await;
     fixture.factory.hold_calls.store(true, Ordering::SeqCst);
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     let discovered = fixture
         .manager
         .connect(&fixture.agent, &saved.record.id, enabled.record.version)
@@ -844,10 +844,10 @@ async fn m65_clear_joins_active_call_and_revokes_old_dispatch_without_broadening
 }
 
 #[tokio::test]
-async fn m65_uncertain_vault_save_and_failed_endpoint_delete_fail_closed_without_false_success() {
+async fn uncertain_vault_save_and_failed_endpoint_delete_fail_closed_without_false_success() {
     let fixture = Fixture::new().await;
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     fixture
         .credentials
         .uncertain_put
@@ -858,7 +858,7 @@ async fn m65_uncertain_vault_save_and_failed_endpoint_delete_fail_closed_without
             &fixture.agent,
             &saved.record.id,
             enabled.record.version,
-            McpBearerToken::parse("m65-uncertain-secret".into()).unwrap(),
+            McpBearerToken::parse("bearer-uncertain-secret".into()).unwrap(),
         )
         .await
         .unwrap_err();
@@ -896,7 +896,7 @@ async fn m65_uncertain_vault_save_and_failed_endpoint_delete_fail_closed_without
             &saved.record.id,
             UpdateMcpConnection {
                 expected_version: enabled.record.version,
-                endpoint: Some("https://m65.invalid/changed".into()),
+                endpoint: Some("https://bearer.invalid/changed".into()),
                 label: None,
                 enabled: None,
             },
@@ -921,11 +921,11 @@ async fn m65_uncertain_vault_save_and_failed_endpoint_delete_fail_closed_without
 }
 
 #[tokio::test]
-async fn m65_credential_change_joins_inflight_vault_read_before_mutating_or_dispatching() {
+async fn credential_change_joins_inflight_vault_read_before_mutating_or_dispatching() {
     use futures::FutureExt;
     let fixture = Fixture::new().await;
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     let entered = Arc::new(Semaphore::new(0));
     let release = Arc::new(Semaphore::new(0));
     *fixture.credentials.read_gate.lock().unwrap() = Some((entered.clone(), release.clone()));
@@ -951,7 +951,7 @@ async fn m65_credential_change_joins_inflight_vault_read_before_mutating_or_disp
                     &agent,
                     &id,
                     version,
-                    McpBearerToken::parse("m65-replacement-secret".into()).unwrap(),
+                    McpBearerToken::parse("bearer-replacement-secret".into()).unwrap(),
                 )
                 .await
         }));
@@ -1005,12 +1005,12 @@ async fn m65_credential_change_joins_inflight_vault_read_before_mutating_or_disp
 }
 
 #[tokio::test]
-async fn m65_control_plane_failure_compensates_new_slot_and_uncertain_restore_stays_quiet() {
+async fn control_plane_failure_compensates_new_slot_and_uncertain_restore_stays_quiet() {
     use futures::FutureExt;
     for uncertain in [false, true] {
         let fixture = Fixture::new().await;
-        let saved = m65_saved(&fixture).await;
-        let enabled = m65_enabled(&fixture, &saved).await;
+        let saved = saved_bearer_connection(&fixture).await;
+        let enabled = enabled_connection(&fixture, &saved).await;
         let gate = if uncertain {
             Some(
                 fixture
@@ -1038,7 +1038,7 @@ async fn m65_control_plane_failure_compensates_new_slot_and_uncertain_restore_st
                     &agent,
                     &id,
                     version,
-                    McpBearerToken::parse("m65-unpublished-secret".into()).unwrap(),
+                    McpBearerToken::parse("bearer-unpublished-secret".into()).unwrap(),
                 )
                 .await
         });
@@ -1128,7 +1128,7 @@ async fn m65_control_plane_failure_compensates_new_slot_and_uncertain_restore_st
     }
 }
 
-async fn m65_http(
+async fn credential_request(
     app: &axum::Router,
     method: &str,
     uri: &str,
@@ -1167,7 +1167,7 @@ async fn m65_http(
     (status, cache, body)
 }
 
-fn m65_credential_uri(fixture: &Fixture, id: &str) -> String {
+fn credential_uri(fixture: &Fixture, id: &str) -> String {
     format!(
         "/api/agents/{}/mcp-connections/{id}/credential",
         fixture.agent
@@ -1175,16 +1175,16 @@ fn m65_credential_uri(fixture: &Fixture, id: &str) -> String {
 }
 
 #[tokio::test]
-async fn m65_unconfigured_public_view_has_false_marker_without_private_reference() {
+async fn unconfigured_public_view_has_false_marker_without_private_reference() {
     let fixture = Fixture::new().await;
-    let view = m65_https(&fixture).await;
+    let view = https_connection(&fixture).await;
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
     let uri = format!(
         "/api/agents/{}/mcp-connections/{}",
         fixture.agent, view.record.id
     );
     let (status, cache, body) =
-        m65_http(&app, "GET", &uri, "http://localhost:4200", json!({})).await;
+        credential_request(&app, "GET", &uri, "http://localhost:4200", json!({})).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(cache, "no-store");
     assert_eq!(body["connection"]["hasBearerCredential"], false);
@@ -1194,14 +1194,17 @@ async fn m65_unconfigured_public_view_has_false_marker_without_private_reference
 }
 
 #[tokio::test]
-async fn m65_owner_credential_set_replace_clear_is_versioned_secret_free_and_quiet() {
+async fn owner_credential_set_replace_clear_is_versioned_secret_free_and_quiet() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
-    let view = m65_https(&fixture).await;
+    let view = https_connection(&fixture).await;
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
-    let uri = m65_credential_uri(&fixture, &view.record.id);
-    for (expected, token) in [(1, "m65-fixture-secret-one"), (2, "m65-fixture-secret-two")] {
-        let (status, cache, body) = m65_http(
+    let uri = credential_uri(&fixture, &view.record.id);
+    for (expected, token) in [
+        (1, "bearer-fixture-secret-one"),
+        (2, "bearer-fixture-secret-two"),
+    ] {
+        let (status, cache, body) = credential_request(
             &app,
             "PUT",
             &uri,
@@ -1221,7 +1224,7 @@ async fn m65_owner_credential_set_replace_clear_is_versioned_secret_free_and_qui
         assert!(body["connection"].get("bearerToken").is_none());
         assert!(!body.to_string().contains(token));
         let disk = std::fs::read_to_string(fixture.folder.join("control.json")).unwrap();
-        assert!(!disk.contains("m65-fixture-secret-"));
+        assert!(!disk.contains("bearer-fixture-secret-"));
         let current = fixture
             .manager
             .get(&fixture.agent, &view.record.id)
@@ -1231,18 +1234,18 @@ async fn m65_owner_credential_set_replace_clear_is_versioned_secret_free_and_qui
         assert_eq!(fixture.persisted().await.mcp_connections[0], current.record);
         assert!(!format!("{current:?}").contains(token));
     }
-    let (status, cache, body) = m65_http(
+    let (status, cache, body) = credential_request(
         &app,
         "PUT",
         &uri,
         "http://localhost:4200",
-        json!({"expectedVersion": 1, "bearerToken": "m65-fixture-stale-secret"}),
+        json!({"expectedVersion": 1, "bearerToken": "bearer-fixture-stale-secret"}),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(cache, "no-store");
-    assert!(!body.to_string().contains("m65-fixture-stale-secret"));
-    let (status, cache, body) = m65_http(
+    assert!(!body.to_string().contains("bearer-fixture-stale-secret"));
+    let (status, cache, body) = credential_request(
         &app,
         "DELETE",
         &uri,
@@ -1266,14 +1269,14 @@ async fn m65_owner_credential_set_replace_clear_is_versioned_secret_free_and_qui
 }
 
 #[tokio::test]
-async fn m65_clear_absent_credential_is_a_checked_noop() {
+async fn clear_absent_credential_is_a_checked_noop() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
-    let view = m65_https(&fixture).await;
+    let view = https_connection(&fixture).await;
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
-    let uri = m65_credential_uri(&fixture, &view.record.id);
+    let uri = credential_uri(&fixture, &view.record.id);
     let before = std::fs::read(fixture.folder.join("control.json")).unwrap();
-    let (status, cache, body) = m65_http(
+    let (status, cache, body) = credential_request(
         &app,
         "DELETE",
         &uri,
@@ -1289,7 +1292,7 @@ async fn m65_clear_absent_credential_is_a_checked_noop() {
         std::fs::read(fixture.folder.join("control.json")).unwrap(),
         before
     );
-    let (status, _, _) = m65_http(
+    let (status, _, _) = credential_request(
         &app,
         "DELETE",
         &uri,
@@ -1302,10 +1305,10 @@ async fn m65_clear_absent_credential_is_a_checked_noop() {
 }
 
 #[tokio::test]
-async fn m65_credential_route_rejects_foreign_owner_invalid_body_and_oversize() {
+async fn credential_route_rejects_foreign_owner_invalid_body_and_oversize() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
-    let view = m65_https(&fixture).await;
+    let view = https_connection(&fixture).await;
     let other = fixture
         .state
         .write()
@@ -1315,20 +1318,20 @@ async fn m65_credential_route_rejects_foreign_owner_invalid_body_and_oversize() 
         .state
         .id;
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
-    let uri = m65_credential_uri(&fixture, &view.record.id);
-    let valid = json!({"expectedVersion": 1, "bearerToken": "m65-fixture-secret"});
+    let uri = credential_uri(&fixture, &view.record.id);
+    let valid = json!({"expectedVersion": 1, "bearerToken": "bearer-fixture-secret"});
     let (status, _, _) =
-        m65_http(&app, "PUT", &uri, "https://foreign.invalid", valid.clone()).await;
+        credential_request(&app, "PUT", &uri, "https://foreign.invalid", valid.clone()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let foreign = format!(
         "/api/agents/{other}/mcp-connections/{}/credential",
         view.record.id
     );
     let (status, cache, body) =
-        m65_http(&app, "PUT", &foreign, "http://localhost:4200", valid).await;
+        credential_request(&app, "PUT", &foreign, "http://localhost:4200", valid).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(cache, "no-store");
-    assert!(!body.to_string().contains("m65-fixture-secret"));
+    assert!(!body.to_string().contains("bearer-fixture-secret"));
     for body in [
         json!({"expectedVersion": 1, "bearerToken": "ok", "headers": {}}),
         json!({"expectedVersion": 1, "bearerToken": null}),
@@ -1336,11 +1339,12 @@ async fn m65_credential_route_rejects_foreign_owner_invalid_body_and_oversize() 
         json!({"expectedVersion": 1, "bearerToken": "bad\r\nheader"}),
         json!({"bearerToken": "ok"}),
     ] {
-        let (status, cache, _) = m65_http(&app, "PUT", &uri, "http://localhost:4200", body).await;
+        let (status, cache, _) =
+            credential_request(&app, "PUT", &uri, "http://localhost:4200", body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(cache, "no-store");
     }
-    let (status, cache, _) = m65_http(
+    let (status, cache, _) = credential_request(
         &app,
         "PUT",
         &uri,
@@ -1350,7 +1354,7 @@ async fn m65_credential_route_rejects_foreign_owner_invalid_body_and_oversize() 
     .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(cache, "no-store");
-    let (status, _, _) = m65_http(
+    let (status, _, _) = credential_request(
         &app,
         "DELETE",
         &uri,
@@ -1372,10 +1376,9 @@ async fn m65_credential_route_rejects_foreign_owner_invalid_body_and_oversize() 
 }
 
 #[tokio::test]
-async fn m65_bearer_set_refuses_http_and_stdio_without_transport_dispatch() {
+async fn bearer_set_refuses_stdio_without_transport_dispatch() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
-    let http = fixture.create().await;
     let stdio = fixture
         .manager
         .create_stdio(
@@ -1392,13 +1395,13 @@ async fn m65_bearer_set_refuses_http_and_stdio_without_transport_dispatch() {
         .await
         .unwrap();
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
-    for view in [http, stdio] {
-        let (status, cache, _) = m65_http(
+    for view in [stdio] {
+        let (status, cache, _) = credential_request(
             &app,
             "PUT",
-            &m65_credential_uri(&fixture, &view.record.id),
+            &credential_uri(&fixture, &view.record.id),
             "http://localhost:4200",
-            json!({"expectedVersion": 1, "bearerToken": "m65-fixture-secret"}),
+            json!({"expectedVersion": 1, "bearerToken": "bearer-fixture-secret"}),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -1417,7 +1420,77 @@ async fn m65_bearer_set_refuses_http_and_stdio_without_transport_dispatch() {
 }
 
 #[tokio::test]
-async fn m43_actual_owner_router_grants_one_exact_reviewed_alias() {
+async fn local_http_bearer_saves_restores_and_connects_with_bound_credentials() {
+    let fixture = Fixture::new().await;
+    let view = fixture
+        .manager
+        .create(
+            &fixture.agent,
+            CreateMcpConnection {
+                label: "Local bearer".into(),
+                endpoint: "http://localhost:5173/mcp".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(view.record.endpoint, "http://localhost:5173/mcp");
+    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let (status, cache, body) = credential_request(
+        &app,
+        "PUT",
+        &credential_uri(&fixture, &view.record.id),
+        "http://localhost:4200",
+        json!({"expectedVersion":1,"bearerToken":"local-synthetic-secret"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    assert_eq!(body["connection"]["hasBearerCredential"], true);
+    assert!(!body.to_string().contains("local-synthetic-secret"));
+    let saved = fixture
+        .manager
+        .get(&fixture.agent, &view.record.id)
+        .await
+        .unwrap();
+    assert_eq!(fixture.persisted().await.mcp_connections[0], saved.record);
+    let enabled = enabled_connection(&fixture, &saved).await;
+    let snapshot = fixture.persisted().await;
+    fixture.manager.shutdown().await;
+    let mut fresh = DaemonState::new();
+    fresh.restore_control_plane_snapshot(snapshot).unwrap();
+    fresh.control_plane_store = Some(ControlPlaneStoreConfig::Json(
+        fixture.folder.join("control.json"),
+    ));
+    let publication = fresh.mcp_publication.clone();
+    let state = Arc::new(RwLock::new(fresh));
+    let factory = Arc::new(FakeFactory::default());
+    let manager = McpManager::with_credentials(
+        Arc::downgrade(&state),
+        Arc::new(Mutex::new(())),
+        publication,
+        factory.clone(),
+        fixture.credentials.clone(),
+    );
+    assert_eq!(
+        factory.connects.load(Ordering::SeqCst),
+        0,
+        "restart must remain disconnected"
+    );
+    manager
+        .connect(&fixture.agent, &view.record.id, enabled.record.version)
+        .await
+        .unwrap();
+    {
+        let launches = factory.bearer_launches.lock().unwrap();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].0, saved.record.endpoint);
+        assert_eq!(launches[0].1.expose(), "local-synthetic-secret");
+    }
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn actual_owner_router_grants_one_exact_reviewed_alias() {
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt;
@@ -1481,7 +1554,7 @@ async fn m43_actual_owner_router_grants_one_exact_reviewed_alias() {
 }
 
 #[tokio::test]
-async fn m43_grants_preserve_current_unrelated_descriptors_noops_and_none_semantics() {
+async fn grants_preserve_current_unrelated_descriptors_noops_and_none_semantics() {
     let fixture = Fixture::new().await;
     let first = fixture.reviewed().await;
     let second = fixture.reviewed().await;
@@ -1570,7 +1643,7 @@ async fn m43_grants_preserve_current_unrelated_descriptors_noops_and_none_semant
     fixture.manager.shutdown().await;
 }
 
-async fn m43_http(
+async fn grant_request(
     app: &axum::Router,
     uri: &str,
     origin: Option<&str>,
@@ -1608,7 +1681,7 @@ async fn m43_http(
 }
 
 #[tokio::test]
-async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict_inputs() {
+async fn grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict_inputs() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
     let view = fixture.reviewed().await;
@@ -1637,7 +1710,7 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
     );
     let valid = json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true});
     for origin in [None, Some("https://foreign.invalid")] {
-        let (status, cache, _) = m43_http(&app, &path, origin, valid.clone()).await;
+        let (status, cache, _) = grant_request(&app, &path, origin, valid.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(cache, "no-store");
     }
@@ -1648,7 +1721,8 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
         json!({"expectedVersion":view.record.version,"descriptorDigest":null,"granted":true}),
         json!({"expectedVersion":view.record.version,"descriptorDigest":tool.descriptor.descriptor_digest,"granted":true,"tools":[]}),
     ] {
-        let (status, cache, _) = m43_http(&app, &path, Some("http://localhost:4200"), body).await;
+        let (status, cache, _) =
+            grant_request(&app, &path, Some("http://localhost:4200"), body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(cache, "no-store");
     }
@@ -1657,7 +1731,7 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
         json!({"expectedVersion":view.record.version,"descriptorDigest":"sha256:wrong","granted":true}),
     ] {
         assert_eq!(
-            m43_http(&app, &path, Some("http://localhost:4200"), body)
+            grant_request(&app, &path, Some("http://localhost:4200"), body)
                 .await
                 .0,
             StatusCode::CONFLICT
@@ -1669,7 +1743,7 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
             view.record.id, tool.alias
         );
         assert_eq!(
-            m43_http(&app, &uri, Some("http://localhost:4200"), valid.clone())
+            grant_request(&app, &uri, Some("http://localhost:4200"), valid.clone())
                 .await
                 .0,
             StatusCode::NOT_FOUND
@@ -1680,7 +1754,7 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
         fixture.agent, view.record.id
     );
     assert_eq!(
-        m43_http(&app, &uri, Some("http://localhost:4200"), valid)
+        grant_request(&app, &uri, Some("http://localhost:4200"), valid)
             .await
             .0,
         StatusCode::NOT_FOUND
@@ -1721,7 +1795,7 @@ async fn m43_grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict
 }
 
 #[tokio::test]
-async fn m43_grant_precommit_failure_keeps_state_and_uncertainty_publishes_fail_closed() {
+async fn grant_precommit_failure_keeps_state_and_uncertainty_publishes_fail_closed() {
     let fixture = Fixture::new().await;
     let reviewed = fixture.reviewed().await;
     let previous = std::fs::read(fixture.folder.join("control.json")).unwrap();
@@ -1844,7 +1918,7 @@ async fn m43_grant_precommit_failure_keeps_state_and_uncertainty_publishes_fail_
 }
 
 #[tokio::test]
-async fn m43_dropped_grant_caller_still_settles_after_ack_without_staged_publication() {
+async fn dropped_grant_caller_still_settles_after_ack_without_staged_publication() {
     let fixture = Fixture::new().await;
     let reviewed = fixture.reviewed().await;
     let gate = fixture
@@ -1920,7 +1994,7 @@ async fn m43_dropped_grant_caller_still_settles_after_ack_without_staged_publica
 }
 
 #[tokio::test]
-async fn m43_ordered_grant_projection_survives_newer_stale_snapshots_and_opposite_connections() {
+async fn ordered_grant_projection_survives_newer_stale_snapshots_and_opposite_connections() {
     let fixture = Fixture::new().await;
     let first = fixture.reviewed().await;
     let second = fixture.reviewed().await;
@@ -2073,7 +2147,7 @@ async fn m43_ordered_grant_projection_survives_newer_stale_snapshots_and_opposit
 }
 
 #[tokio::test]
-async fn m43_current_version_generic_settings_revoke_remains_authoritative() {
+async fn current_version_generic_settings_revoke_remains_authoritative() {
     let fixture = Fixture::new().await;
     let first = fixture.reviewed().await;
     let second = fixture.reviewed().await;
@@ -2082,7 +2156,7 @@ async fn m43_current_version_generic_settings_revoke_remains_authoritative() {
     fixture.state.write().await.mcp_manager = Some(fixture.manager.clone());
     let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
     assert_eq!(
-        m43_http(
+        grant_request(
             &app,
             &format!("/api/agents/{}", fixture.agent),
             Some("http://localhost:4200"),
@@ -2151,7 +2225,7 @@ async fn m43_current_version_generic_settings_revoke_remains_authoritative() {
 }
 
 #[tokio::test]
-async fn m43_deleted_connection_projection_cannot_restore_grants_and_restart_stays_disconnected() {
+async fn deleted_connection_projection_cannot_restore_grants_and_restart_stays_disconnected() {
     let fixture = Fixture::new().await;
     let reviewed = fixture.reviewed().await;
     let granted = fixture.grant(&reviewed, true).await.unwrap().connection;
@@ -2202,7 +2276,7 @@ async fn m43_deleted_connection_projection_cannot_restore_grants_and_restart_sta
 }
 
 #[tokio::test]
-async fn m43_active_call_revoke_fences_epoch_and_retains_physical_permit_until_close() {
+async fn active_call_revoke_fences_epoch_and_retains_physical_permit_until_close() {
     let fixture = Fixture::new().await;
     fixture.factory.hold_calls.store(true, Ordering::SeqCst);
     let reviewed = fixture.reviewed().await;
@@ -2311,7 +2385,13 @@ fn reviewed_records_round_trip_validate_and_restore_only_known_ordinary_owners()
 #[test]
 fn anonymous_endpoint_and_optional_patch_fields_are_strict() {
     for endpoint in [
-        "http://localhost/mcp",
+        "http://localhost.evil.test/mcp",
+        "http://localhost./mcp",
+        "http://192.168.1.2/mcp",
+        "http://example.com/mcp",
+        "http://0.0.0.0/mcp",
+        "http://2130706433/mcp",
+        "http://0x7f000001/mcp",
         "http://127.1/mcp",
         "https://user:secret@example.com/mcp",
         "https://example.com/mcp?token=secret",
@@ -2323,6 +2403,10 @@ fn anonymous_endpoint_and_optional_patch_fields_are_strict() {
             McpServiceError::InvalidRequest
         );
     }
+    assert_eq!(
+        normalized_endpoint("http://localhost:5173/mcp").unwrap(),
+        "http://localhost:5173/mcp"
+    );
     assert!(normalized_endpoint("http://[::1]:1234/mcp").is_ok());
     assert!(normalized_endpoint("https://example.com/mcp").is_ok());
     assert!(serde_json::from_value::<UpdateMcpConnection>(
@@ -2419,7 +2503,7 @@ async fn configuration_discovery_review_are_separate_from_grant_and_call() {
 }
 
 #[tokio::test]
-async fn m44_stdio_save_list_restore_and_disabled_connect_never_start_transport() {
+async fn stdio_save_list_restore_and_disabled_connect_never_start_transport() {
     let fixture = Fixture::new().await;
     let spec = McpStdioSpec {
         executable: std::env::current_exe()
@@ -2488,7 +2572,7 @@ async fn m44_stdio_save_list_restore_and_disabled_connect_never_start_transport(
 }
 
 #[test]
-fn m44_stdio_spec_enforces_argument_bounds_and_rejects_known_launchers() {
+fn stdio_spec_enforces_argument_bounds_and_rejects_known_launchers() {
     let executable = std::env::current_exe()
         .unwrap()
         .to_string_lossy()

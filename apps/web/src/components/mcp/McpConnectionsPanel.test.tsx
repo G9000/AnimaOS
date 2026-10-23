@@ -86,7 +86,7 @@ async function loaded() {
 }
 
 describe('owner external tools', () => {
-  it('fp02 navigation releases a same-lifetime status-reconciliation busy claim without publishing late rows', async () => {
+  it('navigation releases a same-lifetime status-reconciliation busy claim without publishing late rows', async () => {
     const mock = api();
     const reconciliation = deferred<void>();
     const changed = vi.fn().mockReturnValue(reconciliation.promise);
@@ -114,7 +114,7 @@ describe('owner external tools', () => {
     expect(busy).toHaveBeenLastCalledWith(false);
   });
 
-  it('fp02 fences obsolete connection lists and mutation callbacks across offline and epoch changes', async () => {
+  it('fences obsolete connection lists and mutation callbacks across offline and epoch changes', async () => {
     const first = deferred<McpConnection[]>();
     const mock = api();
     vi.mocked(mock.list).mockReturnValueOnce(first.promise);
@@ -179,10 +179,24 @@ describe('owner external tools', () => {
     expect(mock.update).toHaveBeenCalledTimes(1);
   });
 
-  it('M65 offers an explicit password action only for saved HTTPS HTTP connections', async () => {
+  it('offers a password action for HTTPS and local loopback HTTP connections', async () => {
     const mock = api([
       connection({ endpoint: 'https://example.test/mcp' }),
-      connection({ id: 'loopback', label: 'Loopback' }),
+      connection({
+        id: 'loopback',
+        label: 'Loopback',
+        endpoint: 'http://localhost:5173/mcp',
+      }),
+      connection({
+        id: 'ipv6',
+        label: 'IPv6',
+        endpoint: 'http://[::1]:5173/mcp',
+      }),
+      connection({
+        id: 'remote',
+        label: 'Remote HTTP',
+        endpoint: 'http://example.test/mcp',
+      }),
       connection({
         id: 'local',
         label: 'Local process',
@@ -206,6 +220,16 @@ describe('owner external tools', () => {
       within(
         screen.getByRole('article', { name: 'External server Loopback' }),
       ).queryByLabelText('Bearer token'),
+    ).toHaveAttribute('type', 'password');
+    expect(
+      within(
+        screen.getByRole('article', { name: 'External server IPv6' }),
+      ).getByLabelText('Bearer token'),
+    ).toHaveAttribute('type', 'password');
+    expect(
+      within(
+        screen.getByRole('article', { name: 'External server Remote HTTP' }),
+      ).queryByLabelText('Bearer token'),
     ).not.toBeInTheDocument();
     expect(
       within(
@@ -217,7 +241,7 @@ describe('owner external tools', () => {
     expect(mock.connect).not.toHaveBeenCalled();
   });
 
-  it('M65 saves and replaces only on clicks, clears the password after settlement, and never echoes it', async () => {
+  it('saves and replaces only on clicks, clears the password after settlement, and never echoes it', async () => {
     const user = userEvent.setup();
     const token = 'synthetic-owner-secret';
     const mock = api([connection({ endpoint: 'https://example.test/mcp' })]);
@@ -286,7 +310,7 @@ describe('owner external tools', () => {
     expect(mock.connect).not.toHaveBeenCalled();
   });
 
-  it('M65 discards a failed password, shows only a static error, and requires explicit refresh before re-entry', async () => {
+  it('discards a failed password, shows only a static error, and requires explicit refresh before re-entry', async () => {
     const user = userEvent.setup();
     const token = 'synthetic-failed-token';
     const mock = api([connection({ endpoint: 'https://example.test/mcp' })]);
@@ -320,7 +344,7 @@ describe('owner external tools', () => {
     expect(mock.saveBearerCredential).toHaveBeenCalledTimes(1);
   });
 
-  it('M65 locks other mutations while a credential write is pending and fences an old agent completion', async () => {
+  it('locks other mutations while a credential write is pending and fences an old agent completion', async () => {
     const user = userEvent.setup();
     const pending = deferred<McpConnection>();
     const mock = api();
@@ -375,7 +399,7 @@ describe('owner external tools', () => {
     expect(mock.connect).not.toHaveBeenCalled();
   });
 
-  it('M44_owner_explicitly_selects_connection_type_before_configuring_local_server', async () => {
+  it('owner_explicitly_selects_connection_type_before_configuring_local_server', async () => {
     const mock = api();
     render(<McpConnectionsPanel agentId="main" api={mock} />);
     await loaded();
@@ -387,7 +411,7 @@ describe('owner external tools', () => {
     expect(mock.discover).not.toHaveBeenCalled();
   });
 
-  it('M44 confirms trusted immutable launch, saves disabled, enables separately and starts only on an explicit click', async () => {
+  it('confirms trusted immutable launch, saves disabled, enables separately and starts only on an explicit click', async () => {
     const user = userEvent.setup();
     const mock = api();
     const stdio = {
@@ -504,7 +528,7 @@ describe('owner external tools', () => {
     expect(mock.discover).not.toHaveBeenCalled();
   });
 
-  it('M44 explicitly distinguishes singleton empty argv from untouched zero argv', async () => {
+  it('explicitly distinguishes singleton empty argv from untouched zero argv', async () => {
     const user = userEvent.setup();
     const mock = api();
     const executable = 'C:\\synthetic\\mcp-server.exe';
@@ -585,7 +609,7 @@ describe('owner external tools', () => {
     expect(mock.discover).not.toHaveBeenCalled();
   });
 
-  it('M44 rejects relative paths and oversized argv locally and invalidates trust whenever launch details change', async () => {
+  it('rejects relative paths and oversized argv locally and invalidates trust whenever launch details change', async () => {
     const user = userEvent.setup();
     const mock = api();
     render(<McpConnectionsPanel agentId="main" api={mock} />);
@@ -650,7 +674,7 @@ describe('owner external tools', () => {
     expect(mock.connect).not.toHaveBeenCalled();
   });
 
-  it('M44 shows restored local launch arguments as plain owner data and never starts on load, refresh or agent switch', async () => {
+  it('shows restored local launch arguments as plain owner data and never starts on load, refresh or agent switch', async () => {
     const mock = api([
       connection({
         transport: 'stdio',

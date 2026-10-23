@@ -3,8 +3,8 @@ use super::*;
 #[tokio::test]
 async fn chat_mcp_setup_stop_during_vault_read_prevents_transport_start() {
     let fixture = Fixture::new().await;
-    let saved = m65_saved(&fixture).await;
-    let enabled = m65_enabled(&fixture, &saved).await;
+    let saved = saved_bearer_connection(&fixture).await;
+    let enabled = enabled_connection(&fixture, &saved).await;
     let reviewed = fixture.reviewed().await;
     let stamp = fixture.grant_and_stamp(&reviewed).await;
     let run = RunLink {

@@ -64,8 +64,7 @@ fn account(connection: &str, reference: &str) -> Result<String, McpCredentialErr
     Ok(format!("connection:{connection}:credential:{reference}"))
 }
 fn endpoint_valid(endpoint: &str) -> bool {
-    endpoint.starts_with("https://")
-        && super::normalized_endpoint(endpoint).is_ok_and(|value| value == endpoint)
+    super::credential_endpoint_valid(endpoint)
 }
 
 /// Mutations are awaited by McpManager's owned task, including blocking OS work.
@@ -319,13 +318,13 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Mutex,
     };
-    const TOKEN: &str = "m65-synthetic-vault-secret";
-    const ENDPOINT: &str = "https://m65.invalid/mcp";
+    const TOKEN: &str = "bearer-synthetic-vault-secret";
+    const ENDPOINT: &str = "https://bearer.invalid/mcp";
     fn token() -> McpBearerToken {
         McpBearerToken::parse(TOKEN.into()).unwrap()
     }
     #[test]
-    fn m65_bearer_bounds_and_debug_do_not_expose_input() {
+    fn bearer_bounds_and_debug_do_not_expose_input() {
         for value in [
             "".into(),
             " ".into(),
@@ -348,7 +347,7 @@ mod tests {
         assert!(!format!("{:?}", token()).contains(TOKEN));
     }
     #[tokio::test]
-    async fn m65_memory_slots_are_fresh_endpoint_and_connection_bound() {
+    async fn memory_slots_are_fresh_endpoint_and_connection_bound() {
         let store = InMemoryMcpCredentialStore::default();
         let id = uuid::Uuid::new_v4().to_string();
         let slot = uuid::Uuid::new_v4().to_string();
@@ -368,7 +367,7 @@ mod tests {
             McpCredentialError::Invalid
         );
         assert!(store
-            .load(&id, "https://m65.invalid/other", &slot)
+            .load(&id, "https://bearer.invalid/other", &slot)
             .await
             .is_err());
         assert!(store
@@ -379,7 +378,7 @@ mod tests {
         assert!(store
             .put(
                 &id,
-                "http://127.0.0.1/mcp",
+                "http://example.com/mcp",
                 &uuid::Uuid::new_v4().to_string(),
                 token()
             )
@@ -392,6 +391,37 @@ mod tests {
         store.delete(&id, &slot).await.unwrap();
         store.delete(&id, &slot).await.unwrap();
         assert!(store.load(&id, ENDPOINT, &slot).await.unwrap().is_none());
+    }
+    #[tokio::test]
+    async fn local_http_bearer_vault_slots_remain_endpoint_bound() {
+        let store = InMemoryMcpCredentialStore::default();
+        let id = uuid::Uuid::new_v4().to_string();
+        for endpoint in [
+            "http://localhost:5173/mcp",
+            "http://127.0.0.1:5173/mcp",
+            "http://[::1]:5173/mcp",
+        ] {
+            let slot = uuid::Uuid::new_v4().to_string();
+            store.put(&id, endpoint, &slot, token()).await.unwrap();
+            assert_eq!(
+                store
+                    .load(&id, endpoint, &slot)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .expose(),
+                TOKEN
+            );
+            for other in [
+                "http://127.0.0.1:3001/mcp",
+                "http://127.0.0.1:5173/other",
+                "http://localhost:5173/other",
+                "http://example.com/mcp",
+            ] {
+                assert!(store.load(&id, other, &slot).await.is_err());
+            }
+            store.delete(&id, &slot).await.unwrap();
+        }
     }
     #[derive(Default)]
     struct FakeVault {
@@ -438,7 +468,7 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn m65_os_adapter_fake_backend_verifies_binding_compensation_and_uncertainty() {
+    async fn os_adapter_fake_backend_verifies_binding_compensation_and_uncertainty() {
         assert_eq!(SERVICE, "animaos.mcp.bearer");
         for mode in 0..=3 {
             let backend = Arc::new(FakeVault::default());
@@ -462,7 +492,7 @@ mod tests {
                         TOKEN
                     );
                     assert!(store
-                        .load(&id, "https://m65.invalid/changed", &slot)
+                        .load(&id, "https://bearer.invalid/changed", &slot)
                         .await
                         .is_err());
                     assert!(store.put(&id, ENDPOINT, &slot, token()).await.is_err());

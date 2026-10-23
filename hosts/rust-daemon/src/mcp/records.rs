@@ -147,7 +147,7 @@ impl McpRegistry {
             if row.bearer_credential_ref.as_ref().is_some_and(|reference| {
                 !super::credentials::valid_reference(reference)
                     || row.stdio.is_some()
-                    || !row.endpoint.starts_with("https://")
+                    || !credential_endpoint_valid(&row.endpoint)
             }) {
                 return Err("Invalid MCP credential reference".into());
             }
@@ -419,9 +419,11 @@ pub(crate) fn normalized_endpoint(endpoint: &str) -> Result<String, McpServiceEr
             .ok_or(McpServiceError::InvalidRequest)?;
         let literal = authority == "127.0.0.1"
             || authority == "[::1]"
+            || authority == "localhost"
             || authority
                 .strip_prefix("127.0.0.1:")
                 .or_else(|| authority.strip_prefix("[::1]:"))
+                .or_else(|| authority.strip_prefix("localhost:"))
                 .is_some_and(|port| port.parse::<u16>().is_ok());
         if !literal {
             return Err(McpServiceError::InvalidRequest);
@@ -430,6 +432,10 @@ pub(crate) fn normalized_endpoint(endpoint: &str) -> Result<String, McpServiceEr
         return Err(McpServiceError::InvalidRequest);
     }
     Ok(url.to_string())
+}
+/// Bearer credentials are accepted only for canonical HTTPS or local loopback HTTP.
+pub(crate) fn credential_endpoint_valid(endpoint: &str) -> bool {
+    normalized_endpoint(endpoint).is_ok_and(|value| value == endpoint)
 }
 fn valid_url_text(value: &str) -> bool {
     !value.trim().is_empty()

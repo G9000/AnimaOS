@@ -739,7 +739,7 @@ mod pipe_tests {
     use tokio::time::Instant;
 
     #[tokio::test]
-    async fn m44_complete_stdout_eof_requests_retirement_even_before_leader_exit() {
+    async fn complete_stdout_eof_requests_retirement_even_before_leader_exit() {
         // Typed pipe evidence only: this test does not claim native process
         // exit. The Windows descendant test establishes actual job cleanup.
         let control = TransportControl::new(
@@ -766,7 +766,7 @@ mod pipe_tests {
 
     #[cfg(not(windows))]
     #[tokio::test]
-    async fn m44_non_windows_stdio_rejects_before_reserving_or_starting() {
+    async fn non_windows_stdio_rejects_before_reserving_or_starting() {
         let temporary = tempfile::tempdir().unwrap();
         let executable = temporary.path().join("synthetic-peer.exe");
         std::fs::write(&executable, b"synthetic existing file; never executable").unwrap();
@@ -891,7 +891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_debug_spans_never_record_launch_arguments() {
+    async fn native_debug_spans_never_record_launch_arguments() {
         use tracing::instrument::WithSubscriber;
         #[derive(Clone, Default)]
         struct Captured(Arc<StdMutex<Vec<u8>>>);
@@ -905,7 +905,7 @@ mod tests {
             }
         }
         let temporary = tempfile::tempdir().unwrap();
-        let sentinel = "m44-private-argv-sentinel";
+        let sentinel = "private-argv-sentinel";
         let marker = temporary.path().join(sentinel);
         let captured = Captured::default();
         let subscriber = tracing_subscriber::fmt()
@@ -942,7 +942,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_handshake_discovery_calls_and_stderr_discard_use_one_sdk_session() {
+    async fn native_handshake_discovery_calls_and_stderr_discard_use_one_sdk_session() {
         for mode in ["normal", "stderr-flood", "split-frames"] {
             let temporary = tempfile::tempdir().unwrap();
             let marker = temporary.path().join("peer.json");
@@ -985,7 +985,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_predecode_malformed_line_no_newline_and_protocol_failures_are_static() {
+    async fn native_predecode_malformed_line_no_newline_and_protocol_failures_are_static() {
         for (mode, expected) in [
             ("malformed", McpTransportError::Malformed),
             ("oversized-line", McpTransportError::WireLimit),
@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_idle_and_shared_discovery_wire_budgets_retire_the_child() {
+    async fn native_idle_and_shared_discovery_wire_budgets_retire_the_child() {
         for mode in ["idle-flood", "aggregate-discovery"] {
             let temporary = tempfile::tempdir().unwrap();
             let marker = temporary.path().join("peer.json");
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_root_exit_kills_live_descendant_and_joins_held_output_pipes() {
+    async fn native_root_exit_kills_live_descendant_and_joins_held_output_pipes() {
         let temporary = tempfile::tempdir().unwrap();
         let marker = temporary.path().join("peer.json");
         let heartbeat = marker.with_extension("heartbeat");
@@ -1080,7 +1080,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_cancelled_and_dropped_initialization_keep_lease_until_join() {
+    async fn native_cancelled_and_dropped_initialization_keep_lease_until_join() {
         for dropped in [false, true] {
             let temporary = tempfile::tempdir().unwrap();
             let marker = temporary.path().join("peer.json");
@@ -1118,7 +1118,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_cancelled_and_dropped_dispatched_calls_join_and_leave_outcome_unknown() {
+    async fn native_cancelled_and_dropped_dispatched_calls_join_and_leave_outcome_unknown() {
         for dropped in [false, true] {
             let temporary = tempfile::tempdir().unwrap();
             let marker = temporary.path().join("peer.json");
@@ -1156,7 +1156,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_native_shared_four_child_cap_and_session_drop_block_replacements() {
+    async fn native_shared_four_child_cap_and_session_drop_block_replacements() {
         let temporary = tempfile::tempdir().unwrap();
         let factory = DefaultMcpTransportFactory::default();
         let mut sessions = Vec::new();
@@ -1211,7 +1211,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_missing_executable_is_prelaunch_but_deleted_quarantines_keep_slots_and_ids() {
+    async fn missing_executable_is_prelaunch_but_deleted_quarantines_keep_slots_and_ids() {
         let temporary = tempfile::tempdir().unwrap();
         let factory = DefaultMcpTransportFactory::default();
         let missing = ValidatedMcpLaunch::Stdio {
@@ -1244,7 +1244,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn m44_bounded_frame_reader_retains_partial_bytes_across_cancelled_reads() {
+    async fn bounded_frame_reader_retains_partial_bytes_across_cancelled_reads() {
         let (sender, receiver) = mpsc::channel(1);
         let mut reader = FrameRead {
             receiver,

@@ -337,6 +337,15 @@ impl HttpBackend {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
+            // Never consult DNS or hosts files for the supported local hostname.
+            // Both address families are needed for IPv4-only APIs and IPv6-only dev servers.
+            .resolve_to_addrs(
+                "localhost",
+                &[
+                    std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+                    std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, 0)),
+                ],
+            )
             .connect_timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| McpTransportError::Unavailable)?;
@@ -359,9 +368,7 @@ impl HttpBackend {
         endpoint: &str,
         token: super::credentials::McpBearerToken,
     ) -> Result<Self, McpTransportError> {
-        if !endpoint.starts_with("https://")
-            || !super::normalized_endpoint(endpoint).is_ok_and(|value| value == endpoint)
-        {
+        if !super::credential_endpoint_valid(endpoint) {
             return Err(McpTransportError::Unavailable);
         }
         self.bearer = Some((endpoint.into(), token));
@@ -792,7 +799,7 @@ where
             .await?;
         after_page().await?;
         #[cfg(test)]
-        if let Some(path) = std::env::var_os("ANIMA_M83_DISCOVERY_EVIDENCE_PATH") {
+        if let Some(path) = std::env::var_os("ANIMA_MCP_DISCOVERY_EVIDENCE_PATH") {
             evidence_pages.push(serde_json::json!({"page":page,"result":&result}));
             let bytes = serde_json::to_vec_pretty(&serde_json::json!({
                 "schemaVersion":1,"protocolVersion":PROTOCOL,"pages":&evidence_pages
@@ -1249,13 +1256,13 @@ mod tests {
     }
     #[tokio::test]
     #[ignore = "explicit opt-in anonymous metadata-only diagnostic; no search query"]
-    async fn m83_public_discovery_metadata() {
+    async fn public_discovery_metadata() {
         assert_eq!(
-            std::env::var("ANIMA_M83_PUBLIC_METADATA").as_deref(),
+            std::env::var("ANIMA_MCP_PUBLIC_METADATA").as_deref(),
             Ok("1")
         );
-        let path = std::env::var("ANIMA_M83_DISCOVERY_EVIDENCE_PATH")
-            .expect("ANIMA_M83_DISCOVERY_EVIDENCE_PATH must name a fresh private artifact");
+        let path = std::env::var("ANIMA_MCP_DISCOVERY_EVIDENCE_PATH")
+            .expect("ANIMA_MCP_DISCOVERY_EVIDENCE_PATH must name a fresh private artifact");
         assert!(
             !std::path::Path::new(&path).exists(),
             "Metadata evidence path must be fresh"
@@ -1310,15 +1317,60 @@ mod tests {
             "Actual tools/list metadata must be retained"
         );
     }
-    fn m65_token() -> super::super::credentials::McpBearerToken {
-        super::super::credentials::McpBearerToken::parse("m65-wire-secret".into()).unwrap()
+    fn wire_bearer_token() -> super::super::credentials::McpBearerToken {
+        super::super::credentials::McpBearerToken::parse("bearer-wire-secret".into()).unwrap()
     }
     #[tokio::test]
-    async fn m65_sensitive_header_exact_endpoint_callback_and_unsupported_get_are_fail_closed() {
-        let endpoint = "https://m65.invalid/mcp";
+    #[ignore = "requires an explicitly authorized local MCP server and bearer file"]
+    async fn live_local_http_bearer_discovery() {
+        let endpoint = super::super::normalized_endpoint(
+            &std::env::var("ANIMA_MCP_TEST_ENDPOINT").expect("explicit local endpoint"),
+        )
+        .expect("valid local endpoint");
+        assert!(
+            endpoint.starts_with("http://127.0.0.1")
+                || endpoint.starts_with("http://[::1]")
+                || endpoint.starts_with("http://localhost")
+        );
+        let token = super::super::credentials::McpBearerToken::parse(
+            std::fs::read_to_string(
+                std::env::var_os("ANIMA_MCP_TEST_BEARER_FILE").expect("explicit bearer file"),
+            )
+            .expect("read bearer file")
+            .trim()
+            .to_owned(),
+        )
+        .expect("valid bearer token");
+        let ctl = control(15);
+        let session = DefaultMcpTransportFactory::default()
+            .connect(
+                ValidatedMcpLaunch::HttpBearer {
+                    endpoint: ValidatedMcpEndpoint(endpoint),
+                    token,
+                },
+                ctl.clone(),
+            )
+            .await
+            .expect("authenticated MCP initialize");
+        let discovery = session
+            .discover(ctl.clone())
+            .await
+            .expect("authenticated MCP discovery");
+        assert!(!discovery.tools.is_empty());
+        assert!(!ctl.dispatched.load(Ordering::SeqCst));
+        session.close().await.expect("owned MCP cleanup");
+        println!(
+            "Local MCP initialized and discovered {} tools using protocol {}; zero tool calls",
+            discovery.tools.len(),
+            discovery.protocol_version
+        );
+    }
+    #[tokio::test]
+    async fn sensitive_header_exact_endpoint_callback_and_unsupported_get_are_fail_closed() {
+        let endpoint = "https://bearer.invalid/mcp";
         let backend = HttpBackend::new(control(2))
             .unwrap()
-            .with_bearer(endpoint, m65_token())
+            .with_bearer(endpoint, wire_bearer_token())
             .unwrap();
         for method in [reqwest::Method::POST, reqwest::Method::DELETE] {
             let request = backend
@@ -1327,12 +1379,12 @@ mod tests {
                 .build()
                 .unwrap();
             let header = &request.headers()["authorization"];
-            assert_eq!(header, "Bearer m65-wire-secret");
+            assert_eq!(header, "Bearer bearer-wire-secret");
             assert!(header.is_sensitive());
-            assert!(!format!("{request:?}").contains("m65-wire-secret"));
+            assert!(!format!("{request:?}").contains("bearer-wire-secret"));
         }
         for target in [
-            "https://m65.invalid/other",
+            "https://bearer.invalid/other",
             "https://foreign.invalid/mcp",
             "http://127.0.0.1/mcp",
         ] {
@@ -1342,7 +1394,7 @@ mod tests {
         }
         assert!(HttpBackend::new(control(2))
             .unwrap()
-            .with_bearer("http://127.0.0.1/mcp", m65_token())
+            .with_bearer("http://example.com/mcp", wire_bearer_token())
             .is_err());
         let message: ClientJsonRpcMessage =
             serde_json::from_value(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
@@ -1377,7 +1429,7 @@ mod tests {
 
     // Reuse the public synthetic test CA only in this private test client. The
     // production factory has neither custom trust nor a DNS/dial override.
-    async fn m65_tls_fixture(
+    async fn tls_bearer_fixture(
         mode: u16,
     ) -> (
         ValidatedMcpEndpoint,
@@ -1473,8 +1525,8 @@ mod tests {
                                         _ => panic!("unexpected fixture operation"),
                                     };
                                     let body = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
-                                    if mode == 201 && method == "tools/call" { (200, "text/event-stream", "mcp-session-id: m65-fixture\r\n", format!("data: {body}\n\n")) }
-                                    else { (200, "application/json", "mcp-session-id: m65-fixture\r\n", body) }
+                                    if mode == 201 && method == "tools/call" { (200, "text/event-stream", "mcp-session-id: bearer-fixture\r\n", format!("data: {body}\n\n")) }
+                                    else { (200, "application/json", "mcp-session-id: bearer-fixture\r\n", body) }
                                 };
                                 let response = format!("HTTP/1.1 {status} Fixture\r\ncontent-type: {mime}\r\ncontent-length: {}\r\nconnection: close\r\n{extra}\r\n{body}", body.len());
                                 stream.write_all(response.as_bytes()).await.unwrap();
@@ -1494,10 +1546,10 @@ mod tests {
         (endpoint, client, captured, stop, task)
     }
     #[tokio::test]
-    async fn m65_verified_tls_static_bearer_covers_sdk_json_sse_delete_without_redirect_or_retry() {
+    async fn verified_tls_static_bearer_covers_sdk_json_sse_delete_without_redirect_or_retry() {
         use futures::FutureExt;
         for mode in [200, 201, 302, 401] {
-            let (endpoint, client, captured, stop, server) = m65_tls_fixture(mode).await;
+            let (endpoint, client, captured, stop, server) = tls_bearer_fixture(mode).await;
             let factory = DefaultMcpTransportFactory {
                 http: Some(client),
                 ..Default::default()
@@ -1508,7 +1560,7 @@ mod tests {
                     .connect(
                         ValidatedMcpLaunch::HttpBearer {
                             endpoint,
-                            token: m65_token(),
+                            token: wire_bearer_token(),
                         },
                         control(3),
                     )
@@ -1552,7 +1604,7 @@ mod tests {
             let records = lock(&captured);
             assert!(records
                 .iter()
-                .all(|(_, auth)| auth == "Bearer m65-wire-secret"));
+                .all(|(_, auth)| auth == "Bearer bearer-wire-secret"));
             let count = |method: &str| records.iter().filter(|(name, _)| name == method).count();
             assert_eq!(count("initialize"), 1);
             if mode == 302 || mode == 401 {
@@ -1599,6 +1651,75 @@ mod tests {
         fail: bool,
         methods: Arc<StdMutex<Vec<String>>>,
         tool_result: Option<Value>,
+    }
+    #[tokio::test]
+    async fn local_http_bearer_reaches_sdk_initialize_and_discovery_without_tool_calls() {
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            let methods = Arc::new(StdMutex::new(Vec::new()));
+            let fake_state = Fake {
+                sse: false,
+                fail: false,
+                methods: methods.clone(),
+                tool_result: None,
+            };
+            let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+            let endpoint = super::super::normalized_endpoint(&format!(
+                "http://localhost:{}/mcp",
+                listener.local_addr().unwrap().port()
+            ))
+            .unwrap();
+            let app = Router::new()
+                .route(
+                    "/mcp",
+                    post(
+                        |state: State<Fake>,
+                         headers: axum::http::HeaderMap,
+                         request: Json<Value>| async move {
+                            assert_eq!(
+                                headers.get("authorization").unwrap(),
+                                "Bearer bearer-wire-secret"
+                            );
+                            fake(state, request).await
+                        },
+                    ),
+                )
+                .with_state(fake_state);
+            let task = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let session = DefaultMcpTransportFactory::default()
+                .connect(
+                    ValidatedMcpLaunch::HttpBearer {
+                        endpoint: ValidatedMcpEndpoint(endpoint.clone()),
+                        token: wire_bearer_token(),
+                    },
+                    control(5),
+                )
+                .await
+                .unwrap();
+            let discovery = session.discover(control(5)).await.unwrap();
+            assert_eq!(discovery.tools.len(), 1);
+            session.close().await.unwrap();
+            assert_eq!(
+                *lock(&methods),
+                ["initialize", "notifications/initialized", "tools/list"]
+            );
+            let backend = HttpBackend::new(control(2))
+                .unwrap()
+                .with_bearer(&endpoint, wire_bearer_token())
+                .unwrap();
+            for other in [
+                "http://127.0.0.1:1/mcp",
+                "http://localhost/mcp",
+                "http://example.com/mcp",
+            ] {
+                assert!(backend
+                    .authorize_request(other, backend.http.post(other))
+                    .is_err());
+            }
+            task.abort();
+            let _ = task.await;
+        }
     }
     async fn fake(State(fake): State<Fake>, Json(request): Json<Value>) -> Response {
         let method = request["method"].as_str().unwrap_or("").to_string();
