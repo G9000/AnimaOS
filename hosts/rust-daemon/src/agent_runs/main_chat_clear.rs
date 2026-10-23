@@ -236,6 +236,7 @@ mod tests {
                 parent_run_id: parent.id.clone(),
                 launch_key: "reset-fixture".into(),
                 launch_fingerprint: "a".repeat(64),
+                options: None,
                 effective_bounds: Some(AsyncHelperBounds::for_config(&companion.config)),
                 origin: None,
                 completion: HelperCompletionState::Manual,

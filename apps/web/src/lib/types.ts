@@ -1,7 +1,7 @@
 // UI view-model types shared by the daemon client and the components.
 // The daemon wire format (snake_case here, camelCase on the wire) is adapted
 // into these shapes by daemon-api.ts `toAgentDetail`.
-import type { SessionMessageAttachment } from '@animaos/sdk';
+import type { DelegationPolicy, SessionMessageAttachment } from '@animaos/sdk';
 
 export interface TokenUsage {
   prompt_tokens: number;
@@ -35,6 +35,7 @@ export interface AgentDetail {
   system?: string | null;
   /** Models tried, in order, when the main one fails before replying. */
   fallbacks?: { provider: string; model: string }[];
+  delegation?: DelegationPolicy;
   messages: ChatMessage[];
 }
 

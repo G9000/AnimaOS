@@ -776,7 +776,7 @@ async fn spawn_helper_limits_starts_per_run_and_renews_the_allowance_for_future_
                 .messages
                 .iter()
                 .filter(|m| m.role == MessageRole::Tool
-                    && m.content.text.contains("four-helper start limit"))
+                    && m.content.text.contains("configured helper start limit"))
                 .count(),
             round
         );

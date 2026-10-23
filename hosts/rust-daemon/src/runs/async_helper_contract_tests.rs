@@ -309,9 +309,9 @@ fn async_helper_contract_manual_result_is_pinned_until_launching_parent_settles(
 #[test]
 fn async_helper_contract_effective_bounds_reject_widening_and_missing_limits() {
     for (field, value) in [
-        ("maxToolTurns", json!(9)),
-        ("maxDurationMs", json!(120001)),
-        ("maxOutputTokensPerResponse", json!(4097)),
+        ("maxToolTurns", json!(33)),
+        ("maxDurationMs", json!(600001)),
+        ("maxOutputTokensPerResponse", json!(16385)),
         ("maxAcceptedSteers", json!(9)),
     ] {
         let mut child = child_json();

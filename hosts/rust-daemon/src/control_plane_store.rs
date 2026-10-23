@@ -37,12 +37,15 @@ mod chat_suite_upgrade_tests;
 /// workflow templates, and 26 adds opt-in memory maintenance with per-cohort
 /// recovery journals, Doctor repair images, standing intentions and paired-node
 /// identity records; 27 adds bound turn progress and durable secondary usage;
-/// 28 adds durable shared execution scopes and immutable run bindings.
+/// 28 adds durable shared execution scopes and immutable run bindings;
+/// 29 adds conversation model preferences, reviews, results and viewer grants;
+/// 30 adds owner delegation policies, routed assignments and JSON output contracts.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 29;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 30;
 pub(crate) const PRE_CHAT_SUITE_BACKUP_SUFFIX: &str = ".pre-chat-suite.bak";
+pub(crate) const PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX: &str = ".pre-delegation-controls.bak";
 pub(crate) const PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX: &str = ".pre-execution-budgets.bak";
 pub(crate) const PRE_TURN_RECOVERY_BACKUP_SUFFIX: &str = ".pre-turn-recovery.bak";
 pub(crate) const PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX: &str = ".pre-memory-maintenance.bak";
@@ -562,8 +565,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_TURN_RECOVERY_BACKUP_SUFFIX
             } else if loaded_version < 28 {
                 PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 29 {
                 PRE_CHAT_SUITE_BACKUP_SUFFIX
+            } else {
+                PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)

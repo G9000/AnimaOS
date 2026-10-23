@@ -37,6 +37,9 @@ pub struct AgentSettings {
     /// Shared physical execution limits. Hosts retain accounting across runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_limits: Option<crate::execution_limits::ExecutionLimits>,
+    /// Owner-configured helper authority; omitted settings use bounded defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::delegation::DelegationPolicy>,
     pub additional: BTreeMap<String, DataValue>,
 }
 
@@ -130,6 +133,8 @@ pub struct AgentConfigUpdate {
     pub tools: Option<Vec<ToolDescriptor>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_limits: Option<crate::execution_limits::ExecutionLimits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::delegation::DelegationPolicy>,
     /// Replaces the fallback chain; `Some(vec![])` clears it.
     #[serde(default)]
     pub fallbacks: Option<Vec<ModelChoice>>,
@@ -386,6 +391,27 @@ mod tests {
         assert_eq!(settings.timeout_ms, None);
         assert_eq!(settings.max_retries, None);
         assert!(settings.additional.is_empty());
+    }
+
+    #[test]
+    fn delegation_settings_round_trip_as_typed_owner_authority() {
+        let saved = serde_json::json!({
+            "temperature": 0.2, "max_tokens": null, "timeout_ms": null,
+            "max_retries": null, "max_tool_iterations": null,
+            "additional": {},
+            "delegation": {
+                "maxConcurrent": 2, "maxStartsPerRun": 3, "maxDepth": 1,
+                "maxToolIterations": 6, "timeoutMs": 30000, "maxOutputTokens": 2048,
+                "allowContextFork": false,
+                "routes": [{ "id": "review", "provider": "openai", "model": "model-a", "fallbacks": [] }]
+            }
+        });
+        let settings: AgentSettings = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(serde_json::to_value(settings).unwrap(), saved);
+        assert!(serde_json::to_value(AgentSettings::default())
+            .unwrap()
+            .get("delegation")
+            .is_none());
     }
 }
 

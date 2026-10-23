@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use anima_core::{
     AgentConfig, AgentConfigUpdate, AgentRuntimeSnapshot, AgentSettings, AgentState, DataValue,
-    Message, MessageRole, ModelChoice, PluginDescriptor, ToolDescriptor, ToolExample,
+    DelegationPolicy, DelegationRoute, Message, MessageRole, ModelChoice, PluginDescriptor,
+    ToolDescriptor, ToolExample,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,6 +50,8 @@ pub(crate) struct AgentSettingsResponse {
     #[serde(rename = "maxToolIterations")]
     pub(crate) max_tool_iterations: Option<usize>,
     pub(crate) execution_limits: Option<ExecutionLimitsSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) delegation: Option<DelegationPolicySettings>,
     pub(crate) additional: BTreeMap<String, Value>,
 }
 
@@ -218,8 +221,134 @@ pub(crate) struct AgentSettingsRequest {
     #[serde(rename = "maxToolIterations")]
     pub(crate) max_tool_iterations: Option<Value>,
     pub(crate) execution_limits: Option<ExecutionLimitsSettings>,
+    pub(crate) delegation: Option<DelegationPolicySettings>,
     #[serde(flatten)]
     pub(crate) additional: HashMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DelegationPolicySettings {
+    pub(crate) max_concurrent: usize,
+    pub(crate) max_starts_per_run: usize,
+    pub(crate) max_depth: usize,
+    pub(crate) routes: Vec<DelegationRouteSettings>,
+    pub(crate) allow_context_fork: bool,
+    pub(crate) max_tool_iterations: usize,
+    pub(crate) timeout_ms: u64,
+    pub(crate) max_output_tokens: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DelegationRouteSettings {
+    pub(crate) id: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) fallbacks: Vec<DelegationModelChoiceSettings>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DelegationModelChoiceSettings {
+    pub(crate) provider: String,
+    pub(crate) model: String,
+}
+
+impl Default for DelegationPolicySettings {
+    fn default() -> Self {
+        Self::from(&DelegationPolicy::default())
+    }
+}
+
+impl From<&DelegationPolicy> for DelegationPolicySettings {
+    fn from(value: &DelegationPolicy) -> Self {
+        Self {
+            max_concurrent: value.max_concurrent,
+            max_starts_per_run: value.max_starts_per_run,
+            max_depth: value.max_depth,
+            routes: value
+                .routes
+                .iter()
+                .map(|route| DelegationRouteSettings {
+                    id: route.id.clone(),
+                    provider: route.provider.clone(),
+                    model: route.model.clone(),
+                    fallbacks: route
+                        .fallbacks
+                        .iter()
+                        .map(|choice| DelegationModelChoiceSettings {
+                            provider: choice.provider.clone(),
+                            model: choice.model.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            allow_context_fork: value.allow_context_fork,
+            max_tool_iterations: value.max_tool_iterations,
+            timeout_ms: value.timeout_ms,
+            max_output_tokens: value.max_output_tokens,
+        }
+    }
+}
+
+impl DelegationModelChoiceSettings {
+    fn into_domain(self) -> Result<ModelChoice, &'static str> {
+        let provider = crate::runtime_model::canonical_provider(self.provider.trim());
+        if crate::runtime_model::is_mock_provider(&provider)
+            || !crate::runtime_model::is_routable_provider(&provider)
+        {
+            return Err("delegation routes require a known model provider");
+        }
+        Ok(ModelChoice {
+            provider,
+            model: self.model.trim().to_string(),
+        })
+    }
+}
+
+impl DelegationPolicySettings {
+    fn into_domain(self) -> Result<DelegationPolicy, &'static str> {
+        let policy = DelegationPolicy {
+            max_concurrent: self.max_concurrent,
+            max_starts_per_run: self.max_starts_per_run,
+            max_depth: self.max_depth,
+            routes: self
+                .routes
+                .into_iter()
+                .map(|route| {
+                    let primary = DelegationModelChoiceSettings {
+                        provider: route.provider,
+                        model: route.model,
+                    }
+                    .into_domain()?;
+                    Ok(DelegationRoute {
+                        id: route.id,
+                        provider: primary.provider,
+                        model: primary.model,
+                        fallbacks: route
+                            .fallbacks
+                            .into_iter()
+                            .map(DelegationModelChoiceSettings::into_domain)
+                            .collect::<Result<_, _>>()?,
+                    })
+                })
+                .collect::<Result<_, &'static str>>()?,
+            allow_context_fork: self.allow_context_fork,
+            max_tool_iterations: self.max_tool_iterations,
+            timeout_ms: self.timeout_ms,
+            max_output_tokens: self.max_output_tokens,
+        };
+        policy.validate()?;
+        if policy.max_depth != 1 {
+            return Err("delegation maxDepth above 1 is not supported yet");
+        }
+        if policy.allow_context_fork {
+            return Err("delegation allowContextFork is not supported yet");
+        }
+        Ok(policy)
+    }
 }
 
 /// Owner limits only tighten the finite runtime ceiling. Omitted fields use
@@ -340,7 +469,7 @@ pub(crate) struct AgentUpdateRequest {
     pub(crate) provider: Option<String>,
     pub(crate) system: Option<String>,
     pub(crate) tools: Option<Vec<ToolDescriptorRequest>>,
-    /// Only execution limits are supported as an in-place settings update.
+    /// Owner execution limits and delegation policy support in-place updates.
     pub(crate) settings: Option<AgentSettingsRequest>,
     /// Replaces the fallback chain; `[]` clears it.
     pub(crate) fallbacks: Option<Vec<ModelChoiceRequest>>,
@@ -361,7 +490,7 @@ impl AgentUpdateRequest {
         let system = self.system.map(|value| value.trim().to_string());
         let tools = parse_tool_requests(self.tools)?;
         let fallbacks = parse_fallbacks(self.fallbacks);
-        let execution_limits = self
+        let (execution_limits, delegation) = self
             .settings
             .map(|settings| {
                 if settings.temperature.is_some()
@@ -371,15 +500,20 @@ impl AgentUpdateRequest {
                     || settings.max_tool_iterations.is_some()
                     || !settings.additional.is_empty()
                 {
-                    return Err("PATCH settings supports executionLimits only");
+                    return Err("PATCH settings supports executionLimits and delegation only");
                 }
-                settings
+                let execution_limits = settings
                     .execution_limits
                     .map(ExecutionLimitsSettings::into_domain)
-                    .transpose()
+                    .transpose()?;
+                let delegation = settings
+                    .delegation
+                    .map(DelegationPolicySettings::into_domain)
+                    .transpose()?;
+                Ok((execution_limits, delegation))
             })
             .transpose()?
-            .flatten();
+            .unwrap_or_default();
         if name.is_none()
             && model.is_none()
             && provider.is_none()
@@ -387,6 +521,7 @@ impl AgentUpdateRequest {
             && tools.is_none()
             && fallbacks.is_none()
             && execution_limits.is_none()
+            && delegation.is_none()
         {
             return Err("at least one field must be provided");
         }
@@ -398,6 +533,7 @@ impl AgentUpdateRequest {
             tools,
             fallbacks,
             execution_limits,
+            delegation,
         })
     }
 }
@@ -528,6 +664,11 @@ impl AgentSettingsRequest {
             .take()
             .map(ExecutionLimitsSettings::into_domain)
             .transpose()?;
+        settings.delegation = self
+            .delegation
+            .take()
+            .map(DelegationPolicySettings::into_domain)
+            .transpose()?;
         if self
             .additional
             .get("toolDiscovery")
@@ -646,6 +787,10 @@ impl From<&AgentSettings> for AgentSettingsResponse {
                 .execution_limits
                 .as_ref()
                 .map(ExecutionLimitsSettings::from),
+            delegation: value
+                .delegation
+                .as_ref()
+                .map(DelegationPolicySettings::from),
             additional: value
                 .additional
                 .iter()
@@ -790,5 +935,72 @@ mod execution_limit_tests {
         );
         let update = serde_json::to_value(update.unwrap()).unwrap();
         assert_eq!(update["execution_limits"]["maxModelAttempts"], 1);
+    }
+
+    #[test]
+    fn owner_delegation_is_typed_and_can_be_patched_without_other_settings() {
+        let request: AgentSettingsRequest = serde_json::from_value(serde_json::json!({
+            "temperature": 0.2, "customFlag": true,
+            "delegation": { "maxConcurrent": 2, "routes": [{ "id": "review", "provider": "openai", "model": "model-a" }] }
+        })).unwrap();
+        let settings = request.into_domain().unwrap();
+        let response = serde_json::to_value(AgentSettingsResponse::from(&settings)).unwrap();
+        assert_eq!(response["delegation"]["maxConcurrent"], 2);
+        assert!(response["additional"].get("delegation").is_none());
+        assert_eq!(response["additional"]["customFlag"], true);
+        let request: AgentUpdateRequest = serde_json::from_value(serde_json::json!({
+            "settings": { "delegation": { "maxConcurrent": 1 } }
+        }))
+        .unwrap();
+        let update = serde_json::to_value(request.into_domain().unwrap()).unwrap();
+        assert_eq!(update["delegation"]["maxConcurrent"], 1);
+    }
+
+    #[test]
+    fn owner_delegation_rejects_invalid_routes_limits_and_unsupported_authority() {
+        for delegation in [
+            serde_json::json!({"maxConcurrent": 0}),
+            serde_json::json!({"timeoutMs": 600001}),
+            serde_json::json!({"maxDepth": 2}),
+            serde_json::json!({"allowContextFork": true}),
+            serde_json::json!({"routes":[{"id":"Review", "provider":"openai", "model":"a"}]}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"unknown", "model":"a"}]}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"deterministic", "model":"a"}]}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"openai", "model":" "}]}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"openai", "model":"a", "fallbacks":[{"provider":"OPENAI", "model":"a"}]}]}),
+        ] {
+            let request: AgentSettingsRequest =
+                serde_json::from_value(serde_json::json!({ "delegation": delegation })).unwrap();
+            assert!(request.into_domain().is_err());
+        }
+        for delegation in [
+            serde_json::json!({"apiKey":"secret"}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"openai", "model":"a", "baseUrl":"x"}]}),
+            serde_json::json!({"routes":[{"id":"review", "provider":"openai", "model":"a", "fallbacks":[{"provider":"openai", "model":"b", "apiKey":"secret"}]}]}),
+        ] {
+            assert!(serde_json::from_value::<AgentSettingsRequest>(
+                serde_json::json!({"delegation": delegation})
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn owner_patch_accepts_both_typed_policies_and_rejects_additional_settings() {
+        let request: AgentUpdateRequest = serde_json::from_value(serde_json::json!({
+            "settings": { "delegation": {}, "executionLimits": { "maxModelAttempts": 1, "maxRetries": 0 } }
+        })).unwrap();
+        let update = request.into_domain().unwrap();
+        assert!(update.delegation.is_some());
+        assert!(update.execution_limits.is_some());
+        for settings in [
+            serde_json::json!({ "delegation": {}, "customFlag": true }),
+            serde_json::json!({ "delegation": {}, "temperature": 0.2 }),
+            serde_json::json!({}),
+        ] {
+            let request: AgentUpdateRequest =
+                serde_json::from_value(serde_json::json!({"settings":settings})).unwrap();
+            assert!(request.into_domain().is_err());
+        }
     }
 }

@@ -12,6 +12,8 @@ pub mod components;
 pub use completion::{CompletionObservation, CompletionReview};
 pub mod context_window;
 pub mod definition;
+pub mod delegation;
+pub use delegation::{DelegationPolicy, DelegationRoute};
 pub mod engine;
 pub mod events;
 pub mod evidence;

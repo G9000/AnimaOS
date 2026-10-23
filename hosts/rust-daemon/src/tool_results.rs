@@ -463,13 +463,15 @@ impl ToolResultStore {
     }
 }
 
-/// The helper-list collector already budgets its serialized JSON to 32 KiB,
+/// Native helper management already budgets its serialized JSON to 32 KiB,
 /// bounding each result and retaining immutable handles and provenance. A
 /// generic text wrapper would destroy that structured management contract.
 /// Accept only that bounded native envelope, never arbitrary named output.
 fn bounded_helper_management(call: &anima_core::ToolCall, result: &TaskResult<Content>) -> bool {
-    if call.name != "list_helper_runs"
-        || result.status != anima_core::TaskStatus::Success
+    if !matches!(
+        call.name.as_str(),
+        "list_helper_runs" | "wait_helper_runs" | "spawn_helpers"
+    ) || result.status != anima_core::TaskStatus::Success
         || result.error.is_some()
     {
         return false;
@@ -491,13 +493,80 @@ fn bounded_helper_management(call: &anima_core::ToolCall, result: &TaskResult<Co
     else {
         return false;
     };
-    envelope.len() == 2
-        && envelope
-            .get("runs")
-            .is_some_and(serde_json::Value::is_array)
-        && envelope
-            .get("truncated")
-            .is_some_and(serde_json::Value::is_boolean)
+    let array = |key: &str| envelope.get(key).and_then(serde_json::Value::as_array);
+    let boolean = |key: &str| envelope.get(key).is_some_and(serde_json::Value::is_boolean);
+    if !boolean("truncated") {
+        return false;
+    }
+    match call.name.as_str() {
+        "list_helper_runs" => envelope.len() == 2 && array("runs").is_some(),
+        "wait_helper_runs" => {
+            envelope.len() == 7
+                && matches!(
+                    envelope.get("mode").and_then(serde_json::Value::as_str),
+                    Some("any" | "all")
+                )
+                && boolean("conditionMet")
+                && boolean("timedOut")
+                && ["readyRunIds", "pendingRunIds"].iter().all(|key| {
+                    array(key).is_some_and(|ids| {
+                        ids.len() <= 8
+                            && ids.iter().all(|id| {
+                                id.as_str()
+                                    .is_some_and(|id| !id.is_empty() && id.len() <= 200)
+                            })
+                    })
+                })
+                && array("runs").is_some_and(|runs| {
+                    (1..=8).contains(&runs.len())
+                        && runs.iter().all(|run| {
+                            run["ready"].is_boolean()
+                                && ["runId", "agentId", "sessionId"].iter().all(|key| {
+                                    run[*key]
+                                        .as_str()
+                                        .is_some_and(|id| !id.is_empty() && id.len() <= 200)
+                                })
+                        })
+                })
+        }
+        "spawn_helpers" => {
+            envelope.len() == 7
+                && envelope.get("atomic") == Some(&serde_json::Value::Bool(false))
+                && [
+                    "acceptedCount",
+                    "refusedCount",
+                    "receiptUnavailableCount",
+                    "notAttemptedCount",
+                ]
+                .iter()
+                .all(|key| {
+                    envelope
+                        .get(*key)
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|n| n <= 8)
+                })
+                && array("entries").is_some_and(|entries| {
+                    (1..=8).contains(&entries.len())
+                        && entries.iter().enumerate().all(|(i, entry)| {
+                            entry["index"].as_u64() == Some(i as u64)
+                                && match entry["outcome"].as_str() {
+                                    Some("accepted") => {
+                                        ["runId", "agentId", "sessionId"].iter().all(|key| {
+                                            entry["handle"][*key]
+                                                .as_str()
+                                                .is_some_and(|id| !id.is_empty() && id.len() <= 200)
+                                        })
+                                    }
+                                    Some("refused" | "not_attempted" | "receipt_unavailable") => {
+                                        entry["error"].is_string()
+                                    }
+                                    _ => false,
+                                }
+                        })
+                })
+        }
+        _ => false,
+    }
 }
 
 /// The validated 16 KiB search envelope is also the durable citation format.

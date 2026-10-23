@@ -1,4 +1,10 @@
-import type { AgentStatus, Attachment, ExecutionLimits, TokenUsage } from './types.js';
+import type {
+  AgentStatus,
+  Attachment,
+  DelegationPolicy,
+  ExecutionLimits,
+  TokenUsage,
+} from './types.js';
 
 import type { ModelChoice } from './provider-keys.js';
 
@@ -91,6 +97,7 @@ export interface DaemonAgentSettings {
   maxRetries: number | null;
   maxToolIterations: number | null;
   executionLimits?: ExecutionLimits | null;
+  delegation?: DelegationPolicy | null;
   additional: Record<string, unknown>;
 }
 

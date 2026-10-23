@@ -154,6 +154,43 @@ pub(super) fn delegate_to_agent(
     })
 }
 
+/// One assignment input feeds both native launch paths and the existing async
+/// replay fingerprint. Validate before reserving starts or saving a child.
+pub(super) fn helper_assignment(call: &ToolCall) -> Result<String, String> {
+    let task = match call.args.get("task") {
+        Some(DataValue::String(task)) if !task.trim().is_empty() && task.len() <= 32_768 => task,
+        _ => return Err("task must be nonblank and at most 32768 bytes".into()),
+    };
+    let playbook = match call.args.get("playbook") {
+        None => return Ok(task.clone()),
+        Some(DataValue::String(playbook)) if !playbook.trim().is_empty() => playbook,
+        _ => return Err("playbook must be a nonblank string".into()),
+    };
+    let assignment = format!("## Assigned task\n{task}\n\n## Assignment playbook\n{playbook}");
+    if assignment.len() > 32_768 {
+        return Err("task and playbook together must fit within 32768 bytes".into());
+    }
+    Ok(assignment)
+}
+
+/// Pure launch validation used to preflight every item before a batch mutates state.
+pub(super) fn validate_async_helper_launch(call: &ToolCall) -> Result<(), String> {
+    match call.args.get("name") {
+        Some(DataValue::String(v)) if !v.trim().is_empty() && v.len() <= 80 => (),
+        _ => return Err("name must be nonblank and at most 80 bytes".into()),
+    }
+    let task = helper_assignment(call)?;
+    let options = crate::agent_runs::helper_options::HelperOptions::from_call(call)?;
+    options.task(&task)?;
+    worktree_request(call)?;
+    match call.args.get("completion") {
+        None => (),
+        Some(DataValue::String(v)) if matches!(v.as_str(), "chat" | "manual" | "origin") => (),
+        _ => return Err("completion must be chat, manual or origin".into()),
+    }
+    Ok(())
+}
+
 pub(super) fn spawn_helper(
     context: ToolExecutionContext,
     agent: AgentState,
@@ -177,29 +214,54 @@ pub(super) fn spawn_helper(
             Some(DataValue::String(value)) => Some(value.trim().to_owned()),
             _ => None,
         };
-        let (Some(name), Some(task)) = (arg("name"), arg("task")) else {
-            return TaskResult::error("name and task are required", 0);
+        let Some(name) = arg("name").filter(|name| !name.is_empty() && name.len() <= 80) else {
+            return TaskResult::error("name is required", 0);
+        };
+        let task = match helper_assignment(&call) {
+            Ok(task) => task,
+            Err(error) => return TaskResult::error(error, 0),
         };
         let worktree = match worktree_request(&call) {
             Ok(worktree) => worktree,
             Err(error) => return TaskResult::error(error, 0),
+        };
+        let options = match crate::agent_runs::helper_options::HelperOptions::from_call(&call) {
+            Ok(v) => v,
+            Err(e) => return TaskResult::error(e, 0),
+        };
+        if let Err(e) = options.task(&task) {
+            return TaskResult::error(e, 0);
+        }
+        let max_starts = match coordinator
+            .validate_helper_options(&agent.id, &options)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => return TaskResult::error(e, 0),
         };
         if context
             .helper_starts
             .fetch_update(
                 std::sync::atomic::Ordering::AcqRel,
                 std::sync::atomic::Ordering::Acquire,
-                |count| (count < 4).then_some(count + 1),
+                |count| (count < max_starts).then_some(count + 1),
             )
             .is_err()
         {
             return TaskResult::error(
-                "The four-helper start limit for this companion run has been reached",
+                "The configured helper start limit for this companion run has been reached",
                 0,
             );
         }
         match coordinator
-            .spawn_helper_in(agent.id, name, task, context.run_link.clone(), worktree)
+            .spawn_helper_with_options(
+                agent.id,
+                name,
+                task,
+                context.run_link.clone(),
+                worktree,
+                options,
+            )
             .await
         {
             Ok(text) => TaskResult::success(
@@ -217,8 +279,36 @@ pub(super) fn spawn_helper(
 pub(super) fn async_helper_operation(
     context: ToolExecutionContext,
     agent: AgentState,
+    message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    async_helper_operation_for(context, agent, message, call, false)
+}
+
+pub(super) fn async_helper_batch_item(
+    context: ToolExecutionContext,
+    agent: AgentState,
+    message: Message,
+    call: ToolCall,
+) -> BoxFuture<'static, TaskResult<Content>> {
+    if !agent.config.allows_tool("spawn_helper_async") || !agent.config.allows_tool("spawn_helpers")
+    {
+        return Box::pin(async {
+            TaskResult::error(
+                "Batch launch requires both captured background helper grants",
+                0,
+            )
+        });
+    }
+    async_helper_operation_for(context, agent, message, call, true)
+}
+
+fn async_helper_operation_for(
+    context: ToolExecutionContext,
+    agent: AgentState,
     _message: Message,
     call: ToolCall,
+    batch: bool,
 ) -> BoxFuture<'static, TaskResult<Content>> {
     Box::pin(async move {
         if !context.can_delegate {
@@ -231,12 +321,23 @@ pub(super) fn async_helper_operation(
             );
         };
         let result = if call.name == "spawn_helper_async" {
+            if let Err(e) = validate_async_helper_launch(&call) {
+                return TaskResult::error(e, 0);
+            }
+            let options = match crate::agent_runs::helper_options::HelperOptions::from_call(&call) {
+                Ok(v) => v,
+                Err(e) => return TaskResult::error(e, 0),
+            };
             let arg = |key: &str| match call.args.get(key) {
                 Some(DataValue::String(value)) => Some(value.clone()),
                 _ => None,
             };
-            let (Some(name), Some(task)) = (arg("name"), arg("task")) else {
-                return TaskResult::error("name and task are required", 0);
+            let Some(name) = arg("name") else {
+                return TaskResult::error("name is required", 0);
+            };
+            let task = match helper_assignment(&call) {
+                Ok(task) => task,
+                Err(error) => return TaskResult::error(error, 0),
             };
             let completion = match call.args.get("completion") {
                 None => "chat".to_string(),
@@ -257,7 +358,7 @@ pub(super) fn async_helper_operation(
                 Err(error) => return TaskResult::error(error, 0),
             };
             coordinator
-                .accept_async_helper(
+                .accept_async_helper_with_options(
                     agent.id,
                     parent,
                     call.id,
@@ -266,6 +367,8 @@ pub(super) fn async_helper_operation(
                     completion,
                     context.helper_starts,
                     worktree,
+                    options,
+                    batch,
                 )
                 .await
         } else {

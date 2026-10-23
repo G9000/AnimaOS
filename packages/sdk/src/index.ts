@@ -507,6 +507,8 @@ export type {
 export type {
   AgentConfig,
   AgentSettings,
+  DelegationPolicy,
+  DelegationRoute,
   AgentState,
   AgentStatus,
   Attachment,

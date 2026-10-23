@@ -337,6 +337,7 @@ mod tests {
             parent_run_id: parent.id.clone(),
             launch_key: "launch-first".into(),
             launch_fingerprint: "a".repeat(64),
+            options: None,
             effective_bounds: Some(AsyncHelperBounds::for_config(&config)),
             origin: Some(DelegationOrigin::JobAttempt {
                 job_id: "ordered-origin".into(),

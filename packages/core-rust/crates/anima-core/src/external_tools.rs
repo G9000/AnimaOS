@@ -211,6 +211,16 @@ fn compile(schema: &Value) -> Result<Validator, ExternalToolError> {
         .build(schema)
         .map_err(|_| ExternalToolError::SchemaRejected)
 }
+/// Compile a bounded JSON output contract without remote references or retrieval.
+pub fn validate_output_contract(schema: &Value) -> Result<(), ExternalToolError> {
+    compile(schema).map(|_| ())
+}
+
+/// Validate one result against the same safe contract used for external tools.
+pub fn matches_output_contract(schema: &Value, value: &Value) -> Result<bool, ExternalToolError> {
+    Ok(compile(schema)?.is_valid(value))
+}
+
 fn normalize_schema(mut schema: Value) -> Result<Value, ExternalToolError> {
     let object = schema
         .as_object_mut()

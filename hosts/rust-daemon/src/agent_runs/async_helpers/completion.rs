@@ -235,6 +235,11 @@ impl AgentRunCoordinator {
             "replyMessageId": child.reply_message_id, "launchParentRunId": helper.parent_run_id,
             "resultText": preview, "resultTruncated": result.len() > preview.len()
         });
+        if let Some(validation) =
+            super::super::helper_options::result_validation(helper.options.as_ref(), &result)
+        {
+            envelope["outputValidation"] = validation;
+        }
         if let Some(worktree) = &helper.worktree {
             envelope["worktree"] = worktree.public_json(false);
         }

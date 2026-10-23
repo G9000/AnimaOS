@@ -46,6 +46,7 @@ import {
   type AddProviderKeyInput,
   type KeyStrategy,
   type ModelChoice,
+  type DelegationPolicy,
   type ProviderKey,
   type ProviderKeys,
   type CreateMemoryInput,
@@ -251,7 +252,10 @@ export interface DaemonSnapshot {
       tools?: DaemonToolDescriptor[] | null;
       /** Omitted by the daemon when there are none. */
       fallbacks?: ModelChoice[] | null;
-      settings?: { additional?: Record<string, unknown> } | null;
+      settings?: {
+        additional?: Record<string, unknown>;
+        delegation?: DelegationPolicy | null;
+      } | null;
     };
     createdAtMs: number;
     tokenUsage: DaemonTokenUsage;
@@ -269,6 +273,7 @@ export interface AgentUpdateInput {
   tools?: string[];
   /** At most three, none equal to the primary; `[]` clears them. */
   fallbacks?: ModelChoice[];
+  settings?: { delegation?: DelegationPolicy };
 }
 
 export type TelegramConnectorStatus =
@@ -1275,6 +1280,9 @@ export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
     system: state.config.system,
     ...(state.config.fallbacks?.length
       ? { fallbacks: state.config.fallbacks }
+      : {}),
+    ...(state.config.settings?.delegation
+      ? { delegation: state.config.settings.delegation }
       : {}),
     messages: snapshot.messages
       .filter((m) => {

@@ -483,6 +483,12 @@ impl AgentRuntime {
                 .get_or_insert_with(Default::default)
                 .execution_limits = Some(limits);
         }
+        if let Some(delegation) = patch.delegation {
+            config
+                .settings
+                .get_or_insert_with(Default::default)
+                .delegation = Some(delegation);
+        }
     }
 
     /// Replace the complete configuration, preserving optional field shapes.

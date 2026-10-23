@@ -17,6 +17,8 @@ pub(crate) struct AsyncHelper {
     /// A reused helper's current configuration cannot establish replay equality.
     pub(crate) launch_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) options: Option<crate::agent_runs::helper_options::HelperOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) effective_bounds: Option<AsyncHelperBounds>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) origin: Option<super::DelegationOrigin>,
@@ -41,19 +43,27 @@ pub(crate) struct AsyncHelperBounds {
 impl AsyncHelperBounds {
     pub(crate) fn for_config(config: &anima_core::AgentConfig) -> Self {
         let settings = config.settings.as_ref();
+        let mut policy = settings
+            .and_then(|s| s.delegation.clone())
+            .unwrap_or_default();
+        if crate::agent_runs::is_helper_config(config) {
+            policy.max_tool_iterations = 32;
+            policy.timeout_ms = 600_000;
+            policy.max_output_tokens = 16384;
+        }
         Self {
             max_tool_turns: settings
                 .and_then(|settings| settings.max_tool_iterations)
-                .unwrap_or(8)
-                .min(8),
+                .unwrap_or(policy.max_tool_iterations)
+                .min(policy.max_tool_iterations),
             max_duration_ms: settings
                 .and_then(|settings| settings.timeout_ms)
-                .unwrap_or(120_000)
-                .min(120_000),
+                .unwrap_or(policy.timeout_ms)
+                .min(policy.timeout_ms),
             max_output_tokens_per_response: settings
                 .and_then(|settings| settings.max_tokens)
-                .unwrap_or(4096)
-                .min(4096),
+                .unwrap_or(policy.max_output_tokens)
+                .min(policy.max_output_tokens),
             max_accepted_steers: 8,
         }
     }
@@ -77,9 +87,9 @@ impl AsyncHelperBounds {
     }
 
     fn valid(&self) -> bool {
-        self.max_tool_turns <= 8
-            && self.max_duration_ms <= 120_000
-            && self.max_output_tokens_per_response <= 4096
+        self.max_tool_turns <= 32
+            && self.max_duration_ms <= 600_000
+            && self.max_output_tokens_per_response <= 16384
             && self.max_accepted_steers == 8
     }
 }
@@ -295,6 +305,10 @@ pub(crate) fn validate(records: &[RunRecord]) -> Result<(), String> {
                 || helper.parent_run_id == record.id
                 || helper.launch_key.trim().is_empty()
                 || helper.launch_key.len() > 4096
+                || helper
+                    .options
+                    .as_ref()
+                    .is_some_and(|o| o.validate().is_err())
                 || helper.launch_fingerprint.len() != 64
                 || !helper
                     .launch_fingerprint

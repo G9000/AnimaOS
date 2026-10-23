@@ -1,4 +1,5 @@
 //! Durable async assignments through the existing ledger and accepted-run queue.
+mod collection;
 mod completion;
 mod job_origin;
 pub(super) use completion::validate_accepted_completion;
@@ -13,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     helper_parent, is_workspace_manager, AgentRunCoordinator, AgentRunRequest, RunRoom,
-    HELPER_MAX_RUNS, MAX_HELPERS_PER_COMPANION,
+    HELPER_MAX_RUNS,
 };
 use crate::live::{run_status_event, LiveEventBody};
 use crate::runs::{
@@ -113,7 +114,8 @@ pub(super) fn handle(record: &RunRecord) -> Value {
         "sessionId": record.session_id,
         "status": record.status.as_str(),
         "completion": record.async_helper.as_ref().map(|helper| &helper.completion),
-        "bounds": record.async_helper.as_ref().and_then(|helper| helper.effective_bounds.as_ref())
+        "bounds": record.async_helper.as_ref().and_then(|helper| helper.effective_bounds.as_ref()),
+        "route": record.async_helper.as_ref().and_then(|helper| helper.options.as_ref()).and_then(|o|o.route.as_ref())
     })
 }
 
@@ -215,6 +217,11 @@ impl AgentRunCoordinator {
                     .as_ref()
                     .map(|text| json!(bounded_text(text, 8192)))
                     .unwrap_or(Value::Null);
+                if let Some(validation) = result.as_deref().and_then(|text| {
+                    super::helper_options::result_validation(helper.options.as_ref(), text)
+                }) {
+                    entry["outputValidation"] = validation;
+                }
                 entry["resultTruncated"] =
                     json!(result.as_ref().is_some_and(|text| text.len() > 8192));
                 entry["resultUnavailable"] =
@@ -406,6 +413,35 @@ impl AgentRunCoordinator {
         starts: Arc<AtomicUsize>,
         worktree_repo: Option<String>,
     ) -> Result<String, String> {
+        self.accept_async_helper_with_options(
+            owner,
+            parent,
+            tool_call_id,
+            name,
+            task,
+            completion,
+            starts,
+            worktree_repo,
+            super::helper_options::HelperOptions::default(),
+            false,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn accept_async_helper_with_options(
+        &self,
+        owner: String,
+        parent: RunLink,
+        tool_call_id: String,
+        name: String,
+        task: String,
+        completion: String,
+        starts: Arc<AtomicUsize>,
+        worktree_repo: Option<String>,
+        options: super::helper_options::HelperOptions,
+        batch: bool,
+    ) -> Result<String, String> {
         let coordinator = self.clone();
         // The mutation finishes even if its tool caller disconnects during save.
         tokio::spawn(async move {
@@ -437,6 +473,8 @@ impl AgentRunCoordinator {
                     completion,
                     starts,
                     worktree_repo.zip(worktree.clone()),
+                    options,
+                    batch,
                 )
                 .await;
             if let Some(worktree) = &worktree {
@@ -462,6 +500,8 @@ impl AgentRunCoordinator {
         completion: String,
         starts: Arc<AtomicUsize>,
         worktree: Option<(String, super::worktrees::HelperWorktree)>,
+        options: super::helper_options::HelperOptions,
+        batch: bool,
     ) -> Result<(String, bool), String> {
         if name.trim().is_empty()
             || name.len() > 80
@@ -476,21 +516,37 @@ impl AgentRunCoordinator {
             None => fingerprint(&name, &task, &completion),
             Some((repo, _)) => worktree_fingerprint(&name, &task, &completion, repo),
         };
+        options.validate()?;
+        let digest = if options.is_default() {
+            digest
+        } else {
+            hex::encode(Sha256::digest(
+                serde_json::to_vec(&json!(["anima.helper.options.v1", digest, &options]))
+                    .expect("options serialize"),
+            ))
+        };
+        let task_with_contract = options.task(&task)?;
         let worktree = worktree.map(|(_, worktree)| worktree);
         let run_text = match &worktree {
             Some(worktree) => {
-                let text = format!("{task}{}", super::worktrees::task_note(worktree));
+                let text = format!(
+                    "{task_with_contract}{}",
+                    super::worktrees::task_note(worktree)
+                );
                 if text.len() > 32_768 {
                     return Err("The task is too long to add the worktree instructions".into());
                 }
                 text
             }
-            None => task.clone(),
+            None => task_with_contract,
         };
         let transaction = self.control_plane_transaction().await;
         let (record, helper_id, baseline, slot, execution_candidate, persist) = {
             let mut guard = self.state.write().await;
             let parent_agent = active_caller(&guard, &owner, &parent, "spawn_helper_async")?;
+            if batch {
+                active_caller(&guard, &owner, &parent, "spawn_helpers")?;
+            }
             if super::main_chat_clear::clear_pending(&guard, &owner, &parent.session_id) {
                 return Err(super::main_chat_clear::CLEAR_PENDING.into());
             }
@@ -534,14 +590,27 @@ impl AgentRunCoordinator {
             } else {
                 None
             };
+            let policy = parent_agent
+                .config
+                .settings
+                .as_ref()
+                .and_then(|s| s.delegation.clone())
+                .unwrap_or_default();
+            policy.validate().map_err(str::to_owned)?;
+            let mut config = super::helper_config_in(&parent_agent, name, worktree.as_ref());
+            options.apply(&parent_agent.config, &mut config)?;
+            if options.route.is_none() {
+                super::inherit_launch_model(&guard, Some(&parent), &mut config);
+            }
             if starts
                 .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                    (count < 4).then_some(count + 1)
+                    (count < policy.max_starts_per_run).then_some(count + 1)
                 })
                 .is_err()
             {
                 return Err(
-                    "The four-helper start limit for this companion run has been reached".into(),
+                    "The configured helper start limit for this companion run has been reached"
+                        .into(),
                 );
             }
             if self.accepted_runs.is_closing() || self.is_being_deleted(&owner) {
@@ -559,6 +628,15 @@ impl AgentRunCoordinator {
                 .into_iter()
                 .filter(|agent| helper_parent(&agent.state) == Some(owner.as_str()))
                 .collect();
+            let active = helpers
+                .iter()
+                .filter(|h| {
+                    guard.runs.has_active_assignment(&h.state.id) || self.is_agent_busy(&h.state.id)
+                })
+                .count();
+            if active >= policy.max_concurrent {
+                return Err("The configured helper concurrency limit has been reached".into());
+            }
             let available = helpers.iter().find_map(|helper| {
                 if guard.runs.has_active_assignment(&helper.state.id) {
                     return None;
@@ -566,8 +644,6 @@ impl AgentRunCoordinator {
                 self.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
                     .map(|slot| (helper.clone(), slot))
             });
-            let mut config = super::helper_config_in(&parent_agent, name, worktree.as_ref());
-            crate::chat_models::inherit_helper_model(&guard, Some(&parent), &mut config);
             let (helper, baseline, slot) = if let Some((helper, slot)) = available {
                 let previous = helper.state.config;
                 guard.restore_agent_config(&helper.state.id, config);
@@ -579,9 +655,9 @@ impl AgentRunCoordinator {
                     slot,
                 )
             } else {
-                if helpers.len() >= MAX_HELPERS_PER_COMPANION {
+                if helpers.len() >= policy.max_concurrent {
                     return Err(
-                        "All four helpers have accepted assignments; wait for a result".into(),
+                        "The configured helper concurrency limit has been reached; wait for a result".into(),
                     );
                 }
                 let helper = guard.create_agent(config)?;
@@ -624,6 +700,7 @@ impl AgentRunCoordinator {
                 parent_run_id: parent.run_id.clone(),
                 launch_key: key,
                 launch_fingerprint: digest,
+                options: (!options.is_default()).then_some(options),
                 origin,
                 effective_bounds: Some(crate::runs::AsyncHelperBounds::for_config(
                     &helper.state.config,

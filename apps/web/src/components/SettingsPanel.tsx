@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ACCESS_PROFILES,
   BROWSER_TOOL_ACCESS,
+  BACKGROUND_HELPER_TOOL_ACCESS,
   isBrowserTool,
   PROGRAMMATIC_TOOL_ACCESS,
   WORKFLOW_TOOL_ACCESS,
@@ -26,6 +27,7 @@ import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
+import { DelegationSettings } from './models/DelegationSettings';
 import { ProviderKeys } from './models/ProviderKeys';
 import { SideModel } from './models/SideModel';
 import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
@@ -120,6 +122,9 @@ export function SettingsPanel({
   const hasWorkflows = WORKFLOW_TOOL_ACCESS.tools.every((tool) =>
     agent.toolNames.includes(tool),
   );
+  const hasBackgroundHelpers = BACKGROUND_HELPER_TOOL_ACCESS.tools.every(
+    (tool) => agent.toolNames.includes(tool),
+  );
   const hasWorkflowTemplates = WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.every(
     (tool) => agent.toolNames.includes(tool),
   );
@@ -135,6 +140,7 @@ export function SettingsPanel({
         tool !== 'web_search' &&
         tool !== 'web_fetch' &&
         !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool) &&
+        !BACKGROUND_HELPER_TOOL_ACCESS.tools.some((name) => name === tool) &&
         !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some((name) => name === tool) &&
         tool !== TOOL_RESULT_ACCESS.name &&
         tool !== 'execute_code',
@@ -167,6 +173,10 @@ export function SettingsPanel({
   const [allowWorkflows, setAllowWorkflows] = useState(hasWorkflows);
   // A partial legacy grant stays unchanged until the owner uses this toggle.
   const [workflowsChanged, setWorkflowsChanged] = useState(false);
+  const [allowBackgroundHelpers, setAllowBackgroundHelpers] =
+    useState(hasBackgroundHelpers);
+  const [backgroundHelpersChanged, setBackgroundHelpersChanged] =
+    useState(false);
   const [allowWorkflowTemplates, setAllowWorkflowTemplates] =
     useState(hasWorkflowTemplates);
   const [templatesChanged, setTemplatesChanged] = useState(false);
@@ -221,6 +231,8 @@ export function SettingsPanel({
     setAllowToolChains(hasToolChains);
     setAllowWorkflows(hasWorkflows);
     setWorkflowsChanged(false);
+    setAllowBackgroundHelpers(hasBackgroundHelpers);
+    setBackgroundHelpersChanged(false);
     setAllowWorkflowTemplates(hasWorkflowTemplates);
     setTemplatesChanged(false);
     setAllowToolResultRead(hasToolResultRead);
@@ -238,6 +250,7 @@ export function SettingsPanel({
     hasWebFetch,
     hasToolChains,
     hasWorkflows,
+    hasBackgroundHelpers,
     hasWorkflowTemplates,
     hasToolResultRead,
     derivedAccess,
@@ -265,6 +278,10 @@ export function SettingsPanel({
     (workflowsChanged &&
       WORKFLOW_TOOL_ACCESS.tools.some(
         (tool) => agent.toolNames.includes(tool) !== allowWorkflows,
+      )) ||
+    (backgroundHelpersChanged &&
+      BACKGROUND_HELPER_TOOL_ACCESS.tools.some(
+        (tool) => agent.toolNames.includes(tool) !== allowBackgroundHelpers,
       )) ||
     (templatesChanged &&
       WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
@@ -311,6 +328,11 @@ export function SettingsPanel({
           (!workflowsChanged ||
             allowWorkflows ||
             !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool)) &&
+          (!backgroundHelpersChanged ||
+            allowBackgroundHelpers ||
+            !BACKGROUND_HELPER_TOOL_ACCESS.tools.some(
+              (name) => name === tool,
+            )) &&
           (!templatesChanged ||
             allowWorkflowTemplates ||
             !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
@@ -355,6 +377,14 @@ export function SettingsPanel({
           patch.tools.push(tool);
         }
       }
+      for (const tool of BACKGROUND_HELPER_TOOL_ACCESS.tools) {
+        if (
+          (allowBackgroundHelpers ||
+            (!backgroundHelpersChanged && agent.toolNames.includes(tool))) &&
+          !patch.tools.includes(tool)
+        )
+          patch.tools.push(tool);
+      }
       for (const tool of WORKFLOW_TEMPLATE_TOOL_ACCESS.tools) {
         if (
           (allowWorkflowTemplates ||
@@ -380,6 +410,17 @@ export function SettingsPanel({
   };
 
   const abilities = [
+    {
+      id: 'background-helpers',
+      label: BACKGROUND_HELPER_TOOL_ACCESS.label,
+      checked: allowBackgroundHelpers,
+      setChecked: (checked: boolean) => {
+        setAllowBackgroundHelpers(checked);
+        setBackgroundHelpersChanged(true);
+      },
+      disabled: agent.workspaceRole === 'helper',
+      help: 'Allows this agent to launch focused background helpers and collect, steer or stop their work. Helpers stay within existing tool permissions and approval rules.',
+    },
     {
       id: 'workflows',
       label: WORKFLOW_TOOL_ACCESS.label,
@@ -740,12 +781,20 @@ export function SettingsPanel({
             </details>
           </div>
           <FallbackModels
-            key={agent.id}
+            key={'fallbacks:' + agent.id}
             primary={{ provider: agent.provider, model: agent.model }}
             fallbacks={agent.fallbacks ?? []}
             providers={providers}
             disabled={controlsDisabled}
             save={(fallbacks) => saveSettings({ fallbacks })}
+          />
+          <DelegationSettings
+            key={'delegation:' + agent.id}
+            primary={{ provider: agent.provider, model: agent.model }}
+            policy={agent.delegation}
+            providers={providers}
+            disabled={controlsDisabled}
+            save={(delegation) => saveSettings({ settings: { delegation } })}
           />
         </section>
       )}

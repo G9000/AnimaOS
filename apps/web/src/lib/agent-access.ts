@@ -16,6 +16,18 @@ export const WORKFLOW_TOOL_ACCESS = {
   label: 'Allow workflows in chat',
 } as const;
 
+export const BACKGROUND_HELPER_TOOL_ACCESS = {
+  tools: [
+    'spawn_helper_async',
+    'spawn_helpers',
+    'wait_helper_runs',
+    'list_helper_runs',
+    'steer_helper',
+    'stop_helper',
+  ],
+  label: 'Allow background helpers',
+} as const;
+
 export const WORKFLOW_TEMPLATE_TOOL_ACCESS = {
   tools: [
     'save_workflow_template',

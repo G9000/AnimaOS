@@ -26,8 +26,14 @@ const TOOLS: [&str; 4] = [
 
 #[path = "async_helper_coding_tests.rs"]
 mod coding;
+#[path = "helper_collection_tests.rs"]
+mod collection;
 #[path = "async_helper_completion_tests.rs"]
 mod completion;
+#[path = "helper_options_tests.rs"]
+mod options;
+#[path = "self_clone_async_tests.rs"]
+mod self_clone;
 
 struct Harness {
     coordinator: AgentRunCoordinator,
@@ -249,7 +255,10 @@ async fn async_helper_admission_four_queued_assignments_reserve_four_distinct_he
         .clone()
         .execute_tool(caller, input(&harness.parent.id), sync)
         .await;
-    assert!(refused.error.unwrap().contains("four-helper start limit"));
+    assert!(refused
+        .error
+        .unwrap()
+        .contains("configured helper start limit"));
     assert!(harness.model.requests().is_empty());
     harness.coordinator.request_shutdown();
 }

@@ -1,0 +1,9 @@
+# Focused helpers with assignment playbooks
+
+The companion already creates bounded synchronous or asynchronous helpers using its configured model. Give each helper a separate task and optional playbook while retaining a fresh conversation and a focused worker persona. The user explicitly selected a focused worker persona that omits the main personality. Do not inherit legacy personality, workspace/profile SOUL, owner conversation history, or owner knowledge. Existing specialists and peer delegation stay unchanged.
+
+Both helper tools accept an optional nonblank playbook defining the assignment's role, procedure, and output rules. Compose it with the task as bounded assignment input before consuming a start or creating durable state. Preserve that input in existing run/session records and async launch fingerprints. A reused idle helper gets a fresh assignment session; earlier playbooks do not enter the next assignment. Do not introduce a persistent playbook subsystem or change the parent's configuration.
+
+Retain generic helper configuration and normal project instructions. Host guidance clearly identifies workers and their limits, independently of task text. Suppress the companion's persona-bearing biography from helper roster context so it cannot re-enter through metadata. Existing tool filtering, approvals, current-parent checks, cancellation, capacity, and execution limits remain authoritative.
+
+Verify native model-visible workspace/profile/legacy personality omission, the inherited model, distinct playbooks, reuse, asynchronous acceptance and snapshot restore, changed-retry refusal, invalid inputs, unchanged parent configuration, and no copied owner history. Use the existing scripted model and native tool paths; actual provider task quality remains separate acceptance.

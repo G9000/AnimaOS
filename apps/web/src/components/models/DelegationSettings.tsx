@@ -1,0 +1,640 @@
+import { useEffect, useId, useRef, useState } from 'react';
+import type { DelegationPolicy, ModelChoice } from '@animaos/sdk';
+
+import {
+  isMockProvider,
+  MODEL_SUGGESTIONS,
+  type DaemonProvider,
+} from '../../lib/daemon-api';
+import { ghostBtnCls, primaryBtnCls } from '../ui-bits';
+
+type LimitName =
+  | 'maxConcurrent'
+  | 'maxStartsPerRun'
+  | 'maxToolIterations'
+  | 'timeoutMs'
+  | 'maxOutputTokens';
+const LIMITS: {
+  name: LimitName;
+  label: string;
+  initial: number;
+  min: number;
+  max: number;
+  scale: number;
+}[] = [
+  {
+    name: 'maxConcurrent',
+    label: 'Concurrent helpers',
+    initial: 4,
+    min: 1,
+    max: 8,
+    scale: 1,
+  },
+  {
+    name: 'maxStartsPerRun',
+    label: 'Helpers per run',
+    initial: 4,
+    min: 1,
+    max: 16,
+    scale: 1,
+  },
+  {
+    name: 'maxToolIterations',
+    label: 'Tool turns per helper',
+    initial: 8,
+    min: 1,
+    max: 32,
+    scale: 1,
+  },
+  {
+    name: 'timeoutMs',
+    label: 'Time limit (seconds)',
+    initial: 120000,
+    min: 1000,
+    max: 600000,
+    scale: 1000,
+  },
+  {
+    name: 'maxOutputTokens',
+    label: 'Output tokens per reply',
+    initial: 4096,
+    min: 1,
+    max: 16384,
+    scale: 1,
+  },
+];
+
+interface RouteDraft extends ModelChoice {
+  key: string;
+  id: string;
+  fallbacks: (ModelChoice & { key: string })[];
+}
+interface Draft {
+  limits: Record<LimitName, string>;
+  routes: RouteDraft[];
+}
+
+function normalize(policy?: DelegationPolicy): DelegationPolicy {
+  return {
+    ...Object.fromEntries(
+      LIMITS.map((limit) => [
+        limit.name,
+        policy?.[limit.name] ?? limit.initial,
+      ]),
+    ),
+    maxDepth: 1,
+    allowContextFork: false,
+    routes: (policy?.routes ?? []).map((route) => ({
+      id: route.id,
+      provider: route.provider,
+      model: route.model.trim(),
+      fallbacks: (route.fallbacks ?? []).map((choice) => ({
+        provider: choice.provider,
+        model: choice.model.trim(),
+      })),
+    })),
+  };
+}
+
+function draftFrom(policy: DelegationPolicy): Draft {
+  return {
+    limits: Object.fromEntries(
+      LIMITS.map((limit) => [
+        limit.name,
+        String((policy[limit.name] ?? limit.initial) / limit.scale),
+      ]),
+    ) as Record<LimitName, string>,
+    routes: (policy.routes ?? []).map((route, i) => ({
+      ...route,
+      key: 'route-' + i,
+      fallbacks: (route.fallbacks ?? []).map((choice, n) => ({
+        ...choice,
+        key: 'fallback-' + n,
+      })),
+    })),
+  };
+}
+
+function policyFrom(draft: Draft): DelegationPolicy {
+  return {
+    ...Object.fromEntries(
+      LIMITS.map((limit) => [
+        limit.name,
+        limit.scale === 1
+          ? Number(draft.limits[limit.name])
+          : Math.round(Number(draft.limits[limit.name]) * limit.scale),
+      ]),
+    ),
+    maxDepth: 1,
+    allowContextFork: false,
+    routes: draft.routes.map((route) => ({
+      id: route.id,
+      provider: route.provider,
+      model: route.model.trim(),
+      fallbacks: route.fallbacks.map((choice) => ({
+        provider: choice.provider,
+        model: choice.model.trim(),
+      })),
+    })),
+  };
+}
+
+function problemsFor(draft: Draft): string[] {
+  const problems: string[] = [];
+  for (const limit of LIMITS) {
+    const value = Number(draft.limits[limit.name]) * limit.scale;
+    if (
+      !draft.limits[limit.name].trim() ||
+      !Number.isFinite(value) ||
+      Math.abs(value - Math.round(value)) > 0.0000001 ||
+      value < limit.min ||
+      value > limit.max
+    ) {
+      problems.push(
+        limit.label +
+          ' must be ' +
+          (limit.scale === 1 ? 'a whole number ' : '') +
+          'from ' +
+          limit.min / limit.scale +
+          ' to ' +
+          limit.max / limit.scale +
+          '.',
+      );
+    }
+  }
+  if (draft.routes.length > 8) problems.push('Keep at most eight routes.');
+  const ids = new Set<string>();
+  draft.routes.forEach((route, i) => {
+    const label = 'Route ' + (i + 1);
+    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(route.id))
+      problems.push(
+        label +
+          ' needs a name starting with a lowercase letter, using up to 32 lowercase letters, numbers, underscores or hyphens.',
+      );
+    if (ids.has(route.id)) problems.push('Route names must be unique.');
+    ids.add(route.id);
+    if (!route.provider || !route.model.trim())
+      problems.push(label + ' needs a provider and model.');
+    if (route.fallbacks.length > 3)
+      problems.push(label + ' can have at most three fallbacks.');
+    const choices = new Set([
+      JSON.stringify([route.provider, route.model.trim()]),
+    ]);
+    route.fallbacks.forEach((choice, n) => {
+      if (!choice.provider || !choice.model.trim())
+        problems.push(
+          label + ' fallback ' + (n + 1) + ' needs a provider and model.',
+        );
+      const key = JSON.stringify([choice.provider, choice.model.trim()]);
+      if (choices.has(key))
+        problems.push(
+          label + ' must use different models for its primary and fallbacks.',
+        );
+      choices.add(key);
+    });
+  });
+  return problems;
+}
+
+function ModelPicker({
+  label,
+  choice,
+  providers,
+  onChange,
+}: {
+  label: string;
+  choice: ModelChoice;
+  providers: readonly DaemonProvider[] | null;
+  onChange: (choice: ModelChoice) => void;
+}) {
+  const models = MODEL_SUGGESTIONS[choice.provider] ?? [];
+  const [custom, setCustom] = useState(!models.includes(choice.model));
+  useEffect(() => {
+    if (!models.includes(choice.model)) setCustom(true);
+  }, [choice.model, models]);
+  const providerIds = [
+    ...(providers ?? []).filter((p) => !isMockProvider(p.id)).map((p) => p.id),
+    choice.provider,
+  ].filter((id, i, all) => id && all.indexOf(id) === i);
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label>
+        <span className="settings-field-note">{label} provider</span>
+        <select
+          aria-label={label + ' provider'}
+          className="field"
+          value={choice.provider}
+          onChange={(event) =>
+            onChange({
+              provider: event.target.value,
+              model: MODEL_SUGGESTIONS[event.target.value]?.[0] ?? '',
+            })
+          }
+        >
+          {providerIds.map((id) => (
+            <option key={id} value={id}>
+              {providers?.find((p) => p.id === id)?.label ?? id}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span className="settings-field-note">{label} model</span>
+        <select
+          aria-label={label + ' model'}
+          className="field"
+          value={custom ? '__custom__' : choice.model}
+          onChange={(event) => {
+            const isCustom = event.target.value === '__custom__';
+            setCustom(isCustom);
+            if (!isCustom)
+              onChange({
+                provider: choice.provider,
+                model: event.target.value,
+              });
+          }}
+        >
+          {models.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+          <option value="__custom__">custom…</option>
+        </select>
+      </label>
+      {custom && (
+        <label className="sm:col-span-2">
+          <span className="settings-field-note">{label} custom model</span>
+          <input
+            aria-label={label + ' custom model'}
+            className="field"
+            value={choice.model}
+            placeholder="model id"
+            onChange={(event) =>
+              onChange({ ...choice, model: event.target.value })
+            }
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
+export function DelegationSettings({
+  primary,
+  policy,
+  providers,
+  disabled = false,
+  save,
+}: {
+  primary: ModelChoice;
+  policy?: DelegationPolicy;
+  providers: readonly DaemonProvider[] | null;
+  disabled?: boolean;
+  save: (policy: DelegationPolicy) => Promise<boolean>;
+}) {
+  const headingId = useId();
+  const savedKey = JSON.stringify(normalize(policy));
+  const [baseline, setBaseline] = useState(savedKey);
+  const [draft, setDraft] = useState(() => draftFrom(normalize(policy)));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const nextKey = useRef(0);
+  const generation = useRef(0);
+  const pending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    generation.current += 1;
+    pending.current = false;
+    setDraft(draftFrom(JSON.parse(savedKey) as DelegationPolicy));
+    setBaseline(savedKey);
+    setBusy(false);
+    setError(null);
+    setSaved(false);
+  }, [savedKey]);
+
+  const update = (change: (current: Draft) => Draft) => {
+    setDraft(change);
+    setError(null);
+    setSaved(false);
+  };
+  const updateRoute = (
+    key: string,
+    change: (route: RouteDraft) => RouteDraft,
+  ) =>
+    update((current) => ({
+      ...current,
+      routes: current.routes.map((route) =>
+        route.key === key ? change(route) : route,
+      ),
+    }));
+  const realProviders = (providers ?? []).filter((p) => !isMockProvider(p.id));
+  const newChoice = (main: ModelChoice, fallback: boolean): ModelChoice => {
+    const provider = fallback
+      ? (realProviders.find((p) => p.configured && p.id !== main.provider)
+          ?.id ??
+        realProviders[0]?.id ??
+        main.provider)
+      : !isMockProvider(main.provider)
+        ? main.provider
+        : (realProviders.find((p) => p.configured)?.id ??
+          realProviders[0]?.id ??
+          main.provider);
+    return {
+      provider,
+      model:
+        !fallback && provider === main.provider
+          ? main.model
+          : (MODEL_SUGGESTIONS[provider]?.[0] ?? ''),
+    };
+  };
+  const next = policyFrom(draft);
+  const problems = problemsFor(draft);
+  const dirty = JSON.stringify(next) !== baseline;
+  const canSave = dirty && !disabled && !busy && problems.length === 0;
+  const submit = async () => {
+    if (!canSave || pending.current) return;
+    const currentGeneration = generation.current;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const accepted = await save(next);
+      if (!mounted.current || currentGeneration !== generation.current) return;
+      if (accepted) {
+        setBaseline(JSON.stringify(next));
+        setSaved(true);
+      } else
+        setError(
+          'Helper settings could not be saved. Your changes are still here.',
+        );
+    } catch {
+      if (mounted.current && currentGeneration === generation.current)
+        setError(
+          'Helper settings could not be saved. Your changes are still here.',
+        );
+    } finally {
+      if (mounted.current && currentGeneration === generation.current) {
+        pending.current = false;
+        setBusy(false);
+      }
+    }
+  };
+
+  return (
+    <section className="settings-group" aria-labelledby={headingId}>
+      <h3 id={headingId} className="settings-group-title">
+        Helper routing and limits
+      </h3>
+      <p className="settings-group-help">
+        Choose routes such as fast or research for different tasks. Helpers keep
+        their focused task and playbook, without the main personality.
+      </p>
+      <fieldset disabled={disabled || busy} className="settings-fieldset">
+        <legend className="sr-only">Helper limits and routes</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {LIMITS.map((limit) => (
+            <label key={limit.name}>
+              <span className="settings-field-note">{limit.label}</span>
+              <input
+                aria-label={limit.label}
+                className="field"
+                type="number"
+                min={limit.min / limit.scale}
+                max={limit.max / limit.scale}
+                step={limit.scale === 1 ? 1 : 0.001}
+                value={draft.limits[limit.name]}
+                onChange={(event) =>
+                  update((current) => ({
+                    ...current,
+                    limits: {
+                      ...current.limits,
+                      [limit.name]: event.target.value,
+                    },
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <p className="settings-group-help">
+          Without a named route, helpers use the current model. Fallback models
+          are tried in order before a reply starts.
+        </p>
+        {draft.routes.map((route, i) => {
+          const label = 'Route ' + (i + 1);
+          return (
+            <fieldset key={route.key} className="settings-fieldset">
+              <legend className="settings-group-title">{label}</legend>
+              <label>
+                <span className="settings-field-note">{label} name</span>
+                <input
+                  aria-label={label + ' name'}
+                  className="field"
+                  value={route.id}
+                  maxLength={32}
+                  placeholder="fast or research"
+                  onChange={(event) =>
+                    updateRoute(route.key, (current) => ({
+                      ...current,
+                      id: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <ModelPicker
+                key={route.key + route.provider}
+                label={label}
+                choice={route}
+                providers={providers}
+                onChange={(choice) =>
+                  updateRoute(route.key, (current) => ({
+                    ...current,
+                    ...choice,
+                  }))
+                }
+              />
+              {route.fallbacks.map((fallback, n) => (
+                <div
+                  key={fallback.key}
+                  className="grid gap-2 border-t border-white/10 pt-3"
+                >
+                  <ModelPicker
+                    key={fallback.key + fallback.provider}
+                    label={label + ' fallback ' + (n + 1)}
+                    choice={fallback}
+                    providers={providers}
+                    onChange={(choice) =>
+                      updateRoute(route.key, (current) => ({
+                        ...current,
+                        fallbacks: current.fallbacks.map((item) =>
+                          item.key === fallback.key
+                            ? { ...item, ...choice }
+                            : item,
+                        ),
+                      }))
+                    }
+                  />
+                  <div className="fallback-actions">
+                    {([-1, 1] as const).map((by) => (
+                      <button
+                        key={by}
+                        type="button"
+                        className={ghostBtnCls}
+                        aria-label={
+                          'Move ' +
+                          label.toLowerCase() +
+                          ' fallback ' +
+                          (n + 1) +
+                          (by === -1 ? ' up' : ' down')
+                        }
+                        disabled={
+                          by === -1 ? n === 0 : n === route.fallbacks.length - 1
+                        }
+                        onClick={() =>
+                          updateRoute(route.key, (current) => {
+                            const fallbacks = [...current.fallbacks];
+                            const [moved] = fallbacks.splice(n, 1);
+                            fallbacks.splice(n + by, 0, moved);
+                            return { ...current, fallbacks };
+                          })
+                        }
+                      >
+                        {by === -1 ? '↑' : '↓'}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className={ghostBtnCls}
+                      aria-label={
+                        'Remove ' + label.toLowerCase() + ' fallback ' + (n + 1)
+                      }
+                      onClick={() =>
+                        updateRoute(route.key, (current) => ({
+                          ...current,
+                          fallbacks: current.fallbacks.filter(
+                            (item) => item.key !== fallback.key,
+                          ),
+                        }))
+                      }
+                    >
+                      Remove fallback
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <div className="fallback-footer">
+                {route.fallbacks.length < 3 && (
+                  <button
+                    type="button"
+                    className={ghostBtnCls}
+                    aria-label={'Add ' + label.toLowerCase() + ' fallback'}
+                    onClick={() => {
+                      const fallback = {
+                        ...newChoice(route, true),
+                        key: 'new-fallback-' + nextKey.current++,
+                      };
+                      updateRoute(route.key, (current) => ({
+                        ...current,
+                        fallbacks: [...current.fallbacks, fallback],
+                      }));
+                    }}
+                  >
+                    Add fallback
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={ghostBtnCls}
+                  aria-label={'Remove ' + label.toLowerCase()}
+                  onClick={() =>
+                    update((current) => ({
+                      ...current,
+                      routes: current.routes.filter(
+                        (item) => item.key !== route.key,
+                      ),
+                    }))
+                  }
+                >
+                  Remove route
+                </button>
+              </div>
+            </fieldset>
+          );
+        })}
+        {draft.routes.length < 8 && (
+          <button
+            type="button"
+            className={ghostBtnCls}
+            onClick={() => {
+              let id = 'fast';
+              for (
+                let n = 2;
+                draft.routes.some((route) => route.id === id);
+                n += 1
+              )
+                id = 'route-' + n;
+              const route: RouteDraft = {
+                ...newChoice(primary, false),
+                id,
+                key: 'new-route-' + nextKey.current++,
+                fallbacks: [],
+              };
+              update((current) => ({
+                ...current,
+                routes: [...current.routes, route],
+              }));
+            }}
+          >
+            Add route
+          </button>
+        )}
+      </fieldset>
+      {problems.length > 0 && (
+        <div role="alert" className="key-error">
+          <ul>
+            {problems.map((problem, i) => (
+              <li key={i}>{problem}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="key-error">
+          {error}
+        </p>
+      )}
+      {saved && <p role="status">Helper settings saved.</p>}
+      <div className="fallback-footer">
+        <button
+          type="button"
+          className={ghostBtnCls}
+          disabled={disabled || busy || !dirty}
+          onClick={() => {
+            setDraft(draftFrom(JSON.parse(baseline) as DelegationPolicy));
+            setError(null);
+            setSaved(false);
+          }}
+        >
+          Discard helper changes
+        </button>
+        <button
+          type="button"
+          className={primaryBtnCls}
+          disabled={!canSave}
+          onClick={() => void submit()}
+        >
+          {busy ? 'Saving helper settings…' : 'Save helper settings'}
+        </button>
+      </div>
+    </section>
+  );
+}

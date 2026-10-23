@@ -298,6 +298,7 @@ impl HarnessBuilder {
                 max_retries: None,
                 max_tool_iterations: self.max_tool_iterations,
                 execution_limits: Some(self.controls.execution_limits.clone()),
+                delegation: None,
                 additional: BTreeMap::new(),
             }),
             fallbacks: Vec::new(),

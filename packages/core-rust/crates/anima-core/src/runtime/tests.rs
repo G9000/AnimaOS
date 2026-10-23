@@ -1495,6 +1495,40 @@ fn runtime_does_not_recover_cached_results_for_tools_removed_from_allowlist() {
 }
 
 #[test]
+fn runtime_delegation_update_preserves_other_settings_and_snapshot_round_trip() {
+    let limits = crate::execution_limits::ExecutionLimits::default();
+    let mut config = tool_config();
+    config.settings = Some(crate::AgentSettings {
+        temperature: Some(0.3),
+        max_tokens: Some(1000),
+        execution_limits: Some(limits.clone()),
+        additional: BTreeMap::from([("customFlag".into(), DataValue::String("retained".into()))]),
+        ..Default::default()
+    });
+    let mut runtime = AgentRuntime::new(config, Arc::new(ToolCallingModelAdapter));
+    let policy = crate::DelegationPolicy {
+        max_concurrent: 2,
+        ..Default::default()
+    };
+    runtime.update_config(AgentConfigUpdate {
+        delegation: Some(policy.clone()),
+        ..Default::default()
+    });
+    let settings = runtime.config().settings.as_ref().unwrap();
+    assert_eq!(settings.delegation.as_ref(), Some(&policy));
+    assert_eq!(settings.execution_limits.as_ref(), Some(&limits));
+    assert_eq!(settings.temperature, Some(0.3));
+    assert_eq!(settings.max_tokens, Some(1000));
+    assert_eq!(
+        settings.additional.get("customFlag"),
+        Some(&DataValue::String("retained".into()))
+    );
+    let saved = serde_json::to_value(runtime.snapshot()).unwrap();
+    let restored: crate::AgentRuntimeSnapshot = serde_json::from_value(saved).unwrap();
+    assert_eq!(restored.state.config.settings.as_ref().unwrap(), settings);
+}
+
+#[test]
 fn runtime_run_does_not_reuse_previous_tool_result_between_runs() {
     let mut runtime = AgentRuntime::new(tool_config(), Arc::new(ToolCallingModelAdapter));
     runtime.init();

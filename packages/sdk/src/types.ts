@@ -1,5 +1,6 @@
 import type { AgentToolInput } from './agents.js';
 import type { DaemonPluginDescriptor } from './daemon-types.js';
+import type { ModelChoice } from './provider-keys.js';
 
 export type UUID = `${string}-${string}-${string}-${string}-${string}`;
 
@@ -47,12 +48,34 @@ export interface ExecutionLimits {
   maxInflightOperations?: number;
 }
 
+/** A named owner-configured provider and model route for helpers. */
+export interface DelegationRoute extends ModelChoice {
+  id: string;
+  fallbacks?: ModelChoice[];
+}
+
+/** Finite helper limits. Omitted fields use the daemon's bounded defaults. */
+export interface DelegationPolicy {
+  maxConcurrent?: number;
+  maxStartsPerRun?: number;
+  /** Only depth 1 is currently supported. */
+  maxDepth?: 1;
+  routes?: DelegationRoute[];
+  /** Context forking is currently unsupported. */
+  allowContextFork?: false;
+  maxToolIterations?: number;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
+}
+
 export interface AgentSettings {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
+  maxToolIterations?: number;
   executionLimits?: ExecutionLimits;
+  delegation?: DelegationPolicy;
   [key: string]: unknown;
 }
 

@@ -572,3 +572,27 @@ fn profile_owner_tool_result_store_retains_lease_and_refuses_revoked_mutations()
     ])
     .unwrap();
 }
+
+#[test]
+fn bounded_batch_receipts_keep_json_and_reject_malformed_native_shapes() {
+    let call = anima_core::ToolCall {
+        id: "batch".into(),
+        name: "spawn_helpers".into(),
+        args: Default::default(),
+    };
+    let envelope = serde_json::json!({"atomic":false,"acceptedCount":0,"refusedCount":8,"receiptUnavailableCount":0,"notAttemptedCount":0,"truncated":true,"entries":(0..8).map(|index|serde_json::json!({"index":index,"outcome":"refused","error":"\u{0001}".repeat(400),"errorTruncated":true})).collect::<Vec<_>>()});
+    let original = result(&envelope.to_string());
+    assert!(serde_json::to_vec(&original).unwrap().len() > INLINE_LIMIT);
+    assert!(original.data.as_ref().unwrap().text.len() <= 32 * 1024);
+    assert_eq!(
+        project_result(None, "agent", None, None, &call, original.clone()),
+        original
+    );
+    let mut malformed = envelope;
+    malformed["notAttemptedCount"] = serde_json::json!("unbounded");
+    let invalid = result(&malformed.to_string());
+    assert_ne!(
+        project_result(None, "agent", None, None, &call, invalid.clone()),
+        invalid
+    );
+}
