@@ -12,6 +12,8 @@ import type {
 } from '@animaos/sdk';
 import { SectionTitle } from '../ui-bits';
 import { LearningSkillDraftForm } from './LearningSkillDraftForm';
+import { useLatest } from '../../hooks/useLatest';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 export interface LearningReviewApi {
   policy(
@@ -70,27 +72,26 @@ export function LearningReviewPanel({
   const [loading, setLoading] = useState(api !== undefined);
   const generation = useRef(0);
   const busyRef = useRef(false);
-  const currentAgent = useRef(agentId);
-  currentAgent.current = agentId;
-
-  useEffect(() => {
-    const requestGeneration = ++generation.current;
-    let active = true;
-    const controller = new AbortController();
+  const currentAgent = useLatest(agentId);
+  useResetOnChange([agentId, api], () => {
     setPolicy(null);
     setReviews([]);
     setExpanded(new Set());
     setBusy(false);
     setRefreshing(false);
-    busyRef.current = false;
     setError(null);
+    setLoading(api !== undefined);
+  });
+  useEffect(() => {
+    const requestGeneration = ++generation.current;
+    let active = true;
+    const controller = new AbortController();
+    busyRef.current = false;
     if (!api) {
-      setLoading(false);
       return () => {
         active = false;
       };
     }
-    setLoading(true);
     void Promise.all([
       api.policy(agentId, { signal: controller.signal }),
       api.listReviews(agentId, { signal: controller.signal }),

@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
   useEffect,
   useMemo,
@@ -49,7 +50,11 @@ import {
   type ConversationControlProps,
 } from './ConversationControls';
 import { ChatExportScope } from './ChatExportDownload';
-import { ChatExtensions, type ChatPanelRequest, type ChatPanelName } from './ChatExtensions';
+import {
+  ChatExtensions,
+  type ChatPanelRequest,
+  type ChatPanelName,
+} from './ChatExtensions';
 import { ChatResultsLayout } from '../results/ChatResultsPanel';
 import type { ChatModelPreferencesView } from '@animaos/sdk';
 
@@ -149,7 +154,11 @@ export interface SessionViewProps {
   onAtBottomChange?: (atBottom: boolean) => void;
   /** Activity outside a historical window that refreshes its context estimate. */
   contextRefreshKey?: number | string;
-  extensions?: { request?: ChatPanelRequest | null; onOpen(panel: ChatPanelName): void; onModelSaved?(view: ChatModelPreferencesView): void };
+  extensions?: {
+    request?: ChatPanelRequest | null;
+    onOpen(panel: ChatPanelName): void;
+    onModelSaved?(view: ChatModelPreferencesView): void;
+  };
   controls?: Pick<
     ConversationControlProps,
     'onRevise' | 'onQueuePatch' | 'onCancel' | 'onOpenSource' | 'revising'
@@ -222,9 +231,9 @@ function SessionHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(session.title);
-  useEffect(() => {
+  useResetOnChange([editing, session.title], () => {
     if (!editing) setTitle(session.title);
-  }, [editing, session.title]);
+  });
   const cancel = () => {
     setEditing(false);
     setTitle(session.title);
@@ -524,32 +533,31 @@ export function SessionView({
         )}
     </>
   );
-  const renderMessages = (inlineResults?: ReactNode) => (<MessageList
-        agent={conversation}
-        items={items}
-        actions={transcriptActions}
-        sending={thinking}
-        scrollerRef={scrollerRef}
-        onSuggestion={onSuggestion}
-        hasOlder={hasOlder}
-        loadingOlder={loadingOlder}
-        onLoadOlder={onLoadOlder}
-        emptyState={
-          session && session.kind !== 'chat' ? NO_MESSAGES : undefined
-        }
-        readAloud={readAloud}
-        knownAttachments={knownAttachments}
-        highlightMessageId={historyAnchor?.messageId}
-        jumpRequestKey={jumpRequestKey}
-        jumpReady={
-          !historyAnchor || (!historyAnchor.loading && !historyAnchor.error)
-        }
-        onJumpToLatest={historyAnchor?.onReturnToLatest}
-        onAtBottomChange={onAtBottomChange}
-        tail={<>
-            {inlineResults}
-            {
-          agent.workspaceRole !== 'helper' &&
+  const renderMessages = (inlineResults?: ReactNode) => (
+    <MessageList
+      agent={conversation}
+      items={items}
+      actions={transcriptActions}
+      sending={thinking}
+      scrollerRef={scrollerRef}
+      onSuggestion={onSuggestion}
+      hasOlder={hasOlder}
+      loadingOlder={loadingOlder}
+      onLoadOlder={onLoadOlder}
+      emptyState={session && session.kind !== 'chat' ? NO_MESSAGES : undefined}
+      readAloud={readAloud}
+      knownAttachments={knownAttachments}
+      highlightMessageId={historyAnchor?.messageId}
+      jumpRequestKey={jumpRequestKey}
+      jumpReady={
+        !historyAnchor || (!historyAnchor.loading && !historyAnchor.error)
+      }
+      onJumpToLatest={historyAnchor?.onReturnToLatest}
+      onAtBottomChange={onAtBottomChange}
+      tail={
+        <>
+          {inlineResults}
+          {agent.workspaceRole !== 'helper' &&
           (!session ||
             (session.kind === 'chat' && session.agentId === agent.id)) ? (
             <ChatWorkflows
@@ -559,8 +567,10 @@ export function SessionView({
               refreshKey={`${messages.length}:${messages.at(-1)?.id ?? ''}:${runs.map(({ run }) => `${run.id}:${run.status}`).join(',')}:${session?.activeRuns ?? 0}:${composer.sending}:${contextRefreshKey ?? ''}`}
             />
           ) : undefined}
-        </>}
-      />);
+        </>
+      }
+    />
+  );
   const view = (
     <section
       className="flex h-full min-h-0 flex-col"
@@ -586,8 +596,16 @@ export function SessionView({
         />
       )}
       {notice}
-      {session && extensions && <ChatExtensions key={`${session.agentId}:${session.id}:${session.clearGeneration ?? 0}`} session={session} request={extensions.request} onOpen={extensions.onOpen}
-        onModelSaved={extensions.onModelSaved} refreshKey={contextRefreshKey} />}
+      {session && extensions && (
+        <ChatExtensions
+          key={`${session.agentId}:${session.id}:${session.clearGeneration ?? 0}`}
+          session={session}
+          request={extensions.request}
+          onOpen={extensions.onOpen}
+          onModelSaved={extensions.onModelSaved}
+          refreshKey={contextRefreshKey}
+        />
+      )}
       {session && controls && (
         <ConversationControls
           key={`${session.agentId}:${session.id}`}
@@ -626,11 +644,17 @@ export function SessionView({
         ) : null}
       </div>
       {session?.kind === 'chat' && extensions && daemon.chatResults ? (
-        <ChatResultsLayout agentId={session.agentId} sessionId={session.id} clearGeneration={session.clearGeneration ?? 0}
-          refreshKey={`${contextRefreshKey}:${session.lastActivityAtMs}:${messages.length}:${runs.map(({run}) => `${run.id}:${run.status}`).join()}`}>
+        <ChatResultsLayout
+          agentId={session.agentId}
+          sessionId={session.id}
+          clearGeneration={session.clearGeneration ?? 0}
+          refreshKey={`${contextRefreshKey}:${session.lastActivityAtMs}:${messages.length}:${runs.map(({ run }) => `${run.id}:${run.status}`).join()}`}
+        >
           {renderMessages}
         </ChatResultsLayout>
-      ) : renderMessages()}
+      ) : (
+        renderMessages()
+      )}
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts
           sessionId={session.id}

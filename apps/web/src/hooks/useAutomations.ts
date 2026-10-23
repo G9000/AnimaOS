@@ -91,6 +91,8 @@ export function useAutomations({
 
   useEffect(() => {
     if (!enabled || !agentId) return;
+    // State changes only after the awaited daemon response, including failures.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
   }, [enabled, agentId, version, epoch, load]);
 

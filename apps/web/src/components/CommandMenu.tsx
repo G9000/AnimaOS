@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type {
   SessionMessageSearchHit,
@@ -56,11 +57,20 @@ export function CommandMenu({
   const totalResults = results.length + messageResults.length;
   const selected = Math.min(active, Math.max(totalResults - 1, 0));
 
+  useResetOnChange([trimmedQuery, searchMessages, retry], () => {
+    setMessageRead(
+      trimmedQuery && searchMessages
+        ? {
+            query: trimmedQuery,
+            search: searchMessages,
+            page: { results: [], hasMore: false },
+            status: 'loading',
+          }
+        : null,
+    );
+  });
   useEffect(() => {
-    if (!trimmedQuery || !searchMessages) {
-      setMessageRead(null);
-      return;
-    }
+    if (!trimmedQuery || !searchMessages) return;
     const controller = new AbortController();
     let current = true;
     const state = {
@@ -68,7 +78,6 @@ export function CommandMenu({
       search: searchMessages,
       page: { results: [], hasMore: false },
     };
-    setMessageRead({ ...state, status: 'loading' });
     const timer = setTimeout(() => {
       void Promise.resolve()
         .then(() => searchMessages(trimmedQuery, controller.signal))

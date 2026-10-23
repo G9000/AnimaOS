@@ -112,17 +112,17 @@ function ReportCard({
   );
 }
 
-function stateIcon(state: ReminderState | null) {
+function ReminderStateIcon({ state }: { state: ReminderState | null }) {
   switch (state) {
     case 'done':
     case 'gone':
-      return CheckIcon;
+      return <CheckIcon size={16} className="automation-card-icon" />;
     case 'snoozed':
-      return SnoozeIcon;
+      return <SnoozeIcon size={16} className="automation-card-icon" />;
     case 'earlier':
-      return ClockIcon;
+      return <ClockIcon size={16} className="automation-card-icon" />;
     default:
-      return BellIcon;
+      return <BellIcon size={16} className="automation-card-icon" />;
   }
 }
 
@@ -170,7 +170,6 @@ function ReminderCard({
     status = `Earlier reminder · ${formatTime(meta.firedAtMs)} · it came up again later`;
   else if (state === 'gone') status = 'Done · cleared from Automations';
   const due = state === 'due';
-  const Icon = stateIcon(state);
 
   return (
     <article
@@ -180,7 +179,7 @@ function ReminderCard({
       aria-label={`Reminder ${name}`}
     >
       <header className="automation-card-head">
-        <Icon size={16} className="automation-card-icon" />
+        <ReminderStateIcon state={state} />
         <div className="automation-card-titles">
           <h3 className="automation-card-title">{name}</h3>
           <p className="automation-card-sub">{status}</p>

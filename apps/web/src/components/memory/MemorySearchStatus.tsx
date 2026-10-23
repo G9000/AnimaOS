@@ -1,7 +1,9 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import type { MemoryReadiness } from '@animaos/sdk';
 
 import { daemon } from '../../lib/daemon-api';
+import { useLatest } from '../../hooks/useLatest';
+import { useRenderScope } from '../../hooks/useRenderScope';
 
 interface Props {
   agentId: string;
@@ -23,7 +25,7 @@ interface Snapshot {
   passedChecks: number;
 }
 
-type Boundary = Props;
+type Boundary = ReturnType<typeof useRenderScope>;
 
 // The SDK readiness method has no abort signal. An unmounted panel cannot free
 // its read: only the actual settlement admits another check on this page.
@@ -41,6 +43,17 @@ function ownerBusy() {
 
 function notifyOwner() {
   for (const listener of ownerListeners) listener();
+}
+
+function reserveRead(request: Promise<MemoryReadiness>) {
+  pendingRead = request;
+  notifyOwner();
+}
+
+function releaseRead(request: Promise<MemoryReadiness>) {
+  if (pendingRead !== request) return;
+  pendingRead = null;
+  notifyOwner();
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -167,7 +180,8 @@ function projectReadiness(value: unknown): Snapshot | null {
 }
 
 export function MemorySearchStatus({ agentId, online, epoch }: Props) {
-  const boundaryRef = useRef<Boundary | null>(null);
+  const boundary = useRenderScope(agentId, online, epoch);
+  const boundaryRef = useLatest<Boundary | null>(boundary);
   const [result, setResult] = useState<{
     boundary: Boundary;
     snapshot: Snapshot | null;
@@ -175,32 +189,16 @@ export function MemorySearchStatus({ agentId, online, epoch }: Props) {
   const busy = useSyncExternalStore(subscribeOwner, ownerBusy, ownerBusy);
 
   useLayoutEffect(() => {
-    const boundary = { agentId, online, epoch };
-    boundaryRef.current = boundary;
     return () => {
       if (boundaryRef.current === boundary) boundaryRef.current = null;
     };
-  }, [agentId, online, epoch]);
+  }, [boundary, boundaryRef]);
 
-  const boundary = boundaryRef.current;
-  const visible =
-    boundary?.agentId === agentId &&
-    boundary.online === online &&
-    boundary.epoch === epoch &&
-    result?.boundary === boundary
-      ? result.snapshot
-      : undefined;
+  const visible = result?.boundary === boundary ? result.snapshot : undefined;
 
   const check = () => {
     const owner = boundaryRef.current;
-    if (
-      !online ||
-      !owner ||
-      owner.agentId !== agentId ||
-      owner.epoch !== epoch ||
-      !owner.online ||
-      pendingRead !== null
-    ) {
+    if (!online || owner !== boundary || pendingRead !== null) {
       return;
     }
     setResult(null);
@@ -211,18 +209,14 @@ export function MemorySearchStatus({ agentId, online, epoch }: Props) {
       setResult({ boundary: owner, snapshot: null });
       return;
     }
-    pendingRead = request;
-    notifyOwner();
+    reserveRead(request);
     const settle = (snapshot: Snapshot | null) => {
       try {
         if (boundaryRef.current === owner) {
           setResult({ boundary: owner, snapshot });
         }
       } finally {
-        if (pendingRead === request) {
-          pendingRead = null;
-          notifyOwner();
-        }
+        releaseRead(request);
       }
     };
     void request.then(

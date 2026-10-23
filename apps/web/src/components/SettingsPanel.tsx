@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ACCESS_PROFILES,
@@ -209,52 +210,55 @@ export function SettingsPanel({
 
   // Re-seed after an accepted agent update or a main-agent transition. Tool
   // order alone is not a config change and must not clobber an in-progress draft.
-  useEffect(() => {
-    const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
-    const seeded =
-      agent.provider === 'chatgpt' || options.includes(agent.model)
-        ? agent.model
-        : '__custom__';
-    setName(agent.name);
-    setProvider(agent.provider);
-    setModel(seeded);
-    setCustomModel(seeded === '__custom__' ? agent.model : '');
-    setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
-    setAccessChanged(false);
-    setBrowserGrants(agent.toolNames.filter(isBrowserTool));
-    setAllowMemoryRemove(hasMemoryRemove);
-    setAllowMemoryConsolidate(hasMemoryConsolidate);
-    setAllowConversationRead(hasConversationRead);
-    setAllowDocumentRead(hasDocumentRead);
-    setAllowWebSearch(hasWebSearch);
-    setAllowWebFetch(hasWebFetch);
-    setAllowToolChains(hasToolChains);
-    setAllowWorkflows(hasWorkflows);
-    setWorkflowsChanged(false);
-    setAllowBackgroundHelpers(hasBackgroundHelpers);
-    setBackgroundHelpersChanged(false);
-    setAllowWorkflowTemplates(hasWorkflowTemplates);
-    setTemplatesChanged(false);
-    setAllowToolResultRead(hasToolResultRead);
-  }, [
-    agent.id,
-    agent.name,
-    agent.provider,
-    agent.model,
-    agentToolsKey,
-    hasMemoryRemove,
-    hasMemoryConsolidate,
-    hasConversationRead,
-    hasDocumentRead,
-    hasWebSearch,
-    hasWebFetch,
-    hasToolChains,
-    hasWorkflows,
-    hasBackgroundHelpers,
-    hasWorkflowTemplates,
-    hasToolResultRead,
-    derivedAccess,
-  ]);
+  useResetOnChange(
+    [
+      agent.id,
+      agent.name,
+      agent.provider,
+      agent.model,
+      agentToolsKey,
+      hasMemoryRemove,
+      hasMemoryConsolidate,
+      hasConversationRead,
+      hasDocumentRead,
+      hasWebSearch,
+      hasWebFetch,
+      hasToolChains,
+      hasWorkflows,
+      hasBackgroundHelpers,
+      hasWorkflowTemplates,
+      hasToolResultRead,
+      derivedAccess,
+    ],
+    () => {
+      const options = MODEL_SUGGESTIONS[agent.provider] ?? [];
+      const seeded =
+        agent.provider === 'chatgpt' || options.includes(agent.model)
+          ? agent.model
+          : '__custom__';
+      setName(agent.name);
+      setProvider(agent.provider);
+      setModel(seeded);
+      setCustomModel(seeded === '__custom__' ? agent.model : '');
+      setAccessSelection(derivedAccess === 'custom' ? null : derivedAccess);
+      setAccessChanged(false);
+      setBrowserGrants(agent.toolNames.filter(isBrowserTool));
+      setAllowMemoryRemove(hasMemoryRemove);
+      setAllowMemoryConsolidate(hasMemoryConsolidate);
+      setAllowConversationRead(hasConversationRead);
+      setAllowDocumentRead(hasDocumentRead);
+      setAllowWebSearch(hasWebSearch);
+      setAllowWebFetch(hasWebFetch);
+      setAllowToolChains(hasToolChains);
+      setAllowWorkflows(hasWorkflows);
+      setWorkflowsChanged(false);
+      setAllowBackgroundHelpers(hasBackgroundHelpers);
+      setBackgroundHelpersChanged(false);
+      setAllowWorkflowTemplates(hasWorkflowTemplates);
+      setTemplatesChanged(false);
+      setAllowToolResultRead(hasToolResultRead);
+    },
+  );
 
   useEffect(() => {
     if (saveError) {

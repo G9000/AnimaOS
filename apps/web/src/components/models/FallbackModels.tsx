@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
+import { useMemo, useState } from 'react';
 
 import {
   isMockProvider,
@@ -59,7 +60,7 @@ export function FallbackModels({
   const [busy, setBusy] = useState(false);
 
   // An accepted save, or another agent, replaces the draft.
-  useEffect(() => {
+  useResetOnChange([savedKey], () => {
     setRows(
       (JSON.parse(savedKey) as ModelChoice[]).map((choice, key) => ({
         ...choice,
@@ -67,7 +68,7 @@ export function FallbackModels({
       })),
     );
     setNext(JSON.parse(savedKey).length);
-  }, [savedKey]);
+  });
 
   const providerIds = useMemo(
     () =>

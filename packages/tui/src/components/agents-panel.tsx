@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { AgentProfile } from '../types.js';
 
@@ -31,7 +31,7 @@ function getValue(profile: AgentProfile, field: EditableField): string {
 function applyValue(
   profile: AgentProfile,
   field: EditableField,
-  value: string
+  value: string,
 ): AgentProfile {
   if (ARRAY_FIELDS.has(field)) {
     return {
@@ -66,7 +66,7 @@ function matchesAgentProfile(profile: AgentProfile, query: string): boolean {
 function nextMatchIndex(
   matchIndexes: number[],
   currentIdx: number,
-  direction: 1 | -1
+  direction: 1 | -1,
 ): number | null {
   if (matchIndexes.length === 0) {
     return null;
@@ -116,11 +116,15 @@ export function AgentsPanel({
 
   const selected = profiles[agentIdx] ?? profiles[0];
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const matchIndexes = normalizedQuery
-    ? profiles.flatMap((profile, idx) =>
-        matchesAgentProfile(profile, normalizedQuery) ? [idx] : []
-      )
-    : [];
+  const matchIndexes = useMemo(
+    () =>
+      normalizedQuery
+        ? profiles.flatMap((profile, idx) =>
+            matchesAgentProfile(profile, normalizedQuery) ? [idx] : [],
+          )
+        : [],
+    [normalizedQuery, profiles],
+  );
   const currentMatch = matchIndexes.indexOf(agentIdx);
 
   const updateSearch = useCallback(
@@ -133,7 +137,7 @@ export function AgentsPanel({
       }
 
       const nextMatches = profiles.flatMap((profile, idx) =>
-        matchesAgentProfile(profile, normalized) ? [idx] : []
+        matchesAgentProfile(profile, normalized) ? [idx] : [],
       );
       const nextIdx =
         nextMatches.find((idx) => idx >= agentIdx) ?? nextMatches[0];
@@ -142,7 +146,7 @@ export function AgentsPanel({
         setAgentIdx(nextIdx);
       }
     },
-    [agentIdx, profiles]
+    [agentIdx, profiles],
   );
 
   const moveSearch = useCallback(
@@ -152,7 +156,7 @@ export function AgentsPanel({
         setAgentIdx(nextIdx);
       }
     },
-    [agentIdx, matchIndexes]
+    [agentIdx, matchIndexes],
   );
 
   const enterEdit = useCallback((profile: AgentProfile) => {
@@ -175,7 +179,7 @@ export function AgentsPanel({
       });
       setFieldIdx(newIdx);
     },
-    [fieldIdx, editValue]
+    [fieldIdx, editValue],
   );
 
   const saveAll = useCallback(() => {
@@ -275,7 +279,7 @@ export function AgentsPanel({
               {normalizedQuery
                 ? matchIndexes.length > 0
                   ? `  ${String(currentMatch + 1)}/${String(
-                      matchIndexes.length
+                      matchIndexes.length,
                     )}`
                   : '  no matches'
                 : '  enter close · esc clear'}
@@ -421,8 +425,8 @@ export function AgentsPanel({
           const displayVal = active
             ? editValue
             : draft
-            ? getValue(draft, field)
-            : '';
+              ? getValue(draft, field)
+              : '';
           return (
             <Box key={field}>
               <Text color={active ? 'cyan' : 'gray'} bold={active}>

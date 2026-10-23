@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import {
   Component,
   memo,
@@ -79,10 +80,10 @@ function CodeBlock({
     };
   }, []);
 
+  useResetOnChange([language, source], () => setCopyState('idle'));
   useEffect(() => {
     copyOperation.current += 1;
     clearTimeout(resetTimer.current);
-    setCopyState('idle');
   }, [language, source]);
 
   const copy = async () => {
@@ -289,7 +290,7 @@ const components: Components = {
     const source = sourceText(children);
     const fenced = className?.includes('language-') || source.includes('\n');
     return fenced ? (
-      <CodeBlock className={className} children={children} />
+      <CodeBlock className={className}>{children}</CodeBlock>
     ) : (
       <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em] [overflow-wrap:anywhere]">
         {children}

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DaemonHttpError,
   type WorkflowRun,
@@ -111,10 +112,15 @@ export function WorkflowTemplates({
   const epoch = useRef(0);
   const busyRef = useRef(false);
   const selected = templates?.find((item) => item.slug === selection);
+  const invalidateEpoch = useCallback(() => {
+    epoch.current += 1;
+  }, []);
+  useResetOnChange([agentId, online, refresh, refreshKey], () => {
+    setTemplates(null);
+  });
   useEffect(() => {
     const current = ++epoch.current;
     const controller = new AbortController();
-    setTemplates(null);
     if (online) {
       daemon
         .listWorkflowTemplates(agentId, { signal: controller.signal })
@@ -127,10 +133,10 @@ export function WorkflowTemplates({
         });
     }
     return () => {
-      epoch.current++;
+      invalidateEpoch();
       controller.abort();
     };
-  }, [agentId, online, refresh, refreshKey]);
+  }, [agentId, online, refresh, refreshKey, invalidateEpoch]);
 
   const submit = async (command: Command) => {
     if (!online || !templates || busyRef.current) return;

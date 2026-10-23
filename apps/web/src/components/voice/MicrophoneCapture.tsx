@@ -12,6 +12,8 @@ import {
   type CaptureState,
   type MicrophoneCaptureController,
 } from '../../lib/audio-capture';
+import { useLatest } from '../../hooks/useLatest';
+import { useRenderScope } from '../../hooks/useRenderScope';
 
 const messages: Record<CaptureError, string> = {
   unsupported: 'Audio recording is unavailable in this browser.',
@@ -39,29 +41,23 @@ export function MicrophoneCapture({
   disabled: boolean;
   onAdd: (files: readonly File[]) => void;
 }) {
-  const [state, setState] = useState<CaptureState>({ status: 'idle' });
-  const [clock, setClock] = useState(Date.now());
+  const boundary = useRenderScope(conversationKey, disabled);
+  const [capture, setCapture] = useState<{
+    boundary: typeof boundary;
+    value: CaptureState;
+  } | null>(null);
+  const state: CaptureState =
+    capture?.boundary === boundary ? capture.value : { status: 'idle' };
+  const setState = (value: CaptureState) => setCapture({ boundary, value });
+  const [clock, setClock] = useState(0);
   const controllerRef = useRef<MicrophoneCaptureController | null>(null);
   const activeRef = useRef(false);
-  const scopeRef = useRef({ conversationKey, disabled, onAdd });
-  const boundaryRef = useRef({ conversationKey, disabled, generation: 0 });
-  if (
-    boundaryRef.current.conversationKey !== conversationKey ||
-    boundaryRef.current.disabled !== disabled
-  ) {
-    boundaryRef.current = {
-      conversationKey,
-      disabled,
-      generation: boundaryRef.current.generation + 1,
-    };
-  }
-  const generation = boundaryRef.current.generation;
-  scopeRef.current = { conversationKey, disabled, onAdd };
+  const scopeRef = useLatest({ conversationKey, disabled, onAdd });
+  const boundaryRef = useLatest(boundary);
 
   useLayoutEffect(() => {
     let live = true;
     activeRef.current = false;
-    setState({ status: 'idle' });
     if (disabled || !conversationKey)
       return () => {
         live = false;
@@ -71,10 +67,10 @@ export function MicrophoneCapture({
         live &&
         activeRef.current &&
         controllerRef.current === controller &&
-        boundaryRef.current.generation === generation &&
+        boundaryRef.current === boundary &&
         !scopeRef.current.disabled
       )
-        setState(next);
+        setCapture({ boundary, value: next });
     });
     controllerRef.current = controller;
     activeRef.current = true;
@@ -85,7 +81,7 @@ export function MicrophoneCapture({
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [conversationKey, disabled, generation]);
+  }, [conversationKey, disabled, boundary, boundaryRef, scopeRef]);
 
   useEffect(() => {
     if (state.status !== 'recording') return;
@@ -98,12 +94,12 @@ export function MicrophoneCapture({
     return (
       activeRef.current &&
       controllerRef.current !== null &&
-      boundaryRef.current.generation === generation &&
+      boundaryRef.current === boundary &&
       !scope.disabled &&
       scope.conversationKey.length > 0 &&
       scope.conversationKey === conversationKey
     );
-  }, [conversationKey, generation]);
+  }, [conversationKey, boundary, boundaryRef, scopeRef]);
 
   const record = () => {
     if (!canAct()) return;

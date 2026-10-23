@@ -42,7 +42,7 @@ export function useConversationLifecycle({
     return () => {
       current = false;
     };
-  }, [agentId]);
+  }, [agentId, setLegacyMigrationError]);
 
   // Opening an unread session marks it read up to its newest message, but
   // not while a page hides it.

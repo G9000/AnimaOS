@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { daemon } from '../lib/daemon-api';
 import { describeTrigger } from '../lib/automations';
 import type { AgentDetail } from '../lib/types';
@@ -7,6 +7,8 @@ import { WorkspaceGoals } from './WorkspaceGoals';
 import { WorkspaceWorkflows } from './WorkspaceWorkflows';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentProactiveView, AgentTasksView } from './AgentWork';
+import { useLatest } from '../hooks/useLatest';
+import { useRenderScope } from '../hooks/useRenderScope';
 
 type Section = 'Notes' | 'Tasks' | 'Schedules' | 'Runs' | 'Workflows' | 'Goals';
 type Entry = {
@@ -142,18 +144,14 @@ export function WorkspaceHub({
   // even when its membership and online value match an earlier request.
   const tasksOnline = section !== 'Tasks' || online;
   const contextKey = JSON.stringify([agentIds, section, revision, tasksOnline]);
-  const generationRef = useRef({ key: contextKey });
-  if (generationRef.current.key !== contextKey) {
-    generationRef.current = { key: contextKey };
-  }
-  const generation = generationRef.current;
+  const generation = useRenderScope(contextKey);
+  const generationRef = useLatest(generation);
   const result =
-    section !== 'Tasks' || (online && loaded?.generation === generation)
-      ? (loaded?.result ?? null)
+    loaded?.generation === generation && (section !== 'Tasks' || online)
+      ? loaded.result
       : null;
   useEffect(() => {
     let cancelled = false;
-    setLoaded(null);
     if (
       section === 'Runs' ||
       section === 'Goals' ||
@@ -195,7 +193,7 @@ export function WorkspaceHub({
     return () => {
       cancelled = true;
     };
-  }, [agentIds, section, revision, tasksOnline, generation]);
+  }, [agentIds, section, revision, tasksOnline, generation, generationRef]);
 
   const selectedId = agents.some((agent) => agent.id === agentFilter)
     ? agentFilter

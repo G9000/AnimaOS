@@ -85,8 +85,7 @@ it.each(['switch', 'disabled', 'remove', 'unmount'] as const)(
     expect(signal?.aborted).toBe(true);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local');
     await act(async () => pending.resolve(attachment));
-    if (boundary !== 'unmount')
-      expect(result.current.readyAttachments).toHaveLength(0);
+    expect(result.current.readyAttachments).toHaveLength(0);
   },
 );
 

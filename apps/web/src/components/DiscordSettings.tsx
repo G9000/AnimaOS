@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type {
   DiscordConnector,
   CreateDiscordConnectorInput,
@@ -191,17 +192,17 @@ function DiscordConnection({
   const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState(() => rulesDraft(c));
   const [editing, setEditing] = useState(false);
-  useLayoutEffect(() => {
+  useResetOnChange([p.agentId, c.id, p.online, p.epoch], () => {
     setToken('');
     setReplacing(false);
     setReviewing(false);
     setDeleting(false);
     setDraft(rulesDraft(c));
     setEditing(false);
-  }, [p.agentId, c.id, p.online, p.epoch]);
-  useLayoutEffect(() => {
+  });
+  useResetOnChange([c.unknownOutbound], () => {
     if (c.unknownOutbound === 0) setReviewing(false);
-  }, [c.unknownOutbound]);
+  });
   const disabled =
     p.disabled || p.online === false || p.busy !== null || p.loading;
   const warning = discordWarning(c.warning);
@@ -481,20 +482,23 @@ export function DiscordSettings(p: DiscordSettingsProps) {
   const [checked, setChecked] = useState<DiscordBotCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const request = useRef(0);
-  useLayoutEffect(() => {
+  const invalidateCheck = useCallback(() => {
+    request.current += 1;
+  }, []);
+  useResetOnChange([p.agentId], () => {
     setGuild('');
     setChannel('');
     setDraft(rulesDraft());
-  }, [p.agentId]);
-  useLayoutEffect(() => {
-    request.current++;
+  });
+  useResetOnChange([p.agentId, p.online, p.epoch], () => {
     setToken('');
     setChecked(null);
     setChecking(false);
-    return () => {
-      request.current++;
-    };
-  }, [p.agentId, p.online, p.epoch]);
+  });
+  useLayoutEffect(() => {
+    invalidateCheck();
+    return invalidateCheck;
+  }, [p.agentId, p.online, p.epoch, invalidateCheck]);
   const disabled = Boolean(
     p.disabled ||
     p.online === false ||

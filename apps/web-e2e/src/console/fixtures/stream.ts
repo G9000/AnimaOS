@@ -37,7 +37,7 @@ export async function installStreams(
           for (const stream of streams.keys()) stream.enqueue(encode(event));
         },
         disconnect() {
-          for (const [stream, detach] of [...streams]) {
+          for (const [stream, detach] of streams) {
             detach();
             stream.close();
           }

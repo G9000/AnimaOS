@@ -27,25 +27,33 @@ export function Playground() {
   const [providerList, setProviderList] = useState<Provider[] | null>(null);
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
 
-  const refreshAgents = useCallback(async () => {
-    try {
-      const list = await agents.list();
-      setAgentList(list);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  const refreshAgents = useCallback(
+    () =>
+      agents.list().then(
+        (list) => {
+          setAgentList(list);
+          setLoadError(null);
+        },
+        (e: unknown) => {
+          setLoadError(e instanceof Error ? e.message : String(e));
+        },
+      ),
+    [],
+  );
 
-  const refreshSwarms = useCallback(async () => {
-    try {
-      const list = await swarms.list();
-      setSwarmList(list);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  const refreshSwarms = useCallback(
+    () =>
+      swarms.list().then(
+        (list) => {
+          setSwarmList(list);
+          setLoadError(null);
+        },
+        (e: unknown) => {
+          setLoadError(e instanceof Error ? e.message : String(e));
+        },
+      ),
+    [],
+  );
 
   const refreshActive = useCallback(async () => {
     if (kind === 'agents') return refreshAgents();
@@ -85,24 +93,15 @@ export function Playground() {
     selectedId == null
       ? null
       : kind === 'agents'
-      ? agentList.find((a) => a.state.id === selectedId) ?? null
-      : kind === 'swarms'
-      ? swarmList.find((s) => s.id === selectedId) ?? null
-      : null;
-
-  useEffect(() => {
-    if (selectedId == null) return;
-    const exists =
-      kind === 'agents'
-        ? agentList.some((a) => a.state.id === selectedId)
+        ? (agentList.find((a) => a.state.id === selectedId) ?? null)
         : kind === 'swarms'
-        ? swarmList.some((s) => s.id === selectedId)
-        : false;
-    if (!exists) {
-      setSelectedId(null);
-      setView('empty');
-    }
-  }, [kind, agentList, swarmList, selectedId]);
+          ? (swarmList.find((s) => s.id === selectedId) ?? null)
+          : null;
+
+  if (selectedId !== null && selected === null) {
+    setSelectedId(null);
+    setView('empty');
+  }
 
   function handleKindChange(next: EntityKind) {
     setKind(next);
@@ -122,7 +121,9 @@ export function Playground() {
 
   async function handleDelete(id: string) {
     if (kind === 'agencies') {
-      alert('Agency workspaces are written to disk and are not listed by the daemon yet.');
+      alert(
+        'Agency workspaces are written to disk and are not listed by the daemon yet.',
+      );
       return;
     }
     if (kind === 'swarms') {
@@ -212,8 +213,8 @@ export function Playground() {
                   kind === 'agencies'
                     ? false
                     : kind === 'agents'
-                    ? agentList.length > 0
-                    : swarmList.length > 0
+                      ? agentList.length > 0
+                      : swarmList.length > 0
                 }
                 onNew={handleNew}
               />
@@ -284,10 +285,10 @@ function EmptyState({
           {hasItems
             ? `Select a ${noun} from the sidebar to start chatting, or create a new one.`
             : kind === 'agents'
-            ? 'Agents are individual conversational endpoints backed by a model provider.'
-            : kind === 'agencies'
-            ? 'Agencies are prompt-generated workspace bundles, similar to `animaos create`, and can optionally be spawned as live swarms.'
-            : 'Swarms wrap a manager and one or more workers under a coordination strategy.'}
+              ? 'Agents are individual conversational endpoints backed by a model provider.'
+              : kind === 'agencies'
+                ? 'Agencies are prompt-generated workspace bundles, similar to `animaos create`, and can optionally be spawned as live swarms.'
+                : 'Swarms wrap a manager and one or more workers under a coordination strategy.'}
         </p>
         <div className="flex justify-center gap-2 mt-2">
           <button

@@ -8,6 +8,8 @@ import {
 } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 import { downloadText } from '../lib/download';
 import {
   USAGE_EXPORT_FAILED,
@@ -72,8 +74,7 @@ export function useUsage({
   epoch,
   now = () => new Date(),
 }: UsageOptions): UsageView {
-  const clock = useRef(now);
-  clock.current = now;
+  const clock = useLatest(now);
   const [range, setRange] = useState(() => rangeFor(days, now));
   const [dayList, setDayList] = useState<UsageGroup[]>(NO_GROUPS);
   const [models, setModels] = useState<UsageGroup[]>(NO_GROUPS);
@@ -87,13 +88,17 @@ export function useUsage({
     status: number | null;
   } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const scope = useRenderScope(enabled, agentId, days, epoch);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setExportError(null);
+  }
   // The newest read wins; a late answer to an older one is dropped.
   const sequence = useRef(0);
   const unmounted = useRef(false);
-  const daysRef = useRef(days);
-  daysRef.current = days;
-  const agentRef = useRef(agentId);
-  agentRef.current = agentId;
+  const daysRef = useLatest(days);
+  const agentRef = useLatest(agentId);
 
   const load = useCallback(async () => {
     if (!agentId) return;
@@ -146,7 +151,7 @@ export function useUsage({
         : null,
     );
     setLoaded(true);
-  }, [agentId, days]);
+  }, [agentId, days, clock]);
 
   useEffect(() => {
     unmounted.current = false;
@@ -157,7 +162,8 @@ export function useUsage({
 
   useEffect(() => {
     if (!enabled || !agentId) return;
-    setExportError(null);
+    // State changes only after all awaited daemon responses have settled.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
   }, [enabled, agentId, days, epoch, load]);
 
@@ -187,7 +193,7 @@ export function useUsage({
         );
       return false;
     }
-  }, []);
+  }, [clock, agentRef, daysRef]);
 
   return {
     range,

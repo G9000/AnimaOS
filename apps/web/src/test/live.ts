@@ -228,6 +228,7 @@ async function* silentStream(
   await new Promise<void>((resolve) =>
     signal?.addEventListener('abort', () => resolve(), { once: true }),
   );
+  yield* [];
 }
 
 /** `daemon.agentEvents` streams that stay open and silent until closed. */

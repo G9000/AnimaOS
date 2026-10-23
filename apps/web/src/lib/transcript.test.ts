@@ -238,9 +238,13 @@ describe('m83 search source provenance in transcript cards', () => {
       const items = buildHistory({
         messages: [call('call', 'run-a', 'run-a:1'), saved],
       }).items;
-      for (const item of items)
-        if (item.kind === 'tools')
-          for (const step of item.steps) expect(step.sources ?? []).toEqual([]);
+      const tools = items.filter((item) => item.kind === 'tools');
+      expect(tools.length).toBeGreaterThan(0);
+      expect(
+        tools.flatMap((item) =>
+          item.steps.flatMap((step) => step.sources ?? []),
+        ),
+      ).toEqual([]);
     },
   );
 

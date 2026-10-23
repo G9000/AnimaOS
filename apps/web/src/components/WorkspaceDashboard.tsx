@@ -4,6 +4,7 @@ import { daemon, type DaemonSchedule } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentAvatar } from './AgentAvatar';
 import { selectMainAgent } from '../lib/agent-access';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 
 type Snapshot = {
   tasks: (AgentTask & { agentId: string })[];
@@ -44,17 +45,18 @@ export function WorkspaceDashboard({
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(true);
   const agentIds = JSON.stringify(agents.map((agent) => agent.id).sort());
+  useResetOnChange([agentIds, online, refresh], () => {
+    setSnapshot(null);
+    setBusy(online);
+  });
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
-    setSnapshot(null);
     const ids = JSON.parse(agentIds) as string[];
     async function load() {
       if (!online) {
-        setBusy(false);
         return;
       }
-      setBusy(true);
       const results = await Promise.all(
         ids.map(async (id) => ({
           id,
@@ -86,8 +88,13 @@ export function WorkspaceDashboard({
       }
       setSnapshot(next);
       setBusy(false);
-      timer = setTimeout(() => void load(), 30_000);
+      timer = setTimeout(() => {
+        setBusy(true);
+        void load();
+      }, 30_000);
     }
+    // State changes only after all awaited dashboard requests settle.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
     return () => {
       cancelled = true;

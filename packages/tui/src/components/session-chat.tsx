@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import {
   isTerminalRunStatus,
@@ -71,10 +71,14 @@ export function SessionChat({
 }: SessionChatProps): React.ReactElement | null {
   const [draft, setDraft] = useState('');
   const sessionIdRef = useRef(session.id);
-  sessionIdRef.current = session.id;
-  useEffect(() => {
-    setDraft('');
+  useLayoutEffect(() => {
+    sessionIdRef.current = session.id;
   }, [session.id]);
+  const [draftSessionId, setDraftSessionId] = useState(session.id);
+  if (draftSessionId !== session.id) {
+    setDraftSessionId(session.id);
+    setDraft('');
+  }
   const currentRun =
     activeRun ??
     [...runs].sort((left, right) => right.createdAtMs - left.createdAtMs)[0] ??

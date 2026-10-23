@@ -1,4 +1,5 @@
 import { Text } from 'ink';
+import { useLayoutEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentEvent,
@@ -155,6 +156,7 @@ function neverStream(signal: AbortSignal): AsyncIterable<AgentEvent> {
       await new Promise<void>((resolve) => {
         signal.addEventListener('abort', () => resolve(), { once: true });
       });
+      yield* [];
     },
   };
 }
@@ -188,10 +190,13 @@ function createApi(overrides: Partial<TuiSessionApi> = {}): TuiSessionApi {
 function renderWorkspace(api: TuiSessionApi, online = true) {
   const current: { value: UseSessionWorkspaceResult | null } = { value: null };
   function Probe() {
-    current.value = useSessionWorkspace({ api, online });
+    const workspace = useSessionWorkspace({ api, online });
+    useLayoutEffect(() => {
+      current.value = workspace;
+    }, [workspace]);
     return (
       <Text>
-        {`agent=${current.value.selectedAgentId ?? 'none'}|session=${current.value.activeSession?.id ?? 'none'}|messages=${current.value.messages.length}|offline=${String(current.value.isOffline)}|stream=${current.value.streamStatus}`}
+        {`agent=${workspace.selectedAgentId ?? 'none'}|session=${workspace.activeSession?.id ?? 'none'}|messages=${workspace.messages.length}|offline=${String(workspace.isOffline)}|stream=${workspace.streamStatus}`}
       </Text>
     );
   }

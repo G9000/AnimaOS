@@ -1,4 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import {
   DAEMON_HEALTH_UNAVAILABLE_MESSAGE,
   describeDaemonWarningTransition,
@@ -45,16 +51,29 @@ export function useDaemonState({
   onWarning,
 }: UseDaemonStateOptions): UseDaemonStateResult {
   const [daemonWarning, setDaemonWarning] = useState<string | null>(
-    preflightWarning ?? null
+    preflightWarning ?? null,
   );
   const [daemonRecoveryNotice, setDaemonRecoveryNotice] = useState<
     string | null
   >(null);
   const [lastDaemonCheckAt, setLastDaemonCheckAt] = useState<number | null>(
-    pollDaemonWarning || typeof preflightWarning !== 'undefined'
-      ? Date.now()
-      : null
+    () =>
+      pollDaemonWarning || typeof preflightWarning !== 'undefined'
+        ? Date.now()
+        : null,
   );
+  const [preflight, setPreflight] = useState({
+    warning: preflightWarning,
+    poll: pollDaemonWarning,
+  });
+  if (
+    preflight.warning !== preflightWarning ||
+    preflight.poll !== pollDaemonWarning
+  ) {
+    setPreflight({ warning: preflightWarning, poll: pollDaemonWarning });
+    setDaemonWarning(preflightWarning ?? null);
+    if (preflightWarning) setDaemonRecoveryNotice(null);
+  }
   const daemonWarningRef = useRef<string | null>(preflightWarning ?? null);
   const daemonRecoveryNoticeTimeoutRef = useRef<ReturnType<
     typeof setTimeout
@@ -133,7 +152,7 @@ export function useDaemonState({
       const transition = describeDaemonWarningTransition(
         previousWarning,
         nextWarning,
-        source
+        source,
       );
       if (transition.message) {
         showMessage(transition.message);
@@ -148,22 +167,19 @@ export function useDaemonState({
       pollDaemonWarning,
       showDaemonRecoveryNotice,
       showMessage,
-    ]
+    ],
   );
 
+  useLayoutEffect(() => {
+    daemonWarningRef.current = daemonWarning;
+  }, [daemonWarning]);
+
   useEffect(() => {
-    const nextWarning = preflightWarning ?? null;
-    daemonWarningRef.current = nextWarning;
-    setDaemonWarning(nextWarning);
-    if (nextWarning) {
-      clearDaemonRecoveryNotice();
+    if (preflightWarning && daemonRecoveryNoticeTimeoutRef.current) {
+      clearTimeout(daemonRecoveryNoticeTimeoutRef.current);
+      daemonRecoveryNoticeTimeoutRef.current = null;
     }
-    if (pollDaemonWarning || typeof preflightWarning !== 'undefined') {
-      setLastDaemonCheckAt(Date.now());
-      return;
-    }
-    setLastDaemonCheckAt(null);
-  }, [clearDaemonRecoveryNotice, pollDaemonWarning, preflightWarning]);
+  }, [preflightWarning]);
 
   useEffect(() => clearDaemonRecoveryNotice, [clearDaemonRecoveryNotice]);
 
@@ -210,9 +226,12 @@ export function useDaemonState({
     daemonStatus: daemonWarning
       ? 'down'
       : pollDaemonWarning || typeof preflightWarning !== 'undefined'
-      ? 'up'
-      : undefined,
-    lastDaemonCheckAt,
+        ? 'up'
+        : undefined,
+    lastDaemonCheckAt:
+      pollDaemonWarning || typeof preflightWarning !== 'undefined'
+        ? lastDaemonCheckAt
+        : null,
     taskEntryBlockedByDaemon:
       interactive && phase === 'waiting' && Boolean(daemonWarning),
     syncDaemonWarning,

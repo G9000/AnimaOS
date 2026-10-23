@@ -1,5 +1,6 @@
-import { useRef, type RefObject } from 'react';
+import type { RefObject } from 'react';
 import { useBrowserDictation } from '../../hooks/useBrowserDictation';
+import { useLatest } from '../../hooks/useLatest';
 import { labelCls } from '../ui-bits';
 
 export function WorkspaceBrief({
@@ -11,14 +12,13 @@ export function WorkspaceBrief({
   onChange(value: string): void;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
-  const latestValue = useRef(value);
-  latestValue.current = value;
+  const latestValueRef = useLatest(value);
   const change = (text: string) => {
-    latestValue.current = text;
+    latestValueRef.current = text;
     onChange(text);
   };
   const dictation = useBrowserDictation((text) => {
-    const previous = latestValue.current;
+    const previous = latestValueRef.current;
     change(`${previous}${previous && !/\s$/.test(previous) ? ' ' : ''}${text}`);
   });
   const active = dictation.state !== 'idle';
@@ -99,9 +99,9 @@ export function WorkspaceBrief({
         id="onboarding-brief-help"
         className="mt-3 text-sm leading-relaxed text-ink-3"
       >
-        Describe the first useful result you want, who it is for, and what a good
-        outcome looks like. Include constraints and context your team should keep
-        in mind. Paragraphs and bullet points are welcome.
+        Describe the first useful result you want, who it is for, and what a
+        good outcome looks like. Include constraints and context your team
+        should keep in mind. Paragraphs and bullet points are welcome.
       </p>
     </div>
   );

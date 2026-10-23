@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
   useCallback,
   useEffect,
@@ -327,9 +328,7 @@ export function SessionSidebar({
     key: string;
     target: HTMLElement | null;
   } | null>(null);
-  useEffect(() => {
-    setText(query);
-  }, [query]);
+  useResetOnChange([query], () => setText(query));
   useEffect(() => {
     if (text === query) return;
     const timer = window.setTimeout(
@@ -403,7 +402,13 @@ export function SessionSidebar({
   const visible = activeKind
     ? sessions.filter((session) => session.kind === activeKind)
     : sessions;
-  const groups = groupSessions(visible, now ?? new Date(), activeKind === null);
+  const [localNow, setLocalNow] = useState(() => new Date());
+  useEffect(() => {
+    if (now !== undefined) return;
+    const timer = window.setInterval(() => setLocalNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [now]);
+  const groups = groupSessions(visible, now ?? localNow, activeKind === null);
 
   return (
     <nav className="session-sidebar" aria-label="Sessions" ref={navRef}>

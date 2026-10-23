@@ -105,6 +105,8 @@ export function useSkills({
 
   useEffect(() => {
     if (!enabled) return;
+    // State changes only after the awaited daemon responses, including failures.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
   }, [enabled, version, epoch, load]);
 

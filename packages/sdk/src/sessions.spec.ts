@@ -296,12 +296,11 @@ describe('sessions client', () => {
     const page = await sessions.messages('agent/a', 'chat:1');
     const summary = page.messages[0].attachments[0].extraction;
     expect(summary).toEqual(extraction);
-    if (summary && 'format' in summary && summary.format === 'xlsx') {
-      const xlsx: SessionMessageXlsxExtraction = summary;
-      expect(xlsx.includedCellCount).toBe(4);
-    } else {
+    if (!summary || !('format' in summary) || summary.format !== 'xlsx') {
       throw new Error('Expected the XLSX extraction variant');
     }
+    const xlsx: SessionMessageXlsxExtraction = summary;
+    expect(xlsx.includedCellCount).toBe(4);
     expect(requests[0].url).toBe(
       '/api/agents/agent%2Fa/sessions/chat%3A1/messages',
     );
@@ -487,9 +486,9 @@ describe('sessions client', () => {
     expect(requests[0].url).toBe(
       '/api/agents/agent%2Fa/sessions/chat%3A1/export',
     );
-    expect(
-      (requests[0].init?.headers as Record<string, string>).accept,
-    ).toContain('text/markdown');
+    expect(new Headers(requests[0].init?.headers).get('accept')).toContain(
+      'text/markdown',
+    );
 
     const failure = sessions.exportMarkdown('agent/a', 'chat:missing');
     await expect(failure).rejects.toBeInstanceOf(DaemonHttpError);

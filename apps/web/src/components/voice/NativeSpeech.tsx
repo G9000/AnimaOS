@@ -19,6 +19,7 @@ export interface NativeSpeechProps {
 
 type Phase = 'checking' | 'generating' | 'ready' | 'playing' | 'cleanup';
 interface SpeechOwner {
+  panelId: string;
   scope: string;
   operationId: string;
   agentId: string;
@@ -37,10 +38,21 @@ interface SpeechOwner {
   url: string | null;
 }
 
+interface SpeechSnapshot {
+  readonly panelId: string;
+  readonly scope: string;
+  readonly retired: boolean;
+  readonly phase: Phase;
+  readonly hasBlob: boolean;
+  readonly hasPlayer: boolean;
+  readonly playSettled: boolean;
+  readonly cleanupCertain: boolean;
+}
+
 // A single page owner survives component unmount while aborted fetch, DELETE, or
 // a browser play promise is still unsettled. No second operation is queued.
 let pageOwner: SpeechOwner | null = null;
-let ownerVersion = 0;
+let ownerView: SpeechSnapshot | null = null;
 const ownerSubscribers = new Set<() => void>();
 
 function subscribeOwner(listener: () => void) {
@@ -49,12 +61,29 @@ function subscribeOwner(listener: () => void) {
 }
 
 function ownerSnapshot() {
-  return ownerVersion;
+  return ownerView;
 }
 
 function notifyOwner() {
-  ownerVersion += 1;
+  ownerView = pageOwner
+    ? {
+        panelId: pageOwner.panelId,
+        scope: pageOwner.scope,
+        retired: pageOwner.retired,
+        phase: pageOwner.phase,
+        hasBlob: pageOwner.blob !== null,
+        hasPlayer: pageOwner.player !== null,
+        playSettled: pageOwner.playSettled,
+        cleanupCertain: pageOwner.cleanupCertain,
+      }
+    : null;
   for (const listener of ownerSubscribers) listener();
+}
+
+function claimOwner(owner: SpeechOwner) {
+  if (pageOwner) return false;
+  pageOwner = owner;
+  return true;
 }
 
 function releaseIfSettled(owner: SpeechOwner) {
@@ -177,7 +206,11 @@ export function NativeSpeech({
 }: NativeSpeechProps) {
   const selectId = useId();
   const [selectedId, setSelectedId] = useState('');
-  useSyncExternalStore(subscribeOwner, ownerSnapshot, ownerSnapshot);
+  const snapshot = useSyncExternalStore(
+    subscribeOwner,
+    ownerSnapshot,
+    ownerSnapshot,
+  );
   const mounted = useRef(false);
   const ownerRef = useRef<SpeechOwner | null>(null);
   const [notice, setNotice] = useState('');
@@ -219,13 +252,15 @@ export function NativeSpeech({
     return () => {
       if (ownerRef.current?.scope === scope) retire(ownerRef.current);
     };
-  }, [scope]);
+  }, [scope, committedScope]);
 
-  const owned =
-    ownerRef.current?.scope === scope && !ownerRef.current.retired
-      ? ownerRef.current
+  const activeOwner =
+    snapshot?.panelId === selectId &&
+    snapshot.scope === scope &&
+    !snapshot.retired
+      ? snapshot
       : null;
-  const pending = pageOwner !== null && pageOwner !== owned;
+  const pending = snapshot !== null && activeOwner === null;
   const generate = () => {
     if (
       disabled ||
@@ -236,6 +271,7 @@ export function NativeSpeech({
     )
       return;
     const owner: SpeechOwner = {
+      panelId: selectId,
       scope,
       agentId,
       sessionId,
@@ -253,7 +289,7 @@ export function NativeSpeech({
       player: null,
       url: null,
     };
-    pageOwner = owner;
+    if (!claimOwner(owner)) return;
     ownerRef.current = owner;
     setNotice('');
     notify();
@@ -315,8 +351,11 @@ export function NativeSpeech({
     })();
   };
   const play = () => {
+    const owned = ownerRef.current;
     if (
       disabled ||
+      owned?.scope !== scope ||
+      owned.retired ||
       !owned?.blob ||
       owned.player ||
       !owned.playSettled ||
@@ -380,6 +419,18 @@ export function NativeSpeech({
       notify();
     }
   };
+  const discard = () => {
+    const owner = ownerRef.current;
+    if (owner?.scope === scope) retire(owner);
+  };
+  const stopPlayback = () => {
+    const owner = ownerRef.current;
+    if (!owner || owner.scope !== scope || owner.retired) return;
+    if (detachPlayer(owner)) {
+      owner.phase = 'ready';
+      notify();
+    } else retire(owner);
+  };
 
   return (
     <section
@@ -418,46 +469,42 @@ export function NativeSpeech({
       <button
         type="button"
         className="studio-tool-button mt-2"
-        disabled={disabled || !selected || Boolean(pageOwner)}
+        disabled={disabled || !selected || Boolean(snapshot)}
         onClick={generate}
       >
         Generate speech with OpenAI API
       </button>
-      {owned &&
-        (owned.phase === 'checking' || owned.phase === 'generating') && (
+      {activeOwner &&
+        (activeOwner.phase === 'checking' ||
+          activeOwner.phase === 'generating') && (
           <button
             type="button"
             className="studio-tool-button ml-2"
-            onClick={() => retire(owned)}
+            onClick={discard}
           >
             Stop generating speech
           </button>
         )}
-      {owned?.blob && (
+      {activeOwner?.hasBlob && (
         <>
           <button
             type="button"
             className="studio-tool-button ml-2"
             disabled={
               disabled ||
-              Boolean(owned.player) ||
-              !owned.playSettled ||
-              !owned.cleanupCertain
+              activeOwner.hasPlayer ||
+              !activeOwner.playSettled ||
+              !activeOwner.cleanupCertain
             }
             onClick={play}
           >
             Play speech
           </button>
-          {owned.player && (
+          {activeOwner.hasPlayer && (
             <button
               type="button"
               className="studio-tool-button ml-2"
-              onClick={() => {
-                if (detachPlayer(owned)) {
-                  owned.phase = 'ready';
-                  notify();
-                } else retire(owned);
-              }}
+              onClick={stopPlayback}
             >
               Stop speech
             </button>
@@ -465,7 +512,7 @@ export function NativeSpeech({
           <button
             type="button"
             className="studio-tool-button ml-2"
-            onClick={() => retire(owned)}
+            onClick={discard}
           >
             Discard speech
           </button>

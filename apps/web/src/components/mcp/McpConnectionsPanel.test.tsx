@@ -622,10 +622,13 @@ describe('owner external tools', () => {
     expect(
       screen.getByRole('button', { name: 'Save disabled connection' }),
     ).toBeEnabled();
-    await user.type(
-      args,
-      Array.from({ length: 33 }, (_, index) => `arg-${index}`).join('\n'),
-    );
+    fireEvent.change(args, {
+      target: {
+        value: Array.from({ length: 33 }, (_, index) => `arg-${index}`).join(
+          '\n',
+        ),
+      },
+    });
     expect(trust).not.toBeChecked();
     await user.click(trust);
     expect(

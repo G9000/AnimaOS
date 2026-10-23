@@ -137,6 +137,7 @@ export function groupFacts(facts: readonly MemoryFact[]): {
  *  joined scripts survive. */
 export function stripInvisible(text: string): string {
   return text.replace(
+    // eslint-disable-next-line no-misleading-character-class -- Strip these Unicode formatting code points individually, including tags and variation selectors.
     /[\u{E0000}-\u{E007F}\u{202A}-\u{202E}\u{2066}-\u{2069}\u{E0100}-\u{E01EF}]/gu,
     '',
   );

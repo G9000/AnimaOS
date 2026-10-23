@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 import type {
   AgentRelationship,
   Memory,
@@ -80,14 +82,6 @@ function keepEmpty<T>(previous: T[], next: T[]): T[] {
   return previous.length === 0 && next.length === 0 ? previous : next;
 }
 
-function sameInputs(context: MemoryContext, options: MemoryOptions): boolean {
-  return (
-    context.agentId === options.agentId &&
-    context.enabled === options.enabled &&
-    context.epoch === options.epoch
-  );
-}
-
 function emptySnapshot(context: MemoryContext): MemorySnapshot {
   return {
     context,
@@ -110,25 +104,19 @@ export function useMemory({
 }: MemoryOptions): MemoryView {
   const sequence = useRef(0);
   const mounted = useRef(true);
-  const contextRef = useRef<MemoryContext | null>(null);
-  const inputs = { agentId, epoch, enabled };
-
-  if (!contextRef.current || !sameInputs(contextRef.current, inputs)) {
-    const generation = (contextRef.current?.generation ?? 0) + 1;
-    contextRef.current = { ...inputs, generation };
-    // Invalidate reads as soon as a new context is rendered. The visible view
-    // is projected from the context-bound snapshot below, before effects run.
-    sequence.current += 1;
-  }
-
-  const context = contextRef.current!;
+  const { generation } = useRenderScope(agentId, epoch, enabled);
+  const context = useMemo<MemoryContext>(
+    () => ({ agentId, epoch, enabled, generation }),
+    [agentId, epoch, enabled, generation],
+  );
+  const contextRef = useLatest(context);
   const isCurrent = useCallback(
     (origin: MemoryContext) =>
       mounted.current &&
       contextRef.current === origin &&
       origin.enabled &&
       Boolean(origin.agentId),
-    [],
+    [contextRef],
   );
 
   const [snapshot, setSnapshot] = useState<MemorySnapshot>(() =>
@@ -136,10 +124,8 @@ export function useMemory({
   );
   const [query, setQuery] = useState('');
   const [includeReplaced, setIncludeReplaced] = useState(false);
-  const queryRef = useRef(query);
-  queryRef.current = query;
-  const includeReplacedRef = useRef(includeReplaced);
-  includeReplacedRef.current = includeReplaced;
+  const queryRef = useLatest(query);
+  const includeReplacedRef = useLatest(includeReplaced);
 
   const currentSnapshot =
     snapshot.context === context ? snapshot : emptySnapshot(context);
@@ -209,7 +195,7 @@ export function useMemory({
           : null,
       };
     });
-  }, [context, isCurrent]);
+  }, [context, isCurrent, queryRef, includeReplacedRef]);
 
   // Mount validity must be established before the read effect. React Strict
   // Mode replays effects after cleanup; the replayed load must see mounted=true.

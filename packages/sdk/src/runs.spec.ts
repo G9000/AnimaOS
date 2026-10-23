@@ -141,9 +141,9 @@ describe('runs client', () => {
     const [request] = requests;
     expect(request.url).toBe('/api/agents/agent%2Fa/sessions/chat%3A1/runs');
     expect(request.init?.method).toBe('POST');
-    expect(
-      (request.init?.headers as Record<string, string>)['idempotency-key'],
-    ).toBe('key-1');
+    expect(new Headers(request.init?.headers).get('idempotency-key')).toBe(
+      'key-1',
+    );
     expect(JSON.parse(String(request.init?.body))).toEqual({
       text: 'Plan the week',
       mode: 'queue',

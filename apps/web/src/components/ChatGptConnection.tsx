@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDaemonClient, type ChatGptStatus } from '@animaos/sdk';
+import { useLatest } from '../hooks/useLatest';
 
 const client = createDaemonClient({ baseUrl: '' }).chatgpt;
 const verificationUrl = 'https://auth.openai.com/codex/device';
@@ -27,69 +28,78 @@ export function ChatGptConnection({
   const generation = useRef(0);
   const connected = useRef<boolean | null>(null);
   const account = useRef<string | null>(null);
-  const onChange = useRef(onConnectionChange);
-  onChange.current = onConnectionChange;
-  const modelScopeChange = useRef(onModelScopeChange);
-  modelScopeChange.current = onModelScopeChange;
+  const onChange = useLatest(onConnectionChange);
+  const modelScopeChange = useLatest(onModelScopeChange);
 
-  async function request(
-    action: 'status' | 'login' | 'cancel' | 'disconnect',
-    foreground = true,
-  ) {
-    const version = ++generation.current;
-    if (foreground) {
-      setBusy(true);
-      modelScopeChange.current?.(true);
-    }
-    setError(null);
-    try {
-      const next = await client[action]();
-      if (version !== generation.current) return;
-      setStatus(next);
-      if (
-        (connected.current !== next.connected ||
-          account.current !== next.accountId) &&
-        (connected.current !== null || next.connected)
-      ) {
-        void Promise.resolve(onChange.current?.()).catch(() => {
+  const request = useCallback(
+    (
+      action: 'status' | 'login' | 'cancel' | 'disconnect',
+      foreground = true,
+    ) => {
+      const version = ++generation.current;
+      if (foreground) {
+        modelScopeChange.current?.(true);
+      }
+      return client[action]()
+        .then((next) => {
+          if (version !== generation.current) return;
+          setStatus(next);
+          if (
+            (connected.current !== next.connected ||
+              account.current !== next.accountId) &&
+            (connected.current !== null || next.connected)
+          ) {
+            void Promise.resolve(onChange.current?.()).catch(() => {
+              if (version === generation.current)
+                setError(
+                  'Account updated, but the provider catalog could not refresh. Retry the provider catalog.',
+                );
+            });
+          }
+          if (
+            !foreground &&
+            (connected.current !== next.connected ||
+              account.current !== next.accountId)
+          ) {
+            modelScopeChange.current?.(false);
+          }
+          connected.current = next.connected;
+          account.current = next.accountId;
+        })
+        .catch((cause: unknown) => {
           if (version === generation.current)
             setError(
-              'Account updated, but the provider catalog could not refresh. Retry the provider catalog.',
+              cause instanceof Error
+                ? cause.message
+                : 'Unable to update ChatGPT connection.',
             );
+        })
+        .finally(() => {
+          if (version === generation.current) {
+            if (foreground) modelScopeChange.current?.(false);
+            setBusy(false);
+            setNow(Date.now());
+            setPoll((value) => value + 1);
+          }
         });
-      }
-      if (
-        !foreground &&
-        (connected.current !== next.connected ||
-          account.current !== next.accountId)
-      ) {
-        modelScopeChange.current?.(false);
-      }
-      connected.current = next.connected;
-      account.current = next.accountId;
-    } catch (cause) {
-      if (version === generation.current)
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : 'Unable to update ChatGPT connection.',
-        );
-    } finally {
-      if (version === generation.current) {
-        if (foreground) modelScopeChange.current?.(false);
-        setBusy(false);
-        setNow(Date.now());
-        setPoll((value) => value + 1);
-      }
-    }
-  }
+    },
+    [onChange, modelScopeChange],
+  );
+
+  const beginRequest = (
+    action: 'status' | 'login' | 'cancel' | 'disconnect',
+  ) => {
+    setBusy(true);
+    setError(null);
+    void request(action);
+  };
 
   useEffect(() => {
     void request('status');
     return () => {
       generation.current += 1;
     };
-  }, []);
+  }, [request]);
 
   const login = status?.login;
   const expired = Boolean(login && now >= login.expiresAtMs);
@@ -98,12 +108,13 @@ export function ChatGptConnection({
     const timer = window.setTimeout(
       () => {
         setNow(Date.now());
+        setError(null);
         void request('status', false);
       },
       Math.min(3000, Math.max(0, login.expiresAtMs - Date.now())),
     );
     return () => window.clearTimeout(timer);
-  }, [login, expired, busy, poll]);
+  }, [login, expired, busy, poll, request]);
 
   return (
     <section
@@ -186,7 +197,7 @@ export function ChatGptConnection({
             type="button"
             className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
-            onClick={() => void request('disconnect')}
+            onClick={() => beginRequest('disconnect')}
           >
             Disconnect ChatGPT
           </button>
@@ -195,7 +206,7 @@ export function ChatGptConnection({
             type="button"
             className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
-            onClick={() => void request('login')}
+            onClick={() => beginRequest('login')}
           >
             Connect ChatGPT
           </button>
@@ -205,7 +216,7 @@ export function ChatGptConnection({
             type="button"
             className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
-            onClick={() => void request('cancel')}
+            onClick={() => beginRequest('cancel')}
           >
             Cancel sign-in
           </button>
@@ -215,7 +226,7 @@ export function ChatGptConnection({
             type="button"
             className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
-            onClick={() => void request('status')}
+            onClick={() => beginRequest('status')}
           >
             Refresh connection
           </button>
@@ -225,7 +236,7 @@ export function ChatGptConnection({
             type="button"
             className={compact ? compactButtonClass : buttonClass}
             disabled={busy}
-            onClick={() => void request('disconnect')}
+            onClick={() => beginRequest('disconnect')}
           >
             Clear saved ChatGPT connection
           </button>

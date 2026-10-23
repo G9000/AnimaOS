@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
+import { useLatest } from '../../hooks/useLatest';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   mcpOwnerApi,
@@ -46,6 +48,7 @@ function launchIssue(
   args: string[],
 ): string | null {
   const bytes = (value: string) => new TextEncoder().encode(value).length;
+  // eslint-disable-next-line no-control-regex -- Reject control bytes in connection secrets and endpoints.
   const control = /[\u0000-\u001f\u007f]/;
   if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(executable))
     return 'Enter an absolute executable path.';
@@ -107,15 +110,9 @@ export function McpConnectionsPanel({
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
-  const previousLifetime = useRef(lifetime.token);
-  if (previousLifetime.current !== lifetime.token) {
-    previousLifetime.current = lifetime.token;
-    generation.current++;
-  }
   const readGeneration = useRef(0);
   const locked = useRef(false);
-  const currentAgent = useRef(agentId);
-  currentAgent.current = agentId;
+  const currentAgent = useLatest(agentId);
 
   async function refresh(signal?: AbortSignal, explicit = false) {
     if (
@@ -179,7 +176,7 @@ export function McpConnectionsPanel({
     }
   }
 
-  useLayoutEffect(() => {
+  useResetOnChange([agentId, api], () => {
     setConnections([]);
     setLabel('');
     setEndpoint('');
@@ -188,11 +185,9 @@ export function McpConnectionsPanel({
     setArgumentsText('');
     setPassEmptyArgument(false);
     setTrustedLocalCode(false);
-  }, [agentId, api]);
+  });
 
-  useLayoutEffect(() => {
-    generation.current += 1;
-    locked.current = false;
+  useResetOnChange([agentId, api, lifetime.token], () => {
     setToolNames(null);
     setRowsLifetime(null);
     setTrustedLocalCode(false);
@@ -200,6 +195,10 @@ export function McpConnectionsPanel({
     setLoading(online);
     setNeedsRefresh(!online);
     setError(null);
+  });
+  useLayoutEffect(() => {
+    generation.current += 1;
+    locked.current = false;
     const controller = new AbortController();
     if (online) void refresh(controller.signal);
     return () => {
@@ -657,25 +656,28 @@ function ConnectionCard({
   const [label, setLabel] = useState(row.label);
   const [endpoint, setEndpoint] = useState(row.endpoint);
   const [bearerToken, setBearerToken] = useState('');
-  const dirty = useRef({ label: false, endpoint: false });
-  useEffect(() => {
-    if (!dirty.current.label || label === row.label) {
-      dirty.current.label = false;
-      setLabel(row.label);
-    }
-    if (!dirty.current.endpoint || endpoint === row.endpoint) {
-      dirty.current.endpoint = false;
-      setEndpoint(row.endpoint);
-    }
-  }, [row.label, row.endpoint, row.version, label, endpoint]);
-  useEffect(() => {
+  const [dirty, setDirty] = useState({ label: false, endpoint: false });
+  useResetOnChange(
+    [row.label, row.endpoint, row.version, label, endpoint],
+    () => {
+      const resetLabel = !dirty.label || label === row.label;
+      const resetEndpoint = !dirty.endpoint || endpoint === row.endpoint;
+      if (resetLabel) setLabel(row.label);
+      if (resetEndpoint) setEndpoint(row.endpoint);
+      setDirty({
+        label: resetLabel ? false : dirty.label,
+        endpoint: resetEndpoint ? false : dirty.endpoint,
+      });
+    },
+  );
+  useResetOnChange([row.endpoint, row.version, lifetime], () => {
     // A refreshed version or endpoint requires deliberate re-entry.
     setBearerToken('');
-  }, [row.endpoint, row.version, lifetime]);
+  });
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
-  useLayoutEffect(() => {
+  useResetOnChange([lifetime], () => {
     setConfirmRemove(null);
-  }, [lifetime]);
+  });
   const local = row.transport === 'stdio';
   const bearerEligible = !local && row.endpoint.startsWith('https://');
   const wireBusy =
@@ -793,7 +795,7 @@ function ConnectionCard({
               maxLength={80}
               disabled={blocked || wireBusy}
               onChange={(event) => {
-                dirty.current.label = true;
+                setDirty((current) => ({ ...current, label: true }));
                 setLabel(event.target.value);
               }}
             />
@@ -807,7 +809,7 @@ function ConnectionCard({
                 maxLength={2048}
                 disabled={blocked || wireBusy}
                 onChange={(event) => {
-                  dirty.current.endpoint = true;
+                  setDirty((current) => ({ ...current, endpoint: true }));
                   setEndpoint(event.target.value);
                 }}
               />
@@ -823,7 +825,7 @@ function ConnectionCard({
             }
             onClick={() =>
               save(local ? { label } : { label, endpoint }, (saved) => {
-                dirty.current = { label: false, endpoint: false };
+                setDirty({ label: false, endpoint: false });
                 setLabel(saved.label);
                 setEndpoint(saved.endpoint);
               })

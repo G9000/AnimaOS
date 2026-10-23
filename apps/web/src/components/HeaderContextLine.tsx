@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useRef, useState } from 'react';
 import { useHeaderContextState } from '../lib/header-context';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -10,9 +11,9 @@ export function HeaderContextLine() {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useResetOnChange([summary], () => {
     if (!summary) setOpen(false);
-  }, [summary]);
+  });
 
   useEffect(() => {
     if (!open) return;

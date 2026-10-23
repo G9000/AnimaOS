@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useRef, useState } from 'react';
 import type { RunRecoverySummary } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
@@ -32,9 +33,9 @@ function Recovery({
       alive.current = false;
     };
   }, []);
-  useEffect(() => {
+  useResetOnChange([continuationRunId], () => {
     if (continuationRunId) setContinuation(continuationRunId);
-  }, [continuationRunId]);
+  });
   async function act(continueWork: boolean) {
     if (locked.current) return;
     locked.current = true;

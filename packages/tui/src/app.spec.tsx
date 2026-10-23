@@ -56,7 +56,7 @@ function createResultEntry(overrides: Partial<ResultEntry> = {}): ResultEntry {
 }
 
 function createAgentProfile(
-  overrides: Partial<AgentProfile> = {}
+  overrides: Partial<AgentProfile> = {},
 ): AgentProfile {
   return {
     name: 'manager',
@@ -87,7 +87,7 @@ function createDaemonAgent(id: string): AgentSummary {
 function createChatSession(
   id: string,
   agentId: string,
-  overrides: Partial<Session> = {}
+  overrides: Partial<Session> = {},
 ): Session {
   return {
     id,
@@ -133,12 +133,13 @@ function neverSessionEvents(signal: AbortSignal): AsyncIterable<AgentEvent> {
       await new Promise<void>((resolve) => {
         signal.addEventListener('abort', () => resolve(), { once: true });
       });
+      yield* [];
     },
   };
 }
 
 function createSessionApi(
-  overrides: Partial<TuiSessionApi> = {}
+  overrides: Partial<TuiSessionApi> = {},
 ): TuiSessionApi {
   const agent = createDaemonAgent('agent-a');
   const session = createChatSession('session-a', 'agent-a');
@@ -155,7 +156,7 @@ function createSessionApi(
     streamEvents: vi
       .fn()
       .mockImplementation((_agentId: string, signal: AbortSignal) =>
-        neverSessionEvents(signal)
+        neverSessionEvents(signal),
       ),
     ...overrides,
   };
@@ -216,15 +217,15 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
     await submit(rendered, '/chat');
     await vi.waitFor(() =>
-      expect(rendered.lastFrame()).toContain('Type a message')
+      expect(rendered.lastFrame()).toContain('Type a message'),
     );
     await pressKey(rendered, 'unfinished draft');
     await vi.waitFor(() =>
-      expect(rendered.lastFrame()).toContain('1 approval')
+      expect(rendered.lastFrame()).toContain('1 approval'),
     );
     await pressKey(rendered, '\u0012');
     expect(rendered.lastFrame()).toContain('Session review');
@@ -252,11 +253,11 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
     await submit(rendered, '/chat');
     await vi.waitFor(() =>
-      expect(rendered.lastFrame()).toContain('Type a message')
+      expect(rendered.lastFrame()).toContain('Type a message'),
     );
     await submit(rendered, '/approvals');
     expect(rendered.lastFrame()).toContain('Session review · approvals');
@@ -270,13 +271,13 @@ describe('App interactions', () => {
   it('shows a helpful message when session commands are used without an API', async () => {
     mockEventLog();
     const rendered = render(
-      <App eventBus={createEventBus()} strategy="round-robin" interactive />
+      <App eventBus={createEventBus()} strategy="round-robin" interactive />,
     );
 
     await submit(rendered, '/chat');
 
     expect(rendered.lastFrame()).toContain(
-      'Session chat is unavailable in this launch.'
+      'Session chat is unavailable in this launch.',
     );
     expect(rendered.lastFrame()).toContain('SWARM');
   });
@@ -310,7 +311,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await submit(rendered, '/chat');
@@ -345,7 +346,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -370,7 +371,7 @@ describe('App interactions', () => {
       'agent-a',
       'session-latest',
       undefined,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
   });
 
@@ -397,7 +398,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await submit(rendered, '/new');
@@ -414,7 +415,7 @@ describe('App interactions', () => {
       'agent-a',
       'session-a',
       undefined,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
   });
 
@@ -438,7 +439,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -465,8 +466,8 @@ describe('App interactions', () => {
         Promise.resolve(
           cursor === 'cursor-two'
             ? { sessions: [second], nextCursor: null }
-            : { sessions: [first], nextCursor: 'cursor-two' }
-        )
+            : { sessions: [first], nextCursor: 'cursor-two' },
+        ),
       );
     const sessionApi = createSessionApi({ listSessions });
     const rendered = render(
@@ -475,7 +476,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -487,7 +488,7 @@ describe('App interactions', () => {
     expect(listSessions).toHaveBeenCalledWith(
       'agent-a',
       'cursor-two',
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     expect(rendered.lastFrame()).toContain('More than one session matches');
     expect(sessionApi.getMessages).not.toHaveBeenCalled();
@@ -507,8 +508,8 @@ describe('App interactions', () => {
         Promise.resolve(
           cursor === 'cursor-two'
             ? { sessions: [second], nextCursor: null }
-            : { sessions: [first], nextCursor: 'cursor-two' }
-        )
+            : { sessions: [first], nextCursor: 'cursor-two' },
+        ),
       );
     const sessionApi = createSessionApi({ listSessions });
     const rendered = render(
@@ -517,7 +518,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -529,14 +530,14 @@ describe('App interactions', () => {
     expect(listSessions).toHaveBeenCalledWith(
       'agent-a',
       'cursor-two',
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     expect(rendered.lastFrame()).toContain('Target title');
     expect(sessionApi.getMessages).toHaveBeenCalledWith(
       'agent-a',
       'session-two',
       undefined,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
   });
 
@@ -563,8 +564,8 @@ describe('App interactions', () => {
                   ],
                   nextCursor: null,
                 }
-              : { sessions: [first], nextCursor: 'cursor-two' }
-        )
+              : { sessions: [first], nextCursor: 'cursor-two' },
+        ),
       );
     const sessionApi = createSessionApi({ listSessions });
     const rendered = render(
@@ -573,7 +574,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -585,19 +586,19 @@ describe('App interactions', () => {
     expect(listSessions).toHaveBeenCalledWith(
       'agent-a',
       'cursor-two',
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     expect(listSessions).not.toHaveBeenCalledWith(
       'agent-a',
       'cursor-three',
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     expect(rendered.lastFrame()).toContain('Target title');
     expect(sessionApi.getMessages).toHaveBeenCalledWith(
       'agent-a',
       'session-two',
       undefined,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
   });
 
@@ -618,7 +619,7 @@ describe('App interactions', () => {
         }
         lookupSignal = signal;
         return deferredLookup.promise;
-      }
+      },
     );
     const sessionApi = createSessionApi({
       listAgents: vi.fn().mockResolvedValue([agent]),
@@ -631,7 +632,7 @@ describe('App interactions', () => {
         interactive
         agentProfiles={[createAgentProfile()]}
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await flush();
@@ -678,7 +679,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await submit(rendered, '/chat');
@@ -693,7 +694,7 @@ describe('App interactions', () => {
     expect(sessionApi.listSessions).toHaveBeenCalledWith(
       'agent-a',
       undefined,
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
     );
     await flush();
     await flush();
@@ -717,7 +718,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await submit(rendered, '/chat');
@@ -742,7 +743,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={sessionApi}
-      />
+      />,
     );
 
     await submit(rendered, '/chat');
@@ -770,11 +771,11 @@ describe('App interactions', () => {
     await submit(rendered, '/help');
     const helpText = stripVTControlCharacters(rendered.lastFrame()).replace(
       /\s+/g,
-      ' '
+      ' ',
     );
     expect(helpText).toContain('/queue queue the next message');
     expect(helpText).toContain(
-      '/steer steer the active run with the next message'
+      '/steer steer the active run with the next message',
     );
   });
 
@@ -786,7 +787,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         sessionApi={createSessionApi()}
-      />
+      />,
     );
 
     await submit(rendered, '/sessions');
@@ -809,7 +810,7 @@ describe('App interactions', () => {
         interactive
         initialResults={[createResultEntry()]}
         resumeLastResult
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Resumed last run.');
@@ -841,7 +842,7 @@ describe('App interactions', () => {
         onResultRecorded={onResultRecorded}
         initialResults={[createResultEntry()]}
         resumeLastResult
-      />
+      />,
     );
 
     await submit(rendered, '/retry');
@@ -852,7 +853,7 @@ describe('App interactions', () => {
         task: 'Earlier task',
         result: 'Retried result',
         isError: false,
-      })
+      }),
     );
     expect(rendered.lastFrame()).toContain('SWARM');
     expect(rendered.lastFrame()).toContain('Retried result');
@@ -890,7 +891,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         initialResults={[createResultEntry()]}
-      />
+      />,
     );
 
     await submit(rendered, '/trace');
@@ -932,7 +933,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/history');
@@ -960,7 +961,7 @@ describe('App interactions', () => {
         initialResults={[createResultEntry()]}
         resumeLastResult
         onClearHistory={onClearHistory}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Resumed last run.');
@@ -987,7 +988,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         task="Ship the patch"
         initialResults={[createResultEntry()]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('h history');
@@ -1035,7 +1036,7 @@ describe('App interactions', () => {
         eventBus={createEventBus()}
         strategy="round-robin"
         task="Inspect trace"
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('t trace');
@@ -1078,7 +1079,7 @@ describe('App interactions', () => {
             result: 'Earlier result',
           }),
         ]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('r retry');
@@ -1091,7 +1092,7 @@ describe('App interactions', () => {
         task: 'Ship the patch',
         result: 'Retried one-shot result',
         isError: false,
-      })
+      }),
     );
 
     await pressKey(rendered, 'h');
@@ -1105,7 +1106,7 @@ describe('App interactions', () => {
     mockEventLog();
 
     const rendered = render(
-      <App eventBus={createEventBus()} strategy="round-robin" interactive />
+      <App eventBus={createEventBus()} strategy="round-robin" interactive />,
     );
 
     await submit(rendered, '/help');
@@ -1145,7 +1146,7 @@ describe('App interactions', () => {
             label: 'docs sweep',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume hotfix');
@@ -1181,13 +1182,13 @@ describe('App interactions', () => {
             label: 'launch docs',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume launch');
 
     expect(rendered.lastFrame()).toContain(
-      'Multiple saved runs match "launch"'
+      'Multiple saved runs match "launch"',
     );
     expect(rendered.lastFrame()).toContain('Saved run matches for "launch"');
     expect(rendered.lastFrame()).toContain('"launch docs"');
@@ -1219,13 +1220,13 @@ describe('App interactions', () => {
             label: 'docs sweep',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume hotfx');
 
     expect(rendered.lastFrame()).toContain(
-      'No saved run named "hotfx". Type /resume to browse saved runs.'
+      'No saved run named "hotfx". Type /resume to browse saved runs.',
     );
     expect(rendered.lastFrame()).toContain('Closest saved runs for "hotfx"');
     expect(rendered.lastFrame()).toContain('launch hotfix');
@@ -1256,7 +1257,7 @@ describe('App interactions', () => {
             label: 'launch docs',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume launch');
@@ -1300,7 +1301,7 @@ describe('App interactions', () => {
             label: 'launch docs',
           }),
         ]}
-      />
+      />,
     );
 
     for (const char of '/resume ') {
@@ -1350,7 +1351,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     for (const char of '/rename launch hotfix') {
@@ -1373,7 +1374,7 @@ describe('App interactions', () => {
           id: 'run-2',
           label: 'launch hotfix 2',
         }),
-      ])
+      ]),
     );
   });
 
@@ -1402,13 +1403,13 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/rename launch hotfix');
 
     expect(rendered.lastFrame()).toContain(
-      'Saved run label "launch hotfix" is already used.'
+      'Saved run label "launch hotfix" is already used.',
     );
     expect(rendered.lastFrame()).toContain('Try /rename launch hotfix 2');
     expect(onHistoryUpdated).not.toHaveBeenCalled();
@@ -1437,7 +1438,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1455,7 +1456,7 @@ describe('App interactions', () => {
           id: 'run-1',
           label: 'launch hotfix',
         }),
-      ])
+      ]),
     );
 
     await submit(rendered, '/resume');
@@ -1487,7 +1488,7 @@ describe('App interactions', () => {
             result: 'Unnamed latest result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1515,13 +1516,13 @@ describe('App interactions', () => {
             label: 'launch hotfix',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume missing-run');
 
     expect(rendered.lastFrame()).toContain(
-      'No saved run named "missing-run". Type /resume to browse saved runs.'
+      'No saved run named "missing-run". Type /resume to browse saved runs.',
     );
     expect(rendered.lastFrame()).toContain('SWARM');
   });
@@ -1555,7 +1556,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1612,7 +1613,7 @@ describe('App interactions', () => {
             result: 'Latest result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1692,7 +1693,7 @@ describe('App interactions', () => {
             label: 'charlie',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1717,7 +1718,7 @@ describe('App interactions', () => {
     await pressKey(rendered, 'u');
 
     expect(rendered.lastFrame()).toContain(
-      'Restored saved run: bravo. 1 more deleted run queued for undo.'
+      'Restored saved run: bravo. 1 more deleted run queued for undo.',
     );
     expect(rendered.lastFrame()).toContain('Press u to restore charlie.');
     expect(rendered.lastFrame()).toContain('Saved runs (2)');
@@ -1796,7 +1797,7 @@ describe('App interactions', () => {
             label: 'six',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -1866,13 +1867,13 @@ describe('App interactions', () => {
             label: 'bravo',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/undo-status');
 
     expect(rendered.lastFrame()).toContain(
-      'Undo queue empty. Delete a saved run first.'
+      'Undo queue empty. Delete a saved run first.',
     );
 
     await submit(rendered, '/delete bravo');
@@ -1915,7 +1916,7 @@ describe('App interactions', () => {
             label: 'bravo',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/undo');
@@ -1965,7 +1966,7 @@ describe('App interactions', () => {
             label: 'bravo',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/undo-drop');
@@ -1979,11 +1980,11 @@ describe('App interactions', () => {
     await submit(rendered, '/undo-drop');
 
     expect(rendered.lastFrame()).toContain(
-      'Confirm oldest undo discard: repeat /undo-drop to discard bravo.'
+      'Confirm oldest undo discard: repeat /undo-drop to discard bravo.',
     );
     expect(rendered.lastFrame()).toContain('Undo discard armed.');
     expect(rendered.lastFrame()).toContain(
-      'Repeat /undo-drop to discard bravo.'
+      'Repeat /undo-drop to discard bravo.',
     );
     expect(rendered.lastFrame()).toContain('Any other command cancels.');
     expect(onHistoryUpdated).toHaveBeenCalledTimes(2);
@@ -1991,7 +1992,7 @@ describe('App interactions', () => {
     await submit(rendered, '/undo-drop');
 
     expect(rendered.lastFrame()).toContain(
-      'Dropped oldest queued undo: bravo.'
+      'Dropped oldest queued undo: bravo.',
     );
     expect(rendered.lastFrame()).toContain('1 deleted run still queued.');
     expect(rendered.lastFrame()).toContain('Undo queued: alpha.');
@@ -2039,7 +2040,7 @@ describe('App interactions', () => {
             label: 'charlie',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/resume');
@@ -2050,7 +2051,7 @@ describe('App interactions', () => {
 
     expect(rendered.lastFrame()).toContain('Press u to restore bravo.');
     expect(rendered.lastFrame()).toContain(
-      'Press D to discard oldest queued undo: charlie.'
+      'Press D to discard oldest queued undo: charlie.',
     );
 
     await pressKey(rendered, 'D');
@@ -2059,18 +2060,18 @@ describe('App interactions', () => {
     expect(rendered.lastFrame()).toContain('drop oldest undo');
     expect(rendered.lastFrame()).toContain('Confirm oldest undo discard');
     expect(rendered.lastFrame()).toContain(
-      'Press D again to discard oldest queued undo: charlie.'
+      'Press D again to discard oldest queued undo: charlie.',
     );
 
     await pressKey(rendered, 'D');
 
     expect(rendered.lastFrame()).toContain(
-      'Dropped oldest queued undo: charlie.'
+      'Dropped oldest queued undo: charlie.',
     );
     expect(rendered.lastFrame()).toContain('1 deleted run still queued.');
     expect(rendered.lastFrame()).toContain('Press u to restore bravo.');
     expect(rendered.lastFrame()).not.toContain(
-      'Press D to discard oldest queued undo: charlie.'
+      'Press D to discard oldest queued undo: charlie.',
     );
   });
 
@@ -2091,7 +2092,7 @@ describe('App interactions', () => {
             label: 'alpha',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/delete alpha');
@@ -2099,10 +2100,10 @@ describe('App interactions', () => {
 
     expect(rendered.lastFrame()).toContain('Deleted saved run: alpha');
     expect(rendered.lastFrame()).toContain(
-      'Undo queued: alpha. Use /undo or /undo-status.'
+      'Undo queued: alpha. Use /undo or /undo-status.',
     );
     expect(rendered.lastFrame()).not.toContain(
-      'Press Ctrl+O to open saved runs.'
+      'Press Ctrl+O to open saved runs.',
     );
   });
 
@@ -2151,7 +2152,7 @@ describe('App interactions', () => {
             label: 'five',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/delete five');
@@ -2198,7 +2199,7 @@ describe('App interactions', () => {
             label: 'ship ready',
           }),
         ]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('ship ready');
@@ -2208,10 +2209,10 @@ describe('App interactions', () => {
     expect(onHistoryUpdated).not.toHaveBeenCalled();
     expect(rendered.lastFrame()).toContain('Pending delete');
     expect(rendered.lastFrame()).toContain(
-      'Repeat /delete to remove ship ready. Any other command cancels.'
+      'Repeat /delete to remove ship ready. Any other command cancels.',
     );
     expect(rendered.lastFrame()).toContain(
-      'Confirm delete: repeat /delete to remove ship ready.'
+      'Confirm delete: repeat /delete to remove ship ready.',
     );
 
     await submit(rendered, '/delete ');
@@ -2252,7 +2253,7 @@ describe('App interactions', () => {
             result: 'Latest result',
           }),
         ]}
-      />
+      />,
     );
 
     for (const char of '/delete ') {
@@ -2266,7 +2267,7 @@ describe('App interactions', () => {
 
     expect(onHistoryUpdated).not.toHaveBeenCalled();
     expect(rendered.lastFrame()).toContain(
-      'Confirm delete: repeat /delete release prep to remove this saved run.'
+      'Confirm delete: repeat /delete release prep to remove this saved run.',
     );
 
     await submit(rendered, '/delete release prep');
@@ -2300,13 +2301,13 @@ describe('App interactions', () => {
             label: 'release prep',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/delete ');
 
     expect(rendered.lastFrame()).toContain(
-      'Open a result or provide a saved run label, for example /delete release prep.'
+      'Open a result or provide a saved run label, for example /delete release prep.',
     );
   });
 
@@ -2327,13 +2328,13 @@ describe('App interactions', () => {
             label: 'release prep',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/delete release');
 
     expect(rendered.lastFrame()).toContain(
-      'No saved run named "release". Use Tab completion or /resume to inspect saved runs.'
+      'No saved run named "release". Use Tab completion or /resume to inspect saved runs.',
     );
     expect(rendered.lastFrame()).toContain('release prep');
   });
@@ -2359,7 +2360,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Press Ctrl+O to open saved runs.');
@@ -2399,7 +2400,7 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('↑↓ recall previous prompts');
@@ -2453,7 +2454,7 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         initialResults={[createResultEntry()]}
-      />
+      />,
     );
 
     await submit(rendered, '/status');
@@ -2479,7 +2480,7 @@ describe('App interactions', () => {
           createAgentProfile(),
           createAgentProfile({ name: 'researcher_1', role: 'worker' }),
         ]}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('2 agents (0 active)');
@@ -2496,17 +2497,17 @@ describe('App interactions', () => {
         strategy="supervisor"
         interactive
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Failed to reach daemon');
     expect(rendered.lastFrame()).toContain('Launch tasks will fail');
     expect(rendered.lastFrame()).toContain('daemon: down');
     expect(rendered.lastFrame()).toContain(
-      'daemon down - tasks paused; use /health or /help'
+      'daemon down - tasks paused; use /health or /help',
     );
     expect(rendered.lastFrame()).toContain(
-      'commands only while daemon is down'
+      'commands only while daemon is down',
     );
 
     await submit(rendered, '/help');
@@ -2526,7 +2527,7 @@ describe('App interactions', () => {
         interactive
         initialResults={[createResultEntry()]}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Past runs');
@@ -2545,12 +2546,12 @@ describe('App interactions', () => {
         initialResults={[createResultEntry()]}
         resumeLastResult
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('Resumed last run.');
     expect(rendered.lastFrame()).toContain(
-      'Retry unavailable while daemon is down.'
+      'Retry unavailable while daemon is down.',
     );
     expect(rendered.lastFrame()).toContain('Use /health to recheck');
 
@@ -2579,14 +2580,14 @@ describe('App interactions', () => {
         interactive
         onTask={onTask}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     await submit(rendered, 'Draft release notes');
 
     expect(onTask).not.toHaveBeenCalled();
     expect(rendered.lastFrame()).toContain(
-      'Task submission is blocked while the daemon is down.'
+      'Task submission is blocked while the daemon is down.',
     );
     expect(rendered.lastFrame()).toContain('Use /health to recheck.');
   });
@@ -2609,14 +2610,14 @@ describe('App interactions', () => {
         onTask={onTask}
         initialResults={[createResultEntry()]}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     await submit(rendered, '/retry');
 
     expect(onTask).not.toHaveBeenCalled();
     expect(rendered.lastFrame()).toContain(
-      'Task submission is blocked while the daemon is down.'
+      'Task submission is blocked while the daemon is down.',
     );
   });
 
@@ -2650,7 +2651,7 @@ describe('App interactions', () => {
           }),
         ]}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     await submit(rendered, '/history');
@@ -2659,7 +2660,7 @@ describe('App interactions', () => {
     expect(onTask).not.toHaveBeenCalled();
     expect(rendered.lastFrame()).toContain('History');
     expect(rendered.lastFrame()).not.toContain(
-      'Task submission is blocked while the daemon is down.'
+      'Task submission is blocked while the daemon is down.',
     );
   });
 
@@ -2685,7 +2686,7 @@ describe('App interactions', () => {
           }),
         ]}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     await submit(rendered, '/history');
@@ -2702,7 +2703,7 @@ describe('App interactions', () => {
     const pollDaemonWarning = vi
       .fn<() => Promise<string | undefined>>()
       .mockResolvedValueOnce(
-        'Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable.'
+        'Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable.',
       )
       .mockResolvedValueOnce(undefined);
 
@@ -2712,7 +2713,7 @@ describe('App interactions', () => {
         strategy="supervisor"
         interactive
         pollDaemonWarning={pollDaemonWarning}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('daemon: up');
@@ -2737,17 +2738,17 @@ describe('App interactions', () => {
     expect(rendered.lastFrame()).toContain('daemon: up');
     expect(rendered.lastFrame()).toContain('@ 12:00:10Z');
     expect(rendered.lastFrame()).toContain(
-      'Task entry restored. Freeform tasks are available again.'
+      'Task entry restored. Freeform tasks are available again.',
     );
     expect(rendered.lastFrame()).toContain(
-      'type your task... or /help for commands'
+      'type your task... or /help for commands',
     );
 
     await vi.advanceTimersByTimeAsync(4000);
     await Promise.resolve();
 
     expect(rendered.lastFrame()).not.toContain(
-      'Task entry restored. Freeform tasks are available again.'
+      'Task entry restored. Freeform tasks are available again.',
     );
   });
 
@@ -2775,12 +2776,12 @@ describe('App interactions', () => {
         onTask={onTask}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
         pollDaemonWarning={pollDaemonWarning}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('daemon: down');
     expect(rendered.lastFrame()).toContain(
-      'daemon down - tasks paused; use /health or /help'
+      'daemon down - tasks paused; use /health or /help',
     );
 
     await vi.advanceTimersByTimeAsync(5000);
@@ -2789,13 +2790,13 @@ describe('App interactions', () => {
 
     expect(rendered.lastFrame()).toContain('daemon: up');
     expect(rendered.lastFrame()).toContain(
-      'Task entry restored. Freeform tasks are available again.'
+      'Task entry restored. Freeform tasks are available again.',
     );
     expect(rendered.lastFrame()).toContain(
-      'type your task... or /help for commands'
+      'type your task... or /help for commands',
     );
     expect(rendered.lastFrame()).not.toContain(
-      'daemon down - tasks paused; use /health or /help'
+      'daemon down - tasks paused; use /health or /help',
     );
 
     vi.useRealTimers();
@@ -2810,7 +2811,7 @@ describe('App interactions', () => {
   it('includes the daemon check time in /status when health monitoring is wired', async () => {
     mockEventLog();
     vi.spyOn(Date, 'now').mockReturnValue(
-      new Date('2026-04-09T09:45:30Z').valueOf()
+      new Date('2026-04-09T09:45:30Z').valueOf(),
     );
 
     const rendered = render(
@@ -2819,7 +2820,7 @@ describe('App interactions', () => {
         strategy="supervisor"
         interactive
         pollDaemonWarning={vi.fn().mockResolvedValue(undefined)}
-      />
+      />,
     );
 
     await submit(rendered, '/status');
@@ -2837,7 +2838,7 @@ describe('App interactions', () => {
         interactive
         pollDaemonWarning={vi.fn().mockResolvedValue(undefined)}
         preflightWarning="Failed to reach daemon at http://127.0.0.1:8080. Launch tasks will fail until the daemon is reachable."
-      />
+      />,
     );
 
     await submit(rendered, '/health');
@@ -2845,10 +2846,10 @@ describe('App interactions', () => {
     expect(rendered.lastFrame()).toContain('Daemon reachable again.');
     expect(rendered.lastFrame()).toContain('Launch tasks can run.');
     expect(rendered.lastFrame()).toContain(
-      'Task entry restored. Freeform tasks are available again.'
+      'Task entry restored. Freeform tasks are available again.',
     );
     expect(rendered.lastFrame()).toContain(
-      'type your task... or /help for commands'
+      'type your task... or /help for commands',
     );
   });
 
@@ -2856,13 +2857,13 @@ describe('App interactions', () => {
     mockEventLog();
 
     const rendered = render(
-      <App eventBus={createEventBus()} strategy="supervisor" interactive />
+      <App eventBus={createEventBus()} strategy="supervisor" interactive />,
     );
 
     await submit(rendered, '/health');
 
     expect(rendered.lastFrame()).toContain(
-      'Daemon health checks unavailable in this session.'
+      'Daemon health checks unavailable in this session.',
     );
   });
 
@@ -2870,13 +2871,13 @@ describe('App interactions', () => {
     mockEventLog();
 
     const rendered = render(
-      <App eventBus={createEventBus()} strategy="round-robin" interactive />
+      <App eventBus={createEventBus()} strategy="round-robin" interactive />,
     );
 
     await submit(rendered, '/agents');
 
     expect(rendered.lastFrame()).toContain(
-      'No agent profiles loaded. Create an agency first.'
+      'No agent profiles loaded. Create an agency first.',
     );
     expect(rendered.lastFrame()).toContain('SWARM');
   });
@@ -2897,7 +2898,7 @@ describe('App interactions', () => {
             adjectives: ['concise', 'fast'],
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/agents');
@@ -2932,14 +2933,14 @@ describe('App interactions', () => {
             result: 'Second result',
           }),
         ]}
-      />
+      />,
     );
 
     await submit(rendered, '/result');
 
     expect(rendered.lastFrame()).toContain('Result');
     expect(rendered.lastFrame()).toContain(
-      'Type /rename <label> to name this saved run.'
+      'Type /rename <label> to name this saved run.',
     );
     expect(rendered.lastFrame()).toContain('Second task');
     expect(rendered.lastFrame()).toContain('Second result');
@@ -2954,7 +2955,7 @@ describe('App interactions', () => {
     mockEventLog();
 
     const rendered = render(
-      <App eventBus={createEventBus()} strategy="round-robin" interactive />
+      <App eventBus={createEventBus()} strategy="round-robin" interactive />,
     );
 
     await submit(rendered, '/result');
@@ -2962,22 +2963,22 @@ describe('App interactions', () => {
 
     await submit(rendered, '/history');
     expect(rendered.lastFrame()).toContain(
-      'No run history yet. Run a task first.'
+      'No run history yet. Run a task first.',
     );
 
     await submit(rendered, '/resume');
     expect(rendered.lastFrame()).toContain(
-      'No saved runs yet. Run a task first.'
+      'No saved runs yet. Run a task first.',
     );
 
     await pressKey(rendered, '\u000f');
     expect(rendered.lastFrame()).toContain(
-      'No saved runs yet. Run a task first.'
+      'No saved runs yet. Run a task first.',
     );
 
     await submit(rendered, '/rename sprint prep');
     expect(rendered.lastFrame()).toContain(
-      'No saved runs yet. Run a task first.'
+      'No saved runs yet. Run a task first.',
     );
 
     await submit(rendered, '/trace');
@@ -3009,14 +3010,14 @@ describe('App interactions', () => {
         strategy="round-robin"
         interactive
         onTask={onTask}
-      />
+      />,
     );
 
     await submit(rendered, 'Ship the patch');
 
     expect(rendered.lastFrame()).toContain('running swarm...');
     expect(rendered.lastFrame()).toContain(
-      'Press s for status while the swarm is running.'
+      'Press s for status while the swarm is running.',
     );
 
     await pressKey(rendered, 's');

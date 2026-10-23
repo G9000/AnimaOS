@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --build --emitDeclarationOnly",
+    "test": "bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
     "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   }
 }

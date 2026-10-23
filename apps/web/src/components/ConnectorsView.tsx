@@ -1,7 +1,6 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -19,6 +18,8 @@ import { GenericEmailSettings } from './GenericEmailSettings';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
 import { CommunityBundlesPanel } from './community-bundles/CommunityBundlesPanel';
 import { useConnectorLifetime } from '../hooks/useConnectorLifetime';
+import { useLatest } from '../hooks/useLatest';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 
 const client = createDaemonClient({ baseUrl: '' }).connectors;
 const button =
@@ -41,25 +42,24 @@ function useService<T>(
     context.online,
     context.epoch,
   );
-  const allowed = useRef(!context.disabled);
-  allowed.current = !context.disabled;
-  const loader = useRef(load);
-  loader.current = load;
+  const allowed = useLatest(!context.disabled);
+  const loader = useLatest(load);
   const alive = useRef(false),
-    generation = useRef(0),
+    generation = useRef({ value: 0 }),
     locked = useRef(false);
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  async function refresh(clearError = true, explicit = false) {
+  async function refresh(clearError = true, explicit = false, initial = false) {
     if (!lifetime.isCurrent(lifetime.token) || locked.current) return;
-    const current = ++generation.current;
+    const counter = generation.current;
+    const current = ++counter.value;
     const valid = () =>
       alive.current &&
-      current === generation.current &&
+      current === counter.value &&
       lifetime.isCurrent(lifetime.token);
-    setLoading(true);
+    if (!initial) setLoading(true);
     try {
       const next = await loader.current(explicit, valid);
       if (valid()) {
@@ -72,26 +72,29 @@ function useService<T>(
       if (valid()) setLoading(false);
     }
   }
-  useLayoutEffect(() => {
-    alive.current = true;
-    generation.current++;
-    locked.current = false;
+  useResetOnChange([lifetime.token], () => {
     setData(null);
     setError(null);
     setBusy(false);
     setLoading(context.online);
+  });
+  useLayoutEffect(() => {
+    const counter = generation.current;
+    alive.current = true;
+    counter.value++;
+    locked.current = false;
     if (!context.online)
       return () => {
         alive.current = false;
-        generation.current++;
+        counter.value++;
       };
-    void refresh();
+    void refresh(true, false, true);
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'hidden') void refresh();
     }, 15000);
     return () => {
       alive.current = false;
-      generation.current++;
+      counter.value++;
       window.clearInterval(timer);
     };
     // Refresh captures this exact connection lifetime.
@@ -109,10 +112,11 @@ function useService<T>(
     )
       return false;
     locked.current = true;
-    const submittedGeneration = ++generation.current;
+    const counter = generation.current;
+    const submittedGeneration = ++counter.value;
     const current = () =>
       alive.current &&
-      submittedGeneration === generation.current &&
+      submittedGeneration === counter.value &&
       lifetime.isCurrent(lifetime.token);
     setBusy(true);
     setError(null);
@@ -300,12 +304,12 @@ function MailCard({
     };
   });
   const connection = resource.data?.connector;
-  useEffect(() => {
+  useResetOnChange([connection?.status], () => {
     if (connection?.status === 'active') setConsent(null);
-  }, [connection?.status]);
-  useLayoutEffect(() => {
+  });
+  useResetOnChange([context.online, context.epoch, agentId], () => {
     setConsent(null);
-  }, [context.online, context.epoch, agentId]);
+  });
   const status = !resource.data
     ? resource.error
       ? 'Status unavailable'
@@ -636,14 +640,14 @@ function OAuthAppCard({
   const resource = useService(() => client.oauthAppStatus(provider));
   const status = resource.data;
   const environmentManaged = status?.source === 'environment';
-  useLayoutEffect(() => {
+  useResetOnChange([context.owner, context.online, context.epoch], () => {
     setClientSecret('');
     setValidationError(null);
-  }, [context.owner, context.online, context.epoch]);
+  });
 
-  useEffect(() => {
+  useResetOnChange([provider, status?.tenant], () => {
     if (provider === 'microsoft' && status?.tenant) setTenant(status.tenant);
-  }, [provider, status?.tenant]);
+  });
 
   const submit = () => {
     setValidationError(null);
@@ -829,12 +833,12 @@ function CalendarCard({ agentId }: { agentId: string }) {
           : connection.status === 'reauthRequired'
             ? 'Reconnect required'
             : 'Awaiting authorization';
-  useEffect(() => {
+  useResetOnChange([connection?.status], () => {
     if (connection?.status === 'active') setConsent(null);
-  }, [connection?.status]);
-  useLayoutEffect(() => {
+  });
+  useResetOnChange([context.online, context.epoch, agentId], () => {
     setConsent(null);
-  }, [context.online, context.epoch, agentId]);
+  });
   return (
     <Card
       title="Google Calendar"
@@ -978,10 +982,12 @@ export function ConnectorsView({
   const [ownerBusy, setOwnerBusy] = useState(false);
   const busyClaims = useRef(0);
   const [mcpRefreshRequired, setMcpRefreshRequired] = useState(false);
-  useLayoutEffect(() => {
-    busyClaims.current = 0;
+  useResetOnChange([lifetime.token], () => {
     setOwnerBusy(false);
     setMcpRefreshRequired(false);
+  });
+  useLayoutEffect(() => {
+    busyClaims.current = 0;
   }, [lifetime.token]);
   const reportOwnerBusy = (busy: boolean) => {
     if (!lifetime.matches(lifetime.token)) return;

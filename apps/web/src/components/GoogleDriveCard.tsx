@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { useState } from 'react';
 import { useDriveIntegrations } from '../hooks/useDriveIntegrations';
 import { parseDriveSelection } from '../lib/drive-selection';
 
@@ -30,17 +31,17 @@ export function GoogleDriveCard({
   );
   const [selection, setSelection] = useState('');
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  useLayoutEffect(() => {
+  useResetOnChange([agentId], () => {
     setSelection('');
     setConfirmDisconnect(false);
-  }, [agentId]);
-  useLayoutEffect(() => {
+  });
+  useResetOnChange([online, epoch], () => {
     setConfirmDisconnect(false);
-  }, [online, epoch]);
+  });
   const connector = integration.status?.connector ?? null;
-  useLayoutEffect(() => {
+  useResetOnChange([connector?.id, connector?.status], () => {
     setConfirmDisconnect(false);
-  }, [connector?.id, connector?.status]);
+  });
   const selected = parseDriveSelection(selection);
   const fixedSelection =
     connector !== null && connector.status !== 'disconnected';

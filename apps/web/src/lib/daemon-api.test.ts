@@ -546,12 +546,11 @@ describe('daemon workspace requests', () => {
     const result = await daemon.inspectWorkspace('/srv/company');
 
     expect(result.found).toBe(true);
-    if (result.found) {
-      expect(result.companyName).toBe('Acme');
-      expect(result.orchestrator.name).toBe('Anima');
-      expect(result.workers).toHaveLength(1);
-      expect(result.providerAvailable).toBe(true);
-    }
+    if (!result.found) throw new Error('Expected an existing workspace');
+    expect(result.companyName).toBe('Acme');
+    expect(result.orchestrator.name).toBe('Anima');
+    expect(result.workers).toHaveLength(1);
+    expect(result.providerAvailable).toBe(true);
   });
 
   it('inspectWorkspace parses a found preview without mission/values', async () => {
@@ -576,12 +575,11 @@ describe('daemon workspace requests', () => {
     const result = await daemon.inspectWorkspace('/srv/company');
 
     expect(result.found).toBe(true);
-    if (result.found) {
-      expect(result.companyName).toBe('Acme');
-      expect(result.mission).toBeUndefined();
-      expect(result.values).toBeUndefined();
-      expect(result.workers).toEqual([]);
-    }
+    if (!result.found) throw new Error('Expected an existing workspace');
+    expect(result.companyName).toBe('Acme');
+    expect(result.mission).toBeUndefined();
+    expect(result.values).toBeUndefined();
+    expect(result.workers).toEqual([]);
   });
 
   it('resumeWorkspace posts rootPath and returns the envelope', async () => {
@@ -1096,7 +1094,9 @@ describe('coding apps', () => {
     await daemon.cancelAcpTurn('agent /?', 'acp-1');
     await daemon.stopAcpSession('agent /?', 'acp-1');
     await daemon.setCodingKeys('agent /?', ['OPENAI_API_KEY']);
-    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [url, init?.method]),
+    ).toEqual([
       ['/api/agents/agent%20%2F%3F/app-sessions/app-3/stop', 'POST'],
       ['/api/agents/agent%20%2F%3F/acp-sessions/acp-1/cancel', 'POST'],
       ['/api/agents/agent%20%2F%3F/acp-sessions/acp-1/stop', 'POST'],
@@ -1120,7 +1120,9 @@ describe('coding apps', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(daemon.autonomy('agent /?')).resolves.toEqual(autonomy);
     await daemon.setAutonomy('agent /?', { mode: 'strict', smartCheck: true });
-    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [url, init?.method]),
+    ).toEqual([
       ['/api/agents/agent%20%2F%3F/autonomy', undefined],
       ['/api/agents/agent%20%2F%3F/autonomy', 'PUT'],
     ]);

@@ -66,10 +66,14 @@ interface Props {
   refreshKey: number;
 }
 
-export function MemoryInspector({ agents, selectedAgentId, refreshKey }: Props) {
+export function MemoryInspector({
+  agents,
+  selectedAgentId,
+  refreshKey,
+}: Props) {
   const [tab, setTab] = useState<InspectorTab>('state');
   const [agentId, setAgentId] = useState(selectedAgentId ?? '');
-  const [entityId, setEntityId] = useState('');
+  const [entityId, setEntityId] = useState(playgroundUserId);
   const [recent, setRecent] = useState<Memory[]>([]);
   const [entities, setEntities] = useState<MemoryEntity[]>([]);
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
@@ -92,86 +96,117 @@ export function MemoryInspector({ agents, selectedAgentId, refreshKey }: Props) 
     aliases: 'operator,me',
     summary: '',
   }));
-  const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft>(() => ({
-    sourceKind: 'agent',
-    sourceAgentId: '',
-    sourceAgentName: '',
-    targetKind: 'user',
-    targetAgentId: playgroundUserId(),
-    targetAgentName: 'Playground User',
-    relationshipType: 'knows',
-    summary: '',
-    strength: 0.6,
-    confidence: 0.7,
-    evidenceMemoryIds: '',
-    tags: 'playground-inspector',
-  }));
-  const [loading, setLoading] = useState(false);
+  const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft>(
+    () => ({
+      sourceKind: 'agent',
+      sourceAgentId: '',
+      sourceAgentName: '',
+      targetKind: 'user',
+      targetAgentId: playgroundUserId(),
+      targetAgentName: 'Playground User',
+      relationshipType: 'knows',
+      summary: '',
+      strength: 0.6,
+      confidence: 0.7,
+      evidenceMemoryIds: '',
+      tags: 'playground-inspector',
+    }),
+  );
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const knownRelationshipIds = useRef<Set<string>>(new Set());
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.state.id === agentId) ?? null,
-    [agentId, agents]
+    [agentId, agents],
   );
   const selectedAgentStateId = selectedAgent?.state.id;
   const selectedAgentStateName = selectedAgent?.state.name;
 
-  useEffect(() => {
+  const [previousAgentId, setPreviousAgentId] = useState(selectedAgentId);
+  if (previousAgentId !== selectedAgentId) {
+    setPreviousAgentId(selectedAgentId);
     if (selectedAgentId) {
       setAgentId(selectedAgentId);
     }
-  }, [selectedAgentId]);
+  }
 
-  useEffect(() => {
-    setEntityId((current) => current || playgroundUserId());
-  }, []);
+  const [previousSource, setPreviousSource] = useState<{
+    id: string | undefined;
+    name: string | undefined;
+  } | null>(null);
+  if (
+    previousSource?.id !== selectedAgentStateId ||
+    previousSource?.name !== selectedAgentStateName
+  ) {
+    setPreviousSource({
+      id: selectedAgentStateId,
+      name: selectedAgentStateName,
+    });
+    if (selectedAgentStateId && selectedAgentStateName)
+      setRelationshipDraft((current) => ({
+        ...current,
+        sourceKind: 'agent',
+        sourceAgentId: selectedAgentStateId,
+        sourceAgentName: selectedAgentStateName,
+      }));
+  }
 
-  useEffect(() => {
-    if (!selectedAgentStateId || !selectedAgentStateName) return;
-    setRelationshipDraft((current) => ({
-      ...current,
-      sourceKind: 'agent',
-      sourceAgentId: selectedAgentStateId,
-      sourceAgentName: selectedAgentStateName,
-    }));
-  }, [selectedAgentStateId, selectedAgentStateName]);
-
-  const loadState = useCallback(async () => {
+  const [previousRead, setPreviousRead] = useState({
+    agentId,
+    entityId,
+    refreshKey,
+  });
+  if (
+    previousRead.agentId !== agentId ||
+    previousRead.entityId !== entityId ||
+    previousRead.refreshKey !== refreshKey
+  ) {
+    setPreviousRead({ agentId, entityId, refreshKey });
     setLoading(true);
-    try {
-      const trimmedEntityId = entityId.trim();
-      const [recentMemories, entityList, relationshipList, readinessReport] = await Promise.all([
-        memories.recent({
-          agentId: agentId || undefined,
-          limit: 8,
-        }),
-        memories.entities({ limit: 16 }),
-        memories.relationships({
-          agentId: agentId || undefined,
-          entityId: trimmedEntityId || undefined,
-          limit: 24,
-        }),
-        memories.readiness(),
-      ]);
-      setRecent(recentMemories);
-      setEntities(entityList);
-      setRelationships(relationshipList);
-      setReadiness(readinessReport);
-      const nextRelationshipIds = new Set(relationshipList.map((relationship) => relationship.id));
-      const hasNewRelationship = relationshipList.some(
-        (relationship) => !knownRelationshipIds.current.has(relationship.id)
-      );
-      knownRelationshipIds.current = nextRelationshipIds;
-      if (refreshKey > 0 && hasNewRelationship) {
-        setTab('graph');
-      }
-      setError(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setLoading(false);
-    }
+  }
+
+  const loadState = useCallback(() => {
+    const trimmedEntityId = entityId.trim();
+    return Promise.all([
+      memories.recent({
+        agentId: agentId || undefined,
+        limit: 8,
+      }),
+      memories.entities({ limit: 16 }),
+      memories.relationships({
+        agentId: agentId || undefined,
+        entityId: trimmedEntityId || undefined,
+        limit: 24,
+      }),
+      memories.readiness(),
+    ])
+      .then(
+        ([recentMemories, entityList, relationshipList, readinessReport]) => {
+          setRecent(recentMemories);
+          setEntities(entityList);
+          setRelationships(relationshipList);
+          setReadiness(readinessReport);
+          const nextRelationshipIds = new Set(
+            relationshipList.map((relationship) => relationship.id),
+          );
+          const hasNewRelationship = relationshipList.some(
+            (relationship) =>
+              !knownRelationshipIds.current.has(relationship.id),
+          );
+          knownRelationshipIds.current = nextRelationshipIds;
+          if (refreshKey > 0 && hasNewRelationship) {
+            setTab('graph');
+          }
+          setError(null);
+        },
+      )
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [agentId, entityId, refreshKey]);
 
   useEffect(() => {
@@ -299,7 +334,13 @@ export function MemoryInspector({ agents, selectedAgentId, refreshKey }: Props) 
     const targetAgentId = relationshipDraft.targetAgentId.trim();
     const targetAgentName = relationshipDraft.targetAgentName.trim();
     const relationshipType = relationshipDraft.relationshipType.trim();
-    if (!sourceAgentId || !sourceAgentName || !targetAgentId || !targetAgentName || !relationshipType) {
+    if (
+      !sourceAgentId ||
+      !sourceAgentName ||
+      !targetAgentId ||
+      !targetAgentName ||
+      !relationshipType
+    ) {
       return;
     }
 
@@ -443,7 +484,13 @@ export function MemoryInspector({ agents, selectedAgentId, refreshKey }: Props) 
         )}
 
         {tab === 'ready' && (
-          <ReadinessView readiness={readiness} onRefresh={loadState} />
+          <ReadinessView
+            readiness={readiness}
+            onRefresh={() => {
+              setLoading(true);
+              return loadState();
+            }}
+          />
         )}
 
         {trace && <TraceView trace={trace} onClose={() => setTrace(null)} />}
@@ -474,14 +521,16 @@ function ReadinessView({
   }
 
   const failedChecks = readiness.evaluation.cases.flatMap((evalCase) =>
-    evalCase.checks.filter((check) => !check.passed)
+    evalCase.checks.filter((check) => !check.passed),
   );
 
   return (
     <div className="mt-4 grid gap-3">
       <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-[var(--text)]">Memory readiness</span>
+          <span className="text-sm font-medium text-[var(--text)]">
+            Memory readiness
+          </span>
           <span
             className={`rounded px-2 py-0.5 text-[11px] font-medium ${
               readiness.passed
@@ -493,10 +542,19 @@ function ReadinessView({
           </span>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--muted-2)]">
-          <Metric label="checks" value={`${readiness.evaluation.passedChecks}/${readiness.evaluation.totalChecks}`} />
-          <Metric label="vectors" value={String(readiness.embeddings.vectorCount)} />
+          <Metric
+            label="checks"
+            value={`${readiness.evaluation.passedChecks}/${readiness.evaluation.totalChecks}`}
+          />
+          <Metric
+            label="vectors"
+            value={String(readiness.embeddings.vectorCount)}
+          />
           <Metric label="provider" value={readiness.embeddings.provider} />
-          <Metric label="persisted" value={readiness.embeddings.persisted ? 'yes' : 'no'} />
+          <Metric
+            label="persisted"
+            value={readiness.embeddings.persisted ? 'yes' : 'no'}
+          />
         </div>
       </div>
 
@@ -504,7 +562,9 @@ function ReadinessView({
         <div className="font-medium text-[var(--text)]">Embedding index</div>
         <div className="mt-2 grid gap-1 text-[var(--muted)]">
           <div className="truncate">{readiness.embeddings.model}</div>
-          <div className="tabular-nums">{readiness.embeddings.dimension} dimensions</div>
+          <div className="tabular-nums">
+            {readiness.embeddings.dimension} dimensions
+          </div>
           {readiness.embeddings.storageFile && (
             <div className="truncate font-mono text-[11px] text-[var(--muted-2)]">
               {readiness.embeddings.storageFile}
@@ -513,7 +573,10 @@ function ReadinessView({
         </div>
       </div>
 
-      <SectionTitle title="Eval Cases" count={readiness.evaluation.cases.length} />
+      <SectionTitle
+        title="Eval Cases"
+        count={readiness.evaluation.cases.length}
+      />
       <div className="grid gap-2">
         {readiness.evaluation.cases.map((evalCase) => (
           <div
@@ -521,9 +584,12 @@ function ReadinessView({
             className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-medium text-[var(--text)]">{evalCase.name}</span>
+              <span className="truncate font-medium text-[var(--text)]">
+                {evalCase.name}
+              </span>
               <span className="tabular-nums text-[var(--muted-2)]">
-                {evalCase.checks.filter((check) => check.passed).length}/{evalCase.checks.length}
+                {evalCase.checks.filter((check) => check.passed).length}/
+                {evalCase.checks.length}
               </span>
             </div>
           </div>
@@ -574,7 +640,10 @@ function Filters({
     <div className="grid gap-3">
       <label className="grid gap-1.5 text-xs text-[var(--muted)]">
         Agent
-        <select value={agentId} onChange={(event) => onAgentIdChange(event.target.value)}>
+        <select
+          value={agentId}
+          onChange={(event) => onAgentIdChange(event.target.value)}
+        >
           <option value="">All agents</option>
           {agents.map((agent) => (
             <option key={agent.state.id} value={agent.state.id}>
@@ -681,32 +750,37 @@ function GraphView({
   const [traceableOnly, setTraceableOnly] = useState(false);
   const graphCounts = useMemo(
     () => relationshipGraphCounts(relationships),
-    [relationships]
+    [relationships],
   );
   const filteredRelationships = useMemo(
     () =>
       relationships.filter(
         (relationship) =>
           relationshipMatchesGraphFilter(relationship, filter) &&
-          (!traceableOnly || relationship.evidenceMemoryIds.length > 0)
+          (!traceableOnly || relationship.evidenceMemoryIds.length > 0),
       ),
-    [filter, relationships, traceableOnly]
+    [filter, relationships, traceableOnly],
   );
   const graph = useMemo(
     () => buildRelationshipGraph(entities, filteredRelationships),
-    [entities, filteredRelationships]
+    [entities, filteredRelationships],
   );
-  const hiddenRelationshipCount = relationships.length - filteredRelationships.length;
+  const hiddenRelationshipCount =
+    relationships.length - filteredRelationships.length;
 
   return (
     <div className="mt-4 grid gap-4">
       <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-medium text-[var(--text)]">Relationship graph</div>
+            <div className="text-sm font-medium text-[var(--text)]">
+              Relationship graph
+            </div>
             <div className="text-[11px] text-[var(--muted-2)]">
               {graph.nodes.length} nodes · {graph.edges.length} edges
-              {hiddenRelationshipCount > 0 ? ` · ${hiddenRelationshipCount} hidden` : ''}
+              {hiddenRelationshipCount > 0
+                ? ` · ${hiddenRelationshipCount} hidden`
+                : ''}
             </div>
           </div>
         </div>
@@ -722,7 +796,11 @@ function GraphView({
         {graph.nodes.length === 0 ? (
           <div className="mt-3">
             <EmptyLine
-              text={relationships.length === 0 ? 'No graph data yet.' : 'No matching relationships.'}
+              text={
+                relationships.length === 0
+                  ? 'No graph data yet.'
+                  : 'No matching relationships.'
+              }
             />
           </div>
         ) : (
@@ -786,7 +864,9 @@ function GraphView({
                       y2={target.y}
                       stroke="currentColor"
                       strokeWidth={1 + edge.strength * 3}
-                      strokeDasharray={edge.tone === 'broadcast' ? '5 4' : undefined}
+                      strokeDasharray={
+                        edge.tone === 'broadcast' ? '5 4' : undefined
+                      }
                       strokeOpacity={edge.tone === 'default' ? '0.45' : '0.74'}
                       markerEnd="url(#memory-graph-arrow)"
                     />
@@ -917,9 +997,21 @@ function GraphFilterControls({
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[11px] text-[var(--muted-2)]">
-        <GraphCountBadge label="handoff" value={counts.handoffs} tone="handoff" />
-        <GraphCountBadge label="broadcast" value={counts.broadcasts} tone="broadcast" />
-        <GraphCountBadge label="evidence" value={counts.traceable} tone="default" />
+        <GraphCountBadge
+          label="handoff"
+          value={counts.handoffs}
+          tone="handoff"
+        />
+        <GraphCountBadge
+          label="broadcast"
+          value={counts.broadcasts}
+          tone="broadcast"
+        />
+        <GraphCountBadge
+          label="evidence"
+          value={counts.traceable}
+          tone="default"
+        />
       </div>
 
       <label className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -984,7 +1076,9 @@ function GraphCreateForms({
   return (
     <div className="grid gap-4">
       <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-3">
-        <div className="text-sm font-medium text-[var(--text)]">Create entity</div>
+        <div className="text-sm font-medium text-[var(--text)]">
+          Create entity
+        </div>
         <div className="mt-3 grid gap-2">
           <EndpointKindSelect
             label="Kind"
@@ -995,7 +1089,9 @@ function GraphCreateForms({
             ID
             <input
               value={entityDraft.id}
-              onChange={(event) => onEntityDraftChange({ id: event.target.value })}
+              onChange={(event) =>
+                onEntityDraftChange({ id: event.target.value })
+              }
               placeholder="stable entity id"
             />
           </label>
@@ -1003,7 +1099,9 @@ function GraphCreateForms({
             Name
             <input
               value={entityDraft.name}
-              onChange={(event) => onEntityDraftChange({ name: event.target.value })}
+              onChange={(event) =>
+                onEntityDraftChange({ name: event.target.value })
+              }
               placeholder="display name"
             />
           </label>
@@ -1011,7 +1109,9 @@ function GraphCreateForms({
             Aliases
             <input
               value={entityDraft.aliases}
-              onChange={(event) => onEntityDraftChange({ aliases: event.target.value })}
+              onChange={(event) =>
+                onEntityDraftChange({ aliases: event.target.value })
+              }
               placeholder="comma,separated,aliases"
             />
           </label>
@@ -1019,7 +1119,9 @@ function GraphCreateForms({
             Summary
             <textarea
               value={entityDraft.summary}
-              onChange={(event) => onEntityDraftChange({ summary: event.target.value })}
+              onChange={(event) =>
+                onEntityDraftChange({ summary: event.target.value })
+              }
               rows={2}
               placeholder="optional entity note"
             />
@@ -1035,18 +1137,24 @@ function GraphCreateForms({
       </div>
 
       <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-3">
-        <div className="text-sm font-medium text-[var(--text)]">Create relationship</div>
+        <div className="text-sm font-medium text-[var(--text)]">
+          Create relationship
+        </div>
         <div className="mt-3 grid gap-3">
           <div className="grid grid-cols-2 gap-2">
             <EndpointKindSelect
               label="Source kind"
               value={relationshipDraft.sourceKind}
-              onChange={(sourceKind) => onRelationshipDraftChange({ sourceKind })}
+              onChange={(sourceKind) =>
+                onRelationshipDraftChange({ sourceKind })
+              }
             />
             <EndpointKindSelect
               label="Target kind"
               value={relationshipDraft.targetKind}
-              onChange={(targetKind) => onRelationshipDraftChange({ targetKind })}
+              onChange={(targetKind) =>
+                onRelationshipDraftChange({ targetKind })
+              }
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1054,7 +1162,11 @@ function GraphCreateForms({
               Source ID
               <input
                 value={relationshipDraft.sourceAgentId}
-                onChange={(event) => onRelationshipDraftChange({ sourceAgentId: event.target.value })}
+                onChange={(event) =>
+                  onRelationshipDraftChange({
+                    sourceAgentId: event.target.value,
+                  })
+                }
                 placeholder="source id"
               />
             </label>
@@ -1062,7 +1174,11 @@ function GraphCreateForms({
               Source name
               <input
                 value={relationshipDraft.sourceAgentName}
-                onChange={(event) => onRelationshipDraftChange({ sourceAgentName: event.target.value })}
+                onChange={(event) =>
+                  onRelationshipDraftChange({
+                    sourceAgentName: event.target.value,
+                  })
+                }
                 placeholder="source name"
               />
             </label>
@@ -1072,7 +1188,11 @@ function GraphCreateForms({
               Target ID
               <input
                 value={relationshipDraft.targetAgentId}
-                onChange={(event) => onRelationshipDraftChange({ targetAgentId: event.target.value })}
+                onChange={(event) =>
+                  onRelationshipDraftChange({
+                    targetAgentId: event.target.value,
+                  })
+                }
                 placeholder="target id"
               />
             </label>
@@ -1080,7 +1200,11 @@ function GraphCreateForms({
               Target name
               <input
                 value={relationshipDraft.targetAgentName}
-                onChange={(event) => onRelationshipDraftChange({ targetAgentName: event.target.value })}
+                onChange={(event) =>
+                  onRelationshipDraftChange({
+                    targetAgentName: event.target.value,
+                  })
+                }
                 placeholder="target name"
               />
             </label>
@@ -1089,7 +1213,11 @@ function GraphCreateForms({
             Type
             <input
               value={relationshipDraft.relationshipType}
-              onChange={(event) => onRelationshipDraftChange({ relationshipType: event.target.value })}
+              onChange={(event) =>
+                onRelationshipDraftChange({
+                  relationshipType: event.target.value,
+                })
+              }
               placeholder="knows, trusts, collaborates_with"
             />
           </label>
@@ -1097,7 +1225,9 @@ function GraphCreateForms({
             Summary
             <textarea
               value={relationshipDraft.summary}
-              onChange={(event) => onRelationshipDraftChange({ summary: event.target.value })}
+              onChange={(event) =>
+                onRelationshipDraftChange({ summary: event.target.value })
+              }
               rows={2}
               placeholder="optional relationship evidence"
             />
@@ -1111,14 +1241,20 @@ function GraphCreateForms({
             <RangeInput
               label="Confidence"
               value={relationshipDraft.confidence}
-              onChange={(confidence) => onRelationshipDraftChange({ confidence })}
+              onChange={(confidence) =>
+                onRelationshipDraftChange({ confidence })
+              }
             />
           </div>
           <label className="grid gap-1.5 text-xs text-[var(--muted)]">
             Evidence memory IDs
             <input
               value={relationshipDraft.evidenceMemoryIds}
-              onChange={(event) => onRelationshipDraftChange({ evidenceMemoryIds: event.target.value })}
+              onChange={(event) =>
+                onRelationshipDraftChange({
+                  evidenceMemoryIds: event.target.value,
+                })
+              }
               placeholder="comma,separated,memoryIds"
             />
           </label>
@@ -1126,7 +1262,9 @@ function GraphCreateForms({
             Tags
             <input
               value={relationshipDraft.tags}
-              onChange={(event) => onRelationshipDraftChange({ tags: event.target.value })}
+              onChange={(event) =>
+                onRelationshipDraftChange({ tags: event.target.value })
+              }
               placeholder="comma,separated,tags"
             />
           </label>
@@ -1157,7 +1295,9 @@ function EndpointKindSelect({
       {label}
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value as RelationshipEndpointKind)}
+        onChange={(event) =>
+          onChange(event.target.value as RelationshipEndpointKind)
+        }
       >
         <option value="agent">Agent</option>
         <option value="user">User</option>
@@ -1290,7 +1430,9 @@ function EvaluateView({
         Type
         <select
           value={memoryType}
-          onChange={(event) => onMemoryTypeChange(event.target.value as MemoryType)}
+          onChange={(event) =>
+            onMemoryTypeChange(event.target.value as MemoryType)
+          }
         >
           <option value="fact">Fact</option>
           <option value="observation">Observation</option>
@@ -1302,7 +1444,9 @@ function EvaluateView({
         Scope
         <select
           value={memoryScope}
-          onChange={(event) => onMemoryScopeChange(event.target.value as MemoryScope)}
+          onChange={(event) =>
+            onMemoryScopeChange(event.target.value as MemoryScope)
+          }
         >
           <option value="private">Private</option>
           <option value="shared">Shared</option>
@@ -1343,7 +1487,8 @@ function EvaluateView({
         />
       </label>
       <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--muted)]">
-        Evaluate previews the memory policy. Store runs the evaluated path. Save direct writes immediately.
+        Evaluate previews the memory policy. Store runs the evaluated path. Save
+        direct writes immediately.
       </div>
       <div className="grid grid-cols-3 gap-2">
         <button
@@ -1369,7 +1514,9 @@ function EvaluateView({
         </button>
       </div>
 
-      {evaluation && <EvaluationResult evaluation={evaluation} outcome={outcome} />}
+      {evaluation && (
+        <EvaluationResult evaluation={evaluation} outcome={outcome} />
+      )}
       {savedMemory && (
         <div className="rounded-md border border-[var(--ok)]/30 bg-[var(--ok)]/10 px-3 py-2 text-xs text-[var(--ok)]">
           saved {savedMemory.id}
@@ -1408,13 +1555,16 @@ type GraphCounts = Record<GraphFilter, number> & {
 
 function buildRelationshipGraph(
   entities: MemoryEntity[],
-  relationships: AgentRelationship[]
+  relationships: AgentRelationship[],
 ): {
   nodes: GraphNode[];
   edges: GraphEdge[];
   nodeMap: Map<string, GraphNode>;
 } {
-  const nodeSeed = new Map<string, { id: string; name: string; kind: string }>();
+  const nodeSeed = new Map<
+    string,
+    { id: string; name: string; kind: string }
+  >();
 
   for (const entity of entities) {
     nodeSeed.set(`${entity.kind}:${entity.id}`, {
@@ -1448,7 +1598,8 @@ function buildRelationshipGraph(
     if (seeds.length === 1) {
       return { ...node, key, x: centerX, y: centerY };
     }
-    const angle = (Math.PI * 2 * index) / Math.max(seeds.length, 1) - Math.PI / 2;
+    const angle =
+      (Math.PI * 2 * index) / Math.max(seeds.length, 1) - Math.PI / 2;
     return {
       ...node,
       key,
@@ -1516,7 +1667,10 @@ function relationshipTags(relationship: AgentRelationship): string[] {
   return relationship.tags ?? [];
 }
 
-function hasRelationshipTag(relationship: AgentRelationship, tag: string): boolean {
+function hasRelationshipTag(
+  relationship: AgentRelationship,
+  tag: string,
+): boolean {
   return relationshipTags(relationship).includes(tag);
 }
 
@@ -1535,7 +1689,9 @@ function isBroadcastRelationship(relationship: AgentRelationship): boolean {
 }
 
 function isUserRelationship(relationship: AgentRelationship): boolean {
-  return relationship.sourceKind === 'user' || relationship.targetKind === 'user';
+  return (
+    relationship.sourceKind === 'user' || relationship.targetKind === 'user'
+  );
 }
 
 function isSwarmRelationship(relationship: AgentRelationship): boolean {
@@ -1548,7 +1704,9 @@ function isSwarmRelationship(relationship: AgentRelationship): boolean {
   );
 }
 
-function relationshipTone(relationship: AgentRelationship): GraphRelationshipTone {
+function relationshipTone(
+  relationship: AgentRelationship,
+): GraphRelationshipTone {
   if (isHandoffRelationship(relationship)) return 'handoff';
   if (isBroadcastRelationship(relationship)) return 'broadcast';
   if (isUserRelationship(relationship)) return 'user';
@@ -1557,7 +1715,7 @@ function relationshipTone(relationship: AgentRelationship): GraphRelationshipTon
 
 function relationshipMatchesGraphFilter(
   relationship: AgentRelationship,
-  filter: GraphFilter
+  filter: GraphFilter,
 ): boolean {
   switch (filter) {
     case 'all':
@@ -1573,7 +1731,9 @@ function relationshipMatchesGraphFilter(
   }
 }
 
-function relationshipGraphCounts(relationships: AgentRelationship[]): GraphCounts {
+function relationshipGraphCounts(
+  relationships: AgentRelationship[],
+): GraphCounts {
   return relationships.reduce<GraphCounts>(
     (counts, relationship) => {
       counts.all += 1;
@@ -1591,7 +1751,7 @@ function relationshipGraphCounts(relationships: AgentRelationship[]): GraphCount
       broadcasts: 0,
       users: 0,
       traceable: 0,
-    }
+    },
   );
 }
 
@@ -1606,9 +1766,10 @@ function truncateGraphLabel(value: string, maxLength: number): string {
 
 function graphEdgeTitle(edge: GraphEdge): string {
   const tags = edge.tags.length > 0 ? ` tags: ${edge.tags.join(', ')}` : '';
-  const evidence = edge.evidenceMemoryIds.length > 0
-    ? ` evidence: ${edge.evidenceMemoryIds.join(', ')}`
-    : ' no evidence memory ids';
+  const evidence =
+    edge.evidenceMemoryIds.length > 0
+      ? ` evidence: ${edge.evidenceMemoryIds.join(', ')}`
+      : ' no evidence memory ids';
   return `${edge.label} strength ${Math.round(edge.strength * 100)}%, confidence ${Math.round(edge.confidence * 100)}%. ${tags}${evidence}`;
 }
 
@@ -1630,7 +1791,10 @@ function trimOptional(value: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function upsertEntity(items: MemoryEntity[], entity: MemoryEntity): MemoryEntity[] {
+function upsertEntity(
+  items: MemoryEntity[],
+  entity: MemoryEntity,
+): MemoryEntity[] {
   const key = `${entity.kind}:${entity.id}`;
   return [
     entity,
@@ -1640,9 +1804,12 @@ function upsertEntity(items: MemoryEntity[], entity: MemoryEntity): MemoryEntity
 
 function upsertRelationship(
   items: AgentRelationship[],
-  relationship: AgentRelationship
+  relationship: AgentRelationship,
 ): AgentRelationship[] {
-  return [relationship, ...items.filter((item) => item.id !== relationship.id)].slice(0, 8);
+  return [
+    relationship,
+    ...items.filter((item) => item.id !== relationship.id),
+  ].slice(0, 8);
 }
 
 function EvaluationResult({
@@ -1727,7 +1894,10 @@ function RelationshipRow({
   return (
     <div
       className="rounded-md border border-l-4 bg-[var(--surface-2)] px-3 py-2"
-      style={{ borderColor: 'var(--border)', borderLeftColor: graphEdgeColor(tone) }}
+      style={{
+        borderColor: 'var(--border)',
+        borderLeftColor: graphEdgeColor(tone),
+      }}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 truncate text-sm text-[var(--text)]">
@@ -1754,7 +1924,9 @@ function RelationshipRow({
       </div>
       <div className="mt-2 grid gap-2">
         {relationship.summary && (
-          <div className="text-xs text-[var(--muted)]">{relationship.summary}</div>
+          <div className="text-xs text-[var(--muted)]">
+            {relationship.summary}
+          </div>
         )}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -1772,18 +1944,23 @@ function RelationshipRow({
           <span className="tabular-nums">
             confidence {Math.round(relationship.confidence * 100)}%
           </span>
-          {relationship.evidenceMemoryIds.length > 0 && onTrace &&
-            relationship.evidenceMemoryIds.slice(0, 3).map((memoryId, index) => (
-              <button
-                key={memoryId}
-                onClick={() => onTrace(memoryId)}
-                className="text-[var(--accent)] hover:underline"
-              >
-                trace evidence {index + 1}
-              </button>
-            ))}
+          {relationship.evidenceMemoryIds.length > 0 &&
+            onTrace &&
+            relationship.evidenceMemoryIds
+              .slice(0, 3)
+              .map((memoryId, index) => (
+                <button
+                  key={memoryId}
+                  onClick={() => onTrace(memoryId)}
+                  className="text-[var(--accent)] hover:underline"
+                >
+                  trace evidence {index + 1}
+                </button>
+              ))}
           {relationship.evidenceMemoryIds.length > 0 && !onTrace && (
-            <span>{relationship.evidenceMemoryIds.length} evidence memories</span>
+            <span>
+              {relationship.evidenceMemoryIds.length} evidence memories
+            </span>
           )}
           {relationship.evidenceMemoryIds.length === 0 && (
             <span>no evidence memories</span>
@@ -1854,12 +2031,11 @@ function TraceView({
       <div className="grid gap-2">
         <SectionTitle title="Edges" count={trace.relationships.length} />
         {trace.relationships.map((relationship) => (
-          <RelationshipRow
-            key={relationship.id}
-            relationship={relationship}
-          />
+          <RelationshipRow key={relationship.id} relationship={relationship} />
         ))}
-        {trace.relationships.length === 0 && <EmptyLine text="No citing edges." />}
+        {trace.relationships.length === 0 && (
+          <EmptyLine text="No citing edges." />
+        )}
       </div>
 
       <div className="grid gap-2">

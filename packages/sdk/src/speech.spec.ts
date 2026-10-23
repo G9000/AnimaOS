@@ -86,16 +86,16 @@ describe('SpeechClient', () => {
     }).speech;
     await expect(
       speech.generate('a', 's', { ...input, text: 'x'.repeat(2049) }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid speech operation');
     await expect(
       speech.generate('a', 's', { ...input, text: '😀'.repeat(2049) }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid speech operation');
     await expect(
       speech.generate('a', 's', { ...input, text: '\ud800' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid speech operation');
     await expect(
       speech.generate('a', 's', { ...input, messageId: '../bad' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid speech operation');
     expect(fetch).not.toHaveBeenCalled();
     const blob = await speech.generate('a', 's', input);
     expect(blob.size).toBe(12044);
@@ -121,11 +121,15 @@ describe('SpeechClient', () => {
       baseUrl: '',
       fetch: fetch as typeof globalThis.fetch,
     });
-    await expect(client.speech.generate('a', 's', input)).rejects.toThrow();
+    await expect(client.speech.generate('a', 's', input)).rejects.toThrow(
+      'Invalid speech audio',
+    );
     response = new Response(new Uint8Array(5760045), {
       headers: { 'content-type': 'audio/wav' },
     });
-    await expect(client.speech.generate('a', 's', input)).rejects.toThrow();
+    await expect(client.speech.generate('a', 's', input)).rejects.toThrow(
+      'Bounded response too large',
+    );
     response = new Response('private provider details', { status: 503 });
     await expect(client.speech.generate('a', 's', input)).rejects.toMatchObject(
       { status: 503, body: null } satisfies Partial<DaemonHttpError>,

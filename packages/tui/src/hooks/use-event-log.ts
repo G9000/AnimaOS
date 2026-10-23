@@ -55,10 +55,11 @@ export function useEventLog({
   // Increments once per second while running; included in `stats` so the
   // returned object is structurally fresh on each tick and consumers see a
   // live elapsed counter without us re-deriving wall-clock time at render.
-  const [, setTick] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   // Use a ref for startTime so it doesn't cause re-renders
-  const startTimeRef = useRef(Date.now());
+  const [startedAt] = useState(() => Date.now());
+  const startTimeRef = useRef(startedAt);
   // Per-hook id counters — module-level lets would leak across App instances
   // (the test harness or any future multi-pane setup would re-use ids).
   const nextMsgIdRef = useRef(0);
@@ -84,6 +85,7 @@ export function useEventLog({
     setError(null);
     setLaggedEventCount(0);
     startTimeRef.current = Date.now();
+    setElapsed(0);
     nextMsgIdRef.current = 0;
     nextToolIdRef.current = 0;
   }, []);
@@ -96,7 +98,7 @@ export function useEventLog({
       return;
     }
     const interval = setInterval(() => {
-      setTick((value) => (value + 1) | 0);
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, ELAPSED_TICK_MS);
     return () => clearInterval(interval);
   }, [isRunning]);
@@ -104,7 +106,7 @@ export function useEventLog({
   const updateAgent = useCallback(
     (
       agentId: string,
-      updater: (existing: AgentEntry | undefined) => Partial<AgentEntry>
+      updater: (existing: AgentEntry | undefined) => Partial<AgentEntry>,
     ) => {
       setAgents((prev) => {
         const idx = prev.findIndex((a) => a.id === agentId);
@@ -125,7 +127,7 @@ export function useEventLog({
         return [...prev, newAgent];
       });
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -141,8 +143,8 @@ export function useEventLog({
             name,
             status: 'idle' as AgentDisplayStatus,
           }));
-        }
-      )
+        },
+      ),
     );
 
     // task:started
@@ -153,8 +155,8 @@ export function useEventLog({
           updateAgent(evt.data.agentId, () => ({
             status: 'thinking' as AgentDisplayStatus,
           }));
-        }
-      )
+        },
+      ),
     );
 
     // tool:before
@@ -170,7 +172,7 @@ export function useEventLog({
             agentId: string;
             toolName: string;
             args: Record<string, unknown>;
-          }>
+          }>,
         ) => {
           const { agentId, toolName, args } = evt.data;
           updateAgent(agentId, () => ({
@@ -195,8 +197,8 @@ export function useEventLog({
             ]);
             return prev;
           });
-        }
-      )
+        },
+      ),
     );
 
     // tool:after
@@ -216,7 +218,7 @@ export function useEventLog({
             status: string;
             durationMs: number;
             result?: string;
-          }>
+          }>,
         ) => {
           const { agentId, toolName, status, durationMs, result } = evt.data;
           updateAgent(agentId, () => ({
@@ -250,8 +252,8 @@ export function useEventLog({
             }
             return prev;
           });
-        }
-      )
+        },
+      ),
     );
 
     // agent:message
@@ -263,7 +265,7 @@ export function useEventLog({
             from: string;
             to: string;
             message: { text: string };
-          }>
+          }>,
         ) => {
           const { from, to, message } = evt.data;
           const msgId = allocMsgId();
@@ -277,8 +279,8 @@ export function useEventLog({
               timestamp: Date.now(),
             },
           ]);
-        }
-      )
+        },
+      ),
     );
 
     // task:completed
@@ -292,14 +294,14 @@ export function useEventLog({
           evt: Event<{
             agentId: string;
             result: { data?: { text?: string } };
-          }>
+          }>,
         ) => {
           updateAgent(evt.data.agentId, () => ({
             status: 'done' as AgentDisplayStatus,
             currentTool: undefined,
           }));
-        }
-      )
+        },
+      ),
     );
 
     // task:failed
@@ -311,8 +313,8 @@ export function useEventLog({
             status: 'error' as AgentDisplayStatus,
             currentTool: undefined,
           }));
-        }
-      )
+        },
+      ),
     );
 
     // agent:tokens
@@ -323,11 +325,11 @@ export function useEventLog({
           const { agentId, usage } = evt.data;
           setAgents((prev) =>
             prev.map((a) =>
-              a.id === agentId ? { ...a, tokens: usage.totalTokens } : a
-            )
+              a.id === agentId ? { ...a, tokens: usage.totalTokens } : a,
+            ),
           );
-        }
-      )
+        },
+      ),
     );
 
     // agent:terminated
@@ -339,8 +341,8 @@ export function useEventLog({
             status: 'done' as AgentDisplayStatus,
             currentTool: undefined,
           }));
-        }
-      )
+        },
+      ),
     );
 
     // swarm:completed
@@ -356,8 +358,9 @@ export function useEventLog({
               data?: { text?: string };
               error?: string;
             };
-          }>
+          }>,
         ) => {
+          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
           setDone(true);
           const swarmResult = evt.data.result;
           if (swarmResult.error) {
@@ -367,8 +370,8 @@ export function useEventLog({
           } else {
             setResult(swarmResult.status);
           }
-        }
-      )
+        },
+      ),
     );
 
     // swarm:lagged — synthetic event the daemon emits when a SSE consumer
@@ -401,8 +404,8 @@ export function useEventLog({
               kind: 'gap',
             },
           ]);
-        }
-      )
+        },
+      ),
     );
 
     return () => {
@@ -414,7 +417,7 @@ export function useEventLog({
 
   const stats: SwarmStats = {
     totalTokens: agents.reduce((sum, a) => sum + a.tokens, 0),
-    elapsed: Math.floor((Date.now() - startTimeRef.current) / 1000),
+    elapsed,
     agentCount: agents.length,
     strategy,
     laggedEventCount,

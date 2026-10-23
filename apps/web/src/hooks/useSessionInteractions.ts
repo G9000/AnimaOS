@@ -5,6 +5,7 @@ import type {
   SideQuestionAnswer,
 } from '@animaos/sdk';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
 
 export interface SessionInteractionOptions {
   agentId: string | null;
@@ -34,8 +35,7 @@ export function useSessionInteractions(options: SessionInteractionOptions) {
     enabled && agentId && sessionId
       ? `${agentId}\u0000${sessionId}\u0000${resetKey}`
       : null;
-  const latest = useRef({ key, agentId, sessionId, client });
-  latest.current = { key, agentId, sessionId, client };
+  const latest = useLatest({ key, agentId, sessionId, client });
   const [read, setRead] = useState<{
     key: string | null;
     requests: ClarificationRequest[];
@@ -87,7 +87,7 @@ export function useSessionInteractions(options: SessionInteractionOptions) {
       abort.abort();
       window.clearInterval(interval);
     };
-  }, [key, agentId, sessionId, client, revision, refreshKey]);
+  }, [key, agentId, sessionId, client, revision, refreshKey, latest]);
 
   useEffect(() => {
     const calls = sideCalls.current;
@@ -97,59 +97,62 @@ export function useSessionInteractions(options: SessionInteractionOptions) {
     };
   }, [key]);
 
-  const ask = useCallback(async (question: string) => {
-    const scope = latest.current;
-    if (!scope.key || !scope.agentId || !scope.sessionId || !question.trim())
-      return;
-    const id = ++nextSide.current;
-    const abort = new AbortController();
-    sideCalls.current.set(id, abort);
-    setSides((current) => ({
-      key: scope.key,
-      questions: [
-        ...(current.key === scope.key ? current.questions : []),
-        {
-          id,
-          question: question.trim(),
-          pending: true,
-          answer: null,
-          error: null,
-        },
-      ].slice(-5),
-    }));
-    const settle = (patch: Partial<SideQuestionView>) => {
-      if (latest.current.key !== scope.key || abort.signal.aborted) return;
-      setSides((current) =>
-        current.key !== scope.key
-          ? current
-          : {
-              ...current,
-              questions: current.questions.map((item) =>
-                item.id === id ? { ...item, pending: false, ...patch } : item,
-              ),
-            },
-      );
-    };
-    try {
-      settle({
-        answer: await scope.client.sideQuestion(
-          scope.agentId,
-          scope.sessionId,
-          question.trim(),
-          { signal: abort.signal },
-        ),
-      });
-    } catch (caught) {
-      settle({
-        error:
-          caught instanceof Error
-            ? caught.message
-            : 'The side question could not be answered.',
-      });
-    } finally {
-      sideCalls.current.delete(id);
-    }
-  }, []);
+  const ask = useCallback(
+    async (question: string) => {
+      const scope = latest.current;
+      if (!scope.key || !scope.agentId || !scope.sessionId || !question.trim())
+        return;
+      const id = ++nextSide.current;
+      const abort = new AbortController();
+      sideCalls.current.set(id, abort);
+      setSides((current) => ({
+        key: scope.key,
+        questions: [
+          ...(current.key === scope.key ? current.questions : []),
+          {
+            id,
+            question: question.trim(),
+            pending: true,
+            answer: null,
+            error: null,
+          },
+        ].slice(-5),
+      }));
+      const settle = (patch: Partial<SideQuestionView>) => {
+        if (latest.current.key !== scope.key || abort.signal.aborted) return;
+        setSides((current) =>
+          current.key !== scope.key
+            ? current
+            : {
+                ...current,
+                questions: current.questions.map((item) =>
+                  item.id === id ? { ...item, pending: false, ...patch } : item,
+                ),
+              },
+        );
+      };
+      try {
+        settle({
+          answer: await scope.client.sideQuestion(
+            scope.agentId,
+            scope.sessionId,
+            question.trim(),
+            { signal: abort.signal },
+          ),
+        });
+      } catch (caught) {
+        settle({
+          error:
+            caught instanceof Error
+              ? caught.message
+              : 'The side question could not be answered.',
+        });
+      } finally {
+        sideCalls.current.delete(id);
+      }
+    },
+    [latest],
+  );
 
   const answer = useCallback(
     async (request: ClarificationRequest, input: ClarificationAnswerInput) => {
@@ -181,7 +184,7 @@ export function useSessionInteractions(options: SessionInteractionOptions) {
       }
       return result;
     },
-    [refresh],
+    [refresh, latest],
   );
 
   return {

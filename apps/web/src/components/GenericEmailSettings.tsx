@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { useState } from 'react';
 import type {
   ConnectGenericEmailInput,
   EmailEndpoint,
@@ -42,13 +43,13 @@ export function GenericEmailSettings({
   const [error, setError] = useState<string | null>(null);
   const savedSettings = settings ? JSON.stringify(settings) : '';
 
-  useLayoutEffect(() => {
+  useResetOnChange([agentId, online, epoch], () => {
     setImapPassword('');
     setSmtpPassword('');
     setError(null);
-  }, [agentId, online, epoch]);
+  });
 
-  useLayoutEffect(() => {
+  useResetOnChange([agentId, savedSettings], () => {
     const saved: EmailSettings | null = savedSettings
       ? JSON.parse(savedSettings)
       : null;
@@ -60,7 +61,7 @@ export function GenericEmailSettings({
     setAutomatic(saved?.autoReply.enabled ?? false);
     setAllowedSenders(saved?.autoReply.allowedSenders.join(', ') ?? '');
     setAuthservId(saved?.autoReply.authservId ?? '');
-  }, [agentId, savedSettings]);
+  });
 
   const validAddress = (value: string) =>
     /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(value);

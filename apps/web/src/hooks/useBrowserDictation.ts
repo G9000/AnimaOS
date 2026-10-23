@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 // Speech recognition is not declared by every version of TypeScript's DOM lib.
 interface RecognitionResult {
@@ -83,26 +85,20 @@ export function useBrowserDictation(
   const [error, setError] = useState<string | null>(null);
   const current = useRef<Recognition | null>(null);
   const mounted = useRef(true);
-  const boundary = useRef({ conversationKey, disabled, generation: 0 });
-  if (
-    boundary.current.conversationKey !== conversationKey ||
-    boundary.current.disabled !== disabled
-  ) {
-    boundary.current = {
-      conversationKey,
-      disabled,
-      generation: boundary.current.generation + 1,
-    };
-  }
-  const generation = boundary.current.generation;
-  const onTranscriptRef = useRef(onTranscript);
-  onTranscriptRef.current = onTranscript;
-
-  useEffect(() => {
-    mounted.current = true;
+  const scope = useRenderScope(conversationKey, disabled);
+  const { generation } = scope;
+  const boundary = useLatest({ conversationKey, disabled, generation });
+  const onTranscriptRef = useLatest(onTranscript);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
     setState('idle');
     setInterim('');
     setError(null);
+  }
+
+  useEffect(() => {
+    mounted.current = true;
     return () => {
       mounted.current = false;
       const recognition = current.current;

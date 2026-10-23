@@ -503,45 +503,48 @@ describe('CompanionSetup', () => {
     expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it.each([true, false])(
-    'never defaults to the mock provider (real provider configured: %s)',
-    async (configured) => {
-      vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
-      const create = vi
-        .spyOn(daemon, 'bootstrapWorkspace')
-        .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
-      renderSetup({
-        providers: [
-          {
-            id: 'deterministic',
-            label: 'Deterministic (mock)',
-            configured: true,
-            requiresKey: false,
-            apiKeyEnvs: [],
-          },
-          {
-            id: 'ollama',
-            label: 'Ollama',
-            configured: true,
-            requiresKey: false,
-            apiKeyEnvs: [],
-          },
-          { ...providers[0], configured },
-        ],
-      });
-      const user = userEvent.setup();
-      await start(user);
-      if (configured) {
-        await toVoiceFromModel(user);
-        await user.click(button('Finish'));
-        await waitFor(() => expect(create).toHaveBeenCalledOnce());
-        expect(create.mock.calls[0][0].agent.provider).toBe('openai');
-      } else {
-        expect(button('Continue')).toBeDisabled();
-        expect(create).not.toHaveBeenCalled();
-      }
-    },
-  );
+  async function startWithRealProvider(configured: boolean) {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
+    renderSetup({
+      providers: [
+        {
+          id: 'deterministic',
+          label: 'Deterministic (mock)',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+        {
+          id: 'ollama',
+          label: 'Ollama',
+          configured: true,
+          requiresKey: false,
+          apiKeyEnvs: [],
+        },
+        { ...providers[0], configured },
+      ],
+    });
+    const user = userEvent.setup();
+    await start(user);
+    return { user, create };
+  }
+
+  it('uses the configured real provider instead of a mock default', async () => {
+    const { user, create } = await startWithRealProvider(true);
+    await toVoiceFromModel(user);
+    await user.click(button('Finish'));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(create.mock.calls[0][0].agent.provider).toBe('openai');
+  });
+
+  it('refuses to create with a mock default when no real provider is configured', async () => {
+    const { create } = await startWithRealProvider(false);
+    expect(button('Continue')).toBeDisabled();
+    expect(create).not.toHaveBeenCalled();
+  });
 
   it('creates exactly one companion using the daemon workspace directory, with no agency generation', async () => {
     vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { useState } from 'react';
 import type { TelegramConnector } from '../lib/daemon-api';
 import { POLL_CONFLICT_COPY, connectorStatusLabel } from '../lib/telegram';
 import { AlertIcon, TrashIcon } from './icons';
@@ -34,11 +35,11 @@ export function TelegramSettings({
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  useEffect(() => {
+  useResetOnChange([connector?.id, online, epoch], () => {
     setToken('');
     setReplacing(false);
     setConfirmDisconnect(false);
-  }, [connector?.id, online, epoch]);
+  });
   const submit = async () => {
     if (!online || parentDisabled || busy !== null) return;
     const value = token.trim();

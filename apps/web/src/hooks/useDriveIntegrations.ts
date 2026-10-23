@@ -16,6 +16,7 @@ import {
   safeDriveError,
 } from '../lib/drive-selection';
 import { useConnectorLifetime } from './useConnectorLifetime';
+import { useLatest } from './useLatest';
 
 export const DRIVE_CONSENT_POLL_MS = 15_000;
 const MAX_CONSENT_POLLS = 40;
@@ -32,9 +33,8 @@ export function useDriveIntegrations(
   epoch = 0,
   disabled = false,
 ) {
-  const scope = useConnectorLifetime(agentId, online, epoch);
-  const allowed = useRef(!disabled);
-  allowed.current = !disabled;
+  const { token, isCurrent } = useConnectorLifetime(agentId, online, epoch);
+  const allowed = useLatest(!disabled);
   const lifetime = useRef(0);
   const revision = useRef(0);
   const activeAgent = useRef(agentId);
@@ -47,12 +47,9 @@ export function useDriveIntegrations(
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useLayoutEffect(() => {
-    lifetime.current++;
-    revision.current++;
-    activeAgent.current = agentId;
-    locked.current = false;
-    read.current = null;
+  const [previousToken, setPreviousToken] = useState(token);
+  if (previousToken !== token) {
+    setPreviousToken(token);
     setOwner(agentId);
     setStatus(null);
     setConsentUrl(null);
@@ -60,9 +57,14 @@ export function useDriveIntegrations(
     setAvailable(false);
     setBusy(false);
     setError(null);
+  }
+  useLayoutEffect(() => {
+    lifetime.current++;
+    revision.current++;
+    activeAgent.current = agentId;
+    locked.current = false;
+    read.current = null;
     return () => {
-      lifetime.current++;
-      revision.current++;
       activeAgent.current = null;
     };
   }, [agentId, online, epoch]);
@@ -70,7 +72,7 @@ export function useDriveIntegrations(
   const refreshStatus = useCallback(
     async (preserveError = false): Promise<void> => {
       if (
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         !agentId ||
         activeAgent.current !== agentId ||
         locked.current
@@ -82,7 +84,7 @@ export function useDriveIntegrations(
         await previous.promise;
         if (
           generation !== lifetime.current ||
-          !scope.isCurrent(scope.token) ||
+          !isCurrent(token) ||
           activeAgent.current !== agentId ||
           locked.current
         )
@@ -102,7 +104,7 @@ export function useDriveIntegrations(
           const next = await daemon.driveStatus(agentId);
           if (
             generation !== lifetime.current ||
-            !scope.isCurrent(scope.token) ||
+            !isCurrent(token) ||
             requestRevision !== revision.current
           )
             return;
@@ -113,7 +115,7 @@ export function useDriveIntegrations(
         } catch (caught) {
           if (
             generation !== lifetime.current ||
-            !scope.isCurrent(scope.token) ||
+            !isCurrent(token) ||
             requestRevision !== revision.current
           )
             return;
@@ -124,18 +126,18 @@ export function useDriveIntegrations(
           );
         } finally {
           if (read.current === claim) read.current = null;
-          if (generation === lifetime.current && scope.isCurrent(scope.token))
+          if (generation === lifetime.current && isCurrent(token))
             setLoading(false);
         }
       })();
       await claim.promise;
     },
-    [agentId, scope.token, scope.isCurrent],
+    [agentId, token, isCurrent],
   );
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
-  const visible = owner === agentId && scope.isCurrent(scope.token);
+  const visible = owner === agentId && isCurrent(token);
   const pendingId =
     visible && status?.connector?.status === 'pairing'
       ? status.connector.id
@@ -162,7 +164,7 @@ export function useDriveIntegrations(
       ) => Promise<void>,
     ) => {
       if (
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         !allowed.current ||
         !agentId ||
         activeAgent.current !== agentId ||
@@ -177,7 +179,7 @@ export function useDriveIntegrations(
       setError(null);
       setConsentUrl(null);
       const current = () =>
-        scope.isCurrent(scope.token) &&
+        isCurrent(token) &&
         generation === lifetime.current &&
         requestRevision === revision.current;
       try {
@@ -199,7 +201,7 @@ export function useDriveIntegrations(
         }
       }
     },
-    [agentId, refreshStatus, scope.token, scope.isCurrent],
+    [agentId, refreshStatus, token, isCurrent, allowed],
   );
   return {
     status: visible ? status : null,

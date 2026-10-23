@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Text } from 'ink';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@animaos/sdk';
@@ -42,16 +42,19 @@ function harness(
     sessionId?: string;
     online?: boolean;
   }) {
-    current = useSessionReview({
+    const review = useSessionReview({
       api: reviewApi,
       agentId: 'agent-a',
       sessionId,
       online,
       ...options,
     });
+    useLayoutEffect(() => {
+      current = review;
+    }, [review]);
     return (
       <Text>
-        {current.approvals.length}:{current.clarifications.length}
+        {review.approvals.length}:{review.clarifications.length}
       </Text>
     );
   }
@@ -198,7 +201,8 @@ describe('useSessionReview', () => {
       .mockResolvedValue(approval({ status: 'allowed', revision: 2 }));
     const h = harness(api({ decideApproval: decide }));
     await vi.waitFor(() => expect(h.current().approvals).toHaveLength(1));
-    const formVersion = h.current().formVersions['a:approval-a'] ?? 0;
+    const beforeConflict = h.current().formVersions;
+    const formVersion = beforeConflict['a:approval-a'] ?? 0;
     expect(
       await h.current().decide(approval(), {
         decision: 'allow_always',
@@ -210,6 +214,7 @@ describe('useSessionReview', () => {
     expect(h.current().formVersions['a:approval-a']).toBeGreaterThan(
       formVersion,
     );
+    expect(beforeConflict['a:approval-a']).toBeUndefined();
     expect(h.current().approvalBlocked(approval())).toBe(false);
     expect(
       await h

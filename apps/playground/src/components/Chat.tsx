@@ -16,7 +16,10 @@ import {
   type SwarmToolEventPayload,
   type TaskResult,
 } from '../lib/api';
-import { playgroundUserId, playgroundUserMetadata } from '../lib/playgroundUser';
+import {
+  playgroundUserId,
+  playgroundUserMetadata,
+} from '../lib/playgroundUser';
 
 type Kind = 'agents' | 'swarms';
 type Msg = {
@@ -42,7 +45,9 @@ interface Props {
 
 export function Chat({ kind, entity, onAfterRun }: Props) {
   const id =
-    kind === 'agents' ? (entity as AgentSnapshot).state.id : (entity as SwarmState).id;
+    kind === 'agents'
+      ? (entity as AgentSnapshot).state.id
+      : (entity as SwarmState).id;
   const name =
     kind === 'agents'
       ? (entity as AgentSnapshot).state.name
@@ -55,81 +60,88 @@ export function Chat({ kind, entity, onAfterRun }: Props) {
     kind === 'agents'
       ? (entity as AgentSnapshot).state.tokenUsage.totalTokens
       : (entity as SwarmState).tokenUsage.totalTokens;
-  const agentTranscript = kind === 'agents' ? (entity as AgentSnapshot).messages : [];
-  const agentHistoryCount =
-    kind === 'agents' ? agentTranscript.length : 0;
-  const latestAgentMessageId =
-    kind === 'agents' ? agentTranscript[agentTranscript.length - 1]?.id ?? '' : '';
+  const agentTranscript =
+    kind === 'agents' ? (entity as AgentSnapshot).messages : [];
+  const incomingMessages = transcriptFromAgentMessages(agentTranscript);
+  const transcriptKey = JSON.stringify(incomingMessages);
+  const swarmMessages =
+    kind === 'swarms' ? (entity as SwarmState).messages : null;
+  const history = (swarmMessages ?? []).map((message) =>
+    messageActivity(message, 'history'),
+  );
+  const [snapshot, setSnapshot] = useState({
+    id,
+    kind,
+    transcriptKey,
+    swarmMessages,
+  });
 
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<Msg[]>(incomingMessages);
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [recallResults, setRecallResults] = useState<MemoryRecallResult[]>([]);
-  const [relationshipsLoading, setRelationshipsLoading] = useState(false);
-  const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
-  const [swarmActivity, setSwarmActivity] = useState<SwarmActivity[]>([]);
+  const [relationshipsLoading, setRelationshipsLoading] = useState(
+    kind === 'agents',
+  );
+  const [relationshipsError, setRelationshipsError] = useState<string | null>(
+    null,
+  );
+  const [swarmActivity, setSwarmActivity] = useState<SwarmActivity[]>(history);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const activityRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  const refreshRelationships = useCallback(async () => {
-    if (kind !== 'agents') {
-      setRelationships([]);
-      setRecallResults([]);
-      setRelationshipsError(null);
-      setRelationshipsLoading(false);
-      return;
-    }
+  if (snapshot.id !== id || snapshot.kind !== kind) {
+    setSnapshot({ id, kind, transcriptKey, swarmMessages });
+    setMessages(incomingMessages);
+    setSwarmActivity(history);
+    setDraft('');
+    setRelationships([]);
+    setRecallResults([]);
+    setRelationshipsError(null);
+    setRelationshipsLoading(kind === 'agents');
+  } else if (kind === 'agents' && snapshot.transcriptKey !== transcriptKey) {
+    setSnapshot({ id, kind, transcriptKey, swarmMessages });
+    setMessages(incomingMessages);
+  } else if (kind === 'swarms' && snapshot.swarmMessages !== swarmMessages) {
+    setSnapshot({ id, kind, transcriptKey, swarmMessages });
+    setSwarmActivity((items) => mergeSwarmActivity(items, history));
+  }
 
-    setRelationshipsLoading(true);
-    try {
-      const userId = playgroundUserId();
-      const [list, recalled] = await Promise.all([
-        memories.relationships({ agentId: id, limit: 6 }),
-        memories.recall('relationship evidence probe', {
-          entityId: userId,
-          agentId: id,
-          recentLimit: 0,
-          limit: 3,
-        }),
-      ]);
-      setRelationships(list);
-      setRecallResults(recalled);
-      setRelationshipsError(null);
-    } catch (e) {
-      setRelationshipsError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRelationshipsLoading(false);
-    }
+  const refreshRelationships = useCallback(() => {
+    if (kind !== 'agents') return Promise.resolve();
+
+    const userId = playgroundUserId();
+    return Promise.all([
+      memories.relationships({ agentId: id, limit: 6 }),
+      memories.recall('relationship evidence probe', {
+        entityId: userId,
+        agentId: id,
+        recentLimit: 0,
+        limit: 3,
+      }),
+    ])
+      .then(([list, recalled]) => {
+        setRelationships(list);
+        setRecallResults(recalled);
+        setRelationshipsError(null);
+      })
+      .catch((e: unknown) => {
+        setRelationshipsError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        setRelationshipsLoading(false);
+      });
   }, [id, kind]);
 
   useEffect(() => {
-    setMessages([]);
-    setSwarmActivity([]);
-    setDraft('');
-    setTimeout(() => taRef.current?.focus(), 0);
-  }, [id]);
-
-  useEffect(() => {
-    if (kind !== 'agents') return;
-    setMessages(transcriptFromAgentMessages(agentTranscript));
-  }, [agentHistoryCount, id, kind, latestAgentMessageId]);
+    const timer = setTimeout(() => taRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [id, kind]);
 
   useEffect(() => {
     if (kind !== 'swarms') return;
-
-    const history = (entity as SwarmState).messages.map((message) =>
-      messageActivity(message, 'history')
-    );
-    setSwarmActivity((items) => mergeSwarmActivity(items, history));
-  }, [entity, kind]);
-
-  useEffect(() => {
-    if (kind !== 'swarms') {
-      setSwarmActivity([]);
-      return;
-    }
 
     return swarms.streamEvents(
       id,
@@ -148,7 +160,7 @@ export function Chat({ kind, entity, onAfterRun }: Props) {
             body: 'Refresh the swarm or run again to reconnect.',
           },
         ]);
-      }
+      },
     );
   }, [id, kind]);
 
@@ -169,7 +181,10 @@ export function Chat({ kind, entity, onAfterRun }: Props) {
   async function send() {
     const text = draft.trim();
     if (!text || sending) return;
-    setMessages((m) => [...m, { id: localMessageId('user'), role: 'user', text }]);
+    setMessages((m) => [
+      ...m,
+      { id: localMessageId('user'), role: 'user', text },
+    ]);
     setDraft('');
     setSending(true);
 
@@ -191,7 +206,7 @@ export function Chat({ kind, entity, onAfterRun }: Props) {
                   text: response.result.error || 'error',
                   meta,
                 },
-              ]
+              ],
         );
       } else {
         const response = await swarms.run(id, text);
@@ -223,6 +238,7 @@ export function Chat({ kind, entity, onAfterRun }: Props) {
     } finally {
       setSending(false);
       onAfterRun();
+      setRelationshipsLoading(kind === 'agents');
       refreshRelationships();
       setTimeout(() => taRef.current?.focus(), 0);
     }
@@ -356,10 +372,10 @@ function SwarmActivityRow({ activity }: { activity: SwarmActivity }) {
     activity.tone === 'message'
       ? 'bg-[var(--accent)]'
       : activity.tone === 'tool'
-      ? 'bg-sky-500'
-      : activity.tone === 'error'
-      ? 'bg-[var(--err)]'
-      : 'bg-[var(--muted-2)]';
+        ? 'bg-sky-500'
+        : activity.tone === 'error'
+          ? 'bg-[var(--err)]'
+          : 'bg-[var(--muted-2)]';
 
   return (
     <div className="grid grid-cols-[0.5rem_1fr] gap-2 text-xs">
@@ -427,7 +443,8 @@ function activityFromSwarmEvent(event: SwarmStreamEvent): SwarmActivity | null {
       id: `${event.event}-${Date.now()}`,
       tone: result?.status === 'error' ? 'error' : 'status',
       title: 'Swarm completed',
-      body: result?.status === 'error' ? result.error : coerceText(result?.data),
+      body:
+        result?.status === 'error' ? result.error : coerceText(result?.data),
       meta: result?.status ?? 'done',
     };
   }
@@ -446,9 +463,10 @@ function activityFromSwarmEvent(event: SwarmStreamEvent): SwarmActivity | null {
 
 function messageActivity(
   message: AgentMessage,
-  meta: string = 'message'
+  meta: string = 'message',
 ): SwarmActivity {
-  const to = message.to === 'broadcast' ? 'broadcast' : shortAgentId(message.to);
+  const to =
+    message.to === 'broadcast' ? 'broadcast' : shortAgentId(message.to);
   return {
     id: message.id,
     tone: 'message',
@@ -460,7 +478,7 @@ function messageActivity(
 
 function mergeSwarmActivity(
   existing: SwarmActivity[],
-  additions: SwarmActivity[]
+  additions: SwarmActivity[],
 ): SwarmActivity[] {
   if (additions.length === 0) return existing;
 
@@ -476,7 +494,9 @@ function mergeSwarmActivity(
   return merged.slice(-32);
 }
 
-function transcriptFromAgentMessages(messages: AgentTranscriptMessage[]): Msg[] {
+function transcriptFromAgentMessages(
+  messages: AgentTranscriptMessage[],
+): Msg[] {
   return messages.reduce<Msg[]>((transcript, message) => {
     if (message.role === 'user') {
       transcript.push({
@@ -509,16 +529,20 @@ function localMessageId(prefix: 'user' | 'agent' | 'error'): string {
 }
 
 function isSwarmMessagePayload(
-  value: unknown
+  value: unknown,
 ): value is SwarmMessageEventPayload {
   return isRecord(value) && isRecord(value.message);
 }
 
-function isLifecyclePayload(value: unknown): value is { result?: TaskResult | null } {
+function isLifecyclePayload(
+  value: unknown,
+): value is { result?: TaskResult | null } {
   return isRecord(value);
 }
 
-function isAgentPayload(value: unknown): value is { agentId: string; agentName: string; error?: string } {
+function isAgentPayload(
+  value: unknown,
+): value is { agentId: string; agentName: string; error?: string } {
   return (
     isRecord(value) &&
     typeof value.agentId === 'string' &&
@@ -542,7 +566,8 @@ function shortAgentId(id: string): string {
 }
 
 function compactJson(value: unknown): string | undefined {
-  if (!value || (isRecord(value) && Object.keys(value).length === 0)) return undefined;
+  if (!value || (isRecord(value) && Object.keys(value).length === 0))
+    return undefined;
   const json = JSON.stringify(value);
   return json.length > 180 ? `${json.slice(0, 177)}...` : json;
 }
@@ -577,9 +602,7 @@ function RelationshipPanel({
           {error}
         </div>
       ) : relationships.length === 0 ? (
-        <div className="mt-2 text-xs text-[var(--muted)]">
-          No links yet.
-        </div>
+        <div className="mt-2 text-xs text-[var(--muted)]">No links yet.</div>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
           {relationships.map((relationship) => (
@@ -588,13 +611,22 @@ function RelationshipPanel({
               className="max-w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs text-[var(--text-2)]"
               title={relationship.summary ?? relationship.id}
             >
-              <span className="text-[var(--muted)]">{relationship.sourceKind}</span>{' '}
-              <span className="font-medium text-[var(--text)]">{relationship.sourceAgentName}</span>{' '}
+              <span className="text-[var(--muted)]">
+                {relationship.sourceKind}
+              </span>{' '}
+              <span className="font-medium text-[var(--text)]">
+                {relationship.sourceAgentName}
+              </span>{' '}
               <span className="text-[var(--muted-2)]">→</span>{' '}
-              <span className="text-[var(--muted)]">{relationship.targetKind}</span>{' '}
-              <span className="font-medium text-[var(--text)]">{relationship.targetAgentName}</span>
+              <span className="text-[var(--muted)]">
+                {relationship.targetKind}
+              </span>{' '}
+              <span className="font-medium text-[var(--text)]">
+                {relationship.targetAgentName}
+              </span>
               <span className="ml-2 text-[var(--muted-2)]">
-                {relationship.relationshipType} · {Math.round(relationship.strength * 100)}%
+                {relationship.relationshipType} ·{' '}
+                {Math.round(relationship.strength * 100)}%
               </span>
             </div>
           ))}
@@ -621,9 +653,9 @@ function RelationshipPanel({
                   </span>
                 </div>
                 <div className="mt-1 text-[11px] text-[var(--muted-2)]">
-                  relationship {Math.round(result.relationshipScore * 100)}% · temporal{' '}
-                  {Math.round(result.temporalScore * 100)}% · importance{' '}
-                  {Math.round(result.importanceScore * 100)}%
+                  relationship {Math.round(result.relationshipScore * 100)}% ·
+                  temporal {Math.round(result.temporalScore * 100)}% ·
+                  importance {Math.round(result.importanceScore * 100)}%
                 </div>
               </div>
             ))}
@@ -642,14 +674,16 @@ function Bubble({ msg }: { msg: Msg }) {
       className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
       style={{ animation: 'fade-in 180ms ease-out' }}
     >
-      <div className={`max-w-[80%] flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`max-w-[80%] flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}
+      >
         <div
           className={`px-3.5 py-2.5 rounded-lg text-sm whitespace-pre-wrap break-words ${
             isUser
               ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
               : isError
-              ? 'bg-[var(--err)]/10 text-[var(--err)] border border-[var(--err)]/30 font-mono text-xs'
-              : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
+                ? 'bg-[var(--err)]/10 text-[var(--err)] border border-[var(--err)]/30 font-mono text-xs'
+                : 'bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]'
           }`}
         >
           {msg.text}

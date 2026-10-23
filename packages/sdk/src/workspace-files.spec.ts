@@ -115,12 +115,25 @@ it.each([
     size: 1024 * 1024 + 1,
     type: 'application/octet-stream',
     status: 200,
+    error: 'Invalid bounded response length',
   },
-  { name: 'wrong type', size: 2, type: 'application/json', status: 200 },
-  { name: 'owner denial', size: 2, type: 'application/json', status: 403 },
+  {
+    name: 'wrong type',
+    size: 2,
+    type: 'application/json',
+    status: 200,
+    error: 'Invalid bounded response type',
+  },
+  {
+    name: 'owner denial',
+    size: 2,
+    type: 'application/json',
+    status: 403,
+    error: 'Daemon request failed with status 403',
+  },
 ])(
   'm68_refuses $name instead of saving a blob',
-  async ({ size, type, status }) => {
+  async ({ size, type, status, error }) => {
     const fetch = vi.fn(
       async () =>
         new Response('{}', {
@@ -131,7 +144,7 @@ it.each([
     const client = createDaemonClient({ baseUrl: '', fetch });
     await expect(
       client.workspace.downloadFile('reports/result.csv'),
-    ).rejects.toThrow();
+    ).rejects.toThrow(error);
     expect(fetch).toHaveBeenCalledTimes(1);
   },
 );

@@ -1,4 +1,4 @@
-import { DaemonHttpError } from './client.js';
+import { DaemonHttpError } from './daemon-errors.js';
 import type { DaemonClient, FetchLike } from './client.js';
 
 export interface ConversationShareGrant {
@@ -42,16 +42,34 @@ export interface SharedConversationPage {
 export class ConversationSharesClient {
   constructor(private readonly client: DaemonClient) {}
 
-  list(agentId: string, sessionId: string, signal?: AbortSignal): Promise<{ grants: ConversationShareGrant[] }> {
+  list(
+    agentId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<{ grants: ConversationShareGrant[] }> {
     return this.client.requestJson(path(agentId, sessionId), { signal });
   }
 
-  create(agentId: string, sessionId: string, input: { viewerName: string; clearGeneration: number }): Promise<ConversationShareCreated> {
-    return this.client.requestJson(path(agentId, sessionId), { method: 'POST', body: input });
+  create(
+    agentId: string,
+    sessionId: string,
+    input: { viewerName: string; clearGeneration: number },
+  ): Promise<ConversationShareCreated> {
+    return this.client.requestJson(path(agentId, sessionId), {
+      method: 'POST',
+      body: input,
+    });
   }
 
-  revoke(agentId: string, sessionId: string, shareId: string): Promise<{ grants: ConversationShareGrant[] }> {
-    return this.client.requestJson(`${path(agentId, sessionId)}/${encodeURIComponent(shareId)}`, { method: 'DELETE' });
+  revoke(
+    agentId: string,
+    sessionId: string,
+    shareId: string,
+  ): Promise<{ grants: ConversationShareGrant[] }> {
+    return this.client.requestJson(
+      `${path(agentId, sessionId)}/${encodeURIComponent(shareId)}`,
+      { method: 'DELETE' },
+    );
   }
 }
 
@@ -85,22 +103,45 @@ export class SharedConversationClient {
     return this.read(shareId, '', signal);
   }
 
-  messages(shareId: string, options: { before?: string; signal?: AbortSignal } = {}): Promise<SharedConversationPage> {
-    const query = options.before ? `?before=${encodeURIComponent(options.before)}` : '';
+  messages(
+    shareId: string,
+    options: { before?: string; signal?: AbortSignal } = {},
+  ): Promise<SharedConversationPage> {
+    const query = options.before
+      ? `?before=${encodeURIComponent(options.before)}`
+      : '';
     return this.read(shareId, `/messages${query}`, options.signal);
   }
 
-  private async read<T>(shareId: string, suffix: string, signal?: AbortSignal): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/shared/conversations/${encodeURIComponent(shareId)}${suffix}`, {
-      method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
-      headers: { accept: 'application/json', 'x-anima-viewer-id': this.viewerId, 'x-anima-viewer-secret': this.secret },
-      signal,
-    });
+  private async read<T>(
+    shareId: string,
+    suffix: string,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/api/shared/conversations/${encodeURIComponent(shareId)}${suffix}`,
+      {
+        method: 'GET',
+        credentials: 'omit',
+        cache: 'no-store',
+        redirect: 'error',
+        referrerPolicy: 'no-referrer',
+        headers: {
+          accept: 'application/json',
+          'x-anima-viewer-id': this.viewerId,
+          'x-anima-viewer-secret': this.secret,
+        },
+        signal,
+      },
+    );
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      throw new DaemonHttpError(response.status, { error: response.status === 401
-        ? 'Viewer access is unavailable. Check your viewer ID and secret, or ask the owner for a new grant.'
-        : 'The shared conversation could not be loaded.' });
+      throw new DaemonHttpError(response.status, {
+        error:
+          response.status === 401
+            ? 'Viewer access is unavailable. Check your viewer ID and secret, or ask the owner for a new grant.'
+            : 'The shared conversation could not be loaded.',
+      });
     }
     return response.json() as Promise<T>;
   }

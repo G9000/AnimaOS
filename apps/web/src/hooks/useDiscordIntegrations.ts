@@ -29,7 +29,7 @@ export function useDiscordIntegrations(
   online = true,
   epoch = 0,
 ) {
-  const scope = useConnectorLifetime(agentId, online, epoch);
+  const { token, isCurrent } = useConnectorLifetime(agentId, online, epoch);
   const lifetime = useRef(0);
   const mutation = useRef(0);
   const activeAgent = useRef(agentId);
@@ -41,28 +41,30 @@ export function useDiscordIntegrations(
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useLayoutEffect(() => {
-    lifetime.current++;
-    mutation.current++;
-    activeAgent.current = agentId;
-    inFlight.current = false;
-    statusRead.current = null;
+  const [previousToken, setPreviousToken] = useState(token);
+  if (previousToken !== token) {
+    setPreviousToken(token);
     setOwner(agentId);
     setConnectors([]);
     setBusy(null);
     setError(null);
     setAvailable(false);
     setLoading(Boolean(agentId) && online);
+  }
+  useLayoutEffect(() => {
+    lifetime.current++;
+    mutation.current++;
+    activeAgent.current = agentId;
+    inFlight.current = false;
+    statusRead.current = null;
     return () => {
-      lifetime.current++;
-      mutation.current++;
       activeAgent.current = null;
     };
   }, [agentId, online, epoch]);
   const readStatus = useCallback(
     async (preserveError = false): Promise<void> => {
       if (
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         !agentId ||
         activeAgent.current !== agentId ||
         inFlight.current
@@ -76,7 +78,7 @@ export function useDiscordIntegrations(
         await previous.promise;
         if (
           generation !== lifetime.current ||
-          !scope.isCurrent(scope.token) ||
+          !isCurrent(token) ||
           activeAgent.current !== agentId ||
           inFlight.current
         )
@@ -95,7 +97,7 @@ export function useDiscordIntegrations(
         try {
           const listed = await daemon.discordConnectors(agentId);
           if (
-            !scope.isCurrent(scope.token) ||
+            !isCurrent(token) ||
             generation !== lifetime.current ||
             revision !== mutation.current
           )
@@ -105,7 +107,7 @@ export function useDiscordIntegrations(
           if (!preserveError) setError(null);
         } catch (caught) {
           if (
-            !scope.isCurrent(scope.token) ||
+            !isCurrent(token) ||
             generation !== lifetime.current ||
             revision !== mutation.current
           )
@@ -116,13 +118,13 @@ export function useDiscordIntegrations(
           );
         } finally {
           if (statusRead.current === claim) statusRead.current = null;
-          if (generation === lifetime.current && scope.isCurrent(scope.token))
+          if (generation === lifetime.current && isCurrent(token))
             setLoading(false);
         }
       })();
       await claim.promise;
     },
-    [agentId, scope.token, scope.isCurrent],
+    [agentId, token, isCurrent],
   );
   useEffect(() => {
     void readStatus();
@@ -143,7 +145,7 @@ export function useDiscordIntegrations(
       removedId?: string,
     ) => {
       if (
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         !agentId ||
         activeAgent.current !== agentId ||
         inFlight.current
@@ -158,7 +160,7 @@ export function useDiscordIntegrations(
       try {
         const connector = await run();
         if (
-          !scope.isCurrent(scope.token) ||
+          !isCurrent(token) ||
           generation !== lifetime.current ||
           revision !== mutation.current
         )
@@ -171,7 +173,7 @@ export function useDiscordIntegrations(
         return true;
       } catch (caught) {
         if (
-          scope.isCurrent(scope.token) &&
+          isCurrent(token) &&
           generation === lifetime.current &&
           revision === mutation.current
         )
@@ -179,7 +181,7 @@ export function useDiscordIntegrations(
         return false;
       } finally {
         if (
-          scope.isCurrent(scope.token) &&
+          isCurrent(token) &&
           generation === lifetime.current &&
           revision === mutation.current
         ) {
@@ -191,11 +193,11 @@ export function useDiscordIntegrations(
         }
       }
     },
-    [agentId, readStatus, scope.token, scope.isCurrent],
+    [agentId, readStatus, token, isCurrent],
   );
   const check = async (botToken: string): Promise<DiscordBotCheck | null> => {
     if (
-      !scope.isCurrent(scope.token) ||
+      !isCurrent(token) ||
       !agentId ||
       activeAgent.current !== agentId ||
       inFlight.current
@@ -208,14 +210,14 @@ export function useDiscordIntegrations(
     setError(null);
     try {
       const checked = await daemon.checkDiscordBot(agentId, botToken);
-      return scope.isCurrent(scope.token) &&
+      return isCurrent(token) &&
         generation === lifetime.current &&
         revision === mutation.current
         ? checked
         : null;
     } catch (caught) {
       if (
-        scope.isCurrent(scope.token) &&
+        isCurrent(token) &&
         generation === lifetime.current &&
         revision === mutation.current
       )
@@ -223,7 +225,7 @@ export function useDiscordIntegrations(
       return null;
     } finally {
       if (
-        scope.isCurrent(scope.token) &&
+        isCurrent(token) &&
         generation === lifetime.current &&
         revision === mutation.current
       ) {
@@ -234,10 +236,9 @@ export function useDiscordIntegrations(
     }
   };
   return {
-    connectors:
-      owner === agentId && scope.isCurrent(scope.token) ? connectors : [],
+    connectors: owner === agentId && isCurrent(token) ? connectors : [],
     loading,
-    available: owner === agentId && scope.isCurrent(scope.token) && available,
+    available: owner === agentId && isCurrent(token) && available,
     busy,
     error,
     refresh: () => readStatus(),

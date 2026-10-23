@@ -71,7 +71,7 @@ describe('explicit native voice client', () => {
     const client = createDaemonClient({ fetch });
     await expect(
       client.voice.transcribe('a', 's', { ...input, ...patch } as typeof input),
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid voice operation');
     expect(fetch).not.toHaveBeenCalled();
   });
 

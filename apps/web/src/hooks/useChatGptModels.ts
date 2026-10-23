@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  createDaemonClient,
-  type ChatGptModelsSnapshot,
-} from '@animaos/sdk';
+import { createDaemonClient, type ChatGptModelsSnapshot } from '@animaos/sdk';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 const client = createDaemonClient({ baseUrl: '' }).chatgpt;
 const readError =
@@ -12,14 +11,8 @@ const refreshError =
 
 /** Local picker state only. Mount/reconciliation GETs never trigger an upstream refresh. */
 export function useChatGptModels(scopeKey: string, enabled = true) {
-  const context = useRef({ scopeKey, enabled });
-  if (
-    context.current.scopeKey !== scopeKey ||
-    context.current.enabled !== enabled
-  ) {
-    context.current = { scopeKey, enabled };
-  }
-  const owner = context.current;
+  const owner = useRenderScope(scopeKey, enabled);
+  const context = useLatest(owner);
   const sequence = useRef(0);
   const active = useRef<AbortController | null>(null);
   const refreshing = useRef(false);
@@ -87,19 +80,46 @@ export function useChatGptModels(scopeKey: string, enabled = true) {
         }
       }
     },
-    [enabled, owner],
+    [enabled, owner, context],
   );
 
   useEffect(() => {
     refreshing.current = false;
-    if (enabled) void request(false);
+    const controller = new AbortController();
+    const version = ++sequence.current;
+    active.current = controller;
+    const current = () =>
+      context.current === owner &&
+      sequence.current === version &&
+      !controller.signal.aborted;
+    if (enabled)
+      void client
+        .models({ signal: controller.signal })
+        .then(
+          (snapshot) => {
+            if (current())
+              setResult({ owner, snapshot, busy: false, error: null });
+          },
+          () => {
+            if (current())
+              setResult({
+                owner,
+                snapshot: null,
+                busy: false,
+                error: readError,
+              });
+          },
+        )
+        .finally(() => {
+          if (current()) active.current = null;
+        });
     return () => {
       sequence.current += 1;
       active.current?.abort();
       active.current = null;
       refreshing.current = false;
     };
-  }, [enabled, request]);
+  }, [enabled, owner, context]);
 
   const snapshot = result?.owner === owner && enabled ? result.snapshot : null;
   useEffect(() => {

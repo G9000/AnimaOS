@@ -33,7 +33,7 @@ describe('daemon subscription cleanup', () => {
     try {
       await expect(
         client.subscribe('/events', { signal: controller.signal }).next(),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/locked/i);
       expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
     } finally {
       await heldReader.cancel();
@@ -131,16 +131,27 @@ describe('m68_explicit_empty_bounded_downloads', () => {
   );
 
   it.each([
-    { length: '1', body: null, type: 'application/octet-stream' },
+    {
+      length: '1',
+      body: null,
+      type: 'application/octet-stream',
+      error: 'Invalid bounded response type',
+    },
     {
       length: '0',
       body: new Uint8Array([120]),
       type: 'application/octet-stream',
+      error: 'Invalid bounded response length',
     },
-    { length: '0', body: null, type: 'application/json' },
+    {
+      length: '0',
+      body: null,
+      type: 'application/json',
+      error: 'Invalid bounded response type',
+    },
   ])(
     'does_not_relax_length_or_type_validation_$length_$type',
-    async ({ length, body, type }) => {
+    async ({ length, body, type, error }) => {
       const client = createDaemonClient({
         fetch: async () =>
           new Response(body, {
@@ -157,7 +168,7 @@ describe('m68_explicit_empty_bounded_downloads', () => {
             allowEmpty: true,
           },
         ),
-      ).rejects.toThrow();
+      ).rejects.toThrow(error);
     },
   );
 

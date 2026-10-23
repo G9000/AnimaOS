@@ -33,7 +33,8 @@ export function StatusBar({
   // `stats.elapsed` directly; this one keeps the bar live even when the hook
   // is mocked away (tests) or the consumer doesn't propagate stat changes.
   const [elapsed, setElapsed] = useState(stats.elapsed);
-  const startRef = useRef(Date.now());
+  const [startedAt] = useState(() => Date.now());
+  const startRef = useRef(startedAt);
   // Reset the local clock when stats.elapsed jumps backwards (new task) so
   // the bar doesn't show time accumulated from an earlier run.
   const lastStatsElapsedRef = useRef(stats.elapsed);
@@ -78,7 +79,7 @@ export function StatusBar({
         <Text
           color={maybeColor(
             colorEnabled,
-            daemonStatus === 'up' ? 'green' : 'red'
+            daemonStatus === 'up' ? 'green' : 'red',
           )}
         >
           daemon: {daemonStatus}

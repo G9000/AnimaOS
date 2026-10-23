@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { UploadedAttachment } from '@animaos/sdk';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 import {
   ATTACHMENT_ERRORS,
   IMAGE_ATTACHMENT_MIMES,
@@ -35,30 +37,24 @@ export function useAttachments({
   const errors = useRef(new Map<string, string>());
   const operations = useRef(new Map<string, Upload>());
   const mounted = useRef(true);
-  const [, render] = useState(0);
-  const boundary = useRef({
+  const [snapshot, setSnapshot] = useState(() => ({
+    drafts: new Map<string, AttachmentDraft[]>(),
+    errors: new Map<string, string>(),
+  }));
+  const { generation } = useRenderScope(chatKey, agentId, sessionId, enabled);
+  const boundary = useLatest({
     chatKey,
     agentId,
     sessionId,
     enabled,
-    generation: 0,
+    generation,
   });
-  if (
-    boundary.current.chatKey !== chatKey ||
-    boundary.current.agentId !== agentId ||
-    boundary.current.sessionId !== sessionId ||
-    boundary.current.enabled !== enabled
-  )
-    boundary.current = {
-      chatKey,
-      agentId,
-      sessionId,
-      enabled,
-      generation: boundary.current.generation + 1,
-    };
-  const generation = boundary.current.generation;
   const notify = () => {
-    if (mounted.current) render((value) => value + 1);
+    if (mounted.current)
+      setSnapshot({
+        drafts: new Map(drafts.current),
+        errors: new Map(errors.current),
+      });
   };
   const active = () =>
     mounted.current &&
@@ -92,10 +88,10 @@ export function useAttachments({
   };
   useEffect(() => {
     mounted.current = true;
-    notify();
     return () => {
-      mounted.current = false;
       if (chatKey) cancelKey(chatKey);
+      notify();
+      mounted.current = false;
     };
   }, [chatKey, agentId, sessionId, enabled]);
   useEffect(
@@ -275,7 +271,7 @@ export function useAttachments({
     notify();
     return true;
   };
-  const items = chatKey ? (drafts.current.get(chatKey) ?? []) : [];
+  const items = chatKey ? (snapshot.drafts.get(chatKey) ?? []) : [];
   return {
     items,
     readyAttachments: items.flatMap((item) =>
@@ -287,7 +283,7 @@ export function useAttachments({
         : [],
     ),
     uploading: items.some((item) => item.status === 'uploading'),
-    error: (chatKey ? errors.current.get(chatKey) : null) ?? null,
+    error: (chatKey ? snapshot.errors.get(chatKey) : null) ?? null,
     add,
     remove,
     clear,

@@ -44,8 +44,7 @@ describe('ChatGPT subscription transport', () => {
     expect(
       calls.every(
         ({ init }) =>
-          (init?.headers as Record<string, string>)['cache-control'] ===
-          'no-store',
+          new Headers(init?.headers).get('cache-control') === 'no-store',
       ),
     ).toBe(true);
     expect(calls[1].init?.headers).toMatchObject({
@@ -118,7 +117,7 @@ describe('ChatGPT subscription transport', () => {
       calls.map(({ url, init }) => [
         url,
         init?.method ?? 'GET',
-        (init?.headers as Record<string, string>)['cache-control'],
+        new Headers(init?.headers).get('cache-control'),
         init?.body,
       ]),
     ).toEqual([

@@ -47,6 +47,7 @@ import { ResumeCard } from './ResumeCard';
 import { MicCheck, VoiceCheck } from './VoiceCheck';
 import { OnboardingScene } from './OnboardingScene';
 import './companion-onboarding.css';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 export interface CompanionSetupProps {
   providers: DaemonProvider[] | null;
@@ -363,7 +364,7 @@ export function CompanionSetup({
   const [model, setModel] = useState('');
   const [customModel, setCustomModel] = useState('');
   const [source, setSource] = useState<ModelSource | null>(null);
-  const sourceChosen = useRef(false);
+  const [sourceChosen, setSourceChosen] = useState(false);
   const [modelScope, setModelScope] = useState({ revision: 0, pending: false });
   const [access, setAccess] = useState<AccessProfile>('collaborate');
   // How much it asks, separate from what it can use; new agents start Free.
@@ -422,6 +423,8 @@ export function CompanionSetup({
   const modelSelectRef = useRef<HTMLSelectElement>(null);
   const customModelInputRef = useRef<HTMLInputElement>(null);
 
+  useResetOnChange([loadAttempt], () => setWorkspaceError(null));
+
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -430,7 +433,6 @@ export function CompanionSetup({
   }, []);
   useEffect(() => {
     let current = true;
-    setWorkspaceError(null);
     void daemon
       .getWorkspace()
       .then((state) => {
@@ -447,8 +449,8 @@ export function CompanionSetup({
       current = false;
     };
   }, [loadAttempt]);
-  useEffect(() => {
-    if (provider || sourceChosen.current) return;
+  useResetOnChange([providers, provider, sourceChosen, source], () => {
+    if (provider || sourceChosen) return;
     // Keyless local providers are advertised even when no local server is running.
     // Keep those (and the test adapter) explicit choices instead of cloud defaults.
     const available =
@@ -464,8 +466,8 @@ export function CompanionSetup({
     } else if (!source && providers?.some((item) => item.id === 'chatgpt')) {
       setSource('chatgpt');
     }
-  }, [providers, provider, source]);
-  useEffect(() => {
+  });
+  useResetOnChange([providers, source, provider], () => {
     // Connecting ChatGPT while its option is open selects the subscription.
     const chatGpt = providers?.find((item) => item.id === 'chatgpt');
     if (source === 'chatgpt' && chatGpt?.configured && provider !== 'chatgpt') {
@@ -473,20 +475,22 @@ export function CompanionSetup({
       setModel('');
       setCustomModel('');
     }
-  }, [providers, source, provider]);
+  });
   useEffect(
     () => () => {
       if (avatar) URL.revokeObjectURL(avatar.url);
     },
     [avatar],
   );
+  useResetOnChange([coder], () => {
+    if (coder) setCodingAppsError(false);
+  });
   useEffect(() => {
     headingRef.current?.focus();
   }, [step]);
   useEffect(() => {
     if (!coder) return;
     let current = true;
-    setCodingAppsError(false);
     daemon.codingApps().then(
       (result) => {
         if (current)
@@ -534,7 +538,7 @@ export function CompanionSetup({
     setCustomModel('');
   };
   const chooseSource = (value: ModelSource) => {
-    sourceChosen.current = true;
+    setSourceChosen(true);
     setSource(value);
     if (
       provider &&
@@ -800,8 +804,10 @@ export function CompanionSetup({
   const busy = creating || resuming;
   const chatGpt = providers?.find((item) => item.id === 'chatgpt');
   const selectedProvider = providers?.find((item) => item.id === provider);
-  const sources = (['chatgpt', 'key', 'local'] as const).filter((value) =>
-    providers?.some((item) => sourceOf(item) === value),
+  const sources = new Set(
+    (['chatgpt', 'key', 'local'] as const).filter((value) =>
+      providers?.some((item) => sourceOf(item) === value),
+    ),
   );
   const sourceProviders = (providers ?? [])
     .filter(
@@ -1237,7 +1243,7 @@ export function CompanionSetup({
             >
               {SOURCE_GROUPS.map((group) => {
                 const available = group.sources.filter((value) =>
-                  sources.includes(value),
+                  sources.has(value),
                 );
                 if (!available.length) return null;
                 return (

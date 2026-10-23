@@ -12,6 +12,7 @@ import {
   type PersonalitySectionId,
 } from '../../lib/personality-document';
 import './personality.css';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 type Loader = (
   id: string,
@@ -58,23 +59,26 @@ export function PersonalityEditor({
   const [conflict, setConflict] = useState(false);
   const [notice, setNotice] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const generation = useRef(0);
+  const generation = useRef({ value: 0 });
   const savePending = useRef(false);
 
-  useEffect(() => {
-    const current = ++generation.current;
-    const controller = new AbortController();
+  useResetOnChange([agentId, attempt, loadPersonality], () => {
     setLoading(true);
     setSaved(null);
     setDraft('');
     setSaving(false);
-    savePending.current = false;
     setConflict(false);
     setError(null);
     setNotice('');
+  });
+  useEffect(() => {
+    const counter = generation.current;
+    const current = ++counter.value;
+    const controller = new AbortController();
+    savePending.current = false;
     void loadPersonality(agentId, { signal: controller.signal }).then(
       (result) => {
-        if (generation.current !== current) return;
+        if (counter.value !== current) return;
         setSaved(result);
         setDraft(result.content);
         guideBase.current = result.content;
@@ -82,7 +86,7 @@ export function PersonalityEditor({
         setLoading(false);
       },
       (caught) => {
-        if (generation.current !== current) return;
+        if (counter.value !== current) return;
         setError(
           caught instanceof Error
             ? caught.message
@@ -92,7 +96,7 @@ export function PersonalityEditor({
       },
     );
     return () => {
-      ++generation.current;
+      ++counter.value;
       controller.abort();
     };
   }, [agentId, attempt, loadPersonality]);
@@ -104,7 +108,8 @@ export function PersonalityEditor({
   const save = async () => {
     if (!saved || !dirty || !valid || busy || conflict || savePending.current)
       return;
-    const current = generation.current;
+    const counter = generation.current;
+    const current = counter.value;
     savePending.current = true;
     setSaving(true);
     setError(null);
@@ -114,14 +119,14 @@ export function PersonalityEditor({
         content: draft,
         revision: saved.revision,
       });
-      if (generation.current !== current) return;
+      if (counter.value !== current) return;
       setSaved(result);
       setDraft(result.content);
       guideBase.current = result.content;
       setFields(guidedFields(result.content));
       setNotice('Personality saved. New turns will use these instructions.');
     } catch (caught) {
-      if (generation.current !== current) return;
+      if (counter.value !== current) return;
       setConflict(caught instanceof DaemonHttpError && caught.status === 409);
       setError(
         caught instanceof Error
@@ -129,7 +134,7 @@ export function PersonalityEditor({
           : 'Could not save personality.',
       );
     } finally {
-      if (generation.current === current) {
+      if (counter.value === current) {
         savePending.current = false;
         setSaving(false);
       }

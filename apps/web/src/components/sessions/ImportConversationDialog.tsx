@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useState } from 'react';
 
 import {
@@ -18,7 +19,9 @@ const SOURCES: { id: ForeignSource; label: string }[] = [
 /** "~/code/uploader" when the folder is under a home directory. */
 function shortCwd(cwd: string | null): string {
   if (!cwd) return '';
-  const home = cwd.match(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Z]:\\Users\\[^\\]+)/);
+  const home = cwd.match(
+    /^(\/Users\/[^/]+|\/home\/[^/]+|[A-Z]:\\Users\\[^\\]+)/,
+  );
   return home ? `~${cwd.slice(home[0].length)}` : cwd;
 }
 
@@ -54,12 +57,14 @@ export function ImportConversationDialog({
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => {
-    let live = true;
+  useResetOnChange([source], () => {
     setSessions(null);
     setSelected(null);
     setPreview(null);
     setError(null);
+  });
+  useEffect(() => {
+    let live = true;
     daemon
       .foreignSessions(source)
       .then((page) => {
@@ -68,16 +73,22 @@ export function ImportConversationDialog({
         setNextCursor(page.nextCursor);
         setSelected(page.sessions[0]?.handle ?? null);
       })
-      .catch(() => live && setError('Could not look for conversations on this computer.'));
+      .catch(
+        () =>
+          live &&
+          setError('Could not look for conversations on this computer.'),
+      );
     return () => {
       live = false;
     };
   }, [source]);
 
+  useResetOnChange([selected], () => {
+    if (selected) setPreview(null);
+  });
   useEffect(() => {
     if (!selected) return;
     let live = true;
-    setPreview(null);
     daemon
       .foreignSessionPreview(selected)
       .then((value) => live && setPreview(value))
@@ -160,7 +171,11 @@ export function ImportConversationDialog({
           ))}
         </div>
         <div className="import-dialog-body">
-          <div className="import-dialog-list" role="listbox" aria-label={`${label} conversations`}>
+          <div
+            className="import-dialog-list"
+            role="listbox"
+            aria-label={`${label} conversations`}
+          >
             {sessions === null && !error && (
               <p className="import-dialog-empty">Looking for conversations…</p>
             )}
@@ -178,17 +193,26 @@ export function ImportConversationDialog({
                 className="import-dialog-item"
                 onClick={() => setSelected(session.handle)}
               >
-                <span className="import-dialog-item-title">{session.title}</span>
+                <span className="import-dialog-item-title">
+                  {session.title}
+                </span>
                 <span className="import-dialog-item-meta">
-                  <span className="import-dialog-cwd">{shortCwd(session.cwd)}</span>
+                  <span className="import-dialog-cwd">
+                    {shortCwd(session.cwd)}
+                  </span>
                   <span>
-                    {formatDay(session.modifiedAt)} · {formatSize(session.sizeBytes)}
+                    {formatDay(session.modifiedAt)} ·{' '}
+                    {formatSize(session.sizeBytes)}
                   </span>
                 </span>
               </button>
             ))}
             {nextCursor && (
-              <button type="button" className="import-dialog-more" onClick={loadMore}>
+              <button
+                type="button"
+                className="import-dialog-more"
+                onClick={loadMore}
+              >
                 Show older
               </button>
             )}
@@ -224,7 +248,11 @@ export function ImportConversationDialog({
             {error ??
               'Keys and passwords are masked. Up to the last 2,000 messages. Importing again opens the same chat.'}
           </span>
-          <button type="button" className="studio-tool-button" onClick={onClose}>
+          <button
+            type="button"
+            className="studio-tool-button"
+            onClick={onClose}
+          >
             Cancel
           </button>
           <button

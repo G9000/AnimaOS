@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useRef, useState } from 'react';
 import {
   DaemonHttpError,
@@ -102,7 +103,7 @@ function AgentRuns({
   const [jobs, setJobs] = useState<AgentJob[] | null>(
     snapshot ? [snapshot] : null,
   );
-  useEffect(() => {
+  useResetOnChange([snapshot], () => {
     if (!snapshot) return;
     setJobs((current) => {
       const existing = current?.find((job) => job.id === snapshot.id);
@@ -112,7 +113,7 @@ function AgentRuns({
         ...(current ?? []).filter((job) => job.id !== snapshot.id),
       ];
     });
-  }, [snapshot]);
+  });
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -147,12 +148,14 @@ function AgentRuns({
     };
   }, []);
 
+  useResetOnChange([agentId, refresh, online, refreshKey], () => {
+    if (online) setPollingPaused(false);
+  });
   useEffect(() => {
     if (!online) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let remaining = 60;
-    setPollingPaused(false);
     async function load() {
       try {
         const result = await daemon.agentJobs(agentId, {

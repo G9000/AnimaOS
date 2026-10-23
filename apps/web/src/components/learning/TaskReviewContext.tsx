@@ -18,6 +18,8 @@ import type {
 import { daemon } from '../../lib/daemon-api';
 import { learningReviewsChanged } from '../../lib/inbox-events';
 import type { TaskReviewApi } from '../../lib/task-reviews';
+import { useLatest } from '../../hooks/useLatest';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 /** How often a queued or running review is re-read until it settles. */
 const POLL_MS = 2_000;
@@ -72,16 +74,17 @@ export function TaskReviewProvider({
   const [policy, setPolicy] = useState<LearningPolicy | null>(null);
   const [reviews, setReviews] = useState<LearningReview[]>([]);
   const [tick, setTick] = useState(0);
-  const apiRef = useRef(api);
-  apiRef.current = api;
+  const apiRef = useLatest(api);
   /** Reviews seen queued or running, so their settling can be told. */
   const running = useRef(new Set<string>());
 
   const refresh = useCallback(() => setTick((value) => value + 1), []);
 
-  useEffect(() => {
+  useResetOnChange([agentId], () => {
     setPolicy(null);
     setReviews([]);
+  });
+  useEffect(() => {
     running.current = new Set();
   }, [agentId]);
 
@@ -98,7 +101,7 @@ export function TaskReviewProvider({
       if (nextReviews.status === 'fulfilled') setReviews(nextReviews.value);
     });
     return () => controller.abort();
-  }, [agentId, active, tick]);
+  }, [agentId, active, tick, apiRef]);
 
   // Keep re-reading while a review runs, and tell the Inbox when one settles.
   useEffect(() => {
@@ -152,7 +155,7 @@ export function TaskReviewProvider({
           : 'Couldn’t review this task. Try again in a moment.';
       }
     },
-    [agentId, refresh],
+    [agentId, refresh, apiRef],
   );
 
   const undo = useCallback(
@@ -180,7 +183,7 @@ export function TaskReviewProvider({
           : 'Couldn’t undo that lesson. Try again in a moment.';
       }
     },
-    [agentId, refresh],
+    [agentId, refresh, apiRef],
   );
 
   const value = useMemo<TaskReviews>(() => {

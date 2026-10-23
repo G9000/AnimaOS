@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import type {
   WorkspaceFileResponse,
   WorkspaceFilesResponse,
@@ -33,53 +34,53 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
     selected && /\.(?:txt|md|csv)$/i.test(selected),
   );
 
-  useEffect(() => {
-    let active = true;
-    request.current++;
-    downloadGeneration.current++;
-    downloadController.current?.abort();
-    downloadController.current = null;
+  useResetOnChange([online, refresh], () => {
     setDownloading(false);
     setDownloadError(null);
-    for (const [url, timer] of downloadUrls.current) {
-      window.clearTimeout(timer);
-      URL.revokeObjectURL(url);
-    }
-    downloadUrls.current.clear();
     setSelected(null);
     setPreview(null);
     setPreviewError(null);
     setReading(false);
-    if (!online) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setListError(null);
-    daemon
-      .listWorkspaceFiles()
-      .then((result) => {
-        if (active) setListing(result);
-      })
-      .catch((error) => {
-        if (active) setListError(message(error));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-      request.current++;
-      downloadGeneration.current++;
-      downloadController.current?.abort();
-      downloadController.current = null;
-      for (const [url, timer] of downloadUrls.current) {
+    setLoading(online);
+    if (online) setListError(null);
+  });
+  const invalidateRequests = useCallback(() => {
+    request.current++;
+    downloadGeneration.current++;
+    downloadController.current?.abort();
+    downloadController.current = null;
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const ownedUrls = downloadUrls.current;
+    const clearUrls = () => {
+      for (const [url, timer] of ownedUrls) {
         window.clearTimeout(timer);
         URL.revokeObjectURL(url);
       }
-      downloadUrls.current.clear();
+      ownedUrls.clear();
     };
-  }, [online, refresh]);
+    invalidateRequests();
+    clearUrls();
+    if (online) {
+      daemon
+        .listWorkspaceFiles()
+        .then((result) => {
+          if (active) setListing(result);
+        })
+        .catch((error) => {
+          if (active) setListError(message(error));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
+    return () => {
+      active = false;
+      invalidateRequests();
+      clearUrls();
+    };
+  }, [online, refresh, invalidateRequests]);
 
   const read = async (path: string) => {
     if (!online) return;

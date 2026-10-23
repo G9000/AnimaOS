@@ -16,6 +16,7 @@ import type {
   UploadedAttachment,
 } from '@animaos/sdk';
 import type { SendAttachments } from './useSessionSends';
+import { useLatest } from './useLatest';
 import { ATTACHMENT_ERRORS } from '../lib/attachments';
 
 import { daemon } from '../lib/daemon-api';
@@ -110,7 +111,10 @@ export interface SessionCommandOptions {
   search: (words: string) => void;
   /** Opens or updates the current chat's model preference (`/model`). */
   chooseModel: (argument?: string) => void;
-  openChatPanel?: (panel: 'tools' | 'review' | 'reports' | 'share', argument?: string) => void;
+  openChatPanel?: (
+    panel: 'tools' | 'review' | 'reports' | 'share',
+    argument?: string,
+  ) => void;
   rename: (session: Session, title: string) => Promise<boolean>;
   archive: (session: Session, archived: boolean) => Promise<boolean>;
   exportSession: (session: Session) => Promise<void>;
@@ -155,8 +159,7 @@ export interface SessionCommands {
 export function useSessionCommands(
   options: SessionCommandOptions,
 ): SessionCommands {
-  const latest = useRef(options);
-  latest.current = options;
+  const latest = useLatest(options);
   const [compacting, setCompacting] = useState(false);
   const [revising, setRevising] = useState(false);
   const revisionPending = useRef(false);
@@ -317,9 +320,15 @@ export function useSessionCommands(
       };
       const { session, activeRun } = current;
       if (!session) return result;
-      if (session.kind === 'chat' && ['web', 'api'].includes(session.origin) && !session.parentRunId && current.openChatPanel) {
+      if (
+        session.kind === 'chat' &&
+        ['web', 'api'].includes(session.origin) &&
+        !session.parentRunId &&
+        current.openChatPanel
+      ) {
         for (const panel of ['tools', 'review', 'reports', 'share'] as const) {
-          result[panel] = (argument) => current.openChatPanel?.(panel, argument);
+          result[panel] = (argument) =>
+            current.openChatPanel?.(panel, argument);
         }
       }
       const { capabilities } = session;
@@ -543,7 +552,7 @@ export function useSessionCommands(
             : {}),
         }),
     };
-  }, []);
+  }, [latest]);
   return { ...commands, compacting, revising };
 }
 

@@ -32,6 +32,9 @@ import { StatusClient } from './status.js';
 import { SystemClient } from './system.js';
 import { AgentEventsClient } from './events.js';
 import type { DaemonCapabilities } from './capabilities.js';
+import { DaemonHttpError } from './daemon-errors.js';
+
+export { DaemonHttpError } from './daemon-errors.js';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8080';
 
@@ -53,26 +56,6 @@ export interface DaemonEvent<T = unknown> {
 
 export interface DaemonHealth {
   status: 'ok';
-}
-
-export class DaemonHttpError extends Error {
-  readonly status: number;
-  readonly body: unknown;
-
-  constructor(status: number, body: unknown) {
-    const message =
-      typeof body === 'object' &&
-      body !== null &&
-      'error' in body &&
-      typeof body.error === 'string'
-        ? body.error
-        : `Daemon request failed with status ${status}`;
-
-    super(message);
-    this.name = 'DaemonHttpError';
-    this.status = status;
-    this.body = body;
-  }
 }
 
 export class DaemonConnectionError extends Error {

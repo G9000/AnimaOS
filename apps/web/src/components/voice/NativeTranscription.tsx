@@ -1,8 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { VoiceCapabilities } from '@animaos/sdk';
 import type { AttachmentDraft } from '../../lib/attachments';
 import { daemon } from '../../lib/daemon-api';
 import { revealInvisible } from '../../lib/skills';
+import { useLatest } from '../../hooks/useLatest';
+import { useRenderScope } from '../../hooks/useRenderScope';
 
 export interface NativeVoiceScope {
   agentId: string;
@@ -10,10 +12,7 @@ export interface NativeVoiceScope {
   /** Reuses the same session as the selected READY upload, including new chats. */
   ensureSession(): Promise<string>;
 }
-interface Boundary {
-  signature: string;
-  generation: number;
-}
+type Boundary = ReturnType<typeof useRenderScope>;
 interface Operation {
   boundary: Boundary;
   agentId: string;
@@ -63,16 +62,10 @@ export function NativeTranscription({
     selected?.id ?? null,
     disabled,
   ]);
-  const boundary = useRef<Boundary>({ signature, generation: 0 });
-  if (boundary.current.signature !== signature)
-    boundary.current = {
-      signature,
-      generation: boundary.current.generation + 1,
-    };
-  const current = boundary.current;
+  const current = useRenderScope(signature);
+  const boundary = useLatest(current);
   const mounted = useRef(true);
-  const scopeRef = useRef(scope);
-  scopeRef.current = scope;
+  const scopeRef = useLatest(scope);
   const operation = useRef<Operation | null>(null);
   const [capability, setCapability] = useState<{
     boundary: Boundary;
@@ -88,10 +81,12 @@ export function NativeTranscription({
     boundary: Boundary;
     text: string;
   } | null>(null);
-  const live = (owner: Boundary) =>
-    mounted.current && boundary.current === owner;
+  const live = useCallback(
+    (owner: Boundary) => mounted.current && boundary.current === owner,
+    [boundary],
+  );
 
-  const cancel = () => {
+  const cancel = useCallback(() => {
     const previous = operation.current;
     if (!previous) return;
     operation.current = null;
@@ -103,21 +98,18 @@ export function NativeTranscription({
     } finally {
       previous.controller.abort();
     }
-  };
+  }, []);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       cancel();
     };
-  }, []);
+  }, [cancel]);
+  const selectedAttachmentId = selected?.id;
   useEffect(() => {
     const controller = new AbortController();
-    setCapability(null);
-    setPreview(null);
-    setPending(null);
-    setNotice(null);
-    if (selected && !disabled) {
+    if (selectedAttachmentId && !disabled) {
       const target = scopeRef.current;
       void (async () => {
         try {
@@ -140,7 +132,7 @@ export function NativeTranscription({
       controller.abort();
       cancel();
     };
-  }, [signature]);
+  }, [current, disabled, selectedAttachmentId, scopeRef, live, cancel]);
 
   const activeCapability = capability?.boundary === current ? capability : null;
   const activePreview = preview?.boundary === current ? preview : null;

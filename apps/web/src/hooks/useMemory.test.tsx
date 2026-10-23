@@ -273,11 +273,6 @@ describe('useMemory', () => {
           .mockResolvedValueOnce([memoryFixture('filtered-first')])
           .mockResolvedValueOnce([memoryFixture('filtered-after-edit')]);
         act(() => hook.result.current.search('tea'));
-        await waitFor(() =>
-          expect(
-            hook.result.current.memories.map((memory) => memory.id),
-          ).toEqual(['filtered-first']),
-        );
       } else {
         vi.mocked(daemon.listFacts)
           .mockResolvedValueOnce([
@@ -287,12 +282,17 @@ describe('useMemory', () => {
             factFixture('replacement-after-edit', { status: 'superseded' }),
           ]);
         act(() => hook.result.current.setIncludeReplaced(true));
-        await waitFor(() =>
-          expect(hook.result.current.facts.map((fact) => fact.id)).toEqual([
-            'replacement-first',
-          ]),
-        );
       }
+
+      await waitFor(() =>
+        expect(
+          viewChange === 'search'
+            ? hook.result.current.memories.map((memory) => memory.id)
+            : hook.result.current.facts.map((fact) => fact.id),
+        ).toEqual([
+          viewChange === 'search' ? 'filtered-first' : 'replacement-first',
+        ]),
+      );
 
       await act(async () => {
         if (failure) mutation.reject(failure);
@@ -301,33 +301,28 @@ describe('useMemory', () => {
       });
       await expect(pending).resolves.toBe(!failure);
 
-      if (viewChange === 'search') {
-        await waitFor(() =>
-          expect(
-            hook.result.current.memories.map((memory) => memory.id),
-          ).toEqual(['filtered-after-edit']),
-        );
-        expect(daemon.searchMemories).toHaveBeenLastCalledWith(
-          'tea',
-          'agent-main',
-          200,
-        );
-        expect(daemon.recentMemories).toHaveBeenCalledTimes(1);
-      } else {
-        await waitFor(() =>
-          expect(hook.result.current.facts.map((fact) => fact.id)).toEqual([
-            'replacement-after-edit',
-          ]),
-        );
-        expect(daemon.listFacts).toHaveBeenLastCalledWith({
-          includeInactive: true,
-          limit: 500,
-        });
-      }
+      const visibleIds = () =>
+        viewChange === 'search'
+          ? hook.result.current.memories.map((memory) => memory.id)
+          : hook.result.current.facts.map((fact) => fact.id);
+      await waitFor(() =>
+        expect(visibleIds()).toEqual([
+          viewChange === 'search'
+            ? 'filtered-after-edit'
+            : 'replacement-after-edit',
+        ]),
+      );
+      expect(vi.mocked(daemon.searchMemories).mock.calls.at(-1)).toEqual(
+        viewChange === 'search' ? ['tea', 'agent-main', 200] : undefined,
+      );
+      expect(daemon.recentMemories).toHaveBeenCalledTimes(
+        viewChange === 'search' ? 1 : 3,
+      );
+      expect(vi.mocked(daemon.listFacts).mock.calls.at(-1)).toEqual([
+        { includeInactive: viewChange !== 'search', limit: 500 },
+      ]);
       expect(daemon.updateMemory).toHaveBeenCalledTimes(1);
-      if (failure) {
-        expect(hook.result.current.error).toBe('review edit');
-      }
+      expect(hook.result.current.error).toBe(failure ? 'review edit' : null);
     },
   );
 

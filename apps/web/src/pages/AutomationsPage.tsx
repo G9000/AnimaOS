@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useState } from 'react';
 import type { Automation } from '@animaos/sdk';
 
@@ -79,12 +80,14 @@ export function AutomationsPage({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
-  useEffect(() => {
+  useResetOnChange([focusId, view.automations, onFocusHandled], () => {
     if (!focusId) return;
     const focused = view.automations.find((item) => item.id === focusId);
-    if (!focused) return;
-    setEditing({ automation: focused });
-    onFocusHandled?.();
+    if (focused) setEditing({ automation: focused });
+  });
+  useEffect(() => {
+    if (focusId && view.automations.some((item) => item.id === focusId))
+      onFocusHandled?.();
   }, [focusId, view.automations, onFocusHandled]);
 
   const hasHeartbeat = view.automations.some(

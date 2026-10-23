@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DaemonHttpError, type AgentFilesPreview } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { SectionTitle } from './ui-bits';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 
 type PreviewLoader = (
   id: string,
@@ -32,10 +33,12 @@ export function AgentFilesPanel({
     status: 'loading',
   });
 
+  useResetOnChange([agentId, attempt, loadPreview], () => {
+    setState({ agentId, status: 'loading' });
+  });
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    setState({ agentId, status: 'loading' });
     void loadPreview(agentId, { signal: controller.signal }).then(
       (preview) => {
         if (current) setState({ agentId, status: 'ready', preview });

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { AgentTask, AgentTasks } from '@animaos/sdk';
 import {
   daemon,
@@ -7,6 +14,8 @@ import {
 } from '../lib/daemon-api';
 import { primaryBtnCls } from './ui-bits';
 import { describeTrigger } from '../lib/automations';
+import { useLatest } from '../hooks/useLatest';
+import { useRenderScope } from '../hooks/useRenderScope';
 
 interface TasksContext {
   agentId: string;
@@ -80,44 +89,38 @@ export function AgentTasksView({
 }) {
   const mounted = useRef(true);
   const sequence = useRef(0);
-  const contextRef = useRef<TasksContext | null>(null);
-  if (
-    !contextRef.current ||
-    contextRef.current.agentId !== agentId ||
-    contextRef.current.online !== online
-  ) {
-    contextRef.current = {
+  const owner = useRenderScope(agentId);
+  const connection = useRenderScope(agentId, online);
+  const context = useMemo<TasksContext>(
+    () => ({
       agentId,
       online,
-      generation: (contextRef.current?.generation ?? 0) + 1,
-      owner:
-        contextRef.current?.agentId === agentId ? contextRef.current.owner : {},
-    };
-    sequence.current += 1;
-  }
-  const context = contextRef.current!;
+      generation: connection.generation,
+      owner,
+    }),
+    [agentId, online, connection, owner],
+  );
+  const contextRef = useLatest(context);
   const isCurrent = useCallback(
     (origin: TasksContext) =>
       mounted.current && contextRef.current === origin && origin.online,
-    [],
+    [contextRef],
   );
   const [state, setState] = useState(() => emptyTasksEditor(context));
-  const editorRef = useRef(state);
-  editorRef.current = state;
+  const editorRef = useLatest(state);
   const updateEditor = useCallback(
     (update: (previous: TasksEditor) => TasksEditor) => {
       const next = update(editorRef.current);
       editorRef.current = next;
       setState(next);
     },
-    [],
+    [editorRef],
   );
   // This reservation survives connection generations until the physical PUT
   // settles. Display freshness alone must never authorize another submission.
   const pendingRef = useRef<PendingTasksSave | null>(null);
   const [pending, setPending] = useState<PendingTasksSave | null>(null);
-  const runningRef = useRef(running);
-  runningRef.current = running;
+  const runningRef = useLatest(running);
 
   const load = useCallback(
     async (manual = false) => {
@@ -527,9 +530,13 @@ export function AgentProactiveView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [previousLoad, setPreviousLoad] = useState({ agentId, reload });
+  if (previousLoad.agentId !== agentId || previousLoad.reload !== reload) {
+    setPreviousLoad({ agentId, reload });
+    setError(null);
+  }
   useEffect(() => {
     let cancelled = false;
-    setError(null);
     daemon.listSchedules(agentId).then(
       (result) => {
         if (!cancelled) setSchedules(result.schedules);

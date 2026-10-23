@@ -277,7 +277,10 @@ export function useDaemonBootstrap(
         setLoaded(true);
       },
     );
+    // Both helpers publish only after their awaited daemon request settles.
+    // eslint-disable-next-line react/set-state-in-effect
     void retryProviders();
+    // eslint-disable-next-line react/set-state-in-effect
     void refreshWorkspace();
 
     return () => {

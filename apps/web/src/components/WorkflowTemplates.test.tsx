@@ -65,6 +65,9 @@ it('runs a pinned template with fresh input keys and renders input as safe text'
       inputs: { topic: '<script>alert(1)</script>' },
     },
   ]);
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Run template' })).toBeEnabled(),
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Run template' }));
   await waitFor(() => expect(api.runWorkflowTemplate).toHaveBeenCalledTimes(2));
   expect(api.runWorkflowTemplate.mock.calls[0][2].requestKey).not.toBe(

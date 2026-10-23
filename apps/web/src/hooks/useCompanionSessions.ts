@@ -9,6 +9,7 @@ import type { Session } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import { sessionKey } from '../lib/session-groups';
+import { useRenderScope } from './useRenderScope';
 
 /** The sidebar re-reads its sessions this often without the event stream. */
 export const SESSION_LIST_POLL_MS = 10_000;
@@ -115,6 +116,19 @@ export function useCompanionSessions(
   const listingRef = useRef({ agentId, archived, query });
   const changesRef = useRef(new Map<string, LocalChange>());
   const mutationEpochRef = useRef(0);
+  const scope = useRenderScope(agentId, archived, query);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setLoadingMore(false);
+    if (!agentId) {
+      setSessions([]);
+      setHasMore(false);
+      setLoading(false);
+      setError(null);
+      setDaemonTooOld(false);
+    }
+  }
 
   useLayoutEffect(() => {
     listingRef.current = { agentId, archived, query };
@@ -126,16 +140,10 @@ export function useCompanionSessions(
     pagesRef.current = 1;
     shownPagesRef.current = 1;
     loadMoreTargetRef.current = null;
-    setLoadingMore(false);
     // The previous list stays on screen until the new first page lands.
     if (agentId) return;
     hasMoreRef.current = false;
     daemonTooOldRef.current = false;
-    setSessions([]);
-    setHasMore(false);
-    setLoading(false);
-    setError(null);
-    setDaemonTooOld(false);
   }, [agentId, archived, query]);
 
   const refresh = useCallback(async () => {

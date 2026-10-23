@@ -1,4 +1,5 @@
-import { DaemonHttpError, type DaemonClient } from './client.js';
+import type { DaemonClient } from './client.js';
+import { DaemonHttpError } from './daemon-errors.js';
 
 export interface StatusReadiness {
   status: 'ready' | 'not_ready';

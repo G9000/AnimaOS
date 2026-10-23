@@ -1,3 +1,6 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
+import { useRenderScope } from '../../hooks/useRenderScope';
+import { useLatest } from '../../hooks/useLatest';
 import { useEffect, useRef, useState } from 'react';
 import type { SessionMessageAttachment } from '@animaos/sdk';
 import { useAttachmentPreview } from '../../hooks/useAttachmentPreview';
@@ -381,33 +384,28 @@ function AttachmentFile({
   );
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const boundary = useRef({ agentId, id: attachment.id, generation: 0 });
-  if (
-    boundary.current.agentId !== agentId ||
-    boundary.current.id !== attachment.id
-  )
-    boundary.current = {
-      agentId,
-      id: attachment.id,
-      generation: boundary.current.generation + 1,
-    };
-  const generation = boundary.current.generation;
+  const scope = useRenderScope(agentId, attachment.id);
+  const boundary = useLatest(scope);
+  useResetOnChange([scope], () => {
+    setError(null);
+    setDownloading(false);
+  });
   const mounted = useRef(true);
   const requests = useRef(new Set<AbortController>());
   const urls = useRef(new Map<string, number>());
   useEffect(() => {
     mounted.current = true;
-    setError(null);
-    setDownloading(false);
+    const ownedRequests = requests.current;
+    const ownedUrls = urls.current;
     return () => {
       mounted.current = false;
-      for (const controller of requests.current) controller.abort();
-      requests.current.clear();
-      for (const [url, timer] of urls.current) {
+      for (const controller of ownedRequests) controller.abort();
+      ownedRequests.clear();
+      for (const [url, timer] of ownedUrls) {
         window.clearTimeout(timer);
         URL.revokeObjectURL(url);
       }
-      urls.current.clear();
+      ownedUrls.clear();
     };
   }, [agentId, attachment.id]);
   const download = async () => {
@@ -418,7 +416,7 @@ function AttachmentFile({
     setError(null);
     const active = () =>
       mounted.current &&
-      boundary.current.generation === generation &&
+      boundary.current === scope &&
       !controller.signal.aborted;
     try {
       const blob = await daemon.downloadAttachment(agentId, attachment.id, {

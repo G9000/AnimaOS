@@ -21,14 +21,16 @@ export function renameTeamReferences(
   renames: ReadonlyArray<readonly [string, string]>,
 ): string {
   const replacements = new Map(
-    renames.map(([before, after]) => [before.trim(), after.trim()] as const)
+    renames
+      .map(([before, after]) => [before.trim(), after.trim()] as const)
       .filter(([before, after]) => before && after),
   );
-  if (![...replacements].some(([before, after]) => before !== after)) return text;
+  if (![...replacements].some(([before, after]) => before !== after))
+    return text;
   // Preserve text the user already corrected, especially when the new full
   // name contains the old short name (Hana -> Aiko Hana). Source names still
   // take precedence so deliberate swaps remain possible.
-  for (const after of [...replacements.values()]) {
+  for (const after of replacements.values()) {
     if (!replacements.has(after)) replacements.set(after, after);
   }
   const names = [...replacements.keys()]
@@ -36,7 +38,10 @@ export function renameTeamReferences(
     .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   // Match whole names, including Unicode and possessives. One pass prevents
   // cascading replacements when names are swapped or overlap.
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${names.join('|')})(?![\\p{L}\\p{N}_])`, 'gu');
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}_])(?:${names.join('|')})(?![\\p{L}\\p{N}_])`,
+    'gu',
+  );
   return text.replace(pattern, (name) => replacements.get(name) ?? name);
 }
 
@@ -44,18 +49,31 @@ export function renameTeamReferences(
 export function teamNameRenames(
   members: ReadonlyArray<readonly [string, string]>,
 ): [string, string][] {
-  const pairs: [string, string][] = members.map(([before, after]) => [before.trim(), after.trim()]);
+  const pairs: [string, string][] = members.map(([before, after]) => [
+    before.trim(),
+    after.trim(),
+  ]);
   const aliases: [string, string][] = [];
   for (const [index, [before, after]] of pairs.entries()) {
     const parts = before.split(/\s+/);
     if (before === after || parts.length < 2) continue;
     // Role titles are not personal names: never turn "Research findings" into
     // "Alice findings" merely because Research Lead was renamed.
-    if (/\b(lead|manager|director|officer|chief|specialist|analyst|researcher|writer|strategist|assistant|engineer|developer|designer|planner|coordinator|reviewer|support)\b/i.test(before)) continue;
+    if (
+      /\b(lead|manager|director|officer|chief|specialist|analyst|researcher|writer|strategist|assistant|engineer|developer|designer|planner|coordinator|reviewer|support)\b/i.test(
+        before,
+      )
+    )
+      continue;
     const short = parts[0];
     if (!/^\p{Lu}[\p{L}'’-]*$/u.test(short)) continue;
-    const ambiguous = pairs.some(([oldName, newName], other) => other !== index &&
-      [oldName, newName].some((name) => name.split(/\s+/)[0].toLowerCase() === short.toLowerCase()));
+    const ambiguous = pairs.some(
+      ([oldName, newName], other) =>
+        other !== index &&
+        [oldName, newName].some(
+          (name) => name.split(/\s+/)[0].toLowerCase() === short.toLowerCase(),
+        ),
+    );
     if (!ambiguous) aliases.push([short, after]);
   }
   return [...aliases, ...pairs];

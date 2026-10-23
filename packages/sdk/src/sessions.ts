@@ -1,4 +1,4 @@
-import { DaemonHttpError } from './client.js';
+import { DaemonHttpError } from './daemon-errors.js';
 import type { DaemonClient } from './client.js';
 import type { UsageTotals } from './usage.js';
 import type { UploadedAttachment } from './attachments.js';

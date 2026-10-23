@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   LearningProposal,
@@ -61,14 +62,16 @@ export function LearningSkillDraftForm({
     };
   }, [agentId, review.id, proposal.id]);
 
-  useEffect(() => {
+  useResetOnChange([proposal.skillDraftId], () => {
     if (proposal.skillDraftId) setDraftId(proposal.skillDraftId);
-  }, [proposal.skillDraftId]);
+  });
 
+  useResetOnChange([api, open], () => {
+    if (open && api) setLoading(true);
+  });
   useEffect(() => {
     if (!open || !api) return;
     const controller = new AbortController();
-    setLoading(true);
     void api
       .listSkills({ signal: controller.signal })
       .then(

@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useMemo, useState } from 'react';
 import {
   DaemonHttpError,
@@ -45,9 +46,7 @@ export interface AutomationEditorProps {
 }
 
 type Preview =
-  | { key: string; runs: number[] }
-  | { key: string; error: string }
-  | null;
+  { key: string; runs: number[] } | { key: string; error: string } | null;
 
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 
@@ -98,6 +97,7 @@ export function AutomationEditor({
   const [preview, setPreview] = useState<Preview>(null);
   const [saving, setSaving] = useState(false);
 
+  const [phraseTime, setPhraseTime] = useState(() => Date.now());
   const trigger = useMemo<AutomationTrigger | null>(() => {
     if (eventMode)
       return /^[a-z][a-z0-9._-]{0,79}$/.test(eventTopic)
@@ -108,8 +108,16 @@ export function AutomationEditor({
         ? { type: 'cron', expression: expression.trim(), timeZone }
         : null;
     if (!phrase.trim()) return null;
-    return parseSchedule(phrase, { nowMs: Date.now(), timeZone });
-  }, [eventMode, eventTopic, cronMode, expression, phrase, timeZone]);
+    return parseSchedule(phrase, { nowMs: phraseTime, timeZone });
+  }, [
+    eventMode,
+    eventTopic,
+    cronMode,
+    expression,
+    phrase,
+    timeZone,
+    phraseTime,
+  ]);
   const phraseProblem =
     !eventMode && !cronMode && phrase.trim() !== '' && trigger === null;
   const activeHours: ActiveHours | null = hoursOn
@@ -122,15 +130,19 @@ export function AutomationEditor({
     activeHours,
   ]);
 
+  useResetOnChange([previewKey], () => {
+    const [previewed] = JSON.parse(previewKey) as [
+      AutomationTrigger | null,
+      ActiveHours | null,
+    ];
+    if (!previewed) setPreview(null);
+  });
   useEffect(() => {
     const [previewed, hours] = JSON.parse(previewKey) as [
       AutomationTrigger | null,
       ActiveHours | null,
     ];
-    if (!previewed) {
-      setPreview(null);
-      return;
-    }
+    if (!previewed) return;
     const controller = new AbortController();
     daemon
       .previewAutomation(
@@ -249,7 +261,10 @@ export function AutomationEditor({
           <input
             type="checkbox"
             checked={eventMode}
-            onChange={(event) => setEventMode(event.target.checked)}
+            onChange={(event) => {
+              setPhraseTime(Date.now());
+              setEventMode(event.target.checked);
+            }}
           />
           Run when an event arrives
         </label>
@@ -261,7 +276,10 @@ export function AutomationEditor({
                 value={eventTopic}
                 placeholder="files.changed"
                 maxLength={80}
-                onChange={(event) => setEventTopic(event.target.value)}
+                onChange={(event) => {
+                  setPhraseTime(Date.now());
+                  setEventTopic(event.target.value);
+                }}
               />
             </label>
             <p className="automation-help">
@@ -276,7 +294,10 @@ export function AutomationEditor({
             <input
               value={expression}
               placeholder="0 9 * * 1-5"
-              onChange={(event) => setExpression(event.target.value)}
+              onChange={(event) => {
+                setPhraseTime(Date.now());
+                setExpression(event.target.value);
+              }}
             />
           </label>
         ) : (
@@ -289,7 +310,10 @@ export function AutomationEditor({
                   ? `Keep: ${describeTrigger(automation.trigger)}`
                   : PHRASE_EXAMPLES[1]
               }
-              onChange={(event) => setPhrase(event.target.value)}
+              onChange={(event) => {
+                setPhraseTime(Date.now());
+                setPhrase(event.target.value);
+              }}
             />
           </label>
         )}
@@ -298,7 +322,10 @@ export function AutomationEditor({
             <input
               type="checkbox"
               checked={cronMode}
-              onChange={(event) => setCronMode(event.target.checked)}
+              onChange={(event) => {
+                setPhraseTime(Date.now());
+                setCronMode(event.target.checked);
+              }}
             />
             Use a cron expression
           </label>
@@ -307,7 +334,10 @@ export function AutomationEditor({
           Time zone
           <input
             value={timeZone}
-            onChange={(event) => setTimeZone(event.target.value)}
+            onChange={(event) => {
+              setPhraseTime(Date.now());
+              setTimeZone(event.target.value);
+            }}
           />
         </label>
         {phraseProblem && (

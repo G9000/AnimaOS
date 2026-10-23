@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { DelegationPolicy, ModelChoice } from '@animaos/sdk';
 
@@ -209,9 +210,9 @@ function ModelPicker({
 }) {
   const models = MODEL_SUGGESTIONS[choice.provider] ?? [];
   const [custom, setCustom] = useState(!models.includes(choice.model));
-  useEffect(() => {
+  useResetOnChange([choice.provider, choice.model], () => {
     if (!models.includes(choice.model)) setCustom(true);
-  }, [choice.model, models]);
+  });
   const providerIds = [
     ...(providers ?? []).filter((p) => !isMockProvider(p.id)).map((p) => p.id),
     choice.provider,
@@ -311,14 +312,16 @@ export function DelegationSettings({
       generation.current += 1;
     };
   }, []);
-  useEffect(() => {
-    generation.current += 1;
-    pending.current = false;
+  useResetOnChange([savedKey], () => {
     setDraft(draftFrom(JSON.parse(savedKey) as DelegationPolicy));
     setBaseline(savedKey);
     setBusy(false);
     setError(null);
     setSaved(false);
+  });
+  useEffect(() => {
+    generation.current += 1;
+    pending.current = false;
   }, [savedKey]);
 
   const update = (change: (current: Draft) => Draft) => {

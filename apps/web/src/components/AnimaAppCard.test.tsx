@@ -246,7 +246,9 @@ describe('AnimaAppCard', () => {
       .setup({ advanceTimers: vi.advanceTimersByTime })
       .click(screen.getByRole('button', { name: 'Stop' }));
 
-    expect(await screen.findByText('Waiting for 2 tasks to finish')).toBeVisible();
+    expect(
+      await screen.findByText('Waiting for 2 tasks to finish'),
+    ).toBeVisible();
     expect(screen.queryByText(STOPPED_COPY)).toBeNull();
   });
 
@@ -311,7 +313,7 @@ describe('AnimaAppCard', () => {
       .setup({ advanceTimers: vi.advanceTimersByTime })
       .click(screen.getByRole('button', { name: 'Restart' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toHaveTextContent(
       'Another action is in progress',
     );
     expect(screen.getByRole('button', { name: 'Restart' })).toBeEnabled();

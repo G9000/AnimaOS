@@ -5,6 +5,8 @@ import type { DoneToday } from '../components/inbox/NeedsYouPanel';
 import { daemon, type TelegramConnector } from '../lib/daemon-api';
 import { onLearningReviewsChanged } from '../lib/inbox-events';
 import { doneActions, needsYouItems } from '../lib/needs-you';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 /** Sessions read for "Done today": the most recently active ones. */
 const MAX_DONE_SESSIONS = 20;
@@ -37,13 +39,18 @@ export function useNeedsYou({
 
   // A review settling in the chat makes the suggestions here stale.
   const [reviewsChanged, setReviewsChanged] = useState(0);
+  const scope = useRenderScope(agentId, online, refreshKey, reviewsChanged);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setReviews([]);
+  }
   useEffect(
     () => onLearningReviewsChanged(() => setReviewsChanged((n) => n + 1)),
     [],
   );
 
   useEffect(() => {
-    setReviews([]);
     if (!agentId || !online) return;
     const controller = new AbortController();
     daemon
@@ -59,8 +66,7 @@ export function useNeedsYou({
     [approvals, telegram, reviews],
   );
 
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
+  const sessionsRef = useLatest(sessions);
   const loadDone = useCallback(async () => {
     const request = ++doneRequest.current;
     if (!agentId || !online) {
@@ -98,7 +104,7 @@ export function useNeedsYou({
         message: 'Could not read today’s activity. Try again.',
       });
     }
-  }, [agentId, online]);
+  }, [agentId, online, sessionsRef]);
 
   return { items, done, loadDone };
 }

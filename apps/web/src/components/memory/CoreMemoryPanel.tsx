@@ -12,6 +12,8 @@ import { daemon } from '../../lib/daemon-api';
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';
 import { ConfirmRow, formatCount } from './memory-ui';
 import { RevealedText } from './RevealedText';
+import { useLatest } from '../../hooks/useLatest';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 const BLOCKS: readonly { name: CoreMemoryBlockName; title: string }[] = [
   { name: 'user', title: 'About you' },
@@ -38,28 +40,29 @@ export function CoreMemoryPanel({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Messages>({});
   const [warnings, setWarnings] = useState<Messages>({});
-  const current = useRef({ agentId, request: 0 });
-  current.current.agentId = agentId;
-
-  useEffect(() => {
-    const request = ++current.current.request;
-    const controller = new AbortController();
+  const currentAgent = useLatest(agentId);
+  const currentRequest = useRef(0);
+  useResetOnChange([agentId, epoch], () => {
     setMemory(null);
     setLoadError(null);
     setErrors({});
     setWarnings({});
+  });
+  useEffect(() => {
+    const request = ++currentRequest.current;
+    const controller = new AbortController();
     daemon.coreMemory(agentId, { signal: controller.signal }).then(
       (next) => {
-        if (current.current.request === request) setMemory(next);
+        if (currentRequest.current === request && !controller.signal.aborted)
+          setMemory(next);
       },
       (cause: unknown) => {
-        if (current.current.request === request && !controller.signal.aborted)
+        if (currentRequest.current === request && !controller.signal.aborted)
           setLoadError(messageOf(cause));
       },
     );
     return () => {
       controller.abort();
-      current.current.request += 1;
     };
   }, [agentId, epoch]);
 
@@ -73,7 +76,7 @@ export function CoreMemoryPanel({
     setErrors((existing) => ({ ...existing, [block]: undefined }));
     try {
       const result = await work();
-      if (current.current.agentId !== requestAgent) return false;
+      if (currentAgent.current !== requestAgent) return false;
       setMemory({ user: result.user, notes: result.notes });
       setWarnings((existing) => ({
         ...existing,
@@ -81,7 +84,7 @@ export function CoreMemoryPanel({
       }));
       return true;
     } catch (cause) {
-      if (current.current.agentId === requestAgent)
+      if (currentAgent.current === requestAgent)
         setErrors((existing) => ({ ...existing, [block]: messageOf(cause) }));
       return false;
     }

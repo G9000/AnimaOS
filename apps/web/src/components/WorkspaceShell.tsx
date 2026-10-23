@@ -1,5 +1,13 @@
+import { useLatest } from '../hooks/useLatest';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { isMacPlatform } from '../lib/platform';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type {
   Session,
   SessionMessageSearchHit,
@@ -30,13 +38,7 @@ import { WorkspaceCapabilities } from './WorkspaceCapabilities';
 import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey, shouldShowSession } from '../lib/session-groups';
-import {
-  ChevronIcon,
-  GlobeIcon,
-  InboxIcon,
-  SearchIcon,
-  XIcon,
-} from './icons';
+import { ChevronIcon, GlobeIcon, InboxIcon, SearchIcon, XIcon } from './icons';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
 import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
@@ -116,8 +118,7 @@ function SessionDrawer({
   onImport?: () => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
+  const closeRef = useLatest(onClose);
   useEffect(() => {
     const element = panel.current;
     if (!element) return;
@@ -136,7 +137,7 @@ function SessionDrawer({
       if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        close.current();
+        closeRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -168,7 +169,7 @@ function SessionDrawer({
       observer.disconnect();
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [closeRef]);
   return (
     <div
       className="session-drawer"
@@ -405,12 +406,12 @@ export function WorkspaceShell({
     workingHelpers,
   });
 
-  useEffect(() => {
+  useResetOnChange([route], () => {
     if (route.kind === 'session' || route.kind === 'home')
       setVisitedConversation(route);
     setDrawerOpen(false);
     setSettingsQuery('');
-  }, [route]);
+  });
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -843,9 +844,13 @@ function InboxButton({
       document.removeEventListener('keydown', escape);
     };
   }, [open]);
+  const [contentClose, setContentClose] = useState(0);
+  useLayoutEffect(() => {
+    if (contentClose > 0) button.current?.focus();
+  }, [contentClose]);
   const close = () => {
     setOpen(false);
-    button.current?.focus();
+    setContentClose((version) => version + 1);
   };
   const waiting = inbox.count > 0;
   return (

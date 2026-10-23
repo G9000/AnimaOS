@@ -24,6 +24,8 @@ export function useDaemonCompatibility({
     }
   }, [enabled]);
   useEffect(() => {
+    // State changes only after the awaited daemon response, including failures.
+    // eslint-disable-next-line react/set-state-in-effect
     void check();
     return () => {
       generation.current += 1;

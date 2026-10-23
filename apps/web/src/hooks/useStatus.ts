@@ -67,6 +67,8 @@ export function useStatus({ enabled, epoch }: StatusOptions): StatusView {
   useEffect(() => {
     if (!enabled) return;
     stopped.current = false;
+    // State changes only after the awaited daemon response, including failures.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
     const timer = setInterval(() => {
       if (!stopped.current) void load();

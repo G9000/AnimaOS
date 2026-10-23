@@ -9,6 +9,8 @@ import type {
 } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { MessageAttachments } from '../attachments/MessageAttachments';
+import { useLatest } from '../../hooks/useLatest';
+import { useRenderScope } from '../../hooks/useRenderScope';
 
 export interface BrowserControlsApi {
   policies(
@@ -49,10 +51,8 @@ export function BrowserTaskControls({
   api = daemon.browserScopes,
 }: BrowserTaskControlsProps) {
   const key = `${agentId}\u0000${runId ?? ''}`;
-  const boundary = useRef({ key, generation: 0 });
-  if (boundary.current.key !== key)
-    boundary.current = { key, generation: boundary.current.generation + 1 };
-  const generation = boundary.current.generation;
+  const { generation } = useRenderScope(key);
+  const boundary = useLatest({ key, generation });
   const mounted = useRef(true);
   const details = useRef<HTMLDetailsElement>(null);
   const sequence = useRef(0);
@@ -112,7 +112,6 @@ export function BrowserTaskControls({
     if (details.current?.open) void read();
     return () => {
       mounted.current = false;
-      ++sequence.current;
       controller.current?.abort();
     };
     // The owner/run identity owns the read; changing a draft does not reload it.

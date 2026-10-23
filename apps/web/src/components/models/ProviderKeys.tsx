@@ -72,6 +72,8 @@ export function ProviderKeys({
   }, []);
 
   useEffect(() => {
+    // State updates follow the awaited provider-key response.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
   }, [load]);
 

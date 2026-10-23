@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { revealInvisible } from '../lib/skills';
 import { preferredVoice } from '../lib/voice-preference';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 export const READ_ALOUD_ERROR =
   'Read aloud could not continue. Try again when you’re ready.';
@@ -43,18 +45,15 @@ export function useReadAloud(
   );
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
-  const boundary = useRef({ conversationKey, disabled, generation: 0 });
-  if (
-    boundary.current.conversationKey !== conversationKey ||
-    boundary.current.disabled !== disabled
-  ) {
-    boundary.current = {
-      conversationKey,
-      disabled,
-      generation: boundary.current.generation + 1,
-    };
+  const scope = useRenderScope(conversationKey, disabled);
+  const { generation } = scope;
+  const boundary = useLatest({ conversationKey, disabled, generation });
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setSpeakingMessageId(null);
+    setError(null);
   }
-  const generation = boundary.current.generation;
   const current = useRef<{
     utterance: SpeechSynthesisUtterance;
     synthesis: SpeechSynthesis;
@@ -78,8 +77,6 @@ export function useReadAloud(
 
   useEffect(() => {
     mounted.current = true;
-    setSpeakingMessageId(null);
-    setError(null);
     return () => {
       mounted.current = false;
       release(true);
@@ -91,7 +88,7 @@ export function useReadAloud(
       mounted.current &&
       !boundary.current.disabled &&
       boundary.current.generation === generation,
-    [generation],
+    [generation, boundary],
   );
 
   const stop = useCallback(() => {

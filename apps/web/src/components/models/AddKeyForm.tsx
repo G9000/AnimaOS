@@ -66,10 +66,13 @@ export function AddKeyForm({
   }, [warnIfNotPersisted]);
 
   // The chosen provider can vanish once it holds a key; fall back to the first.
-  useEffect(() => {
-    if (!providers.some((provider) => provider.id === chosen))
-      setChosen(providers[0]?.id ?? '');
-  }, [providers, chosen]);
+  const fallbackProvider = providers[0]?.id ?? '';
+  if (
+    !providers.some((provider) => provider.id === chosen) &&
+    chosen !== fallbackProvider
+  ) {
+    setChosen(fallbackProvider);
+  }
 
   const target = providers.find((provider) => provider.id === chosen);
   if (!target) return null;

@@ -3,6 +3,7 @@ import type { AgentMemory } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentAvatar, refreshAgentAvatar } from './AgentAvatar';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 
 export function AgentProfileDetails({
   agent,
@@ -105,10 +106,12 @@ export function AgentMemoryView({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
+  useResetOnChange([agentId, revision], () => {
     setMemories(null);
     setError(null);
+  });
+  useEffect(() => {
+    let cancelled = false;
     daemon
       .recentAgentMemories(agentId)
       .then((result) => {

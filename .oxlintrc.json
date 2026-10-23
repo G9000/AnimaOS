@@ -9,6 +9,7 @@
   "rules": {
     "react/react-in-jsx-scope": "off",
     "vitest/require-mock-type-parameters": "off",
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }],
     "no-await-in-loop": "off",
     "unicorn/no-array-sort": "off",
     "typescript/no-explicit-any": "off",

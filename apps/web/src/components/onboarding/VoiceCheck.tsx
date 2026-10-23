@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { MicIcon, PauseIcon, PlayIcon } from '../icons';
+import { useLatest } from '../../hooks/useLatest';
 
 type MicState =
-  | 'idle'
-  | 'starting'
-  | 'live'
-  | 'blocked'
-  | 'missing'
-  | 'unsupported';
+  'idle' | 'starting' | 'live' | 'blocked' | 'missing' | 'unsupported';
 
 const METER_TICKS = 38;
 const LIT_FULL = 20;
@@ -74,8 +70,7 @@ export function VoiceCheck({
 }: VoiceCheckProps) {
   const voices = shortlist(useBrowserVoices());
   const [playing, setPlaying] = useState<string | null>(null);
-  const speakingRef = useRef(onSpeakingChange);
-  speakingRef.current = onSpeakingChange;
+  const speakingRef = useLatest(onSpeakingChange);
 
   useEffect(
     () => () => {

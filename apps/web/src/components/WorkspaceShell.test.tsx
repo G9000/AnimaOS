@@ -644,11 +644,9 @@ describe('WorkspaceShell', () => {
         name: 'Workspace navigation',
       });
       await user.click(within(nav).getByRole('button', { name: label }));
-      if (content) expect(screen.getByText(content)).toBeVisible();
-      else
-        expect(
-          await screen.findByText('Tools follow your authority'),
-        ).toBeVisible();
+      expect(
+        await screen.findByText(content || 'Tools follow your authority'),
+      ).toBeVisible();
       expect(within(nav).getByRole('button', { name: label })).toHaveAttribute(
         'aria-current',
         'page',

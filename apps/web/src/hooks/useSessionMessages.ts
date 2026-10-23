@@ -8,6 +8,7 @@ import {
 import type { SessionMessage } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
+import { useRenderScope } from './useRenderScope';
 
 /** Messages per page (the daemon default). */
 export const SESSION_MESSAGE_PAGE = 50;
@@ -119,13 +120,16 @@ export function useSessionMessages(
   // check the messages actually loaded so far (see `opensGap`) without
   // waiting on React to commit the corresponding state update.
   const messagesRef = useRef<SessionMessage[]>([]);
-
-  useLayoutEffect(() => {
-    generation.current += 1;
-    loadedOlder.current = false;
-    loadingOlderRef.current = false;
-    missingRef.current = false;
-    messagesRef.current = [];
+  const scope = useRenderScope(
+    agentId,
+    sessionId,
+    anchorMessageId,
+    jumpRequestKey,
+    resetKey,
+  );
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
     setMessages([]);
     setNextBefore(null);
     setLoadingOlder(false);
@@ -134,6 +138,14 @@ export function useSessionMessages(
     setNewestError(null);
     setOlderError(null);
     setAppliedRead(0);
+  }
+
+  useLayoutEffect(() => {
+    generation.current += 1;
+    loadedOlder.current = false;
+    loadingOlderRef.current = false;
+    missingRef.current = false;
+    messagesRef.current = [];
   }, [agentId, sessionId, anchorMessageId, jumpRequestKey, resetKey]);
 
   /** Newest-page reads begun so far, by any caller (a poll, a refresh key,
@@ -150,7 +162,6 @@ export function useSessionMessages(
     if (!agentId || !sessionId) return false;
     const sessionEpoch = generation.current;
     const request = ++refreshGeneration.current;
-    if (anchorMessageId) setLoadingAnchor(true);
     try {
       const page = await daemon.sessionMessages(
         agentId,
@@ -281,6 +292,10 @@ export function useSessionMessages(
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [agentId, sessionId, refresh, activeRefreshKey, pollMs, anchorMessageId]);
+  const refreshWithLoading = useCallback(() => {
+    if (anchorMessageId) setLoadingAnchor(true);
+    return refresh();
+  }, [anchorMessageId, refresh]);
 
   return {
     messages,
@@ -293,7 +308,7 @@ export function useSessionMessages(
     loadOlder,
     missing,
     error: newestError ?? olderError,
-    refresh,
+    refresh: refreshWithLoading,
     appliedRead,
     readsStarted,
   };

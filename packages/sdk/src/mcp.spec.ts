@@ -38,7 +38,7 @@ function harness(respond: (url: string, init?: RequestInit) => Response) {
 }
 
 describe('MCP owner client', () => {
-  it('M65 saves a bearer credential through the versioned owner PUT without echoing the token', async () => {
+  it('saves a bearer credential through the versioned owner PUT without echoing the token', async () => {
     const saved = connection({ version: 4, hasBearerCredential: true });
     const token = 'synthetic-m65-token';
     const { mcp, requests } = harness(() =>
@@ -62,7 +62,7 @@ describe('MCP owner client', () => {
     });
   });
 
-  it('M65 clears a bearer credential through the versioned owner DELETE without retry', async () => {
+  it('clears a bearer credential through the versioned owner DELETE without retry', async () => {
     const cleared = connection({ version: 5, hasBearerCredential: false });
     const { mcp, requests } = harness(() =>
       Response.json({ connection: cleared }),
@@ -83,7 +83,7 @@ describe('MCP owner client', () => {
     });
   });
 
-  it('M44 preserves exact HTTP create and sends only the immutable stdio launch body with empty response endpoint', async () => {
+  it('preserves exact HTTP create and sends only the immutable stdio launch body with empty response endpoint', async () => {
     const stdio = {
       executable: 'C:\\synthetic\\mcp-server.exe',
       args: ['--mode', 'one argument with spaces', '"literal quotes"'],
@@ -110,7 +110,7 @@ describe('MCP owner client', () => {
     expect(requests.map(({ init }) => init?.method)).toEqual(['POST', 'POST']);
   });
 
-  it('M44 uses label and enable patches for stdio without sending launch fields or starting a process', async () => {
+  it('uses label and enable patches for stdio without sending launch fields or starting a process', async () => {
     const value = connection({
       transport: 'stdio',
       stdio: { executable: '/synthetic/mcp-server', args: [] },

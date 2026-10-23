@@ -979,7 +979,8 @@ describe('persistent main conversation', () => {
       .mockImplementation(async (agentId, sessionId) => {
         const generation =
           routes.sessions.find(
-            (session) => session.agentId === agentId && session.id === sessionId,
+            (session) =>
+              session.agentId === agentId && session.id === sessionId,
           )?.clearGeneration ?? 0;
         return {
           clearGeneration: generation,
@@ -991,12 +992,12 @@ describe('persistent main conversation', () => {
               : [],
         };
       });
-    const pin = vi.spyOn(daemon.chatResults, 'pin').mockImplementation(
-      async (_agentId, _sessionId, _id, input) => {
+    const pin = vi
+      .spyOn(daemon.chatResults, 'pin')
+      .mockImplementation(async (_agentId, _sessionId, _id, input) => {
         report = { ...report, revision: 2, pinned: input.pinned };
         return { result: report };
-      },
-    );
+      });
     vi.spyOn(daemon, 'clearSession').mockImplementation(async () => {
       const cleared = { ...main, clearGeneration: 1, messageCount: 0 };
       routes.sessions = routes.sessions.map((session) =>
@@ -1038,8 +1039,9 @@ describe('persistent main conversation', () => {
     await user.click(
       screen.getByRole('button', { name: 'Main chat', exact: true }),
     );
-    expect(await screen.findByRole('complementary', { name: 'Pinned reports' }))
-      .toBeVisible();
+    expect(
+      await screen.findByRole('complementary', { name: 'Pinned reports' }),
+    ).toBeVisible();
     expect(screen.getAllByText(report.title)).toHaveLength(2);
     const input = screen.getByPlaceholderText('Message Nova…');
     await waitFor(() => expect(input).toBeEnabled());
@@ -1113,18 +1115,17 @@ describe('persistent main conversation', () => {
           screen.getByPlaceholderText('Message Nova…'),
           '/clear{Enter}',
         );
-        await waitFor(() =>
-          expect(daemon.clearSession).toHaveBeenCalledWith(
-            'agent-main',
-            main.id,
-          ),
-        );
       } else {
         reset();
         act(() =>
           events.streams[0].push(sessionEvent('session.cleared', main.id, 1)),
         );
       }
+      await waitFor(() =>
+        expect(vi.mocked(daemon.clearSession).mock.calls).toEqual(
+          source === 'slash' ? [['agent-main', main.id]] : [],
+        ),
+      );
       await waitFor(() =>
         expect(window.location.hash).toBe('#/s/chat%3Aprimary'),
       );
@@ -3288,6 +3289,7 @@ it('#/logs and #/health show their pages', async () => {
         once: true,
       }),
     );
+    yield* [];
   });
   vi.spyOn(daemon, 'status').mockResolvedValue(statusFixture());
   window.history.replaceState(null, '', '/#/logs');
@@ -3385,7 +3387,7 @@ it('asks for a daemon update instead of failing sends when sessions are missing'
   fireEvent.keyDown(input, { key: 'Enter' });
   // Nothing can be sent: Send is either not offered or disabled.
   const send = screen.queryByRole('button', { name: 'Send' });
-  if (send) expect(send).toBeDisabled();
+  expect(send === null || (send as HTMLButtonElement).disabled).toBe(true);
   expect(daemon.createSession).not.toHaveBeenCalled();
   expect(startRun).not.toHaveBeenCalled();
 });

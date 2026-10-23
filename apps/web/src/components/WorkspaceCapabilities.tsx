@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DaemonCapabilities } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 
 const groups = [
   [
@@ -64,11 +65,13 @@ export function WorkspaceCapabilities({ online }: { online: boolean }) {
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
+  useResetOnChange([online, refresh], () => {
     setInventory(null);
     setError(null);
     setLoading(online);
+  });
+  useEffect(() => {
+    let cancelled = false;
     if (online) {
       void daemon.capabilities().then(
         (result) => {

@@ -9,6 +9,7 @@ import {
   type WeeklyReport as Report,
 } from '../../lib/weekly-report';
 import { XIcon } from '../icons';
+import { useLatest } from '../../hooks/useLatest';
 
 /** Sessions read for the report: the most recently active ones. */
 const MAX_REPORT_SESSIONS = 40;
@@ -46,8 +47,7 @@ export function WeeklyReport({
   const [forgotten, setForgotten] = useState<ReadonlySet<string>>(new Set());
   const [forgetError, setForgetError] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
+  const sessionsRef = useLatest(sessions);
 
   useEffect(() => {
     dialog.current?.focus();
@@ -97,7 +97,7 @@ export function WeeklyReport({
     return () => {
       current = false;
     };
-  }, [agentId]);
+  }, [agentId, sessionsRef]);
 
   const forget = async (memory: AgentMemory) => {
     setForgetError(null);
@@ -110,9 +110,12 @@ export function WeeklyReport({
   };
 
   return (
-    <div className="weekly-report-scrim" onPointerDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
+    <div
+      className="weekly-report-scrim"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         ref={dialog}
         className="weekly-report"
@@ -157,7 +160,10 @@ export function WeeklyReport({
           <div className="weekly-report-body">
             <div className="weekly-report-main">
               <div className="weekly-report-tiles">
-                <Tile value={load.report.finished} label="replies and tasks finished" />
+                <Tile
+                  value={load.report.finished}
+                  label="replies and tasks finished"
+                />
                 <Tile value={load.report.actions} label="things changed" />
                 <Tile
                   value={formatMicros(load.report.spentMicros)}
@@ -186,7 +192,9 @@ export function WeeklyReport({
                     {load.report.highlights.map((item) => (
                       <li key={item.title}>
                         <span>{item.title}</span>
-                        <span className="weekly-report-count">× {item.count}</span>
+                        <span className="weekly-report-count">
+                          × {item.count}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -196,7 +204,9 @@ export function WeeklyReport({
               <section aria-labelledby="report-failed">
                 <h3 id="report-failed">What didn’t work</h3>
                 {load.report.failed.length === 0 ? (
-                  <p className="weekly-report-quiet">Nothing failed this week.</p>
+                  <p className="weekly-report-quiet">
+                    Nothing failed this week.
+                  </p>
                 ) : (
                   <ul className="weekly-report-issues">
                     {load.report.failed.slice(0, 5).map((issue) => (
@@ -227,14 +237,18 @@ export function WeeklyReport({
               <section aria-labelledby="report-learned">
                 <h3 id="report-learned">What it kept about you</h3>
                 {load.report.learned.length === 0 ? (
-                  <p className="weekly-report-quiet">No new memories this week.</p>
+                  <p className="weekly-report-quiet">
+                    No new memories this week.
+                  </p>
                 ) : (
                   <ul className="weekly-report-facts">
                     {load.report.learned.slice(0, 6).map((memory) => (
                       <li key={memory.id}>
                         <span>{memory.content}</span>
                         {forgotten.has(memory.id) ? (
-                          <span className="weekly-report-forgotten">Forgotten</span>
+                          <span className="weekly-report-forgotten">
+                            Forgotten
+                          </span>
                         ) : (
                           <button
                             type="button"

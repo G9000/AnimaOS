@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { daemon } from '../lib/daemon-api';
 import { ATTACHMENT_ERRORS, IMAGE_ATTACHMENT_MIMES } from '../lib/attachments';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 export function useAttachmentPreview(
   agentId: string,
@@ -8,36 +10,23 @@ export function useAttachmentPreview(
   mime: string | undefined,
   enabled: boolean,
 ) {
+  const shouldLoad = Boolean(
+    enabled && attachmentId && mime && IMAGE_ATTACHMENT_MIMES.has(mime),
+  );
   const [state, setState] = useState<{
     url: string | null;
     loading: boolean;
     error: string | null;
-  }>({ url: null, loading: false, error: null });
+  }>({ url: null, loading: shouldLoad, error: null });
   const [attempt, setAttempt] = useState(0);
-  const boundary = useRef({
-    agentId,
-    attachmentId,
-    mime,
-    enabled,
-    attempt,
-    generation: 0,
-  });
-  if (
-    boundary.current.agentId !== agentId ||
-    boundary.current.attachmentId !== attachmentId ||
-    boundary.current.mime !== mime ||
-    boundary.current.enabled !== enabled ||
-    boundary.current.attempt !== attempt
-  )
-    boundary.current = {
-      agentId,
-      attachmentId,
-      mime,
-      enabled,
-      attempt,
-      generation: boundary.current.generation + 1,
-    };
-  const generation = boundary.current.generation;
+  const scope = useRenderScope(agentId, attachmentId, mime, enabled, attempt);
+  const { generation } = scope;
+  const boundary = useLatest(scope);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setState({ url: null, loading: shouldLoad, error: null });
+  }
   const owner = useRef<{
     url: string | null;
     controller: AbortController;
@@ -52,10 +41,7 @@ export function useAttachmentPreview(
     owner.current = current;
     const active = () =>
       current.active && boundary.current.generation === generation;
-    if (!enabled || !attachmentId || !mime || !IMAGE_ATTACHMENT_MIMES.has(mime))
-      setState({ url: null, loading: false, error: null });
-    else {
-      setState({ url: null, loading: true, error: null });
+    if (enabled && attachmentId && mime && IMAGE_ATTACHMENT_MIMES.has(mime)) {
       void daemon
         .downloadAttachment(agentId, attachmentId, {
           signal: current.controller.signal,
@@ -82,7 +68,7 @@ export function useAttachmentPreview(
         current.url = null;
       }
     };
-  }, [agentId, attachmentId, mime, enabled, attempt]);
+  }, [agentId, attachmentId, mime, enabled, attempt, generation, boundary]);
   const imageFailed = () => {
     const current = owner.current;
     if (!current?.active || boundary.current.generation !== generation) return;

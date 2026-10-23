@@ -191,7 +191,7 @@ describe('useTranscriptActions', () => {
     expect(result.current.onCompact).toBeUndefined();
   });
 
-  it('keeps its identity while live runs change, and finds a helper in the newest', () => {
+  it('updates helper targets while keeping its identity through unrelated live deltas', () => {
     const options: TranscriptActionOptions = {
       session: sessionFixture('room-7'),
       resendable: true,
@@ -217,11 +217,17 @@ describe('useTranscriptActions', () => {
       parentRunId: 'run_7',
     });
     rerender({ ...options, liveRuns: { run_h: emptyLiveRun(child) } });
-    expect(result.current).toBe(first);
+    expect(result.current).not.toBe(first);
     expect(result.current.helperSession?.(helperStep('helper-7'))).toEqual({
       agentId: 'helper-7',
       sessionId: 'room-live',
     });
+    const withHelper = result.current;
+    rerender({
+      ...options,
+      liveRuns: { run_h: emptyLiveRun({ ...child, status: 'completed' }) },
+    });
+    expect(result.current).toBe(withHelper);
   });
 
   it('sends a run again once, and remembers it was sent', () => {

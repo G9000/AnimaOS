@@ -1,7 +1,8 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useState, type RefObject } from 'react';
 
 import { labelCls } from '../ui-bits';
 import { WorkspaceBrief } from './WorkspaceBrief';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 const MAX_VALUES = 5;
 
@@ -70,7 +71,7 @@ export function WorkspaceStep({
 
   // Sync the draft when the values prop changes externally (e.g. reset),
   // without clobbering an in-progress draft that parses to the same values.
-  useEffect(() => {
+  useResetOnChange([values], () => {
     setValuesDraft((draft) => {
       const parsed = parseValues(draft);
       const unchanged =
@@ -78,7 +79,7 @@ export function WorkspaceStep({
         parsed.every((value, index) => value === values[index]);
       return unchanged ? draft : values.join(', ');
     });
-  }, [values]);
+  });
 
   return (
     <section

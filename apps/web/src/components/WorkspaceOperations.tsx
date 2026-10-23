@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useState } from 'react';
 import type { AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
@@ -6,8 +7,7 @@ import { currentJobReview } from '../lib/job-output';
 
 type Agent = { id: string; name: string };
 type Selection =
-  | { agentId: string; jobId: string }
-  | { agentId: string; jobId?: undefined };
+  { agentId: string; jobId: string } | { agentId: string; jobId?: undefined };
 const filters = [
   'All',
   'Approval',
@@ -86,21 +86,20 @@ export function WorkspaceOperations({
   const [owner, setOwner] = useState('');
   const [selection, setSelection] = useState<Selection | null>(null);
   const agentKey = JSON.stringify(agents.map((agent) => agent.id));
-  useEffect(() => {
+  useResetOnChange([agentKey], () => {
     const ids: string[] = JSON.parse(agentKey);
     setOwner((current) => (ids.includes(current) ? current : ''));
-  }, [agentKey]);
+  });
+  useResetOnChange([agentKey, online, refresh], () => {
+    setLoading(online);
+    if (online) setPaused(false);
+  });
   useEffect(() => {
-    if (!online) {
-      setLoading(false);
-      return;
-    }
+    if (!online) return;
     const ids: string[] = JSON.parse(agentKey);
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let remaining = 30;
-    setLoading(true);
-    setPaused(false);
     async function load() {
       const results = await Promise.allSettled(
         ids.map((id) => daemon.agentJobs(id, { signal: controller.signal })),

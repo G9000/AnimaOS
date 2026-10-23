@@ -60,6 +60,7 @@ export function ChatExportDownload({
         const link = document.createElement('a');
         link.href = blobUrl;
         link.download =
+          // eslint-disable-next-line no-control-regex -- Remove control bytes from untrusted download filenames.
           filename?.replace(/[\\/\x00-\x1f]/g, '_') || 'anima-chat.md';
         link.click();
       } finally {

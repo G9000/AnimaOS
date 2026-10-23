@@ -1,4 +1,10 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+} from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { AgentEvent, Session, TaskResult } from '@animaos/sdk';
 import type { IEventBus } from './event-bus.js';
@@ -117,7 +123,7 @@ function SessionPickerCommandInput({
   const [value, setValue] = useState('/');
   const commandPrefix = /^\/([^\s]*)/.exec(value)?.[1]?.toLowerCase() ?? '';
   const matchingCommands = commands.filter((command) =>
-    command.name.startsWith(commandPrefix)
+    command.name.startsWith(commandPrefix),
   );
 
   useInput((input, key) => {
@@ -153,7 +159,7 @@ function SessionPickerCommandInput({
           ? matchingCommands
               .map(
                 (command) =>
-                  `/${command.name}${command.args ? ` ${command.args}` : ''}`
+                  `/${command.name}${command.args ? ` ${command.args}` : ''}`,
               )
               .join('  ·  ')
           : 'No matching session commands.'}
@@ -177,7 +183,7 @@ function formatDaemonCheckTime(timestamp: number): string {
 }
 
 function hasSavedRunLabel(
-  entry: ResultEntry
+  entry: ResultEntry,
 ): entry is ResultEntry & { label: string } {
   return typeof entry.label === 'string' && entry.label.trim().length > 0;
 }
@@ -197,7 +203,7 @@ function sortResumeEntries(entries: ResultEntry[]): ResultEntry[] {
 
 function findSavedRunByLabel(
   entries: ResultEntry[],
-  query: string
+  query: string,
 ): ResultEntry[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
@@ -207,27 +213,27 @@ function findSavedRunByLabel(
   const labeledEntries = sortResumeEntries(entries).filter(hasSavedRunLabel);
 
   const exactMatches = labeledEntries.filter(
-    (entry) => entry.label.toLowerCase() === normalized
+    (entry) => entry.label.toLowerCase() === normalized,
   );
   if (exactMatches.length > 0) {
     return exactMatches;
   }
 
   const prefixMatches = labeledEntries.filter((entry) =>
-    entry.label.toLowerCase().startsWith(normalized)
+    entry.label.toLowerCase().startsWith(normalized),
   );
   if (prefixMatches.length > 0) {
     return prefixMatches;
   }
 
   return labeledEntries.filter((entry) =>
-    entry.label.toLowerCase().includes(normalized)
+    entry.label.toLowerCase().includes(normalized),
   );
 }
 
 function findSavedRunByExactLabel(
   entries: ResultEntry[],
-  query: string
+  query: string,
 ): ResultEntry | undefined {
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
@@ -246,7 +252,7 @@ function buildDeleteConfirmationCommand(label?: string): string {
 
 function formatUndoQueueStatus(
   deletedSavedRunStack: DeletedSavedRunState[],
-  undoLimit: number
+  undoLimit: number,
 ): string {
   if (deletedSavedRunStack.length === 0) {
     return 'Undo queue empty. Delete a saved run first.';
@@ -335,7 +341,7 @@ function savedRunSuggestionScore(entry: ResultEntry, query: string): number {
 function suggestSavedRunsByLabel(
   entries: ResultEntry[],
   query: string,
-  limit = 3
+  limit = 3,
 ): ResultEntry[] {
   return sortResumeEntries(entries)
     .map((entry) => ({
@@ -373,7 +379,7 @@ function normalizeSavedRunLabel(label: string): string {
 function suggestNextSavedRunLabel(
   entries: ResultEntry[],
   requestedLabel: string,
-  targetId?: string
+  targetId?: string,
 ): string {
   const normalizedRequested = requestedLabel.trim();
   if (!normalizedRequested) {
@@ -384,7 +390,7 @@ function suggestNextSavedRunLabel(
     entries
       .filter((entry) => entry.id !== targetId)
       .filter(hasSavedRunLabel)
-      .map((entry) => normalizeSavedRunLabel(entry.label))
+      .map((entry) => normalizeSavedRunLabel(entry.label)),
   );
 
   if (!usedLabels.has(normalizeSavedRunLabel(normalizedRequested))) {
@@ -394,7 +400,7 @@ function suggestNextSavedRunLabel(
   const suffixMatch = /^(.*?)(?:\s+(\d+))$/.exec(normalizedRequested);
   const baseLabel = suffixMatch?.[1]?.trim() || normalizedRequested;
   const hasExistingBaseLabel = usedLabels.has(
-    normalizeSavedRunLabel(baseLabel)
+    normalizeSavedRunLabel(baseLabel),
   );
   const candidateBase = hasExistingBaseLabel ? baseLabel : normalizedRequested;
   let nextSuffix =
@@ -412,7 +418,7 @@ function suggestNextSavedRunLabel(
 function findSavedRunLabelSuggestionEntries(
   entries: ResultEntry[],
   query: string,
-  limit = 5
+  limit = 5,
 ): ResultEntry[] {
   const normalizedQuery = query.trim();
 
@@ -421,14 +427,14 @@ function findSavedRunLabelSuggestionEntries(
   }
 
   const directMatches = uniqueSavedRunLabels(
-    findSavedRunByLabel(entries, normalizedQuery)
+    findSavedRunByLabel(entries, normalizedQuery),
   );
   if (directMatches.length > 0) {
     return directMatches.slice(0, limit);
   }
 
   return uniqueSavedRunLabels(
-    suggestSavedRunsByLabel(entries, normalizedQuery, limit * 2)
+    suggestSavedRunsByLabel(entries, normalizedQuery, limit * 2),
   ).slice(0, limit);
 }
 
@@ -436,7 +442,7 @@ function buildSavedRunLabelInputSuggestions(
   entries: ResultEntry[],
   value: string,
   commandName: 'resume' | 'rename' | 'delete',
-  limit = 5
+  limit = 5,
 ): InputSuggestion[] {
   const match = new RegExp(`^/${commandName}(?:\\s+(.*))?$`, 'i').exec(value);
   if (!match) {
@@ -502,7 +508,7 @@ export function App({
     : undefined;
 
   const [view, setView] = useState<AppView>(resumeEntry ? 'result' : 'swarm');
-  const sessionViewHistoryRef = useRef<AppView[]>([]);
+  const [sessionViewHistory, setSessionViewHistory] = useState<AppView[]>([]);
   const sessionIntentIdRef = useRef(0);
   const processingSessionIntentRef = useRef<number | null>(null);
   const [pendingSessionIntent, setPendingSessionIntent] =
@@ -512,15 +518,15 @@ export function App({
     useState(false);
   const sessionLookupAbortRef = useRef<AbortController | null>(null);
   const [currentTask, setCurrentTask] = useState(
-    task ?? resumeEntry?.task ?? ''
+    task ?? resumeEntry?.task ?? '',
   );
   const [resultLog, setResultLog] = useState<ResultEntry[]>(initialResults);
   const [historyMode, setHistoryMode] = useState<HistoryMode>('history');
   const [promptHistory, setPromptHistory] = useState<string[]>(
-    initialResults.map((entry) => entry.task).slice(-maxPromptHistory)
+    initialResults.map((entry) => entry.task).slice(-maxPromptHistory),
   );
   const [resumeAssist, setResumeAssist] = useState<ResumeAssistState | null>(
-    null
+    null,
   );
   const [pendingDeleteCommand, setPendingDeleteCommand] =
     useState<PendingDeleteCommandState | null>(null);
@@ -532,10 +538,10 @@ export function App({
   const [systemMsg, setSystemMsg] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>(agentProfiles);
   const [activeResultId, setActiveResultId] = useState<string | null>(
-    resumeEntry?.id ?? null
+    resumeEntry?.id ?? null,
   );
   const [resumeEntryId, setResumeEntryId] = useState<string | null>(
-    resumeEntry?.id ?? null
+    resumeEntry?.id ?? null,
   );
   const nextResultId = useRef(0);
   const hasTrace = messages.length > 0 || tools.length > 0;
@@ -588,7 +594,7 @@ export function App({
   const reviewObserverRef = useRef<(event: AgentEvent) => void>(() => {});
   const observeReviewEvent = useCallback(
     (event: AgentEvent) => reviewObserverRef.current(event),
-    []
+    [],
   );
   const sessionWorkspace = useSessionWorkspace({
     api: interactive ? sessionApi : undefined,
@@ -603,14 +609,30 @@ export function App({
     runAgentIds: sessionWorkspace.eventState?.runAgentIds,
     runSessionIds: sessionWorkspace.eventState?.runSessionIds,
   });
-  reviewObserverRef.current = sessionReview.onEvent;
-  useEffect(() => {
-    setReviewFilter(null);
-  }, [
+  useLayoutEffect(() => {
+    reviewObserverRef.current = sessionReview.onEvent;
+  }, [sessionReview.onEvent]);
+  const reviewScope = JSON.stringify([
     view,
     sessionWorkspace.activeSession?.agentId,
     sessionWorkspace.activeSession?.id,
   ]);
+  const [previousReviewScope, setPreviousReviewScope] = useState(reviewScope);
+  if (previousReviewScope !== reviewScope) {
+    setPreviousReviewScope(reviewScope);
+    setReviewFilter(null);
+  }
+  if (pendingSessionIntent && sessionApi && !sessionWorkspace.loadingAgents) {
+    const noAgents = sessionWorkspace.agents.length === 0;
+    const needsAgent =
+      !sessionWorkspace.selectedAgentId && sessionWorkspace.agents.length > 1;
+    if ((noAgents || needsAgent) && view !== 'session-list') {
+      setSessionViewHistory([...sessionViewHistory, view]);
+      setSessionPickerCommandMode(false);
+      setView('session-list');
+    }
+    if (noAgents) setPendingSessionIntent(null);
+  }
   const {
     swarmInputCommands,
     resultInputCommands,
@@ -629,7 +651,7 @@ export function App({
           : null,
     hasMultipleAgents: sessionWorkspace.agents.length > 1,
     canSteerSession: Boolean(
-      sessionWorkspace.activeSession?.capabilities.steer
+      sessionWorkspace.activeSession?.capabilities.steer,
     ),
     canStopSessionRun: sessionWorkspace.canStopActiveRun,
   });
@@ -637,17 +659,20 @@ export function App({
   const navigateSessionView = useCallback(
     (nextView: AppView) => {
       setSessionPickerCommandMode(false);
-      if (nextView !== view) sessionViewHistoryRef.current.push(view);
+      if (nextView !== view)
+        setSessionViewHistory((history) => [...history, view]);
       setView(nextView);
     },
-    [view]
+    [view],
   );
 
   const backFromSessionView = useCallback(() => {
-    let previousView = sessionViewHistoryRef.current.pop() ?? 'swarm';
+    const history = [...sessionViewHistory];
+    let previousView = history.pop() ?? 'swarm';
     if (previousView === 'session-chat' && !sessionWorkspace.activeSession) {
-      previousView = sessionViewHistoryRef.current.pop() ?? 'swarm';
+      previousView = history.pop() ?? 'swarm';
     }
+    setSessionViewHistory(history);
     sessionIntentIdRef.current += 1;
     processingSessionIntentRef.current = null;
     sessionLookupAbortRef.current?.abort();
@@ -655,7 +680,7 @@ export function App({
     setPendingSessionIntent(null);
     setForceAgentPicker(false);
     setView(previousView);
-  }, [sessionWorkspace.activeSession]);
+  }, [sessionViewHistory, sessionWorkspace.activeSession]);
 
   const cancelSessionIntent = useCallback(() => {
     sessionIntentIdRef.current += 1;
@@ -672,14 +697,14 @@ export function App({
       processingSessionIntentRef.current = null;
       setPendingSessionIntent({ ...intent, id: ++sessionIntentIdRef.current });
     },
-    []
+    [],
   );
 
   useEffect(
     () => () => {
       sessionLookupAbortRef.current?.abort();
     },
-    []
+    [],
   );
 
   const blockInteractiveTaskSubmission = useCallback(() => {
@@ -718,10 +743,11 @@ export function App({
         `tools ${tools.length}`,
         `history ${resultLog.length}`,
         hasTrace ? 'trace ready' : 'trace empty',
-      ].join('  ·  ')
+      ].join('  ·  '),
     );
   }, [
     currentTask,
+    interactive,
     hasTrace,
     messages.length,
     phase,
@@ -774,16 +800,16 @@ export function App({
           entry.id !== targetId &&
           hasSavedRunLabel(entry) &&
           normalizeSavedRunLabel(entry.label) ===
-            normalizeSavedRunLabel(normalizedLabel)
+            normalizeSavedRunLabel(normalizedLabel),
       );
       if (duplicateLabelEntry) {
         const suggestedLabel = suggestNextSavedRunLabel(
           resultLog,
           normalizedLabel,
-          targetId
+          targetId,
         );
         showMsg(
-          `Saved run label "${normalizedLabel}" is already used. Try /rename ${suggestedLabel} to keep /resume unambiguous.`
+          `Saved run label "${normalizedLabel}" is already used. Try /rename ${suggestedLabel} to keep /resume unambiguous.`,
         );
         return;
       }
@@ -794,14 +820,14 @@ export function App({
               ...entry,
               label: normalizedLabel,
             }
-          : entry
+          : entry,
       );
 
       setResultLog(next);
       onHistoryUpdated?.(next);
       showMsg(`Saved run named: ${normalizedLabel}`);
     },
-    [onHistoryUpdated, resultLog, showMsg]
+    [onHistoryUpdated, resultLog, showMsg],
   );
 
   const deleteSavedRun = useCallback(
@@ -831,7 +857,7 @@ export function App({
       setPendingDeleteCommand(null);
       setPendingDropOldestUndoCommand(null);
       setDeletedSavedRunStack(
-        nextDeletedSavedRunStack.slice(-maxDeletedSavedRunUndos)
+        nextDeletedSavedRunStack.slice(-maxDeletedSavedRunUndos),
       );
       onHistoryUpdated?.(next);
 
@@ -853,17 +879,18 @@ export function App({
                 droppedUndoEntry.entry.task
               }.`
             : ''
-        }`
+        }`,
       );
     },
     [
       activeResultId,
       deletedSavedRunStack,
+      maxDeletedSavedRunUndos,
       onHistoryUpdated,
       resultLog,
       resumeEntryId,
       showMsg,
-    ]
+    ],
   );
 
   const undoDeleteSavedRun = useCallback(() => {
@@ -876,7 +903,7 @@ export function App({
 
     const insertIndex = Math.min(
       Math.max(lastDeletedSavedRun.index, 0),
-      resultLog.length
+      resultLog.length,
     );
     const next = [
       ...resultLog.slice(0, insertIndex),
@@ -899,7 +926,7 @@ export function App({
               remainingUndos === 1 ? '' : 's'
             } queued for undo.`
           : ''
-      }`
+      }`,
     );
   }, [deletedSavedRunStack, onHistoryUpdated, resultLog, showMsg]);
 
@@ -923,7 +950,7 @@ export function App({
               remainingUndos === 1 ? '' : 's'
             } still queued.`
           : ''
-      }`
+      }`,
     );
   }, [deletedSavedRunStack, showMsg]);
 
@@ -935,12 +962,15 @@ export function App({
       setResumeEntryId(resume ? entry.id : null);
       setView('result');
     },
-    [clearResumeAssist]
+    [clearResumeAssist],
   );
 
-  const rememberPrompt = useCallback((input: string) => {
-    setPromptHistory((prev) => [...prev, input].slice(-maxPromptHistory));
-  }, []);
+  const rememberPrompt = useCallback(
+    (input: string) => {
+      setPromptHistory((prev) => [...prev, input].slice(-maxPromptHistory));
+    },
+    [maxPromptHistory],
+  );
 
   const runTask = useCallback(
     async (input: string) => {
@@ -985,7 +1015,7 @@ export function App({
       rememberPrompt,
       reset,
       onResultRecorded,
-    ]
+    ],
   );
 
   useInput(
@@ -1014,7 +1044,7 @@ export function App({
         exit();
       }
     },
-    { isActive: canExitOneShot }
+    { isActive: canExitOneShot },
   );
 
   useInput(
@@ -1023,7 +1053,7 @@ export function App({
         showStatus();
       }
     },
-    { isActive: interactive && phase === 'running' && view === 'swarm' }
+    { isActive: interactive && phase === 'running' && view === 'swarm' },
   );
 
   useInput(
@@ -1044,7 +1074,7 @@ export function App({
     },
     {
       isActive: interactive && phase === 'waiting' && view === 'swarm',
-    }
+    },
   );
 
   useInput(
@@ -1054,7 +1084,7 @@ export function App({
     {
       isActive:
         interactive && view === 'session-list' && !sessionPickerCommandMode,
-    }
+    },
   );
 
   useInput(
@@ -1085,7 +1115,7 @@ export function App({
         }
       }
     },
-    { isActive: interactive && phase === 'waiting' && view === 'swarm' }
+    { isActive: interactive && phase === 'waiting' && view === 'swarm' },
   );
 
   const openSessionByQuery = useCallback(
@@ -1100,7 +1130,7 @@ export function App({
         (session) =>
           !session.archived &&
           session.kind === 'chat' &&
-          session.id.toLocaleLowerCase() === normalizedQuery
+          session.id.toLocaleLowerCase() === normalizedQuery,
       );
       if (loadedIdMatch) {
         if (!isCurrentIntent()) return false;
@@ -1122,7 +1152,7 @@ export function App({
           const page = await sessionApi.listSessions(
             agentId,
             cursor,
-            controller.signal
+            controller.signal,
           );
           if (!isCurrentIntent()) return false;
           for (const session of page.sessions) {
@@ -1138,14 +1168,14 @@ export function App({
             pages.push(session);
           }
           paginatedIdMatch = pages.find(
-            (session) => session.id.toLocaleLowerCase() === normalizedQuery
+            (session) => session.id.toLocaleLowerCase() === normalizedQuery,
           );
           if (paginatedIdMatch) break;
           const nextCursor = page.nextCursor ?? undefined;
           if (!nextCursor || visitedCursors.has(nextCursor)) break;
           visitedCursors.add(nextCursor);
           cursor = nextCursor;
-        } while (true);
+        } while (cursor);
       } catch (lookupError) {
         if (isCurrentIntent()) {
           showMsg(
@@ -1153,7 +1183,7 @@ export function App({
               lookupError instanceof Error
                 ? lookupError.message
                 : String(lookupError)
-            }`
+            }`,
           );
         }
         return false;
@@ -1173,17 +1203,20 @@ export function App({
 
       const exactTitleMatches = pages.filter(
         (session) =>
-          session.title.trim().toLocaleLowerCase() === normalizedQuery
+          session.title.trim().toLocaleLowerCase() === normalizedQuery,
       );
       const matches =
         exactTitleMatches.length > 0
           ? exactTitleMatches
           : pages.filter((session) =>
-              session.title.trim().toLocaleLowerCase().includes(normalizedQuery)
+              session.title
+                .trim()
+                .toLocaleLowerCase()
+                .includes(normalizedQuery),
             );
       if (matches.length > 1) {
         showMsg(
-          `More than one session matches "${query}". Use /open with its session ID.`
+          `More than one session matches "${query}". Use /open with its session ID.`,
         );
         return false;
       }
@@ -1196,7 +1229,7 @@ export function App({
       if (opened && isCurrentIntent()) navigateSessionView('session-chat');
       return opened;
     },
-    [navigateSessionView, sessionApi, sessionWorkspace, showMsg]
+    [navigateSessionView, sessionApi, sessionWorkspace, showMsg],
   );
 
   useEffect(() => {
@@ -1210,18 +1243,11 @@ export function App({
     }
     if (sessionWorkspace.loadingAgents) return;
 
-    if (sessionWorkspace.agents.length === 0) {
-      navigateSessionView('session-list');
-      setPendingSessionIntent(null);
+    if (
+      sessionWorkspace.agents.length === 0 ||
+      !sessionWorkspace.selectedAgentId
+    )
       return;
-    }
-
-    if (!sessionWorkspace.selectedAgentId) {
-      if (sessionWorkspace.agents.length > 1) {
-        navigateSessionView('session-list');
-      }
-      return;
-    }
 
     if (
       intent.kind !== 'new' &&
@@ -1239,7 +1265,7 @@ export function App({
             navigateSessionView('session-chat');
           } else {
             const latestSession = [...sessionWorkspace.sessions].sort(
-              (left, right) => right.lastActivityAtMs - left.lastActivityAtMs
+              (left, right) => right.lastActivityAtMs - left.lastActivityAtMs,
             )[0];
             if (latestSession) {
               const opened = await sessionWorkspace.openSession(latestSession);
@@ -1283,7 +1309,7 @@ export function App({
       const commandName = name.toLowerCase();
       if (
         !['chat', 'sessions', 'new', 'open', 'agent', 'back'].includes(
-          commandName
+          commandName,
         )
       ) {
         cancelSessionIntent();
@@ -1412,7 +1438,7 @@ export function App({
                 });
               }
               showMsg(
-                `No saved run named "${args}". Type /resume to browse saved runs.`
+                `No saved run named "${args}". Type /resume to browse saved runs.`,
               );
               break;
             }
@@ -1426,8 +1452,8 @@ export function App({
               });
               showMsg(
                 `Multiple saved runs match "${args}": ${formatSavedRunMatchSummary(
-                  matchedEntries
-                )}. Type /resume to browse saved runs.`
+                  matchedEntries,
+                )}. Type /resume to browse saved runs.`,
               );
               break;
             }
@@ -1470,14 +1496,14 @@ export function App({
 
           if (!args && !targetEntry) {
             showMsg(
-              'Open a result or provide a saved run label, for example /delete release prep.'
+              'Open a result or provide a saved run label, for example /delete release prep.',
             );
             break;
           }
 
           if (args && !targetEntry) {
             showMsg(
-              `No saved run named "${args}". Use Tab completion or /resume to inspect saved runs.`
+              `No saved run named "${args}". Use Tab completion or /resume to inspect saved runs.`,
             );
             break;
           }
@@ -1509,7 +1535,7 @@ export function App({
               ? `Confirm delete: repeat /delete ${targetLabel} to remove this saved run.`
               : `Confirm delete: repeat /delete to remove ${
                   targetEntry.label?.trim() || targetEntry.task
-                }.`
+                }.`,
           );
           break;
         }
@@ -1551,13 +1577,16 @@ export function App({
               label: oldestUndoLabel,
             });
             showMsg(
-              `Confirm oldest undo discard: repeat /undo-drop to discard ${oldestUndoLabel}.`
+              `Confirm oldest undo discard: repeat /undo-drop to discard ${oldestUndoLabel}.`,
             );
           }
           break;
         case 'undo-status':
           showMsg(
-            formatUndoQueueStatus(deletedSavedRunStack, maxDeletedSavedRunUndos)
+            formatUndoQueueStatus(
+              deletedSavedRunStack,
+              maxDeletedSavedRunUndos,
+            ),
           );
           break;
         case 'trace':
@@ -1610,7 +1639,7 @@ export function App({
           break;
         case 'help':
           showMsg(
-            helpCommands.map((c) => `/${c.name}  ${c.description}`).join('   ')
+            helpCommands.map((c) => `/${c.name}  ${c.description}`).join('   '),
           );
           break;
         default:
@@ -1636,7 +1665,7 @@ export function App({
       hasTrace,
       clearResumeAssist,
       deletedSavedRunStack,
-      moveResumeAssistSelection,
+      maxDeletedSavedRunUndos,
       pendingDeleteCommand,
       pendingDropOldestUndoCommand,
       renameSavedRun,
@@ -1649,8 +1678,7 @@ export function App({
       blockInteractiveTaskSubmission,
       runTask,
       onClearHistory,
-      view,
-    ]
+    ],
   );
 
   const handleTaskSubmit = useCallback(
@@ -1670,7 +1698,7 @@ export function App({
       handleSlashCommand,
       rememberPrompt,
       runTask,
-    ]
+    ],
   );
 
   const handleSessionChatSubmit = useCallback(
@@ -1682,17 +1710,17 @@ export function App({
       }
       return sessionWorkspace.sendMessage(text);
     },
-    [handleSlashCommand, sessionWorkspace]
+    [handleSlashCommand, sessionWorkspace],
   );
 
   const handleSaveAgent = useCallback(
     (profile: AgentProfile) => {
       setProfiles((prev) =>
-        prev.map((p) => (p.name === profile.name ? profile : p))
+        prev.map((p) => (p.name === profile.name ? profile : p)),
       );
       onSaveAgent?.(profile);
     },
-    [onSaveAgent]
+    [onSaveAgent],
   );
 
   const inputSuggestions = useCallback(
@@ -1701,7 +1729,7 @@ export function App({
       ...buildSavedRunLabelInputSuggestions(resultLog, value, 'rename'),
       ...buildSavedRunLabelInputSuggestions(resultLog, value, 'delete'),
     ],
-    [resultLog]
+    [resultLog],
   );
 
   if (view === 'session-list') {
@@ -1800,7 +1828,7 @@ export function App({
           runMode={sessionWorkspace.runMode}
           canStopActiveRun={sessionWorkspace.canStopActiveRun}
           stopRequested={sessionWorkspace.stopRequestedRunIds.includes(
-            sessionWorkspace.activeRun?.id ?? ''
+            sessionWorkspace.activeRun?.id ?? '',
           )}
           disabled={sessionWorkspace.sessionActionsDisabled}
           loadingMessages={sessionWorkspace.loadingSession}

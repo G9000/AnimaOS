@@ -56,7 +56,7 @@ const AFTER_DRAIN: Partial<Record<SystemAction, string>> = {
 };
 
 /** Stop and Quit end the server; the console then cannot reach it. */
-const ENDS_SERVER: SystemAction[] = ['stop', 'quit'];
+const ENDS_SERVER: ReadonlySet<SystemAction> = new Set(['stop', 'quit']);
 
 const withV = (version: string) =>
   version.startsWith('v') ? version : `v${version}`;
@@ -133,7 +133,7 @@ export function AnimaAppCard({
       apply(next);
     } catch (cause) {
       if (unmounted.current || mine !== sequence.current) return;
-      if (away.current && ENDS_SERVER.includes(away.current)) {
+      if (away.current && ENDS_SERVER.has(away.current)) {
         setStopped(true);
       } else if (away.current) {
         setReconnecting(true);
@@ -148,6 +148,8 @@ export function AnimaAppCard({
 
   useEffect(() => {
     unmounted.current = false;
+    // The status request settles before load applies any state changes.
+    // eslint-disable-next-line react/set-state-in-effect
     void load();
     const timer = setInterval(() => void load(), ANIMA_APP_POLL_MS);
     return () => {
@@ -166,21 +168,18 @@ export function AnimaAppCard({
         ? client.action(action, options)
         : client.action(action));
       if (unmounted.current) return;
-      if (ENDS_SERVER.includes(action) || action === 'restart') {
+      if (ENDS_SERVER.has(action) || action === 'restart') {
         away.current = action;
       }
       apply(next);
-      if (ENDS_SERVER.includes(action) && next.supervised !== false) {
+      if (ENDS_SERVER.has(action) && next.supervised !== false) {
         const settled =
           next.state.kind !== 'draining' && next.pending !== action;
         if (settled) setStopped(true);
       }
     } catch (cause) {
       if (unmounted.current) return;
-      if (
-        ENDS_SERVER.includes(action) &&
-        cause instanceof DaemonConnectionError
-      ) {
+      if (ENDS_SERVER.has(action) && cause instanceof DaemonConnectionError) {
         // The server went away before it could answer.
         away.current = action;
         setStopped(true);
@@ -283,13 +282,13 @@ export function AnimaAppCard({
                 } to finish`}
           </p>
           <ul className="system-card-details">
-            {IN_FLIGHT_LABELS.filter(([key]) => (state.inFlight[key] ?? 0) > 0).map(
-              ([key, label]) => (
-                <li key={key}>
-                  {label}: {state.inFlight[key]}
-                </li>
-              ),
-            )}
+            {IN_FLIGHT_LABELS.filter(
+              ([key]) => (state.inFlight[key] ?? 0) > 0,
+            ).map(([key, label]) => (
+              <li key={key}>
+                {label}: {state.inFlight[key]}
+              </li>
+            ))}
           </ul>
           {AFTER_DRAIN[state.action] && (
             <p className="system-note">{AFTER_DRAIN[state.action]}.</p>

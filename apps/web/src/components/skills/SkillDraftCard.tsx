@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useMemo, useState } from 'react';
 import type {
   SkillDraft,
@@ -42,8 +43,8 @@ export function SkillDraftCard({
   const [busy, setBusy] = useState(false);
 
   // A draft that replaces a skill is compared with that skill's file now.
+  useResetOnChange([draft.slug, draft.currentHash], () => setCurrent(null));
   useEffect(() => {
-    setCurrent(null);
     if (draft.currentHash === null) return;
     const controller = new AbortController();
     daemon.skill(draft.slug, { signal: controller.signal }).then(

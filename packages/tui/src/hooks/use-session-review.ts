@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import type {
   AgentEvent,
   Approval,
@@ -66,6 +73,79 @@ const message = (error: unknown) =>
 const requestKey = (kind: string, item: { id: string; revision: number }) =>
   `${kind}:${item.id}:${item.revision}`;
 
+function createReviewStore(key: string, api?: TuiReviewApi) {
+  const store: ReviewStore = {
+    key,
+    api,
+    approvals: [],
+    clarifications: [],
+    approvalVersion: 0,
+    clarificationVersion: 0,
+    approvalsReady: false,
+    clarificationsReady: false,
+    approvalError: null,
+    clarificationError: null,
+    actionError: null,
+    notice: null,
+    busy: new Set(),
+    blocked: new Set(),
+    helpers: {},
+    formVersions: {},
+  };
+  let snapshot = copyReviewStore(store);
+  const listeners = new Set<() => void>();
+  return {
+    store,
+    getSnapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    publish() {
+      snapshot = copyReviewStore(store);
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+function copyReviewStore(store: ReviewStore): ReviewStore {
+  return {
+    ...store,
+    approvals: [...store.approvals],
+    clarifications: [...store.clarifications],
+    busy: new Set(store.busy),
+    blocked: new Set(store.blocked),
+    helpers: { ...store.helpers },
+    formVersions: { ...store.formVersions },
+  };
+}
+
+function isApprovalBlocked(item: Approval, state: ReviewStore): boolean {
+  return (
+    !state.approvalsReady ||
+    Boolean(state.approvalError) ||
+    item.status !== 'pending' ||
+    item.expiresAtMs <= Date.now() ||
+    state.blocked.has(requestKey('a', item)) ||
+    state.busy.has('a:' + item.id)
+  );
+}
+
+function isClarificationBlocked(
+  item: ClarificationRequest,
+  state: ReviewStore,
+): boolean {
+  return (
+    !state.clarificationsReady ||
+    Boolean(state.clarificationError) ||
+    item.status !== 'pending' ||
+    state.blocked.has(requestKey('c', item)) ||
+    state.busy.has('c:' + item.id)
+  );
+}
+
 export function useSessionReview({
   api,
   agentId,
@@ -74,42 +154,27 @@ export function useSessionReview({
   runAgentIds = {},
   runSessionIds = {},
 }: SessionReviewOptions): SessionReview {
-  const [, render] = useState(0);
   const key = JSON.stringify([agentId, sessionId]);
-  const storeRef = useRef<ReviewStore | null>(null);
-  if (
-    !storeRef.current ||
-    storeRef.current.key !== key ||
-    storeRef.current.api !== api
-  ) {
-    storeRef.current = {
-      key,
-      api,
-      approvals: [],
-      clarifications: [],
-      approvalVersion: 0,
-      clarificationVersion: 0,
-      approvalsReady: false,
-      clarificationsReady: false,
-      approvalError: null,
-      clarificationError: null,
-      actionError: null,
-      notice: null,
-      busy: new Set(),
-      blocked: new Set(),
-      helpers: {},
-      formVersions: {},
-    };
-  }
-  const store = storeRef.current;
+  const reviewStore = useMemo(() => createReviewStore(key, api), [key, api]);
+  const snapshot = useSyncExternalStore(
+    reviewStore.subscribe,
+    reviewStore.getSnapshot,
+  );
+  const storeRef = useRef(reviewStore.store);
   const onlineRef = useRef(online);
-  onlineRef.current = online;
   const ownersRef = useRef({ runAgentIds, runSessionIds, agentId, sessionId });
-  ownersRef.current = { runAgentIds, runSessionIds, agentId, sessionId };
+  useLayoutEffect(() => {
+    storeRef.current = reviewStore.store;
+    onlineRef.current = online;
+    ownersRef.current = { runAgentIds, runSessionIds, agentId, sessionId };
+  }, [reviewStore, online, runAgentIds, runSessionIds, agentId, sessionId]);
   const refreshRef = useRef<() => Promise<void>>(async () => {});
-  const notify = useCallback((target: ReviewStore) => {
-    if (storeRef.current === target) render((value) => value + 1);
-  }, []);
+  const notify = useCallback(
+    (target: ReviewStore) => {
+      if (reviewStore.store === target) reviewStore.publish();
+    },
+    [reviewStore],
+  );
 
   const belongs = useCallback(
     (
@@ -139,6 +204,7 @@ export function useSessionReview({
     .join('\u0000');
 
   useEffect(() => {
+    const store = storeRef.current;
     refreshRef.current = async () => {};
     store.approvalsReady = false;
     store.clarificationsReady = false;
@@ -231,7 +297,16 @@ export function useSessionReview({
       controller.abort();
       clearInterval(timer);
     };
-  }, [api, agentId, sessionId, online, store, helperOwners, belongs, notify]);
+  }, [
+    api,
+    agentId,
+    sessionId,
+    online,
+    reviewStore,
+    helperOwners,
+    belongs,
+    notify,
+  ]);
 
   const onEvent = useCallback(
     (event: AgentEvent) => {
@@ -271,22 +346,9 @@ export function useSessionReview({
   );
 
   const approvalBlocked = (item: Approval) =>
-    !api ||
-    !online ||
-    !store.approvalsReady ||
-    Boolean(store.approvalError) ||
-    item.status !== 'pending' ||
-    item.expiresAtMs <= Date.now() ||
-    store.blocked.has(requestKey('a', item)) ||
-    store.busy.has(`a:${item.id}`);
+    !api || !online || isApprovalBlocked(item, snapshot);
   const clarificationBlocked = (item: ClarificationRequest) =>
-    !api ||
-    !online ||
-    !store.clarificationsReady ||
-    Boolean(store.clarificationError) ||
-    item.status !== 'pending' ||
-    store.blocked.has(requestKey('c', item)) ||
-    store.busy.has(`c:${item.id}`);
+    !api || !online || isClarificationBlocked(item, snapshot);
 
   const write = async (
     kind: 'a' | 'c',
@@ -300,12 +362,12 @@ export function useSessionReview({
     const busyKey = `${kind}:${item.id}`;
     const blocked =
       kind === 'a'
-        ? approvalBlocked(item as Approval)
-        : clarificationBlocked(item as ClarificationRequest);
+        ? isApprovalBlocked(item as Approval, target)
+        : isClarificationBlocked(item as ClarificationRequest, target);
     if (
       !api ||
       !onlineRef.current ||
-      target !== store ||
+      target !== reviewStore.store ||
       blocked ||
       target.busy.has(busyKey) ||
       !belongs(item, target) ||
@@ -383,26 +445,31 @@ export function useSessionReview({
 
   return {
     available: Boolean(api),
-    approvals: store.approvals.filter((item) => item.status === 'pending'),
-    clarifications: store.clarifications.filter(
+    approvals: snapshot.approvals.filter((item) => item.status === 'pending'),
+    clarifications: snapshot.clarifications.filter(
       (item) => item.status === 'pending',
     ),
     canAct: Boolean(
-      api && online && (store.approvalsReady || store.clarificationsReady),
+      api &&
+      online &&
+      (snapshot.approvalsReady || snapshot.clarificationsReady),
     ),
     loading: Boolean(
       api &&
       online &&
-      (!store.approvalsReady || !store.clarificationsReady) &&
-      !store.approvalError &&
-      !store.clarificationError,
+      (!snapshot.approvalsReady || !snapshot.clarificationsReady) &&
+      !snapshot.approvalError &&
+      !snapshot.clarificationError,
     ),
-    error: store.actionError ?? store.approvalError ?? store.clarificationError,
-    notice: store.notice,
-    busyIds: [...store.busy],
+    error:
+      snapshot.actionError ??
+      snapshot.approvalError ??
+      snapshot.clarificationError,
+    notice: snapshot.notice,
+    busyIds: [...snapshot.busy],
     approvalBlocked,
     clarificationBlocked,
-    formVersions: store.formVersions,
+    formVersions: snapshot.formVersions,
     refresh: useCallback(() => refreshRef.current(), []),
     onEvent,
     decide: (item, input) => write('a', item, input),

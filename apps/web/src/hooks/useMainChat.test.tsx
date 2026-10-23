@@ -93,13 +93,21 @@ describe('useMainChat', () => {
       initialProps: { agentId: 'agent-main' as string | null, online: true },
     });
     const oldRequest = result.current.ensureSession();
-    const rejected = expect(oldRequest).rejects.toThrow(/changed|active/i);
+    const rejected = oldRequest.then(
+      () => ({ status: 'fulfilled', reason: undefined }),
+      (reason: unknown) => ({ status: 'rejected', reason }),
+    );
     rerender({ agentId: 'agent-next', online: true });
     expect(result.current.session).toBeNull();
     const resolved = main('next', 'agent-next');
     await act(async () => next.resolve(resolved));
     await act(async () => old.resolve(main('old')));
-    await rejected;
+    const outcome = await rejected;
+    expect(outcome.status).toBe('rejected');
+    expect(outcome.reason).toBeInstanceOf(Error);
+    expect(outcome.reason).toMatchObject({
+      message: expect.stringMatching(/changed|active/i),
+    });
     expect(result.current.session).toBe(resolved);
     expect(result.current.error).toBeNull();
   });
@@ -130,10 +138,18 @@ describe('useMainChat', () => {
       useMainChat({ agentId: 'agent-main', online: true }),
     );
     const request = result.current.ensureSession();
-    const rejected = expect(request).rejects.toThrow(/changed|active/i);
+    const rejected = request.then(
+      () => ({ status: 'fulfilled', reason: undefined }),
+      (reason: unknown) => ({ status: 'rejected', reason }),
+    );
     unmount();
     pending.resolve(main());
-    await rejected;
+    const outcome = await rejected;
+    expect(outcome.status).toBe('rejected');
+    expect(outcome.reason).toBeInstanceOf(Error);
+    expect(outcome.reason).toMatchObject({
+      message: expect.stringMatching(/changed|active/i),
+    });
   });
 
   it('does not initiate offline and keeps only the current agent result across disconnection', async () => {

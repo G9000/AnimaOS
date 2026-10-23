@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   isTerminalRunStatus,
   type AgentEvent,
@@ -243,7 +249,9 @@ export function useSessionWorkspace({
   onEvent,
 }: UseSessionWorkspaceOptions = {}): UseSessionWorkspaceResult {
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  useLayoutEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -258,7 +266,7 @@ export function useSessionWorkspace({
   const [runMode, setRunMode] = useState<RunMode>('queue');
   const [streamStatus, setStreamStatus] =
     useState<UseSessionWorkspaceResult['streamStatus']>('disconnected');
-  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [loadingAgents, setLoadingAgents] = useState(Boolean(api && online));
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
   const [loadingEarlierMessages, setLoadingEarlierMessages] = useState(false);
@@ -275,6 +283,81 @@ export function useSessionWorkspace({
   );
   const [stopRequestedRunIds, setStopRequestedRunIds] = useState<string[]>([]);
 
+  // Request changes invalidate loading state before committing the next view.
+  const [loadInputs, setLoadInputs] = useState({
+    api,
+    online,
+    agentLoadRevision,
+    selectedAgentId,
+    sessionCursor,
+    sessionListRevision,
+    openRequest,
+    olderMessageRequest,
+    activeSessionId: activeSession?.id,
+  });
+  if (
+    loadInputs.api !== api ||
+    loadInputs.online !== online ||
+    loadInputs.agentLoadRevision !== agentLoadRevision ||
+    loadInputs.selectedAgentId !== selectedAgentId ||
+    loadInputs.sessionCursor !== sessionCursor ||
+    loadInputs.sessionListRevision !== sessionListRevision ||
+    loadInputs.openRequest !== openRequest ||
+    loadInputs.olderMessageRequest !== olderMessageRequest ||
+    loadInputs.activeSessionId !== activeSession?.id
+  ) {
+    if (
+      loadInputs.api !== api ||
+      loadInputs.online !== online ||
+      loadInputs.agentLoadRevision !== agentLoadRevision
+    )
+      setLoadingAgents(Boolean(api && online));
+    if (
+      loadInputs.api !== api ||
+      loadInputs.online !== online ||
+      loadInputs.selectedAgentId !== selectedAgentId ||
+      loadInputs.sessionCursor !== sessionCursor ||
+      loadInputs.sessionListRevision !== sessionListRevision
+    )
+      setLoadingSessions(Boolean(api && online && selectedAgentId));
+    if (
+      loadInputs.api !== api ||
+      loadInputs.online !== online ||
+      loadInputs.selectedAgentId !== selectedAgentId ||
+      loadInputs.openRequest !== openRequest
+    )
+      setLoadingSession(
+        Boolean(api && online && selectedAgentId && openRequest),
+      );
+    if (
+      loadInputs.api !== api ||
+      loadInputs.online !== online ||
+      loadInputs.selectedAgentId !== selectedAgentId ||
+      loadInputs.olderMessageRequest !== olderMessageRequest ||
+      loadInputs.activeSessionId !== activeSession?.id
+    )
+      setLoadingEarlierMessages(
+        Boolean(
+          api &&
+          online &&
+          selectedAgentId &&
+          activeSession?.id &&
+          olderMessageRequest,
+        ),
+      );
+    setLoadInputs({
+      api,
+      online,
+      agentLoadRevision,
+      selectedAgentId,
+      sessionCursor,
+      sessionListRevision,
+      openRequest,
+      olderMessageRequest,
+      activeSessionId: activeSession?.id,
+    });
+  }
+
   const mountedRef = useRef(false);
   const selectedAgentIdRef = useRef(selectedAgentId);
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
@@ -290,14 +373,25 @@ export function useSessionWorkspace({
   const stopRequestedRunIdsRef = useRef(stopRequestedRunIds);
   const latestSnapshotRef = useRef<StoredStreamSnapshot | null>(null);
 
-  selectedAgentIdRef.current = selectedAgentId;
-  activeSessionIdRef.current = activeSession?.id ?? null;
-  eventStateRef.current = eventState;
-  sessionCursorRef.current = sessionCursor;
-  nextSessionCursorRef.current = nextSessionCursor;
-  messagesCursorRef.current = messagesCursor;
-  recentRunsRef.current = recentRuns;
-  stopRequestedRunIdsRef.current = stopRequestedRunIds;
+  useLayoutEffect(() => {
+    selectedAgentIdRef.current = selectedAgentId;
+    activeSessionIdRef.current = activeSession?.id ?? null;
+    eventStateRef.current = eventState;
+    sessionCursorRef.current = sessionCursor;
+    nextSessionCursorRef.current = nextSessionCursor;
+    messagesCursorRef.current = messagesCursor;
+    recentRunsRef.current = recentRuns;
+    stopRequestedRunIdsRef.current = stopRequestedRunIds;
+  }, [
+    selectedAgentId,
+    activeSession?.id,
+    eventState,
+    sessionCursor,
+    nextSessionCursor,
+    messagesCursor,
+    recentRuns,
+    stopRequestedRunIds,
+  ]);
 
   const commitEventState = useCallback((next: SessionEventState | null) => {
     eventStateRef.current = next;
@@ -390,13 +484,11 @@ export function useSessionWorkspace({
 
   useEffect(() => {
     if (!api || !online) {
-      setLoadingAgents(false);
       return;
     }
 
     const controller = new AbortController();
     let disposed = false;
-    setLoadingAgents(true);
 
     void api
       .listAgents(controller.signal)
@@ -445,7 +537,6 @@ export function useSessionWorkspace({
 
   useEffect(() => {
     if (!api || !online || !selectedAgentId) {
-      setLoadingSessions(false);
       return;
     }
 
@@ -453,7 +544,6 @@ export function useSessionWorkspace({
     const cursor = sessionCursor;
     const controller = new AbortController();
     let disposed = false;
-    setLoadingSessions(true);
 
     void api
       .listSessions(agentId, cursor, controller.signal)
@@ -497,13 +587,11 @@ export function useSessionWorkspace({
     const request = openRequest;
     const agentId = selectedAgentId;
     if (!request || !api || !online || !agentId) {
-      setLoadingSession(false);
       return;
     }
 
     const controller = new AbortController();
     let disposed = false;
-    setLoadingSession(true);
 
     void Promise.all([
       api.getMessages(
@@ -608,13 +696,11 @@ export function useSessionWorkspace({
     const agentId = selectedAgentId;
     const sessionId = activeSession?.id;
     if (!request || !api || !online || !agentId || !sessionId) {
-      setLoadingEarlierMessages(false);
       return;
     }
 
     const controller = new AbortController();
     let disposed = false;
-    setLoadingEarlierMessages(true);
 
     void api
       .getMessages(agentId, sessionId, request.before, controller.signal)
@@ -770,7 +856,6 @@ export function useSessionWorkspace({
   useEffect(() => {
     const agentId = selectedAgentId;
     if (!api || !online || !agentId) {
-      setStreamStatus('disconnected');
       return;
     }
 
@@ -1288,7 +1373,8 @@ export function useSessionWorkspace({
     runs,
     eventState,
     runMode,
-    streamStatus,
+    streamStatus:
+      !api || !online || !selectedAgentId ? 'disconnected' : streamStatus,
     loadingAgents,
     loadingSessions,
     loadingSession,

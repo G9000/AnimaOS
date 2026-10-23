@@ -39,6 +39,7 @@ function safeSourceUrl(value: string): boolean {
   if (
     byteLength(value) > 2048 ||
     !/^https?:\/\//i.test(value) ||
+    // eslint-disable-next-line no-control-regex -- Untrusted source URLs must not contain control bytes.
     /[\u0000-\u0020\u007f-\u009f]/u.test(value)
   )
     return false;

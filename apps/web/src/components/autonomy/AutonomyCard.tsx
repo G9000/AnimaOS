@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 
 import {
@@ -55,6 +56,7 @@ export function denyPatternProblem(
   if (!value) return 'Type a command to block.';
   if (value.length > MAX_DENY_PATTERN_CHARS)
     return `Keep it to ${MAX_DENY_PATTERN_CHARS} characters.`;
+  // eslint-disable-next-line no-control-regex -- Control bytes are deliberately rejected from one-line guidance.
   if (/[\u0000-\u001f\u007f]/.test(value)) return 'Keep it to one line.';
   if (existing.includes(value)) return 'That command is already blocked.';
   if (existing.length >= MAX_DENY_PATTERNS)
@@ -88,13 +90,11 @@ export function AutonomyCard({
   const generation = useRef(0);
   const savedGuidance = autonomy?.smartPolicy ?? '';
 
-  useEffect(() => {
-    setGuidance(savedGuidance);
-  }, [savedGuidance]);
+  useResetOnChange([savedGuidance], () => setGuidance(savedGuidance));
 
+  useResetOnChange([agentId, revision], () => setError(null));
   useEffect(() => {
     const current = ++generation.current;
-    setError(null);
     daemon.autonomy(agentId).then(
       (result) => {
         if (generation.current === current) setAutonomy(result);
@@ -105,11 +105,11 @@ export function AutonomyCard({
     );
   }, [agentId, revision]);
 
-  useEffect(() => {
+  useResetOnChange([agentId], () => {
     setAutonomy(null);
     setDraft('');
     setProblem(null);
-  }, [agentId]);
+  });
 
   const save = async (patch: AutonomyPatch): Promise<boolean> => {
     if (!autonomy || saving) return false;
@@ -136,9 +136,7 @@ export function AutonomyCard({
     const reason = denyPatternProblem(draft, autonomy.denyPatterns);
     setProblem(reason);
     if (reason) return;
-    if (
-      await save({ denyPatterns: [...autonomy.denyPatterns, draft.trim()] })
-    )
+    if (await save({ denyPatterns: [...autonomy.denyPatterns, draft.trim()] }))
       setDraft('');
   };
 
@@ -157,8 +155,8 @@ export function AutonomyCard({
     >
       <h2 id="approvals-autonomy">Autonomy</h2>
       <p className="approvals-help">
-        How much anima asks before it acts. Everything it does shows up in
-        Work, and you can stop it any time.
+        How much anima asks before it acts. Everything it does shows up in Work,
+        and you can stop it any time.
       </p>
       {error && (
         <p className="approvals-error" role="alert">
@@ -313,8 +311,8 @@ export function AutonomyCard({
             <div className="autonomy-floor-column">
               <h3 id="autonomy-always-asks">Always asks, in any mode</h3>
               <p className="approvals-help">
-                Free never skips these. You can relax one at a time in the
-                rules below.
+                Free never skips these. You can relax one at a time in the rules
+                below.
               </p>
               <ul
                 className="autonomy-list"

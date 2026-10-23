@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LogLevel, LogLine } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 import {
   LOGS_FETCH_LIMIT,
   logsErrorMessage,
@@ -71,7 +73,7 @@ export function useLogs({
   reconnectDelay = defaultDelay,
 }: LogsOptions): LogsView {
   const [lines, setLines] = useState<LogLine[]>(NO_LINES);
-  const [held, setHeld] = useState(0);
+  const [buffer, setBuffer] = useState<LogLine[]>(NO_LINES);
   const [connected, setConnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -80,14 +82,28 @@ export function useLogs({
     status: number | null;
   } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const scope = useRenderScope(enabled, level, query, reloadKey);
+  const [previousScope, setPreviousScope] = useState(scope);
+  const [wasPaused, setWasPaused] = useState(paused);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setBuffer(NO_LINES);
+    setLines(NO_LINES);
+    setConnected(false);
+    setRetrying(false);
+    setLoaded(false);
+    setFailure(null);
+  } else if (wasPaused && !paused && buffer.length > 0) {
+    setLines(mergeLines(lines, buffer));
+    setBuffer(NO_LINES);
+  }
+  if (wasPaused !== paused) setWasPaused(paused);
 
   // The refs are the source of truth, so a burst of lines merges once each.
   const shown = useRef<LogLine[]>(NO_LINES);
   const heldLines = useRef<LogLine[]>(NO_LINES);
-  const pausedRef = useRef(paused);
-  pausedRef.current = paused;
-  const delayRef = useRef(reconnectDelay);
-  delayRef.current = reconnectDelay;
+  const pausedRef = useLatest(paused);
+  const delayRef = useLatest(reconnectDelay);
 
   const show = useCallback((next: LogLine[]) => {
     if (next === shown.current) return;
@@ -103,13 +119,13 @@ export function useLogs({
         const next = mergeLines(heldLines.current, fresh);
         if (next !== heldLines.current) {
           heldLines.current = next;
-          setHeld(next.length);
+          setBuffer(next);
         }
         return;
       }
       show(mergeLines(shown.current, incoming));
     },
-    [show],
+    [show, pausedRef],
   );
 
   // Resuming shows what was held.
@@ -117,18 +133,12 @@ export function useLogs({
     if (paused || heldLines.current.length === 0) return;
     const pending = heldLines.current;
     heldLines.current = NO_LINES;
-    setHeld(0);
-    show(mergeLines(shown.current, pending));
+    shown.current = mergeLines(shown.current, pending);
   }, [paused, show]);
 
   useEffect(() => {
     heldLines.current = NO_LINES;
-    setHeld(0);
-    show(NO_LINES);
-    setConnected(false);
-    setRetrying(false);
-    setLoaded(false);
-    setFailure(null);
+    shown.current = NO_LINES;
     if (!enabled) return;
 
     const controller = new AbortController();
@@ -217,13 +227,13 @@ export function useLogs({
     void run();
 
     return () => controller.abort();
-  }, [enabled, level, query, reloadKey, show, accept]);
+  }, [enabled, level, query, reloadKey, show, accept, delayRef]);
 
   const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
 
   return {
     lines,
-    held,
+    held: paused ? buffer.length : 0,
     connected,
     retrying,
     loaded,

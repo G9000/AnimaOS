@@ -17,6 +17,8 @@ import {
 import { mergeSessionRuns } from '../lib/transcript';
 import { useAgentEvents, type AgentStreamStatus } from './useAgentEvents';
 import { useSessionLedger, type SessionLedger } from './useSessionRuns';
+import { useLatest } from './useLatest';
+import { useRenderScope } from './useRenderScope';
 
 /** Live events of one kind settle this long before what they change is read. */
 export const LIVE_REFRESH_DELAY_MS = 150;
@@ -123,20 +125,25 @@ export function useLiveSession({
   const sessionId = session?.sessionId ?? null;
   const key =
     sessionAgentId && sessionId ? `${sessionAgentId}\u0000${sessionId}` : null;
-  const [runsRefresh, setRunsRefresh] = useState(0);
-  const refreshRuns = useCallback(
-    () => setRunsRefresh((value) => value + 1),
-    [],
-  );
   // Its reads are numbered as they begin, so a caller can wait for one
   // that began after something happened.
-  const ledger = useSessionLedger(sessionAgentId, sessionId, runsRefresh);
+  const ledger = useSessionLedger(sessionAgentId, sessionId);
+  const refreshLedger = ledger.refresh;
+  const refreshRuns = useCallback(() => {
+    void refreshLedger();
+  }, [refreshLedger]);
   const startedLedgerReads = ledger.started;
 
   const [announced, setAnnounced] = useState<{
     key: string;
     text: string;
   } | null>(null);
+  const scope = useRenderScope(key);
+  const [previousScope, setPreviousScope] = useState(scope);
+  if (previousScope !== scope) {
+    setPreviousScope(scope);
+    setAnnounced(null);
+  }
   const timersRef = useRef(new Map<Refresh, number>());
   // A companion's refreshes end with it (and with the view); the open
   // session's end when another opens, which reads its own on open.
@@ -147,7 +154,6 @@ export function useLiveSession({
   useEffect(() => {
     // A reply announced in the session left behind is not read again when
     // it is reopened.
-    setAnnounced(null);
     const timers = timersRef.current;
     return () => clearTimers(timers, SESSION_REFRESHES);
   }, [key]);
@@ -225,8 +231,7 @@ export function useLiveSession({
   // Accepted runs fill the gap between the daemon's answer and the
   // stream's `run.queued` or the ledger's next read (spec §15.2).
   const [seeds, setSeeds] = useState(NO_SEEDS);
-  const keyRef = useRef(key);
-  keyRef.current = key;
+  const keyRef = useLatest(key);
   const seedRun = useCallback(
     (run: Run) => {
       const runKey = `${run.agentId}\u0000${run.sessionId}`;
@@ -237,7 +242,7 @@ export function useLiveSession({
         seed,
       ]);
     },
-    [startedLedgerReads],
+    [startedLedgerReads, keyRef],
   );
   const seedAnswered = useCallback(
     (seed: SeededRun) =>
@@ -247,12 +252,8 @@ export function useLiveSession({
       ledger.runs.some((run) => run.id === seed.run.id),
     [key, live.state, ledger],
   );
-  useEffect(() => {
-    setSeeds((current) => {
-      const kept = current.filter((seed) => !seedAnswered(seed));
-      return kept.length === current.length ? current : kept;
-    });
-  }, [seedAnswered]);
+  const keptSeeds = seeds.filter((seed) => !seedAnswered(seed));
+  if (keptSeeds.length !== seeds.length) setSeeds(keptSeeds);
 
   const runs = useMemo(() => {
     if (!sessionAgentId || !sessionId) return [];
@@ -282,7 +283,9 @@ export function useLiveSession({
       previous?.key === key &&
       previous.count !== listedActiveRuns
     )
-      refreshRuns();
+      // The ledger updates only after the awaited daemon request settles.
+      // eslint-disable-next-line react/set-state-in-effect
+      void refreshRuns();
   }, [key, listedActiveRuns, streamOpen, refreshRuns]);
 
   // A run's messages are committed when it ends: history showing a run the
@@ -320,7 +323,9 @@ export function useLiveSession({
       checkedRef.current.add(runId);
       stale = true;
     }
-    if (stale) refreshRuns();
+    // The ledger updates only after the awaited daemon request settles.
+    // eslint-disable-next-line react/set-state-in-effect
+    if (stale) void refreshRuns();
   }, [key, messages, runs, watchedRunIds, refreshRuns, trimFinishedRun]);
 
   return {

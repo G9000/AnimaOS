@@ -8,6 +8,7 @@ import {
 } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { currentJobReview, reviewMatchesAttempt } from '../lib/job-output';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 const fresh = (): GoalInput => ({
   title: '',
   objective: '',
@@ -80,10 +81,12 @@ export function WorkspaceGoals({
       });
     return () => controller.abort();
   }, [refresh]);
-  useEffect(() => {
-    const controller = new AbortController();
+  useResetOnChange([selected, refresh], () => {
     setOutputs(null);
     setOutputError('');
+  });
+  useEffect(() => {
+    const controller = new AbortController();
     if (selected)
       void daemon
         .goalJobs(selected, { signal: controller.signal })

@@ -20,14 +20,24 @@ export function helperSessionTarget(
   liveRuns: LiveState['runs'],
   sessions: readonly Session[],
 ): HelperTarget | null {
+  return helperSessionFromChildren(
+    step,
+    Object.values(liveRuns).map((item) => item.run),
+    sessions,
+  );
+}
+
+function helperSessionFromChildren(
+  step: ToolStep,
+  children: readonly Pick<Run, 'parentRunId' | 'agentId' | 'sessionId'>[],
+  sessions: readonly Session[],
+): HelperTarget | null {
   const helperAgentId = step.helper?.agentId;
   if (!helperAgentId || !step.runId) return null;
-  const child = Object.values(liveRuns).find(
-    (item) =>
-      item.run.parentRunId === step.runId && item.run.agentId === helperAgentId,
+  const child = children.find(
+    (run) => run.parentRunId === step.runId && run.agentId === helperAgentId,
   );
-  if (child)
-    return { agentId: child.run.agentId, sessionId: child.run.sessionId };
+  if (child) return { agentId: child.agentId, sessionId: child.sessionId };
   const session = sessions.find(
     (item) => item.agentId === helperAgentId && item.parentRunId === step.runId,
   );
@@ -124,9 +134,6 @@ export function useTranscriptActions({
   useEffect(() => {
     latestRef.current = latest;
   });
-  // Read during render, so the cards rendered with it see this render's runs.
-  const liveRunsRef = useRef(liveRuns);
-  liveRunsRef.current = liveRuns;
   // A run sent again from this page is not sent a second time: its button
   // is used up for as long as the page is open.
   const [resent, setResent] = useState<ReadonlySet<string>>(() => new Set());
@@ -138,6 +145,20 @@ export function useTranscriptActions({
   const canAnswerReminders =
     completeAutomation !== undefined && snoozeAutomation !== undefined;
   const sessionAgentId = session?.agentId;
+  // Tokens, steps and status do not affect helper navigation. Only changing a
+  // parent/agent/session target should invalidate every transcript action.
+  const helperSignature = JSON.stringify(
+    Object.values(liveRuns)
+      .filter(({ run }) => run.parentRunId)
+      .map(({ run }) => ({
+        parentRunId: run.parentRunId,
+        agentId: run.agentId,
+        sessionId: run.sessionId,
+      })),
+  );
+  const helperChildren = useMemo<
+    Pick<Run, 'parentRunId' | 'agentId' | 'sessionId'>[]
+  >(() => JSON.parse(helperSignature), [helperSignature]);
   return useMemo<TranscriptActions>(
     () => ({
       ...(cancellable
@@ -165,7 +186,7 @@ export function useTranscriptActions({
           }
         : {}),
       helperSession: (step) =>
-        helperSessionTarget(step, liveRunsRef.current, sessions),
+        helperSessionFromChildren(step, helperChildren, sessions),
       onOpenSession: (target) => latestRef.current.openSession(target),
       onDecideApproval: (approval, input) =>
         (latestRef.current.decideApproval ?? sendApprovalDecision)(
@@ -206,6 +227,7 @@ export function useTranscriptActions({
       canResend,
       compactable,
       sessions,
+      helperChildren,
       resent,
       compacting,
       companionId,

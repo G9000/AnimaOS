@@ -9,6 +9,8 @@ import {
 import { daemon } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { WorkflowTemplates } from './WorkflowTemplates';
+import { useLatest } from '../hooks/useLatest';
+import { useRenderScope } from '../hooks/useRenderScope';
 
 const buttonClass =
   'rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50';
@@ -30,7 +32,7 @@ type Command =
   | { type: 'create'; input: WorkflowInput }
   | { type: 'resume'; id: string; input: WorkflowResumeInput }
   | { type: 'cancel'; id: string; input: { revision: number } };
-type Context = { key: string; active: boolean };
+type Context = ReturnType<typeof useRenderScope>;
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const textValid = (text: string) =>
   text.trim().length > 0 && bytes(text) <= 8192;
@@ -180,12 +182,9 @@ export function WorkflowAgentView({
   const [refresh, setRefresh] = useState(0);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const contextKey = JSON.stringify([agentId, membership, online]);
-  const contextRef = useRef<Context>({ key: contextKey, active: true });
-  if (contextRef.current.key !== contextKey) {
-    contextRef.current.active = false;
-    contextRef.current = { key: contextKey, active: true };
-  }
-  const context = contextRef.current;
+  const context = useRenderScope(contextKey);
+  const contextRef = useLatest(context);
+  const mounted = useRef(false);
   const [loaded, setLoaded] = useState<{
     context: Context;
     workflows: WorkflowRun[] | null;
@@ -205,7 +204,7 @@ export function WorkflowAgentView({
   const disabled =
     !online || !current || current.loading || !current.workflows || saving;
   const validContext = () =>
-    context.active && contextRef.current === context && online;
+    mounted.current && contextRef.current === context && online;
 
   useEffect(() => {
     const update = (event: Event) => {
@@ -220,11 +219,11 @@ export function WorkflowAgentView({
     save(draftKey, draft);
   }, [draftKey, draft]);
   useEffect(() => {
-    context.active = true;
+    mounted.current = true;
     return () => {
-      context.active = false;
+      mounted.current = false;
     };
-  }, [context]);
+  }, []);
   useEffect(() => {
     if (!online) return;
     let cancelled = false;
@@ -232,7 +231,7 @@ export function WorkflowAgentView({
     let count = 0;
     const controller = new AbortController();
     const load = async () => {
-      if (cancelled || !context.active || contextRef.current !== context)
+      if (cancelled || !mounted.current || contextRef.current !== context)
         return;
       if (busyRef.current === context) {
         timer = setTimeout(() => void load(), 5000);
@@ -253,7 +252,7 @@ export function WorkflowAgentView({
         });
         if (
           cancelled ||
-          !context.active ||
+          !mounted.current ||
           contextRef.current !== context ||
           epoch !== readEpoch.current
         )
@@ -272,7 +271,7 @@ export function WorkflowAgentView({
       } catch (error) {
         if (
           cancelled ||
-          !context.active ||
+          !mounted.current ||
           contextRef.current !== context ||
           epoch !== readEpoch.current
         )
@@ -292,7 +291,7 @@ export function WorkflowAgentView({
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [agentId, online, context, refresh, refreshKey]);
+  }, [agentId, online, context, contextRef, refresh, refreshKey]);
 
   const remember = (command: Command | null) => {
     save(commandKey, command);

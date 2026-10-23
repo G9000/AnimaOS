@@ -107,8 +107,7 @@ it.each(['session', 'disabled', 'unmount'] as const)(
     });
     expect(synthesis.speak).toHaveBeenCalledOnce();
     expect(result.current.error).toBeNull();
-    if (boundary !== 'unmount')
-      expect(result.current.speakingMessageId).toBeNull();
+    expect(result.current.speakingMessageId).toBeNull();
   },
 );
 

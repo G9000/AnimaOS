@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DaemonHttpError } from '@animaos/sdk';
 
 import {
@@ -27,6 +27,8 @@ import { ReviewStep } from './ReviewStep';
 import { WorkspaceStep, type WorkspaceVerifyStatus } from './WorkspaceStep';
 import { AgencyPicker } from './AgencyPicker';
 import { AgencyTeam } from './AgencyTeam';
+import { useLatest } from '../../hooks/useLatest';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
   AGENCY_TEMPLATES,
   generatedMembers,
@@ -119,9 +121,7 @@ async function saveAutonomy(
   await Promise.all(
     snapshots.map((snapshot) =>
       snapshot?.state?.id
-        ? daemon
-            .setAutonomy(snapshot.state.id, { mode })
-            .catch(() => undefined)
+        ? daemon.setAutonomy(snapshot.state.id, { mode }).catch(() => undefined)
         : undefined,
     ),
   );
@@ -233,33 +233,38 @@ export function OnboardingFlow({
     };
   }, []);
 
-  useEffect(() => {
-    // Pick an initial default only. A refresh or lost connection must never
-    // replace the user's provider/model with another connected provider.
-    if (!providers || draft.provider) {
-      return;
-    }
+  useResetOnChange(
+    [currentStep, draft.model, draft.provider, providers],
+    () => {
+      // Pick an initial default only. A refresh or lost connection must never
+      // replace the user's provider/model with another connected provider.
+      if (!providers || draft.provider) {
+        return;
+      }
 
-    const firstConfigured = providers.find((candidate) => candidate.configured);
-    if (!firstConfigured) {
-      return;
-    }
+      const firstConfigured = providers.find(
+        (candidate) => candidate.configured,
+      );
+      if (!firstConfigured) {
+        return;
+      }
 
-    setDraft((current) => ({
-      ...current,
-      provider: firstConfigured.id,
-      model: defaultModel(firstConfigured.id),
-    }));
-    if (currentStep === 1) {
-      setBlockingError(null);
-    }
-  }, [currentStep, draft.model, draft.provider, providers]);
+      setDraft((current) => ({
+        ...current,
+        provider: firstConfigured.id,
+        model: defaultModel(firstConfigured.id),
+      }));
+      if (currentStep === 1) {
+        setBlockingError(null);
+      }
+    },
+  );
 
-  useEffect(() => {
+  useResetOnChange([providersError], () => {
     if (providersError) {
       setProviderRetryError(null);
     }
-  }, [providersError]);
+  });
 
   const resolvedModel =
     draft.model === '__custom__'
@@ -273,8 +278,7 @@ export function OnboardingFlow({
     maxTeamSize,
     sizeMode,
   ]);
-  const generationContextRef = useRef(generationContext);
-  generationContextRef.current = generationContext;
+  const generationContextRef = useLatest(generationContext);
   const selectedTemplate = AGENCY_TEMPLATES.find(
     (template) => template.id === agencyChoice,
   );
@@ -476,7 +480,7 @@ export function OnboardingFlow({
   // state after the user left resume mode, the card only renders in mode.
   const showingResumeCard = resumeMode && inspectPreview !== null;
 
-  useEffect(() => {
+  useResetOnChange([currentStep, intelligenceReady], () => {
     if (currentStep < 2 || intelligenceReady) {
       return;
     }
@@ -484,9 +488,9 @@ export function OnboardingFlow({
     setCreateError(null);
     setBlockingError(PROVIDER_CATALOG_CHANGED_ERROR);
     setCurrentStep(1);
-  }, [currentStep, intelligenceReady]);
+  });
 
-  const focusFirstEmptyWorkspaceField = () => {
+  const focusFirstEmptyWorkspaceField = useCallback(() => {
     // In resume mode only the folder field is rendered; the company/mission
     // inputs are hidden, so focusing them would be a no-op dead end.
     if (resumeMode) {
@@ -504,7 +508,7 @@ export function OnboardingFlow({
     if (!draft.workspace.rootPath.trim()) {
       rootPathInputRef.current?.focus();
     }
-  };
+  }, [resumeMode, draft.workspace]);
 
   useEffect(() => {
     if (!blockingError) {
@@ -538,6 +542,7 @@ export function OnboardingFlow({
     draft.name,
     draft.workspace,
     intelligenceReady,
+    focusFirstEmptyWorkspaceField,
     resolvedModel,
     resumeMode,
   ]);

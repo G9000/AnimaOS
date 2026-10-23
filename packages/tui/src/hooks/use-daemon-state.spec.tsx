@@ -42,17 +42,18 @@ function DaemonStateProbe({
     showMessage,
   });
 
+  const { syncDaemonWarning } = state;
   useEffect(() => {
     if (manualCheckToken > 0) {
-      void state.syncDaemonWarning('manual');
+      void syncDaemonWarning('manual');
     }
-  }, [manualCheckToken, state.syncDaemonWarning]);
+  }, [manualCheckToken, syncDaemonWarning]);
 
   useEffect(() => {
     if (pollCheckToken > 0) {
-      void state.syncDaemonWarning('poll');
+      void syncDaemonWarning('poll');
     }
-  }, [pollCheckToken, state.syncDaemonWarning]);
+  }, [pollCheckToken, syncDaemonWarning]);
 
   return (
     <Text>
@@ -82,7 +83,7 @@ describe('useDaemonState', () => {
     expect(rendered.lastFrame()).toContain('checked=none');
 
     rendered.rerender(
-      <DaemonStateProbe showMessage={showMessage} manualCheckToken={1} />
+      <DaemonStateProbe showMessage={showMessage} manualCheckToken={1} />,
     );
     await settleDaemonState();
 
@@ -100,7 +101,7 @@ describe('useDaemonState', () => {
         showMessage={showMessage}
         preflightWarning="daemon unavailable"
         pollDaemonWarning={pollDaemonWarning}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('status=down');
@@ -113,7 +114,7 @@ describe('useDaemonState', () => {
         preflightWarning="daemon unavailable"
         pollDaemonWarning={pollDaemonWarning}
         manualCheckToken={1}
-      />
+      />,
     );
     await settleDaemonState();
 
@@ -122,7 +123,7 @@ describe('useDaemonState', () => {
     expect(rendered.lastFrame()).toContain('warning=none');
     expect(rendered.lastFrame()).toContain('blocked=false');
     expect(rendered.lastFrame()).toContain(
-      'recovery=Task entry restored. Freeform tasks are available'
+      'recovery=Task entry restored. Freeform tasks are available',
     );
     expect(rendered.lastFrame()).toContain('again.');
   });
@@ -137,7 +138,7 @@ describe('useDaemonState', () => {
       <DaemonStateProbe
         showMessage={showMessage}
         pollDaemonWarning={pollDaemonWarning}
-      />
+      />,
     );
 
     expect(rendered.lastFrame()).toContain('status=up');
@@ -148,7 +149,7 @@ describe('useDaemonState', () => {
         showMessage={showMessage}
         pollDaemonWarning={pollDaemonWarning}
         pollCheckToken={1}
-      />
+      />,
     );
     await settleDaemonState();
 
@@ -162,7 +163,7 @@ describe('useDaemonState', () => {
         showMessage={showMessage}
         pollDaemonWarning={pollDaemonWarning}
         pollCheckToken={2}
-      />
+      />,
     );
     await settleDaemonState();
 
@@ -170,5 +171,30 @@ describe('useDaemonState', () => {
     expect(rendered.lastFrame()).toContain('status=up');
     expect(rendered.lastFrame()).toContain('warning=none');
     expect(rendered.lastFrame()).toContain('blocked=false');
+  });
+  it('updates preflight warning without inventing a new health-check timestamp', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      const showMessage = vi.fn();
+      const rendered = renderInk(
+        <DaemonStateProbe
+          showMessage={showMessage}
+          preflightWarning="first failure"
+        />,
+      );
+      expect(rendered.lastFrame()).toContain('checked=1000');
+      now.mockReturnValue(2_000);
+      rendered.rerender(
+        <DaemonStateProbe
+          showMessage={showMessage}
+          preflightWarning="second failure"
+        />,
+      );
+      await settleDaemonState();
+      expect(rendered.lastFrame()).toContain('warning=second failure');
+      expect(rendered.lastFrame()).toContain('checked=1000');
+    } finally {
+      now.mockRestore();
+    }
   });
 });

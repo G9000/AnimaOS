@@ -200,15 +200,15 @@ describe('m83 visible search provenance', () => {
       expect([...new Set(streamSources.map((source) => source.url))]).toEqual(
         artifact.search.urls,
       );
-      if (artifact.snapshot) {
-        const reconnected = applyEvent(EMPTY_LIVE_STATE, artifact.snapshot);
-        const restoredSources = Object.values(reconnected.runs).flatMap((run) =>
-          run.tools.flatMap((tool) => tool.sources ?? []),
-        );
-        expect([
-          ...new Set(restoredSources.map((source) => source.url)),
-        ]).toEqual(artifact.search.urls);
-      }
+      const reconnected = artifact.snapshot
+        ? applyEvent(EMPTY_LIVE_STATE, artifact.snapshot)
+        : EMPTY_LIVE_STATE;
+      const restoredSources = Object.values(reconnected.runs).flatMap((run) =>
+        run.tools.flatMap((tool) => tool.sources ?? []),
+      );
+      expect([...new Set(restoredSources.map((source) => source.url))]).toEqual(
+        artifact.snapshot ? artifact.search.urls : [],
+      );
       const streamed = render(
         <MessageList
           agent={{ ...agent, messages: [] }}
@@ -290,37 +290,68 @@ function settledReceipts(count: number): NonNullable<Run['actionReceipts']> {
 }
 
 describe('MessageList', () => {
-  it.each([true, false])('excludes tail growth from older-history scroll preservation (resize delivered: %s)', (deliverResize) => {
-    let resized!: ResizeObserverCallback;
-    const previous = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      constructor(callback: ResizeObserverCallback) { resized = callback; }
-      observe = vi.fn();
-      unobserve = vi.fn();
-      disconnect = vi.fn();
-    } as unknown as typeof ResizeObserver;
-    try {
-      const scrollerRef = { current: null as HTMLDivElement | null };
-      const props = { sending: false, scrollerRef, onSuggestion: vi.fn(), tail: <div>Resizing workflow</div> };
-      const view = render(<MessageList {...props} agent={agent} />);
-      const scroller = scrollerRef.current!;
-      const tail = screen.getByText('Resizing workflow').parentElement!;
-      let height = 2000;
-      let tailHeight = 100;
-      Object.defineProperties(scroller, { scrollHeight: { configurable: true, get: () => height }, clientHeight: { configurable: true, value: 500 } });
-      Object.defineProperty(tail, 'offsetHeight', { configurable: true, get: () => tailHeight });
-      scroller.scrollTop = 100;
-      fireEvent.scroll(scroller);
-      view.rerender(<MessageList {...props} agent={{ ...agent, messages: [...messages] }} />);
-      tailHeight = 600;
-      height = 2500;
-      if (deliverResize) act(() => resized([], {} as ResizeObserver));
-      expect(scroller.scrollTop).toBe(100);
-      height = 2700;
-      view.rerender(<MessageList {...props} agent={{ ...agent, messages: [{ ...messages[0], id: 'older' }, ...messages] }} />);
-      expect(scroller.scrollTop).toBe(300);
-    } finally { globalThis.ResizeObserver = previous; }
-  });
+  it.each([true, false])(
+    'excludes tail growth from older-history scroll preservation (resize delivered: %s)',
+    (deliverResize) => {
+      let resized!: ResizeObserverCallback;
+      const previous = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = class {
+        constructor(callback: ResizeObserverCallback) {
+          resized = callback;
+        }
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+      } as unknown as typeof ResizeObserver;
+      try {
+        const scrollerRef = { current: null as HTMLDivElement | null };
+        const props = {
+          sending: false,
+          scrollerRef,
+          onSuggestion: vi.fn(),
+          tail: <div>Resizing workflow</div>,
+        };
+        const view = render(<MessageList {...props} agent={agent} />);
+        const scroller = scrollerRef.current!;
+        const tail = screen.getByText('Resizing workflow').parentElement!;
+        let height = 2000;
+        let tailHeight = 100;
+        Object.defineProperties(scroller, {
+          scrollHeight: { configurable: true, get: () => height },
+          clientHeight: { configurable: true, value: 500 },
+        });
+        Object.defineProperty(tail, 'offsetHeight', {
+          configurable: true,
+          get: () => tailHeight,
+        });
+        scroller.scrollTop = 100;
+        fireEvent.scroll(scroller);
+        view.rerender(
+          <MessageList
+            {...props}
+            agent={{ ...agent, messages: [...messages] }}
+          />,
+        );
+        tailHeight = 600;
+        height = 2500;
+        if (deliverResize) act(() => resized([], {} as ResizeObserver));
+        expect(scroller.scrollTop).toBe(100);
+        height = 2700;
+        view.rerender(
+          <MessageList
+            {...props}
+            agent={{
+              ...agent,
+              messages: [{ ...messages[0], id: 'older' }, ...messages],
+            }}
+          />,
+        );
+        expect(scroller.scrollTop).toBe(300);
+      } finally {
+        globalThis.ResizeObserver = previous;
+      }
+    },
+  );
   it('follows asynchronous tail sizing only while the reader is at the bottom and disconnects its observer', () => {
     let resized!: ResizeObserverCallback;
     const disconnect = vi.fn();
@@ -1901,9 +1932,13 @@ describe('automation cards in the main chat', () => {
         onSuggestion={vi.fn()}
       />,
     );
-    expect(screen.getByRole('article', { name: 'Reminder Call the bank' })).toBeVisible();
+    expect(
+      screen.getByRole('article', { name: 'Reminder Call the bank' }),
+    ).toBeVisible();
     expect(screen.getByText('Their cut-off is 3:00 PM.')).toBeVisible();
-    expect(screen.getByText(/Weekly review went to Discord · #home/)).toBeVisible();
+    expect(
+      screen.getByText(/Weekly review went to Discord · #home/),
+    ).toBeVisible();
     expect(screen.queryByText(/written for the model/)).toBeNull();
   });
 
@@ -1927,7 +1962,9 @@ describe('automation cards in the main chat', () => {
       />,
     );
     expect(screen.getByText('Automation · Weekly review')).toBeVisible();
-    expect(screen.getByText(/written for the model, never shown/)).toBeVisible();
+    expect(
+      screen.getByText(/written for the model, never shown/),
+    ).toBeVisible();
     expect(screen.queryByRole('article')).toBeNull();
   });
 

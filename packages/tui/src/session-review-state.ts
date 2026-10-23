@@ -3,6 +3,8 @@ import type { Approval, ApprovalDecisionInput } from '@animaos/sdk';
 /** Render model-authored text without granting it terminal control. */
 export function reviewLiteral(value: string): string {
   return value.replace(
+    // C0 controls are intentionally matched so untrusted text cannot control the terminal.
+    // eslint-disable-next-line no-control-regex
     /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g,
     (character) =>
       `\\u{${character.charCodeAt(0).toString(16).padStart(4, '0')}}`,

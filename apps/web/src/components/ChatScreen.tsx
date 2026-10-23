@@ -1,3 +1,5 @@
+import { useLatest } from '../hooks/useLatest';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import {
   memo,
   useCallback,
@@ -689,6 +691,24 @@ export const MessageList = memo(function MessageList({
     atBottom.current = true;
     setAwayFromBottom(false);
   };
+  const [previousHighlight, setPreviousHighlight] =
+    useState(highlightMessageId);
+  useResetOnChange(
+    [
+      highlightMessageId,
+      highlightMessageId ? jumpRequestKey : null,
+      highlightMessageId ? jumpReady : null,
+      agent.id,
+      highlightMessageId ? transcript : null,
+      highlightMessageId ? firstMessageId : null,
+      highlightMessageId ? scrollerRef : null,
+    ],
+    () => {
+      if (highlightMessageId) setAwayFromBottom(true);
+      else if (previousHighlight) setAwayFromBottom(false);
+      setPreviousHighlight(highlightMessageId);
+    },
+  );
   useLayoutEffect(() => {
     const previous = externalJump.current;
     const changed =
@@ -704,7 +724,6 @@ export const MessageList = memo(function MessageList({
       };
       if (!highlightMessageId && previous.messageId) {
         atBottom.current = true;
-        setAwayFromBottom(false);
         const scroller = scrollerRef.current;
         if (scroller) scroller.scrollTop = scroller.scrollHeight;
       }
@@ -712,7 +731,6 @@ export const MessageList = memo(function MessageList({
     if (!highlightMessageId) return;
     // Disable bottom-follow even while the requested window is loading.
     atBottom.current = false;
-    setAwayFromBottom(true);
     if (!jumpReady || externalJump.current.done) return;
     const element = messageElements.current.get(highlightMessageId);
     if (!element) return;
@@ -973,14 +991,13 @@ export function Composer({
   };
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const latestDraft = useRef(draft);
-  latestDraft.current = draft;
+  const latestDraftRef = useLatest(draft);
   const changeDraft = (value: string) => {
-    latestDraft.current = value;
+    latestDraftRef.current = value;
     setDraft(value);
   };
   const appendDictation = (text: string) => {
-    const previous = latestDraft.current.trimEnd();
+    const previous = latestDraftRef.current.trimEnd();
     changeDraft(`${previous}${previous ? ' ' : ''}${text}`);
   };
   const menuId = useId();
@@ -1019,9 +1036,7 @@ export function Composer({
       (attachments?.items.length ?? 0) > 0 ||
       savedAttachmentCount > 0);
 
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [draft]);
+  useResetOnChange([draft], () => setActiveIndex(0));
 
   // Fit the field to its text. It measures again when its width changes:
   // measured before layout, at no width, the empty field filled its

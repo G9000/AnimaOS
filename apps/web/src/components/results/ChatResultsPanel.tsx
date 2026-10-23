@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type {
   Calculation,
   ChatResult,
@@ -7,6 +7,8 @@ import type {
 } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { MarkdownMessage } from '../MarkdownMessage';
+import { useLatest } from '../../hooks/useLatest';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 type ResultsApi = Pick<ChatResultsClient, 'list' | 'pin'>;
 type ResultsState = {
@@ -31,8 +33,7 @@ export function useChatResults({
   api?: ResultsApi;
 }) {
   const scope = JSON.stringify([agentId, sessionId, clearGeneration]);
-  const currentScope = useRef(scope);
-  currentScope.current = scope;
+  const currentScope = useLatest(scope);
   const [state, setState] = useState<ResultsState>({
     scope,
     results: [],
@@ -43,15 +44,20 @@ export function useChatResults({
   const [pending, setPending] = useState<{ scope: string; id: string } | null>(
     null,
   );
+  useResetOnChange(
+    [agentId, sessionId, clearGeneration, scope, refreshKey, retry, api],
+    () => {
+      setState((previous) => ({
+        scope,
+        results: previous.scope === scope ? previous.results : [],
+        error: null,
+        loading: true,
+      }));
+    },
+  );
   useEffect(() => {
     const abort = new AbortController();
     let active = true;
-    setState((previous) => ({
-      scope,
-      results: previous.scope === scope ? previous.results : [],
-      error: null,
-      loading: true,
-    }));
     api
       .list(agentId, sessionId, { signal: abort.signal })
       .then((response) => {
@@ -99,7 +105,16 @@ export function useChatResults({
       active = false;
       abort.abort();
     };
-  }, [agentId, sessionId, clearGeneration, scope, refreshKey, retry, api]);
+  }, [
+    agentId,
+    sessionId,
+    clearGeneration,
+    scope,
+    refreshKey,
+    retry,
+    api,
+    currentScope,
+  ]);
 
   async function pin(result: ChatResult) {
     if (

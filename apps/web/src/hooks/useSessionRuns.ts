@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Run } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
+import { useLatest } from './useLatest';
 
 /** Ledger runs a session view reads for outcomes its stream no longer
  *  carries: failures, stops, and restarts (spec §4.1, §15.2). */
@@ -24,6 +25,8 @@ export interface SessionLedger {
   /** Reads begun so far, for any session: a read numbered above this
    *  began after now. */
   started: () => number;
+  /** Reads the ledger directly without an intermediate render. */
+  refresh: () => Promise<void>;
 }
 
 /** The session's ledger runs and which read they came from; read again
@@ -41,40 +44,44 @@ export function useSessionLedger(
     landed: number;
   } | null>(null);
   const readsRef = useRef(0);
+  const active = useRef<AbortController | null>(null);
+  const targetRef = useLatest({ key, agentId, sessionId });
   const started = useCallback(() => readsRef.current, []);
-  useEffect(() => {
+  const refresh = useCallback(async () => {
+    const { key, agentId, sessionId } = targetRef.current;
     if (!key || !agentId || !sessionId) return;
-    let current = true;
     const read = ++readsRef.current;
     // A read the view no longer wants (another session opened, a newer
     // read began, or the view closed) is aborted, not just ignored (T20).
     const controller = new AbortController();
-    daemon
-      .sessionRuns(agentId, sessionId, {
+    active.current?.abort();
+    active.current = controller;
+    try {
+      const runs = await daemon.sessionRuns(agentId, sessionId, {
         limit: SESSION_RUNS_LIMIT,
         signal: controller.signal,
-      })
-      .then(
-        (runs) => {
-          if (current) setLoaded({ key, runs, landed: read });
-        },
-        (caught) => {
-          // A daemon without the route, or a deleted session, has none.
-          if (current && httpStatus(caught) === 404)
-            setLoaded({ key, runs: [], landed: read });
-        },
-      );
+      });
+      if (!controller.signal.aborted) setLoaded({ key, runs, landed: read });
+    } catch (caught) {
+      // A daemon without the route, or a deleted session, has none.
+      if (!controller.signal.aborted && httpStatus(caught) === 404)
+        setLoaded({ key, runs: [], landed: read });
+    }
+  }, [targetRef]);
+  useEffect(() => {
+    // Updates follow the awaited daemon response, including its failure.
+    // eslint-disable-next-line react/set-state-in-effect
+    void refresh();
     return () => {
-      current = false;
-      controller.abort();
+      active.current?.abort();
     };
-  }, [key, agentId, sessionId, refreshKey]);
+  }, [key, refresh, refreshKey]);
   return useMemo(
     () =>
       loaded && loaded.key === key
-        ? { runs: loaded.runs, landed: loaded.landed, started }
-        : { runs: NO_RUNS, landed: null, started },
-    [loaded, key, started],
+        ? { runs: loaded.runs, landed: loaded.landed, started, refresh }
+        : { runs: NO_RUNS, landed: null, started, refresh },
+    [loaded, key, started, refresh],
   );
 }
 

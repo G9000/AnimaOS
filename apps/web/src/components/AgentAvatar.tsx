@@ -1,3 +1,4 @@
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useState, type ReactNode } from 'react';
 import { HaloOrb } from './halo/HaloOrb';
 import { useDaemonImage } from '../hooks/useDaemonImage';
@@ -19,10 +20,12 @@ export function AgentAvatar({
 }) {
   const [revision, setRevision] = useState(0);
   const [failed, setFailed] = useState(false);
-  const image = useDaemonImage(`/api/agents/${encodeURIComponent(id)}/avatar?v=${revision}`);
+  const image = useDaemonImage(
+    `/api/agents/${encodeURIComponent(id)}/avatar?v=${revision}`,
+  );
   const useFallback = failed || image.failed || image.src === null;
+  useResetOnChange([id], () => setFailed(false));
   useEffect(() => {
-    setFailed(false);
     const refresh = (event: Event) => {
       if ((event as CustomEvent<string>).detail === id) {
         setFailed(false);

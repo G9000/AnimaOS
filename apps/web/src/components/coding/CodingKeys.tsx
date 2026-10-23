@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { daemon, type CodingKey } from '../../lib/daemon-api';
 import { Switch } from '../ui-bits';
+import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 function errorText(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
@@ -17,11 +18,12 @@ export function CodingKeys({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const generation = useRef(0);
-
-  useEffect(() => {
-    const current = ++generation.current;
+  useResetOnChange([agentId], () => {
     setKeys(null);
     setError(null);
+  });
+  useEffect(() => {
+    const current = ++generation.current;
     daemon.codingKeys(agentId).then(
       (result) => {
         if (generation.current === current) setKeys(result.keys);
@@ -95,8 +97,8 @@ export function CodingKeys({ agentId }: { agentId: string }) {
         </ul>
       )}
       <p className="approvals-help coding-keys-note">
-        <span aria-hidden="true">↳</span> Keys come from Settings › Model. A
-        key that isn't saved can't be turned on.
+        <span aria-hidden="true">↳</span> Keys come from Settings › Model. A key
+        that isn't saved can't be turned on.
       </p>
     </section>
   );

@@ -11,12 +11,7 @@ import { safeIntegrationError } from '../lib/telegram';
 import { useConnectorLifetime } from './useConnectorLifetime';
 
 type ConnectorBusy =
-  | 'connect'
-  | 'replace'
-  | 'approve'
-  | 'restart'
-  | 'disconnect'
-  | null;
+  'connect' | 'replace' | 'approve' | 'restart' | 'disconnect' | null;
 
 /** The companion's connectors and their setup actions (Connectors page). */
 export function useAgentIntegrations(
@@ -24,42 +19,40 @@ export function useAgentIntegrations(
   online = true,
   epoch = 0,
 ) {
-  const scope = useConnectorLifetime(agentId, online, epoch);
+  const { token, isCurrent } = useConnectorLifetime(agentId, online, epoch);
   const generation = useRef(0);
   const connectorMutation = useRef(0);
   const connectorBusyRef = useRef(false);
-  const [owner, setOwner] = useState<string | null>(null);
+  const [owner, setOwner] = useState(agentId);
   const [connectors, setConnectors] = useState<TelegramConnector[]>([]);
   const [loading, setLoading] = useState(Boolean(agentId));
   const [connectorBusy, setConnectorBusy] = useState<ConnectorBusy>(null);
   const [connectorError, setConnectorError] = useState<string | null>(null);
+  const [previousToken, setPreviousToken] = useState(token);
+  if (previousToken !== token) {
+    setPreviousToken(token);
+    setOwner(agentId);
+    setConnectors([]);
+    setConnectorBusy(null);
+    setConnectorError(null);
+    setLoading(Boolean(agentId) && online);
+  }
 
   useLayoutEffect(() => {
     generation.current += 1;
     connectorMutation.current += 1;
-    setOwner(agentId);
-    setConnectors([]);
-    setConnectorBusy(null);
     connectorBusyRef.current = false;
-    setConnectorError(null);
-    setLoading(Boolean(agentId) && online);
-    return () => {
-      generation.current++;
-      connectorMutation.current++;
-    };
   }, [agentId, online, epoch]);
 
   const refresh = useCallback(async () => {
-    if (!scope.isCurrent(scope.token) || !agentId || connectorBusyRef.current)
-      return;
+    if (!isCurrent(token) || !agentId || connectorBusyRef.current) return;
     const requestGeneration = generation.current;
     const connectorRequest = connectorMutation.current;
-    setLoading(true);
     try {
       const { connectors: listed } = await daemon.listConnectors(agentId);
       if (
         requestGeneration !== generation.current ||
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         connectorRequest !== connectorMutation.current
       )
         return;
@@ -68,21 +61,24 @@ export function useAgentIntegrations(
     } catch (caught) {
       if (
         requestGeneration !== generation.current ||
-        !scope.isCurrent(scope.token) ||
+        !isCurrent(token) ||
         connectorRequest !== connectorMutation.current
       )
         return;
       setConnectorError(safeIntegrationError(caught));
     } finally {
-      if (
-        requestGeneration === generation.current &&
-        scope.isCurrent(scope.token)
-      )
+      if (requestGeneration === generation.current && isCurrent(token))
         setLoading(false);
     }
-  }, [agentId, scope.token, scope.isCurrent]);
+  }, [agentId, token, isCurrent]);
+  const refreshWithLoading = useCallback(() => {
+    setLoading(true);
+    return refresh();
+  }, [refresh]);
 
   useEffect(() => {
+    // State changes only after the awaited connector response, including failures.
+    // eslint-disable-next-line react/set-state-in-effect
     void refresh();
   }, [refresh]);
 
@@ -92,7 +88,7 @@ export function useAgentIntegrations(
       action: () => Promise<T>,
       apply: (value: T) => void,
     ) => {
-      if (!scope.isCurrent(scope.token) || !agentId || connectorBusyRef.current)
+      if (!isCurrent(token) || !agentId || connectorBusyRef.current)
         return false;
       const lifetime = generation.current;
       const mutation = ++connectorMutation.current;
@@ -103,7 +99,7 @@ export function useAgentIntegrations(
         const value = await action();
         if (
           lifetime !== generation.current ||
-          !scope.isCurrent(scope.token) ||
+          !isCurrent(token) ||
           mutation !== connectorMutation.current
         )
           return false;
@@ -112,7 +108,7 @@ export function useAgentIntegrations(
       } catch (error) {
         if (
           lifetime === generation.current &&
-          scope.isCurrent(scope.token) &&
+          isCurrent(token) &&
           mutation === connectorMutation.current
         ) {
           setConnectorError(safeIntegrationError(error));
@@ -121,7 +117,7 @@ export function useAgentIntegrations(
       } finally {
         if (
           lifetime === generation.current &&
-          scope.isCurrent(scope.token) &&
+          isCurrent(token) &&
           mutation === connectorMutation.current
         ) {
           connectorBusyRef.current = false;
@@ -129,7 +125,7 @@ export function useAgentIntegrations(
         }
       }
     },
-    [agentId, scope.token, scope.isCurrent],
+    [agentId, token, isCurrent],
   );
 
   const upsertConnector = (connector: TelegramConnector) =>
@@ -187,13 +183,13 @@ export function useAgentIntegrations(
     [agentId, connectorAction],
   );
 
-  const visible = owner === agentId && scope.isCurrent(scope.token);
+  const visible = owner === agentId && isCurrent(token);
   return {
     connectors: visible ? connectors : [],
     loading,
     connectorBusy,
     connectorError,
-    refresh,
+    refresh: refreshWithLoading,
     connectTelegram,
     replaceTelegram,
     approvePairing,

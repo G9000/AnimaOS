@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { PRESENCE_FRAGMENT, PRESENCE_VERTEX } from './presence-shader';
+import { useLatest } from '../../hooks/useLatest';
 
 function rgb(hex: string): [number, number, number] {
   const value = parseInt(hex.replace('#', ''), 16);
@@ -76,7 +77,7 @@ export function HaloOrb({
   style?: CSSProperties;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const uniforms = useRef({
+  const uniforms = useLatest({
     accent,
     core,
     accent2,
@@ -88,18 +89,6 @@ export function HaloOrb({
     pixel,
     portrait,
   });
-  uniforms.current = {
-    accent,
-    core,
-    accent2,
-    mix,
-    zoom,
-    cx,
-    cy,
-    energy,
-    pixel,
-    portrait,
-  };
   const portraitSrc = portrait?.src;
   const [fallback, setFallback] = useState(false);
 
@@ -112,6 +101,8 @@ export function HaloOrb({
       gl = null;
     }
     if (!canvas || !gl) {
+      // Canvas context availability is known only after browser initialization.
+      // eslint-disable-next-line react/set-state-in-effect
       setFallback(true);
       return;
     }
@@ -119,6 +110,8 @@ export function HaloOrb({
     const fs = compile(gl, gl.FRAGMENT_SHADER, PRESENCE_FRAGMENT);
     const program = gl.createProgram();
     if (!vs || !fs || !program) {
+      // WebGL compilation is an external capability check after mount.
+      // eslint-disable-next-line react/set-state-in-effect
       setFallback(true);
       return;
     }
@@ -126,6 +119,8 @@ export function HaloOrb({
     gl.attachShader(program, fs);
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      // The linked WebGL program determines whether the DOM needs a fallback.
+      // eslint-disable-next-line react/set-state-in-effect
       setFallback(true);
       return;
     }
@@ -275,7 +270,7 @@ export function HaloOrb({
       gl!.deleteBuffer(buffer);
       gl!.deleteTexture(texture);
     };
-  }, []);
+  }, [uniforms]);
 
   // A still frame under reduced motion still has to show colour changes.
   useEffect(() => {
