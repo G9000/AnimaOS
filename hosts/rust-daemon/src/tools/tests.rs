@@ -42,6 +42,24 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock as AsyncRwLock;
 
 #[test]
+fn chat_controls_are_native_and_cannot_target_arbitrary_chats() {
+    let registry = ToolRegistry::new();
+    for name in ["rename_chat", "compact_chat", "export_chat"] {
+        let descriptor = registry.descriptor(name).expect("native owner control");
+        assert!(registry.lookup(name).is_some());
+        let DataValue::Object(properties) = &descriptor.parameters_schema["properties"] else {
+            panic!("object properties");
+        };
+        assert!(!properties.contains_key("agent_id"));
+        assert!(!properties.contains_key("session_id"));
+        assert_eq!(
+            descriptor.parameters_schema["additionalProperties"],
+            DataValue::Bool(false)
+        );
+    }
+}
+
+#[test]
 fn m83_anonymous_web_search_is_native_and_separate_from_keyed_exa() {
     let registry = ToolRegistry::new();
     let search = registry
@@ -421,6 +439,13 @@ fn registry_defines_every_registered_tool_schema() {
         ("doctor_undo", &["id", "fingerprint"][..], &[][..]),
         ("search_tools", &["query"][..], &["limit"][..]),
         ("describe_tool", &["name"][..], &[][..]),
+        ("rename_chat", &["title"][..], &[][..]),
+        (
+            "compact_chat",
+            &[][..],
+            &["keepLatestExchanges", "focus"][..],
+        ),
+        ("export_chat", &[][..], &[][..]),
         ("execution_targets", &[][..], &[][..]),
         ("execution_status", &["executionId"][..], &[][..]),
         (

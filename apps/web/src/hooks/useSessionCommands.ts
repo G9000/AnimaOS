@@ -1,5 +1,6 @@
 import {
   useMemo,
+  useEffect,
   useRef,
   useState,
   type Dispatch,
@@ -9,6 +10,9 @@ import type {
   Run,
   RunMode,
   Session,
+  SessionCompactInput,
+  SessionReviseInput,
+  SessionQueuedRunPatch,
   UploadedAttachment,
 } from '@animaos/sdk';
 import type { SendAttachments } from './useSessionSends';
@@ -20,6 +24,7 @@ import { sessionKey } from '../lib/session-groups';
 import {
   SKILL_NOT_IN_TELEGRAM_CHAT,
   parseSlashCommand,
+  parseCompactOptions,
   runSlashCommand,
   type SlashCommand,
   type SlashCommandHandlers,
@@ -32,6 +37,8 @@ export interface CommandChatPatch {
   error?: string | null;
   resend?: null;
   delivery?: null;
+  notice?: string | null;
+  literalDraft?: boolean;
 }
 
 export interface SessionCommandOptions {
@@ -42,11 +49,15 @@ export interface SessionCommandOptions {
   canSend: () => boolean;
   /** The route's session, or null for a new chat. */
   routeSessionId: string | null;
+  /** Changes for every visible route, including pages that retain this chat. */
+  navigationScope?: string;
   /** Its record, once known: a send needs the session's kind. */
   session: Session | null;
   /** The open conversation's chat state key. */
   chatKey: string | null;
   draft: string;
+  /** A reviewed retry is always a fresh literal message, even if it begins with /. */
+  literalDraft?: boolean;
   /** A restored message; sent again unchanged, it keeps its key. */
   resend: {
     text: string;
@@ -113,7 +124,16 @@ export interface SessionCommands {
   /** Stops a run (spec §4.6): the reply in progress, or a queued message. */
   stopRun: (run: Pick<Run, 'agentId' | 'id'>) => Promise<void>;
   /** Folds earlier turns into the session summary (spec §5.4). */
-  compactSession: (session: Session) => Promise<void>;
+  compactSession: (
+    session: Session,
+    input?: SessionCompactInput,
+  ) => Promise<void>;
+  reviseSession: (
+    mode: SessionReviseInput['mode'],
+    throughMessageId?: string,
+  ) => Promise<void>;
+  updateQueuedRun: (run: Run, patch: SessionQueuedRunPatch) => Promise<boolean>;
+  revising: boolean;
   /** Sends a failed or interrupted run's message again, as a new message;
    *  false when it cannot go from the open session or the owner did not
    *  write it. */
@@ -137,6 +157,15 @@ export function useSessionCommands(
   const latest = useRef(options);
   latest.current = options;
   const [compacting, setCompacting] = useState(false);
+  const [revising, setRevising] = useState(false);
+  const revisionPending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const commands = useMemo(() => {
     /** A fresh record replaces the listed or known copy. */
     const adoptSession = (session: Session) => {
@@ -158,16 +187,120 @@ export function useSessionCommands(
       }
     };
 
-    const compactSession = async (session: Session) => {
+    const compactSession = async (
+      session: Session,
+      input?: SessionCompactInput,
+    ) => {
       setCompacting(true);
       try {
         // The summary itself arrives with `session.updated`.
-        adoptSession(await daemon.compactSession(session.agentId, session.id));
+        adoptSession(
+          await (input && Object.keys(input).length
+            ? daemon.compactSession(session.agentId, session.id, input)
+            : daemon.compactSession(session.agentId, session.id)),
+        );
         latest.current.setError(null);
       } catch (caught) {
         latest.current.setError(errorMessage(caught));
       } finally {
         setCompacting(false);
+      }
+    };
+
+    const reviseSession = async (
+      mode: SessionReviseInput['mode'],
+      throughMessageId?: string,
+    ) => {
+      const current = latest.current;
+      const source = current.session;
+      if (
+        !source ||
+        source.kind !== 'chat' ||
+        !['web', 'api'].includes(source.origin) ||
+        source.parentRunId ||
+        !source.capabilities.send ||
+        current.activeRun ||
+        source.activeRuns > 0 ||
+        !current.canSend() ||
+        revisionPending.current
+      )
+        return;
+      revisionPending.current = true;
+      setRevising(true);
+      const stillOpen = () =>
+        mounted.current &&
+        latest.current.chatKey === current.chatKey &&
+        latest.current.navigationScope === current.navigationScope &&
+        latest.current.session?.id === source.id &&
+        latest.current.session?.agentId === source.agentId;
+      try {
+        const revision = await daemon.reviseSession(source.agentId, source.id, {
+          mode,
+          ...(throughMessageId ? { throughMessageId } : {}),
+        });
+        if (!stillOpen()) return;
+        current.upsertSession(revision.session);
+        current.updateChat(
+          `${revision.session.agentId}\u0000session:${revision.session.id}`,
+          {
+            draft: revision.retryPrompt ?? '',
+            resend: null,
+            literalDraft: revision.retryPrompt !== null,
+            delivery: null,
+            error: null,
+            notice: `${revision.notice}${revision.attachmentsOmitted ? ' Reattach the original files before sending again.' : ''}`,
+          },
+        );
+        current.navigate({
+          kind: 'session',
+          sessionId: revision.session.id,
+          ...(revision.session.agentId !== current.companionId
+            ? { agentId: revision.session.agentId }
+            : {}),
+        });
+      } catch (caught) {
+        if (stillOpen()) current.setError(errorMessage(caught));
+      } finally {
+        revisionPending.current = false;
+        setRevising(false);
+      }
+    };
+
+    const updateQueuedRun = async (run: Run, patch: SessionQueuedRunPatch) => {
+      const current = latest.current;
+      const session = current.session;
+      if (
+        !session ||
+        session.kind !== 'chat' ||
+        !session.capabilities.send ||
+        !current.canSend() ||
+        run.agentId !== session.agentId ||
+        run.sessionId !== session.id ||
+        run.status !== 'queued' ||
+        run.startedAtMs !== null ||
+        run.stop ||
+        !['web', 'api'].includes(run.source) ||
+        !isOwnerWritten(run) ||
+        run.parentRunId ||
+        run.helperCompletion
+      )
+        return false;
+      try {
+        await daemon.updateQueuedRun(
+          session.agentId,
+          session.id,
+          run.id,
+          patch,
+        );
+        if (latest.current.chatKey === current.chatKey) {
+          current.refreshRuns();
+          current.setError(null);
+        }
+        return true;
+      } catch (caught) {
+        if (latest.current.chatKey === current.chatKey)
+          current.setError(errorMessage(caught));
+        return false;
       }
     };
 
@@ -209,7 +342,20 @@ export function useSessionCommands(
       if (capabilities.export)
         result.export = () => void current.exportSession(session);
       if (capabilities.compact)
-        result.compact = () => void compactSession(session);
+        result.compact = (argument) =>
+          void compactSession(session, parseCompactOptions(argument));
+      if (
+        session.kind === 'chat' &&
+        ['web', 'api'].includes(session.origin) &&
+        !session.parentRunId &&
+        capabilities.send &&
+        !activeRun &&
+        session.activeRuns === 0
+      ) {
+        result.branch = result.fork = () => void reviseSession('branch');
+        result.undo = () => void reviseSession('undo');
+        result.retry = () => void reviseSession('retry');
+      }
       return result;
     };
 
@@ -239,12 +385,15 @@ export function useSessionCommands(
         current.resend !== null &&
         current.resend.text === rawText &&
         sameAttachments;
-      const text = exactReplay ? rawText : rawText.trim();
+      const text =
+        exactReplay || current.literalDraft ? rawText : rawText.trim();
       if (!text && attachmentIds.length === 0) return;
       const attached: SendAttachments | undefined = attachmentIds.length
         ? { attachmentIds, attachments }
         : undefined;
-      const parsed = parseSlashCommand(text, current.slashCommands);
+      const parsed = current.literalDraft
+        ? null
+        : parseSlashCommand(text, current.slashCommands);
       // An unchanged recovered input already was a message, including API text
       // that looks like a local command. Preserve its identity before normalization.
       const command = exactReplay ? null : parsed;
@@ -302,6 +451,7 @@ export function useSessionCommands(
         draft: '',
         error: null,
         resend: null,
+        ...(current.literalDraft ? { literalDraft: false } : {}),
         delivery: null,
       });
       // A skill message never steers (the daemon refuses it).
@@ -341,6 +491,8 @@ export function useSessionCommands(
       steer: () => submit('steer'),
       stopRun,
       compactSession,
+      reviseSession,
+      updateQueuedRun,
       sendAgain: (run: Run) => {
         const { session, chatKey, queueSend } = latest.current;
         if (
@@ -386,7 +538,7 @@ export function useSessionCommands(
         }),
     };
   }, []);
-  return { ...commands, compacting };
+  return { ...commands, compacting, revising };
 }
 
 function errorMessage(error: unknown): string {

@@ -439,6 +439,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST` | `/api/agents/{agent_id}/paired-devices` |
 | `POST` | `/api/agents/{agent_id}/paired-devices/{device_id}/revoke` |
 
+| `POST` | `/api/agents/{agent_id}/sessions/{session_id}/revise` |
+| `PATCH` | `/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}` |
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -655,7 +657,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 291 operations, including main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 293 operations, including main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

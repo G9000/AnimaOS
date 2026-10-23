@@ -86,6 +86,157 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it.each([
+    '/rename changed',
+    '/new',
+    '/compact keep 3',
+    '/btw other question',
+  ])('sends a reviewed literal retry prompt %s with a fresh key', (prompt) => {
+    const { result, options } = setup({
+      draft: `  ${prompt}  `,
+      literalDraft: true,
+    });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      `  ${prompt}  `,
+      expect.any(String),
+      'queue',
+    );
+    expect(options.rename).not.toHaveBeenCalled();
+    expect(options.newChat).not.toHaveBeenCalled();
+    expect(options.updateChat).toHaveBeenCalledWith(
+      CHAT_KEY,
+      expect.objectContaining({ literalDraft: false }),
+    );
+  });
+
+  it('does not steal navigation when a revision finishes after opening Settings', async () => {
+    const pending =
+      deferred<Awaited<ReturnType<typeof daemon.reviseSession>>>();
+    const revise = vi
+      .spyOn(daemon, 'reviseSession')
+      .mockReturnValue(pending.promise);
+    const { result, options, rerender } = setup({
+      draft: '/branch',
+      navigationScope: 'session:room-7',
+    });
+    act(() => result.current.send());
+    expect(revise).toHaveBeenCalledOnce();
+    rerender({ ...options, navigationScope: 'page:profile' });
+    await act(async () =>
+      pending.resolve({
+        session: sessionFixture('revision'),
+        retryPrompt: null,
+        attachmentsOmitted: false,
+        notice: 'Copied.',
+      }),
+    );
+    expect(options.navigate).not.toHaveBeenCalled();
+  });
+  it('keeps a queue race visible and never edits another conversation or recovery input', async () => {
+    const update = vi
+      .spyOn(daemon, 'updateQueuedRun')
+      .mockRejectedValue(new Error('The run already started'));
+    const { result, options } = setup();
+    const run = runFixture('waiting', { sessionId: 'room-7' });
+    await act(async () =>
+      expect(
+        await result.current.updateQueuedRun(run, { text: 'Edited prompt' }),
+      ).toBe(false),
+    );
+    expect(update).toHaveBeenCalledWith('agent-main', 'room-7', 'waiting', {
+      text: 'Edited prompt',
+    });
+    expect(options.setError).toHaveBeenCalledWith('The run already started');
+    expect(options.refreshRuns).not.toHaveBeenCalled();
+    await act(async () => {
+      expect(
+        await result.current.updateQueuedRun(
+          { ...run, sessionId: 'other' },
+          { beforeRunId: null },
+        ),
+      ).toBe(false);
+      expect(
+        await result.current.updateQueuedRun(
+          { ...run, recoveryOf: 'original' },
+          { text: 'unsafe' },
+        ),
+      ).toBe(false);
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+  it('opens retry as a fresh draft and never automatically sends or reuses attachments', async () => {
+    const revision = sessionFixture('revision', { parentSessionId: 'room-7' });
+    const revise = vi.spyOn(daemon, 'reviseSession').mockResolvedValue({
+      session: revision,
+      retryPrompt: 'Try again',
+      attachmentsOmitted: true,
+      notice: 'Original actions remain.',
+    });
+    const { result, options } = setup({ draft: '/retry' });
+    await act(async () => result.current.send());
+    expect(revise).toHaveBeenCalledWith('agent-main', 'room-7', {
+      mode: 'retry',
+    });
+    expect(options.updateChat).toHaveBeenCalledWith(
+      'agent-main\u0000session:revision',
+      expect.objectContaining({
+        draft: 'Try again',
+        resend: null,
+        notice: expect.stringContaining('Reattach'),
+      }),
+    );
+    expect(options.navigate).toHaveBeenCalledWith({
+      kind: 'session',
+      sessionId: 'revision',
+    });
+    expect(options.queueSend).not.toHaveBeenCalled();
+  });
+
+  it('ignores a revision response after the owner opens another chat', async () => {
+    const pending =
+      deferred<Awaited<ReturnType<typeof daemon.reviseSession>>>();
+    vi.spyOn(daemon, 'reviseSession').mockReturnValue(pending.promise);
+    const { result, options, rerender } = setup({ draft: '/branch' });
+    act(() => result.current.send());
+    rerender({
+      ...options,
+      session: sessionFixture('other'),
+      routeSessionId: 'other',
+      chatKey: 'agent-main\u0000session:other',
+    });
+    await act(async () =>
+      pending.resolve({
+        session: sessionFixture('revision'),
+        retryPrompt: null,
+        attachmentsOmitted: false,
+        notice: 'Copied.',
+      }),
+    );
+    expect(options.navigate).not.toHaveBeenCalled();
+    expect(options.queueSend).not.toHaveBeenCalled();
+  });
+
+  it('passes focused compact options and refuses revisions while a run is active', async () => {
+    const compact = vi
+      .spyOn(daemon, 'compactSession')
+      .mockResolvedValue(sessionFixture('room-7'));
+    const revise = vi.spyOn(daemon, 'reviseSession');
+    const { result, options, rerender } = setup({ draft: '/compact keep 3' });
+    await act(async () => result.current.send());
+    expect(compact).toHaveBeenCalledWith('agent-main', 'room-7', {
+      keepLatestExchanges: 3,
+    });
+    rerender({
+      ...options,
+      draft: '/undo',
+      activeRun: runFixture('busy', { status: 'running' }),
+    });
+    act(() => result.current.send());
+    expect(revise).not.toHaveBeenCalled();
+  });
   it.each(['clear', 'reset'])(
     'clears only the main chat with /%s without deleting the companion',
     async (command) => {

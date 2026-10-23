@@ -14,8 +14,8 @@ use crate::live::{LiveEvent, LiveEventBody, LiveRun};
 use crate::runs::RunRecord;
 use crate::sessions::checkpoint::{CheckpointInputs, SessionCheckpoint};
 use crate::sessions::compaction::{
-    auto_compact_enabled, compaction_input_chars, pruned_turns, summarize, PrunedSpan,
-    COMPACTING_PHASE, COMPACTION_TIMED_OUT,
+    auto_compact_enabled, compaction_input_chars, pruned_turns, summarize_with_focus,
+    CompactionOptions, PrunedSpan, COMPACTING_PHASE, COMPACTION_TIMED_OUT,
 };
 use crate::sessions::context::{mark_context_trimmed, newest_left_out, ContextBudget};
 use crate::sessions::{SessionCompactionError, SessionSummary};
@@ -78,11 +78,41 @@ impl AgentRunCoordinator {
         dropped: &[Message],
     ) -> Result<(), String> {
         match self
-            .compact(agent_id, session_id, dropped, None, None)
+            .compact(agent_id, session_id, dropped, None, None, None, None)
             .await
         {
             Compacted::Failed(error) => Err(error),
             Compacted::Nothing | Compacted::Saved(_) | Compacted::Stopped => Ok(()),
+        }
+    }
+
+    /// Manual and direct owner-tool compaction share the same bounded compactor.
+    /// The caller owns the room; owner tools must not reserve their own room again.
+    pub(crate) async fn compact_session_with_options(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        dropped: &[Message],
+        options: &CompactionOptions,
+        owner: Option<&crate::runs::RunLink>,
+        cancel: Option<CancelSignal>,
+    ) -> Result<(), String> {
+        match self
+            .compact(
+                agent_id,
+                session_id,
+                dropped,
+                None,
+                cancel,
+                options.focus.as_deref(),
+                owner,
+            )
+            .await
+        {
+            Compacted::Failed(error) => Err(error),
+            Compacted::Nothing => Err("Nothing to compact yet".into()),
+            Compacted::Stopped => Err("Compaction was stopped".into()),
+            Compacted::Saved(_) => Ok(()),
         }
     }
 
@@ -122,6 +152,8 @@ impl AgentRunCoordinator {
                 &dropped,
                 Some(&run),
                 Some(cancel),
+                None,
+                None,
             )
             .await
         {
@@ -147,6 +179,8 @@ impl AgentRunCoordinator {
         dropped: &[Message],
         run: Option<&RunCompaction<'_>>,
         cancel: Option<CancelSignal>,
+        focus: Option<&str>,
+        owner: Option<&crate::runs::RunLink>,
     ) -> Compacted {
         let (
             adapter,
@@ -162,6 +196,11 @@ impl AgentRunCoordinator {
             workspace,
         ) = {
             let guard = self.state.read().await;
+            if let Some(owner) = owner {
+                if let Err(error) = super::chat_controls::validate_owner_chat(&guard, owner) {
+                    return Compacted::Failed(error);
+                }
+            }
             let Some(runtime) = guard.agents.get(agent_id) else {
                 return Compacted::Failed("The companion no longer exists".into());
             };
@@ -265,7 +304,7 @@ impl AgentRunCoordinator {
                     previous_checkpoint.as_ref(),
                 );
                 async move {
-                    summarize(
+                    summarize_with_focus(
                         meter,
                         &config,
                         previous,
@@ -273,6 +312,7 @@ impl AgentRunCoordinator {
                         budget_tokens,
                         checkpoint,
                         inputs,
+                        focus,
                     )
                     .await
                 }
@@ -312,6 +352,11 @@ impl AgentRunCoordinator {
         let transaction = self.control_plane_transaction().await;
         let (before, rebuilt, persist) = {
             let mut guard = self.state.write().await;
+            if let Some(owner) = owner {
+                if let Err(error) = super::chat_controls::validate_owner_chat(&guard, owner) {
+                    return Compacted::Failed(error);
+                }
+            }
             if acceptance_cancel
                 .as_ref()
                 .is_some_and(CancelSignal::is_cancelled)

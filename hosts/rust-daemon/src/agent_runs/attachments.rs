@@ -215,7 +215,7 @@ pub(crate) async fn accepted_content(
                 DataValue::String(key.clone()),
             );
         }
-        (run.input.clone(), guard.history.store())
+        (run.effective_input().clone(), guard.history.store())
     };
     let rows = resolve_run_attachments(
         store.as_ref(),

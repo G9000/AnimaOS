@@ -16,6 +16,7 @@ mod execution;
 mod filesystem;
 mod mail;
 mod main_chat_clear;
+mod chat_controls;
 mod mcp;
 #[cfg(test)]
 mod mcp_tests;
@@ -845,6 +846,7 @@ impl ToolRegistry {
             registrations: HashMap::new(),
         };
         clarify::register(&mut registry);
+        chat_controls::register(&mut registry);
         registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));

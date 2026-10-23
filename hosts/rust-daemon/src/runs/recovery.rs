@@ -56,6 +56,7 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
         &run.session_id,
         run.status,
         &run.input,
+        &run.edited_input,
         &run.tools_started,
         &run.action_receipts,
         &run.error,

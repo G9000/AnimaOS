@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 291, "complete registered operation count");
+    assert_eq!(actual.len(), 293, "complete registered operation count");
     let runtime_capability_additions = [
         ("GET", "/api/doctor"),
         ("GET", "/api/doctor/memory-index"),
@@ -220,6 +220,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         );
     }
     let main_chat_additions = [
+        ("POST", "/api/agents/{agent_id}/sessions/{session_id}/revise"),
+        ("PATCH", "/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}"),
         ("POST", "/api/agents/{agent_id}/main-chat"),
         ("POST", "/api/agents/{agent_id}/sessions/{session_id}/clear"),
     ];

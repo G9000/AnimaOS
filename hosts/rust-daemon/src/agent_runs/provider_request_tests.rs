@@ -38,6 +38,9 @@ const AUGMENTED: &[&str] = &[
     "send_message",
     "broadcast_message",
     "delegate_to_agent",
+    "rename_chat",
+    "compact_chat",
+    "export_chat",
 ];
 const MAX_FIXTURE_BYTES: usize = 512 * 1024;
 const REAL_OPT_IN_ERROR: &str =

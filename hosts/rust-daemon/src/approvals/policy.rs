@@ -46,7 +46,9 @@ const READ_TOOLS: &[&str] = &[
     "drive_read",
     "search_conversations",
     "read_conversation_window",
+    "export_chat",
     "load_skill",
+    "skill_history",
     "list_automations",
     "list_workflows",
     "list_workflow_templates",
@@ -58,6 +60,8 @@ const READ_TOOLS: &[&str] = &[
 /// Connectors.
 const WRITE_TOOLS: &[&str] = &[
     "clear_main_chat",
+    "rename_chat",
+    "compact_chat",
     "write_file",
     "doctor_repair",
     "doctor_undo",
@@ -76,6 +80,8 @@ const WRITE_TOOLS: &[&str] = &[
     "memory_remove",
     "memory_consolidate",
     "propose_skill",
+    "remove_skill",
+    "undo_skill",
     "save_workflow_template",
     crate::tools::PLAN_TOOL,
     "create_automation",

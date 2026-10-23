@@ -240,6 +240,12 @@ pub(crate) struct RunRecord {
     pub(crate) idempotency_key: Option<String>,
     #[serde(default)]
     pub(crate) input: RunInput,
+    /// Accepted input stays immutable for delivery retries. Owner queue edits
+    /// supply the input used by execution and recovery separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) edited_input: Option<RunInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) queue_position: Option<u64>,
     pub(crate) created_at_ms: u64,
     #[serde(default)]
     pub(crate) started_at_ms: Option<u64>,
@@ -336,6 +342,8 @@ impl RunRecord {
                 attachment_ids: Vec::new(),
                 skill: None,
             },
+            edited_input: None,
+            queue_position: None,
             created_at_ms: now_ms,
             started_at_ms: Some(now_ms),
             finished_at_ms: None,
@@ -370,6 +378,14 @@ impl RunRecord {
         record.status = RunStatus::Queued;
         record.started_at_ms = None;
         record
+    }
+
+    pub(crate) fn effective_input(&self) -> &RunInput {
+        self.edited_input.as_ref().unwrap_or(&self.input)
+    }
+
+    pub(crate) fn queue_order(&self) -> u64 {
+        self.queue_position.unwrap_or(self.created_at_ms)
     }
 
     /// A queued run starts executing now, with the model it runs on.
@@ -1023,6 +1039,22 @@ impl RunLedger {
         let mut ids = HashSet::new();
         for record in records {
             super::turn::validate(record)?;
+            if let Some(edited) = &record.edited_input {
+                if edited.text.len() > MAX_RUN_INPUT_TEXT_BYTES
+                    || (edited.text.trim().is_empty() && edited.attachment_ids.is_empty())
+                    || edited.attachment_ids != record.input.attachment_ids
+                    || edited.skill != record.input.skill
+                    || !matches!(record.source, RunSource::Web | RunSource::Api)
+                    || record.source_ref.is_some()
+                    || record.parent_run_id.is_some()
+                    || record.recovery_of.is_some()
+                    || record.system_followup != Some(false)
+                    || record.async_helper.is_some()
+                    || record.helper_completion.is_some()
+                {
+                    return Err("Invalid saved owner queue edit".into());
+                }
+            }
             if let (Some(turn), Some(parent_id)) = (&record.turn, &record.recovery_of) {
                 if let Some(parent) = records.iter().find(|r| &r.id == parent_id) {
                     if parent.agent_id != record.agent_id

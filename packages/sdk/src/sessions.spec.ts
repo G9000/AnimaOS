@@ -29,6 +29,66 @@ const session = {
 };
 
 describe('sessions client', () => {
+  it('creates a revision using the full native history and an optional message boundary', async () => {
+    const revision = {
+      session: { ...session, id: 'branch' },
+      retryPrompt: 'Try this',
+      attachmentsOmitted: true,
+      notice: 'Review before sending.',
+    };
+    const { sessions, requests } = transport(() => Response.json(revision));
+    expect(
+      await sessions.revise('agent/a', 'chat:1', {
+        mode: 'branch',
+        throughMessageId: 'message/2',
+      }),
+    ).toEqual(revision);
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/sessions/chat%3A1/revise',
+    );
+    expect(requests[0].init?.method).toBe('POST');
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      mode: 'branch',
+      throughMessageId: 'message/2',
+    });
+  });
+
+  it('serializes focused compaction without changing the empty options default', async () => {
+    const { sessions, requests } = transport(() => Response.json({ session }));
+    await sessions.compact('agent/a', 'chat:1', {
+      keepLatestExchanges: 3,
+      focus: 'Outstanding work',
+    });
+    await sessions.compact('agent/a', 'chat:1');
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      keepLatestExchanges: 3,
+      focus: 'Outstanding work',
+    });
+    expect(requests[1].init?.body).toBeUndefined();
+  });
+
+  it('edits a waiting prompt and distinguishes unchanged order from move to end', async () => {
+    const run = { id: 'run/1', input: { text: 'edited' }, queueOrder: 2 };
+    const { sessions, requests } = transport(() => Response.json({ run }));
+    expect(
+      await sessions.updateQueuedRun('agent/a', 'chat:1', 'run/1', {
+        text: 'edited',
+      }),
+    ).toEqual(run);
+    await sessions.updateQueuedRun('agent/a', 'chat:1', 'run/1', {
+      beforeRunId: null,
+    });
+    expect(requests[0].url).toBe(
+      '/api/agents/agent%2Fa/sessions/chat%3A1/queue/run%2F1',
+    );
+    expect(requests[0].init?.method).toBe('PATCH');
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      text: 'edited',
+    });
+    expect(JSON.parse(String(requests[1].init?.body))).toEqual({
+      beforeRunId: null,
+    });
+  });
   it('searches individual saved messages with a scoped encoded query and cancellation', async () => {
     const page = {
       results: [

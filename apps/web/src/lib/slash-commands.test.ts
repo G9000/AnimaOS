@@ -7,6 +7,7 @@ import {
   runSlashCommand,
   skillSlashCommands,
   slashSuggestions,
+  parseCompactOptions,
 } from './slash-commands';
 import { skillFixture } from '../test/skills';
 
@@ -81,6 +82,35 @@ describe('slashSuggestions', () => {
 });
 
 describe('runSlashCommand', () => {
+  it('runs branch, fork, undo and retry locally without sending a prompt', () => {
+    for (const name of ['branch', 'fork', 'undo', 'retry'] as const) {
+      const handler = vi.fn();
+      expect(
+        runSlashCommand(parseSlashCommand(`/${name}`)!, { [name]: handler }),
+      ).toBeNull();
+      expect(handler).toHaveBeenCalledWith('');
+    }
+  });
+
+  it('accepts bounded compact options and visibly rejects invalid arguments', () => {
+    expect(parseCompactOptions('')).toEqual({});
+    expect(parseCompactOptions('keep 3')).toEqual({ keepLatestExchanges: 3 });
+    expect(parseCompactOptions('focus outstanding tasks')).toEqual({
+      focus: 'outstanding tasks',
+    });
+    expect(parseCompactOptions('here 2')).toEqual({ keepLatestExchanges: 2 });
+    const compact = vi.fn();
+    expect(
+      runSlashCommand(parseSlashCommand('/compact keep 0')!, { compact }),
+    ).toMatch(/1.*100/);
+    expect(compact).not.toHaveBeenCalled();
+    expect(
+      runSlashCommand(parseSlashCommand('/compact focus outstanding tasks')!, {
+        compact,
+      }),
+    ).toBeNull();
+    expect(compact).toHaveBeenCalledWith('focus outstanding tasks');
+  });
   it('runs a command where it is available and says why otherwise', () => {
     const rename = vi.fn();
     const renameCommand = parseSlashCommand('/rename Offsite')!;

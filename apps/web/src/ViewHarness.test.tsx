@@ -4374,6 +4374,48 @@ function runningRun() {
   });
 }
 
+it.each(['Plan Saturday again', ' /rename Task title ', '/btw quoted input'])(
+  'opens a retry revision with draft %s and sends it only as a fresh literal message',
+  async (prompt) => {
+    const user = userEvent.setup();
+    await openLiveSession();
+    const revision = sessionFixture('chat:revision', {
+      title: 'Weekend plans revision',
+      parentSessionId: 'room-7',
+    });
+    vi.spyOn(daemon, 'reviseSession').mockImplementation(async () => {
+      routes.sessions.push(revision);
+      return {
+        session: revision,
+        retryPrompt: prompt,
+        attachmentsOmitted: true,
+        notice: 'The original chat is preserved.',
+      };
+    });
+    await user.click(screen.getByText('Conversation controls'));
+    await user.click(
+      screen.getByRole('button', { name: 'Retry latest prompt' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(prompt),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Open original chat' }),
+    ).toBeVisible();
+    expect(screen.getByText(/Reattach the original files/)).toBeVisible();
+    expect(daemon.startRun).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(daemon.startRun).toHaveBeenCalledWith(
+        'agent-main',
+        'chat:revision',
+        { text: prompt, mode: 'queue', timeZone: expect.any(String) },
+        expect.any(String),
+      ),
+    );
+  },
+);
+
 it('streams a reply into the open session with its tool steps, then shows the committed reply', async () => {
   const { stream } = await openLiveSession();
   const run = runningRun();

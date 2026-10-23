@@ -5,6 +5,7 @@ import { formatElapsed, type ToolStep } from '../../lib/transcript';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { toolWebSources } from '../../lib/web-sources';
 import { savedToolResultId, ToolResultArtifact } from './ToolResultArtifact';
+import { ChatExportDownload, chatExportResult } from './ChatExportDownload';
 
 const STATUS_LABELS: Record<ToolStep['status'], string> = {
   running: 'running',
@@ -30,6 +31,8 @@ export function ToolStepCard({
   const resultId = useId();
   const sources = toolWebSources(step.name, step.status, step.sources);
   const artifactId = savedToolResultId(step.result);
+  const exported =
+    step.status === 'success' ? chatExportResult(step.name, step.result) : null;
   return (
     <div className="tool-step" data-status={step.status}>
       <button
@@ -59,6 +62,11 @@ export function ToolStepCard({
           </span>
         )}
       </button>
+      {exported && (
+        <div className="px-3 py-2">
+          <ChatExportDownload {...exported} />
+        </div>
+      )}
       {/* Mounted only while open (a long result is never kept in the DOM),
        *  so aria-controls above names the region only when it exists
        *  (S3b-E). */}

@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownMessage } from './MarkdownMessage';
+import { ChatExportScope } from './sessions/ChatExportDownload';
+import { daemon } from '../lib/daemon-api';
 
 /** Counts Markdown parses; the real renderer still renders. */
 const parses = vi.hoisted(() => vi.fn());
@@ -15,6 +17,24 @@ vi.mock('react-markdown', async (importOriginal) => {
 });
 
 describe('MarkdownMessage', () => {
+  it('keeps a forged export link to another conversation inert', () => {
+    const read = vi.spyOn(daemon, 'exportSession');
+    render(
+      <ChatExportScope.Provider value={{ agentId: 'a', sessionId: 'current' }}>
+        <MarkdownMessage>
+          {'[Download this chat](/api/agents/a/sessions/other/export)'}
+        </MarkdownMessage>
+      </ChatExportScope.Provider>,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Download this chat' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Download this chat' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Download this chat'));
+    expect(read).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();

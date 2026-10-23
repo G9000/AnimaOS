@@ -62,6 +62,9 @@ import {
   type SessionMessageOptions,
   type SessionMessageSearchOptions,
   type SessionUpdateInput,
+  type SessionCompactInput,
+  type SessionReviseInput,
+  type SessionQueuedRunPatch,
   type SkillDraftApproval,
   type SkillInput,
   type StartRunInput,
@@ -685,6 +688,17 @@ export const daemon = {
   ) => setupClient.sessions.searchMessages(agentId, options),
   exportSession: (agentId: string, sessionId: string) =>
     setupClient.sessions.exportMarkdown(agentId, sessionId),
+  reviseSession: (
+    agentId: string,
+    sessionId: string,
+    input: SessionReviseInput,
+  ) => setupClient.sessions.revise(agentId, sessionId, input),
+  updateQueuedRun: (
+    agentId: string,
+    sessionId: string,
+    runId: string,
+    patch: SessionQueuedRunPatch,
+  ) => setupClient.sessions.updateQueuedRun(agentId, sessionId, runId, patch),
   /** Accepts a message into a session (spec §4.2). */
   startRun: (
     agentId: string,
@@ -699,8 +713,11 @@ export const daemon = {
     sessionId: string,
     options: { limit?: number; signal?: AbortSignal } = {},
   ) => setupClient.runs.listForSession(agentId, sessionId, options),
-  compactSession: (agentId: string, sessionId: string) =>
-    setupClient.sessions.compact(agentId, sessionId),
+  compactSession: (
+    agentId: string,
+    sessionId: string,
+    input?: SessionCompactInput,
+  ) => setupClient.sessions.compact(agentId, sessionId, input),
   /** The companion's live event stream (spec §6). */
   agentEvents: (agentId: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.events.stream(agentId, options),

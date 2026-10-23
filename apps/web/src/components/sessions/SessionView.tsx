@@ -44,9 +44,15 @@ import { useSessionInteractions } from '../../hooks/useSessionInteractions';
 import { ClarificationCard, SideQuestionCard } from './InteractionCards';
 import { daemon } from '../../lib/daemon-api';
 import { ChatWorkflows } from './ChatWorkflows';
+import {
+  ConversationControls,
+  type ConversationControlProps,
+} from './ConversationControls';
+import { ChatExportScope } from './ChatExportDownload';
 
 export interface SessionComposerState {
   draft: string;
+  literalDraft?: boolean;
   setDraft: (value: string) => void;
   sending: boolean;
   disabled: boolean;
@@ -140,6 +146,10 @@ export interface SessionViewProps {
   onAtBottomChange?: (atBottom: boolean) => void;
   /** Activity outside a historical window that refreshes its context estimate. */
   contextRefreshKey?: number | string;
+  controls?: Pick<
+    ConversationControlProps,
+    'onRevise' | 'onQueuePatch' | 'onCancel' | 'onOpenSource' | 'revising'
+  >;
 }
 
 export type SessionFooter =
@@ -336,6 +346,7 @@ export function SessionView({
   jumpRequestKey,
   onAtBottomChange,
   contextRefreshKey,
+  controls,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
   // helper even when the agents list does not hold it (then `agent` is the
@@ -344,6 +355,11 @@ export function SessionView({
   const saveAgentName =
     saveAgentId === agent.id ? agent.name : GENERIC_SAVE_AGENT_NAME;
   const sessionId = session?.id ?? null;
+  const exportScope = useMemo(
+    () =>
+      saveAgentId && sessionId ? { agentId: saveAgentId, sessionId } : null,
+    [saveAgentId, sessionId],
+  );
   const interactions = useSessionInteractions({
     agentId: session?.agentId ?? null,
     sessionId,
@@ -358,7 +374,11 @@ export function SessionView({
   });
   const sendWithSideQuestion = (override?: string) => {
     const text = override ?? composer.draft;
-    if (session?.kind === 'chat' && /^\s*\/btw(?:\s|$)/.test(text)) {
+    if (
+      !composer.literalDraft &&
+      session?.kind === 'chat' &&
+      /^\s*\/btw(?:\s|$)/.test(text)
+    ) {
       const question = text.trimStart().slice(4).trim();
       if (!question) {
         composer.setDraft('/btw ');
@@ -462,10 +482,13 @@ export function SessionView({
                     item.run.status === 'awaiting_approval'
                   : item.run.status !== 'queued',
               )
-              .reduce<
-                (typeof runs)[number] | null
-              >((latest, item) => (!latest || item.run.createdAtMs > latest.run.createdAtMs ? item : latest), null)
-              ?.run.id ?? null
+              .reduce<(typeof runs)[number] | null>(
+                (latest, item) =>
+                  !latest || item.run.createdAtMs > latest.run.createdAtMs
+                    ? item
+                    : latest,
+                null,
+              )?.run.id ?? null
           }
           disabled={
             composer.disabled || composer.sending || Boolean(composer.runActive)
@@ -496,7 +519,7 @@ export function SessionView({
         )}
     </>
   );
-  return (
+  const view = (
     <section
       className="flex h-full min-h-0 flex-col"
       aria-label={session?.title ?? 'New chat'}
@@ -521,6 +544,16 @@ export function SessionView({
         />
       )}
       {notice}
+      {session && controls && (
+        <ConversationControls
+          key={`${session.agentId}:${session.id}`}
+          session={session}
+          messages={messages}
+          runs={runs.map((item) => item.run)}
+          enabled={!composer.disabled && !composer.offline}
+          {...controls}
+        />
+      )}
       {historyAnchor && (
         <div className="session-history-anchor">
           <p role={historyAnchor.error ? 'alert' : 'status'}>
@@ -658,19 +691,21 @@ export function SessionView({
           onDismissError={composer.onDismissError}
           recovery={composer.recovery}
           commands={
-            session?.kind === 'discord'
-              ? composer.commands?.filter((command) => !command.skill)
-              : session?.kind === 'chat'
-                ? [
-                    ...(composer.commands ?? []),
-                    {
-                      name: 'btw',
-                      description: 'Ask a side question while work continues',
-                      needs: 'a question',
-                      placeholder: '<question>',
-                    },
-                  ]
-                : composer.commands
+            composer.literalDraft
+              ? undefined
+              : session?.kind === 'discord'
+                ? composer.commands?.filter((command) => !command.skill)
+                : session?.kind === 'chat'
+                  ? [
+                      ...(composer.commands ?? []),
+                      {
+                        name: 'btw',
+                        description: 'Ask a side question while work continues',
+                        needs: 'a question',
+                        placeholder: '<question>',
+                      },
+                    ]
+                  : composer.commands
           }
           runActive={composer.runActive}
           onStop={composer.onStop}
@@ -732,5 +767,10 @@ export function SessionView({
         {announcement}
       </p>
     </section>
+  );
+  return (
+    <ChatExportScope.Provider value={exportScope}>
+      {view}
+    </ChatExportScope.Provider>
   );
 }

@@ -3,15 +3,10 @@ import type { DaemonClient } from './client.js';
 import type { UsageTotals } from './usage.js';
 import type { UploadedAttachment } from './attachments.js';
 import type { WebSource } from './events.js';
+import type { Run } from './runs.js';
 
 export type SessionKind =
-  | 'chat'
-  | 'telegram'
-  | 'discord'
-  | 'email'
-  | 'checkin'
-  | 'job'
-  | 'helper';
+  'chat' | 'telegram' | 'discord' | 'email' | 'checkin' | 'job' | 'helper';
 export type SessionOrigin =
   | 'web'
   | 'api'
@@ -24,10 +19,7 @@ export type SessionOrigin =
   | 'peer'
   | 'import';
 export type SessionTitleSource =
-  | 'first_message'
-  | 'generated'
-  | 'owner'
-  | 'system';
+  'first_message' | 'generated' | 'owner' | 'system';
 
 export interface SessionCapabilities {
   send: boolean;
@@ -64,6 +56,47 @@ export interface SessionContextUsage {
   /** Usable conversation budget after reserving the reply. */
   budgetTokens: number;
   replyReserveTokens: number;
+  /** Estimates for prompt contributions; null means unavailable. */
+  breakdown?: {
+    conversationTokens: number;
+    summaryTokens: number;
+    checkpointTokens: number;
+    systemInstructionsTokens: number;
+    toolSchemasTokens: number;
+    companionFilesTokens: number | null;
+    memoryTokens: number | null;
+  };
+  coverage?: {
+    basis: string;
+    omitted: string[];
+    companionFilesRunId?: string;
+  };
+}
+
+export interface SessionCompactInput {
+  /** Number of latest user exchanges to retain, from 1 to 100. */
+  keepLatestExchanges?: number;
+  /** Untrusted summarization guidance, at most 500 characters. */
+  focus?: string;
+}
+
+export interface SessionReviseInput {
+  mode: 'branch' | 'undo' | 'retry';
+  throughMessageId?: string;
+}
+
+export interface SessionRevision {
+  session: Session;
+  /** Restore as a draft only; sending again may repeat completed actions. */
+  retryPrompt: string | null;
+  attachmentsOmitted: boolean;
+  notice: string;
+}
+
+export interface SessionQueuedRunPatch {
+  text?: string;
+  /** Omit to retain order; null moves to the end. */
+  beforeRunId?: string | null;
 }
 
 export interface SessionMessageSearchHit {
@@ -197,10 +230,7 @@ export interface SessionMessageDocxExtraction {
 }
 
 export type PdfDocumentOmission =
-  | 'text_layer_only'
-  | 'text_limit'
-  | 'context_limit'
-  | 'selection_limit';
+  'text_layer_only' | 'text_limit' | 'context_limit' | 'selection_limit';
 
 export interface SessionMessagePdfExtraction {
   version: 2;
@@ -445,6 +475,32 @@ export class SessionsClient {
     );
   }
 
+  /** Copies native history into a new chat without changing the source. */
+  revise(
+    agentId: string,
+    sessionId: string,
+    input: SessionReviseInput,
+  ): Promise<SessionRevision> {
+    return this.client.requestJson<SessionRevision>(
+      `${sessionPath(agentId, sessionId)}/revise`,
+      { method: 'POST', body: input },
+    );
+  }
+
+  /** Mutates only a waiting, ordinary owner prompt; the daemon rejects races. */
+  async updateQueuedRun(
+    agentId: string,
+    sessionId: string,
+    runId: string,
+    patch: SessionQueuedRunPatch,
+  ): Promise<Run> {
+    const response = await this.client.requestJson<{ run: Run }>(
+      `${sessionPath(agentId, sessionId)}/queue/${encodeURIComponent(runId)}`,
+      { method: 'PATCH', body: patch },
+    );
+    return response.run;
+  }
+
   /** The full transcript as Markdown, including archived history and
    *  messages kept only in the history store, with silent check-in turns
    *  marked rather than hidden. */
@@ -463,10 +519,14 @@ export class SessionsClient {
 
   /** Folds every uncovered turn but the newest into the session summary
    *  (spec §5.4). The summary arrives later with `session.updated`. */
-  async compact(agentId: string, sessionId: string): Promise<Session> {
+  async compact(
+    agentId: string,
+    sessionId: string,
+    input?: SessionCompactInput,
+  ): Promise<Session> {
     const response = await this.client.requestJson<{ session: Session }>(
       `${sessionPath(agentId, sessionId)}/compact`,
-      { method: 'POST' },
+      { method: 'POST', ...(input ? { body: input } : {}) },
     );
     return response.session;
   }

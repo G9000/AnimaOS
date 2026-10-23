@@ -566,7 +566,10 @@ mod tests {
                 "bash",
                 "list_workspace_agents",
                 "send_message",
-                "broadcast_message"
+                "broadcast_message",
+                "rename_chat",
+                "compact_chat",
+                "export_chat"
             ]
         );
         for tool in tools {

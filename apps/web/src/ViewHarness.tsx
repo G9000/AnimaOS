@@ -82,7 +82,12 @@ import { useAutomationToasts } from './hooks/useAutomationToasts';
 import { AutomationToasts } from './components/sessions/AutomationToasts';
 import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
-import { loadDraft, storeDraft } from './lib/drafts';
+import {
+  loadDraft,
+  storeDraft,
+  loadLiteralDraft,
+  storeLiteralDraft,
+} from './lib/drafts';
 import { safeIntegrationError } from './lib/telegram';
 import {
   discordCanReply,
@@ -116,6 +121,8 @@ type ChatState = {
   /** A new chat is creating its session; its first message waits. */
   sending: boolean;
   error: string | null;
+  notice?: string | null;
+  literalDraft?: boolean;
   /** A restored message; sent again unchanged, it reuses its key. */
   resend: {
     text: string;
@@ -171,7 +178,13 @@ function sessionConversation(sessionId: string): string {
 }
 
 function chatState(chats: Record<string, ChatState>, key: string): ChatState {
-  return chats[key] ?? { ...EMPTY_CHAT, draft: loadDraft(key) };
+  return (
+    chats[key] ?? {
+      ...EMPTY_CHAT,
+      draft: loadDraft(key),
+      literalDraft: loadLiteralDraft(key),
+    }
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -286,6 +299,13 @@ export function ViewHarness() {
   const availableAgentIdsRef = useRef(new Set<string>());
   availableAgentIdsRef.current = new Set(agents.map((item) => item.id));
   const [route, navigate] = useHashRoute();
+  const routeScope = useRef({ key: JSON.stringify(route), generation: 0 });
+  const routeKey = JSON.stringify(route);
+  if (routeScope.current.key !== routeKey)
+    routeScope.current = {
+      key: routeKey,
+      generation: routeScope.current.generation + 1,
+    };
   const routeRef = useRef(route);
   routeRef.current = route;
   // A page hides the conversation but keeps it: the last chat or session stays loaded.
@@ -484,9 +504,11 @@ export function ViewHarness() {
   const storedDraftsRef = useRef(new Map<string, string>());
   useEffect(() => {
     for (const [key, value] of Object.entries(chats)) {
-      if (storedDraftsRef.current.get(key) === value.draft) continue;
-      storedDraftsRef.current.set(key, value.draft);
+      const state = `${value.literalDraft ? '1' : '0'}\u0000${value.draft}`;
+      if (storedDraftsRef.current.get(key) === state) continue;
+      storedDraftsRef.current.set(key, state);
       storeDraft(key, value.draft);
+      storeLiteralDraft(key, Boolean(value.literalDraft && value.draft));
     }
   }, [chats]);
   /** A deleted session's chat state and saved draft go with it. */
@@ -521,9 +543,14 @@ export function ViewHarness() {
   const setDraft = useCallback(
     (value: string | ((current: string) => string)) => {
       if (activeChatKey)
-        updateChat(activeChatKey, (current) => ({
-          draft: typeof value === 'function' ? value(current.draft) : value,
-        }));
+        updateChat(activeChatKey, (current) => {
+          const draft =
+            typeof value === 'function' ? value(current.draft) : value;
+          return {
+            draft,
+            ...(!draft && current.literalDraft ? { literalDraft: false } : {}),
+          };
+        });
     },
     [activeChatKey, updateChat],
   );
@@ -1283,9 +1310,11 @@ export function ViewHarness() {
       resetInFlightRef.current === null &&
       !daemonTooOld,
     routeSessionId,
+    navigationScope: `${routeScope.current.generation}:${routeKey}`,
     session: activeSession,
     chatKey: activeChatKey,
     draft,
+    literalDraft: chat.literalDraft,
     resend: chat.resend,
     attachments: attachments.readyAttachments,
     attachmentIds: savedAttachmentIds,
@@ -1536,6 +1565,7 @@ export function ViewHarness() {
       onSuggestion={setDraft}
       composer={{
         draft,
+        literalDraft: chat.literalDraft,
         conversationKey: activeChatKey,
         voiceDisabled: conversationHidden,
         nativeVoice:
@@ -1579,7 +1609,7 @@ export function ViewHarness() {
         onSend: commands.send,
         error: workspaceError,
         onDismissError: () => setWorkspaceError(null),
-        commands: slashCommands,
+        commands: chat.literalDraft ? undefined : slashCommands,
         runActive: activeRun !== null,
         onStop:
           activeRun && activeSession?.capabilities.stop
@@ -1646,8 +1676,24 @@ export function ViewHarness() {
       onExport={() => {
         if (activeSession) void exportSession(activeSession);
       }}
+      controls={{
+        revising: commands.revising,
+        onRevise: commands.reviseSession,
+        onQueuePatch: commands.updateQueuedRun,
+        onCancel: (run) => void commands.stopRun(run),
+        onOpenSource: (sessionId) =>
+          commands.openTarget({
+            agentId: activeSession?.agentId ?? agent.id,
+            sessionId,
+          }),
+      }}
       notice={
         <>
+          {chat.notice && (
+            <p role="status" className="px-4 pt-3 text-xs text-ink-3">
+              {chat.notice}
+            </p>
+          )}
           {waitingForMain && mainChat.error ? (
             <div role="alert" className="px-4 pt-3 text-xs text-danger">
               <p>Main chat could not be loaded: {mainChat.error}</p>

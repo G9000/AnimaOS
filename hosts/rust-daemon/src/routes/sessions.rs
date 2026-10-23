@@ -9,9 +9,10 @@ use axum::response::{IntoResponse, Response};
 use tracing::warn;
 
 use super::contracts::{
-    DeleteResponse, ErrorBody, MainChatRequest, SessionCreateRequest, SessionEnvelope,
-    SessionMessageResponse, SessionMessageSearchEnvelope, SessionMessageSearchHitResponse,
-    SessionMessagesEnvelope, SessionResponse, SessionUpdateRequest, SessionsEnvelope,
+    DeleteResponse, ErrorBody, MainChatRequest, SessionCompactRequest, SessionCreateRequest,
+    SessionEnvelope, SessionMessageResponse, SessionMessageSearchEnvelope,
+    SessionMessageSearchHitResponse, SessionMessagesEnvelope, SessionResponse,
+    SessionUpdateRequest, SessionsEnvelope,
 };
 use super::http::{json_response, read_limited_body, request_query};
 use super::jobs::{authorize, body, no_store};
@@ -19,8 +20,8 @@ use super::{parse_json_body, ApiError, AppState};
 use crate::agent_runs::HELPER_MUST_RUN_THROUGH_COMPANION;
 use crate::history::HistoryDeletion;
 use crate::live::{LiveEvent, LiveEventBody};
-use crate::sessions::compaction::manual_compaction_input;
-use crate::sessions::context::{conversation_context_usage, uncovered_pruned_through};
+use crate::sessions::compaction::manual_compaction_input_with_keep;
+use crate::sessions::context::{inspect_session_context, uncovered_pruned_through};
 use crate::sessions::history_read::{self, HistoryReadError, MessageSearchRequest, WindowRequest};
 use crate::sessions::views::{
     self, MessagePageError, MessagePageRequest, SessionCursor, SessionListQuery,
@@ -276,21 +277,9 @@ pub(super) async fn get_session(
             let mut session = SessionResponse::from(&view);
             session.usage =
                 Some(super::usage::session_totals(&state, &agent_id, &session_id).await);
-            {
-                let guard = state.daemon.read().await;
-                session.context_usage = guard
-                    .agents
-                    .get(&agent_id)
-                    .zip(guard.sessions.get(&agent_id, &session_id))
-                    .map(|(runtime, record)| {
-                        conversation_context_usage(
-                            runtime.config(),
-                            record,
-                            &guard.model_visible_history(&agent_id, record.room_id()),
-                        )
-                        .into()
-                    });
-            }
+            session.context_usage = inspect_session_context(&state.daemon, &agent_id, &session_id)
+                .await
+                .map(Into::into);
             no_store(json_response(StatusCode::OK, &SessionEnvelope { session }))
         }
         None => rejected(ApiError::not_found()),
@@ -869,6 +858,7 @@ pub(super) async fn clear_session(
 
 #[utoipa::path(post, path = "/api/agents/{agent_id}/sessions/{session_id}/compact", tag = "sessions",
     params(("agent_id" = String, Path), ("session_id" = String, Path, description = "Percent-encoded session id")),
+    request_body(content = Option<SessionCompactRequest>, description = "Optional keepLatestExchanges (1-100, default 1) and summary focus (at most 500 characters)"),
     responses(
         (status = 202, description = "Compaction started: every uncovered turn but the newest, and any pruned turns the summary does not cover, is folded into the summary, which arrives with session.updated", body = SessionEnvelope),
         (status = 403, description = "Local owner required", body = ErrorBody),
@@ -886,6 +876,22 @@ pub(super) async fn compact_session(
     if !is_valid_session_id(&session_id) {
         return rejected(ApiError::not_found());
     }
+    let bytes = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(bytes) => bytes,
+        Err(response) => return no_store(response),
+    };
+    let input = if bytes.iter().all(u8::is_ascii_whitespace) {
+        SessionCompactRequest::default()
+    } else {
+        match parse_json_body::<SessionCompactRequest>(bytes) {
+            Ok(input) => input,
+            Err(error) => return rejected(error),
+        }
+    };
+    let options = match input.options() {
+        Ok(options) => options,
+        Err(error) => return rejected(ApiError::bad_request_static(error)),
+    };
     let room_id = {
         let guard = state.daemon.read().await;
         let record = match guard.sessions.get(&agent_id, &session_id) {
@@ -912,7 +918,11 @@ pub(super) async fn compact_session(
             return rejected(ApiError::not_found());
         };
         let history = guard.model_visible_history(&agent_id, &room_id);
-        let input = manual_compaction_input(&history, record.summary.as_ref());
+        let input = manual_compaction_input_with_keep(
+            &history,
+            record.summary.as_ref(),
+            options.keep_latest_exchanges,
+        );
         // Pruned turns the summary does not cover are compacted too
         // (controller ruling 2, Task 12).
         if input.is_empty() && uncovered_pruned_through(record, &history).is_none() {
@@ -924,7 +934,10 @@ pub(super) async fn compact_session(
     let (agent, session) = (agent_id.clone(), session_id.clone());
     tokio::spawn(async move {
         let _reservation = reservation;
-        if let Err(error) = runs.compact_session(&agent, &session, &input).await {
+        if let Err(error) = runs
+            .compact_session_with_options(&agent, &session, &input, &options, None, None)
+            .await
+        {
             warn!(agent_id = %agent, session_id = %session, error = %error, "session compaction failed");
         }
     });

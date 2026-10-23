@@ -153,6 +153,8 @@ pub(crate) struct RunResponse {
     pub(crate) status: String,
     pub(crate) input: RunInputResponse,
     pub(crate) created_at_ms: u64,
+    /// Durable waiting order, with acceptance time as the legacy fallback.
+    pub(crate) queue_order: u64,
     pub(crate) started_at_ms: Option<u64>,
     pub(crate) finished_at_ms: Option<u64>,
     pub(crate) error: Option<RunErrorResponse>,
@@ -190,11 +192,12 @@ impl From<&RunRecord> for RunResponse {
             idempotency_key: record.idempotency_key.clone(),
             status: record.status.as_str().into(),
             input: RunInputResponse {
-                text: record.input.text.clone(),
-                attachment_ids: record.input.attachment_ids.clone(),
-                skill: record.input.skill.clone(),
+                text: record.effective_input().text.clone(),
+                attachment_ids: record.effective_input().attachment_ids.clone(),
+                skill: record.effective_input().skill.clone(),
             },
             created_at_ms: record.created_at_ms,
+            queue_order: record.queue_order(),
             started_at_ms: record.started_at_ms,
             finished_at_ms: record.finished_at_ms,
             error: record.error.as_ref().map(|error| RunErrorResponse {

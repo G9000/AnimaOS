@@ -1193,6 +1193,30 @@ export function Composer({
               )}
               <ComposerMode mode={mode} model={model} />
               <span className="composer-spacer" />
+              {runActive && (
+                <>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
+                    disabled={!canSend}
+                    onClick={() => onSend()}
+                    title="Wait for the current reply, then send this message"
+                  >
+                    Wait
+                  </button>
+                  {steerable && (
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
+                      disabled={!canSend}
+                      onClick={() => onSteer?.()}
+                      title="Add this message to the reply in progress"
+                    >
+                      Steer
+                    </button>
+                  )}
+                </>
+              )}
               {runActive && onStop ? (
                 <button
                   type="button"

@@ -104,9 +104,9 @@ pub(super) async fn context(
     let (allowed, root, mut ranked) = {
         let guard = state.read().await;
         let allowed = owner_source(&guard, run);
-        let correction = correction_signal(&run.input.text);
+        let correction = correction_signal(&run.effective_input().text);
         let words: Vec<_> = run
-            .input
+            .effective_input()
             .text
             .split(|c: char| !c.is_alphanumeric())
             .map(str::to_lowercase)
@@ -150,7 +150,7 @@ pub(super) async fn context(
         )
     };
     let skill_signal = allowed
-        && (correction_signal(&run.input.text)
+        && (correction_signal(&run.effective_input().text)
             || ranked.iter().any(|(_, _, used)| *used)
             || run
                 .action_receipts
@@ -219,7 +219,8 @@ pub(super) async fn context(
             .filter(|e| {
                 e.agent_id == run.agent_id
                     && (e.run_id == run.id
-                        || (correction_signal(&run.input.text) && e.session_id == run.session_id))
+                        || (correction_signal(&run.effective_input().text)
+                            && e.session_id == run.session_id))
             })
             .map(|e| e.version.clone())
             .collect::<std::collections::BTreeSet<_>>()

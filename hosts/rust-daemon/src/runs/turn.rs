@@ -39,7 +39,7 @@ pub(crate) fn bind(
         .agents
         .get(&record.agent_id)
         .ok_or("Turn owner was deleted")?;
-    let input = digest(&record.input);
+    let input = digest(record.effective_input());
     let source = record
         .recovery_of
         .as_ref()
@@ -47,7 +47,7 @@ pub(crate) fn bind(
     let original = source.and_then(|r| r.turn.as_ref());
     let original_input = original
         .map(|t| t.original_input.clone())
-        .unwrap_or_else(|| source.unwrap_or(record).input.clone());
+        .unwrap_or_else(|| source.unwrap_or(record).effective_input().clone());
     let binding = TurnBinding {
         root_run_id: original
             .map(|t| t.binding.root_run_id.clone())
@@ -114,7 +114,7 @@ fn current_admission(
     if turn.binding.attempt_run_id != record.id
         || turn.binding.agent_id != record.agent_id
         || turn.binding.session_id != record.session_id
-        || turn.binding.attempt_input_digest != digest(&record.input)
+        || turn.binding.attempt_input_digest != digest(record.effective_input())
         || (check_workspace && turn.binding.workspace_digest != workspace_digest(state))
         || turn.binding.config_digest != digest(runtime.config())
         || !state
@@ -168,7 +168,7 @@ pub(crate) fn automatic_candidate(state: &DaemonState, record: &RunRecord) -> bo
             turn.binding.automatic_eligible
                 && turn.checkpoint.is_none()
                 && turn.binding.root_run_id == record.id
-                && turn.original_input == record.input
+                && &turn.original_input == record.effective_input()
         })
         && state
             .agents
@@ -221,7 +221,7 @@ pub(crate) fn validate(record: &RunRecord) -> Result<(), String> {
     if turn.binding.attempt_run_id != record.id
         || turn.binding.agent_id != record.agent_id
         || turn.binding.session_id != record.session_id
-        || turn.binding.attempt_input_digest != digest(&record.input)
+        || turn.binding.attempt_input_digest != digest(record.effective_input())
         || turn.binding.original_input_digest != digest(&turn.original_input)
         || turn.original_input.text.len() > super::MAX_RUN_INPUT_TEXT_BYTES
         || turn.original_input.attachment_ids.len() > super::MAX_RUN_ATTACHMENTS

@@ -127,6 +127,226 @@ pub(crate) fn conversation_context_usage(
     }
 }
 
+/// A current partial preview, independent from billed provider usage. The
+/// conversation meter deliberately retains its existing budget semantics.
+pub(crate) struct ContextInspection {
+    pub(crate) usage: ContextUsage,
+    pub(crate) breakdown: ContextBreakdown,
+    pub(crate) coverage: ContextCoverage,
+}
+
+pub(crate) struct ContextBreakdown {
+    pub(crate) conversation_tokens: u64,
+    pub(crate) summary_tokens: u64,
+    pub(crate) checkpoint_tokens: u64,
+    pub(crate) system_instructions_tokens: u64,
+    pub(crate) tool_schemas_tokens: u64,
+    pub(crate) companion_files_tokens: Option<u64>,
+    pub(crate) memory_tokens: Option<u64>,
+}
+
+pub(crate) struct ContextCoverage {
+    pub(crate) basis: String,
+    pub(crate) omitted: Vec<String>,
+}
+
+/// Mirrors the static sections of the core runtime prompt. An accepted file
+/// identity replaces the legacy personality document, including config.system.
+fn configured_instructions(config: &AgentConfig, file_identity: bool) -> String {
+    let mut parts = Vec::new();
+    if !file_identity {
+        if let Some(bio) = &config.bio {
+            parts.push(format!("## Who You Are\n{bio}"));
+        }
+        if let Some(lore) = &config.lore {
+            parts.push(format!("## Your Backstory\n{lore}"));
+        }
+        if let Some(values) = config
+            .adjectives
+            .as_ref()
+            .filter(|values| !values.is_empty())
+        {
+            parts.push(format!(
+                "## Your Personality\nYou are {}.",
+                values.join(", ")
+            ));
+        }
+        if let Some(values) = config.topics.as_ref().filter(|values| !values.is_empty()) {
+            parts.push(format!(
+                "## Your Expertise\nYou specialize in: {}.",
+                values.join(", ")
+            ));
+        }
+    }
+    if let Some(knowledge) = config
+        .knowledge
+        .as_ref()
+        .filter(|values| !values.is_empty())
+    {
+        parts.push(format!(
+            "## What You Know\n{}",
+            knowledge
+                .iter()
+                .map(|entry| format!("- {entry}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    if !file_identity {
+        if let Some(style) = &config.style {
+            parts.push(format!("## How You Communicate\n{style}"));
+        }
+        parts.push(
+            config
+                .system
+                .clone()
+                .unwrap_or_else(|| "You are a helpful task agent.".into()),
+        );
+    }
+    parts.join("\n\n")
+}
+
+pub(crate) fn context_inspection(
+    config: &AgentConfig,
+    record: &SessionRecord,
+    history: &[Message],
+    companion_files_tokens: Option<u64>,
+    memory_tokens: Option<u64>,
+    file_identity: bool,
+) -> ContextInspection {
+    let usage = conversation_context_usage(config, record, history);
+    let estimator = TokenEstimator::new(
+        record
+            .context_calibration_permille
+            .map_or(1.0, |value| f64::from(value) / 1000.0),
+    );
+    let summary_tokens = record
+        .summary
+        .as_ref()
+        .map_or(0, |summary| estimator.text_tokens(&summary.text));
+    let checkpoint_tokens = record.checkpoint.as_ref().map_or(0, |checkpoint| {
+        estimator.text_tokens(&checkpoint.prompt_text())
+    });
+    let instructions = configured_instructions(config, file_identity);
+    let tools = config
+        .tools
+        .as_ref()
+        .filter(|tools| !tools.is_empty())
+        .map(|tools| serde_json::to_string(tools).unwrap_or_default())
+        .unwrap_or_default();
+    let mut omitted = vec![
+        "dynamic memory retrieval and external recall".into(),
+        "host guidance, workspace roster, time and provider context wrappers".into(),
+        "attachments and document hydration".into(),
+        "draft input and reply output".into(),
+        "host-derived tool grants and lazy discovery hydration".into(),
+    ];
+    if companion_files_tokens.is_none() {
+        omitted.push("current companion files unavailable or changed during preview".into());
+    }
+    if memory_tokens.is_none() {
+        omitted.push("always-on core memory unavailable during preview".into());
+    }
+    ContextInspection {
+        usage,
+        breakdown: ContextBreakdown {
+            conversation_tokens: usage.estimated_tokens.saturating_sub(summary_tokens).saturating_sub(checkpoint_tokens),
+            summary_tokens, checkpoint_tokens,
+            system_instructions_tokens: if instructions.is_empty() { 0 } else { estimator.text_tokens(&instructions) },
+            tool_schemas_tokens: if tools.is_empty() { 0 } else { estimator.text_tokens(&tools) },
+            companion_files_tokens, memory_tokens,
+        },
+        coverage: ContextCoverage {
+            basis: "Current partial preview using local token estimates; not billed or actual provider usage. Conversation uses the existing selected-history meter; configured tool schemas, current bounded companion files and always-on core memory are shown separately.".into(),
+            omitted,
+        },
+    }
+}
+
+/// Reads a bounded current file preview outside the daemon lock, then accepts
+/// it only while its captured workspace/configuration scope is still current.
+pub(crate) async fn inspect_session_context(
+    state: &crate::app::SharedDaemonState,
+    agent_id: &str,
+    session_id: &str,
+) -> Option<ContextInspection> {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let scope = {
+        let guard = state.read().await;
+        guard.agents.get(agent_id)?;
+        guard.sessions.get(agent_id, session_id)?;
+        crate::agent_files::runtime::capture_scope(&guard, agent_id, session_id, None)
+    };
+    let files = if let Some(scope) = &scope {
+        let maximum = crate::agent_files::MAX_RENDER_CHARS;
+        Some(
+            crate::agent_files::load(
+                scope.clone(),
+                anima_core::AgentFileRenderBudget {
+                    max_identity_chars: maximum,
+                    max_project_chars: maximum,
+                    max_total_chars: maximum,
+                },
+                Arc::new(AtomicBool::new(false)),
+                std::time::Instant::now() + crate::agent_files::DEFAULT_LOAD_DEADLINE,
+            )
+            .await,
+        )
+    } else {
+        None
+    };
+    let (config, record, history, memory, file_tokens, file_identity) = {
+        let guard = state.read().await;
+        let config = guard.agents.get(agent_id)?.config().clone();
+        let record = guard.sessions.get(agent_id, session_id)?.clone();
+        let history = guard.model_visible_history(agent_id, record.room_id());
+        let files = scope
+            .as_ref()
+            .zip(files.as_ref())
+            .filter(|(scope, files)| {
+                crate::agent_files::runtime::scope_is_current(&guard, scope)
+                    && files.manifest.availability == crate::agent_files::Availability::Available
+            })
+            .map(|(_, files)| files);
+        (
+            config,
+            record,
+            history,
+            Arc::clone(&guard.memory),
+            files.map(|f| f.rendered.estimated_tokens),
+            files.is_some_and(|f| f.rendered.identity.is_some()),
+        )
+    };
+    let estimator = TokenEstimator::new(
+        record
+            .context_calibration_permille
+            .map_or(1.0, |value| f64::from(value) / 1000.0),
+    );
+    let memory_tokens = if let Ok(memory) =
+        tokio::time::timeout(std::time::Duration::from_millis(100), memory.read()).await
+    {
+        let (user, notes) = crate::core_memory::blocks_for(&memory, agent_id);
+        let rendered = crate::core_memory::render(&user, &notes);
+        Some(if rendered.is_empty() {
+            0
+        } else {
+            estimator.text_tokens(&rendered)
+        })
+    } else {
+        None
+    };
+    let file_tokens =
+        file_tokens.map(|tokens| (tokens as f64 * estimator.calibration().max(1.0)).ceil() as u64);
+    Some(context_inspection(
+        &config,
+        &record,
+        &history,
+        file_tokens,
+        memory_tokens,
+        file_identity,
+    ))
+}
+
 /// The messages of one room, in transcript order, that the model may see:
 /// everything but silent check-in pairs (spec §5.2) and drafts an evaluator
 /// sent back (`revised`; controller ruling, M3 pre-flight audit M17), which
@@ -297,6 +517,72 @@ pub(crate) fn mark_context_trimmed(
 mod tests {
     use super::*;
     use anima_core::{AgentSettings, Content, MessageRole};
+
+    #[test]
+    fn inspector_breakdown_keeps_the_conversation_meter_and_labels_partial_coverage() {
+        let config = config(None, "unknown", AgentSettings::default());
+        let record = SessionRecord::new(
+            "a",
+            "chat:a",
+            super::super::SessionKind::Chat,
+            super::super::SessionOrigin::Web,
+            "Chat".into(),
+            super::super::TitleSource::Owner,
+            1,
+        );
+        let meter = conversation_context_usage(&config, &record, &[]);
+        let inspection = context_inspection(&config, &record, &[], Some(120), Some(25), false);
+        assert_eq!(inspection.usage, meter);
+        assert_eq!(inspection.breakdown.companion_files_tokens, Some(120));
+        assert_eq!(inspection.breakdown.memory_tokens, Some(25));
+        assert!(inspection
+            .coverage
+            .omitted
+            .iter()
+            .any(|s| s.contains("dynamic memory")));
+        assert!(inspection.coverage.basis.contains("not billed"));
+    }
+
+    #[test]
+    fn inspector_components_preserve_meter_and_file_identity_replaces_legacy() {
+        let mut config = config(None, "unknown", AgentSettings::default());
+        config.bio = Some("Legacy identity must not be counted twice".repeat(20));
+        let mut record = SessionRecord::new(
+            "a",
+            "chat:a",
+            super::super::SessionKind::Chat,
+            super::super::SessionOrigin::Web,
+            "Chat".into(),
+            super::super::TitleSource::Owner,
+            1,
+        );
+        record.summary = Some(super::super::SessionSummary {
+            text: "Saved decisions".into(),
+            through_message_id: "old".into(),
+            created_at_ms: 1,
+            source_message_count: 2,
+        });
+        let legacy = context_inspection(&config, &record, &[], None, None, false);
+        let files = context_inspection(&config, &record, &[], Some(100), Some(0), true);
+        assert_eq!(
+            files.usage.estimated_tokens,
+            files.breakdown.conversation_tokens
+                + files.breakdown.summary_tokens
+                + files.breakdown.checkpoint_tokens
+        );
+        assert_eq!(files.breakdown.system_instructions_tokens, 0);
+        assert!(legacy.breakdown.system_instructions_tokens > 0);
+        assert!(legacy
+            .coverage
+            .omitted
+            .iter()
+            .any(|s| s.contains("companion files unavailable")));
+        assert!(legacy
+            .coverage
+            .omitted
+            .iter()
+            .any(|s| s.contains("core memory unavailable")));
+    }
 
     fn config(provider: Option<&str>, model: &str, settings: AgentSettings) -> AgentConfig {
         AgentConfig {

@@ -10,6 +10,33 @@ import { daemon } from '../../lib/daemon-api';
 import type { ToolStep } from '../../lib/transcript';
 import { ToolBlock } from './RunActivity';
 import { ToolStepCard } from './ToolStepCard';
+import { ChatExportScope } from './ChatExportDownload';
+
+it('offers a native chat export through the authenticated download control', () => {
+  const step: ToolStep = {
+    stepId: 'step',
+    toolCallId: 'call',
+    name: 'export_chat',
+    argumentsPreview: '',
+    status: 'success',
+    durationMs: 1,
+    result: JSON.stringify({
+      url: '/api/agents/a/sessions/s/export',
+      filename: 'chat.md',
+      requiresOwnerAuthentication: true,
+    }),
+    truncated: false,
+    helper: null,
+  };
+  render(
+    <ChatExportScope.Provider value={{ agentId: 'a', sessionId: 's' }}>
+      <ToolStepCard step={step} agentId="a" />
+    </ChatExportScope.Provider>,
+  );
+  expect(
+    screen.getByRole('button', { name: 'Download chat Markdown' }),
+  ).toBeVisible();
+});
 
 it('offers owned saved result retrieval from the compact retained-output header', () => {
   const step: ToolStep = {

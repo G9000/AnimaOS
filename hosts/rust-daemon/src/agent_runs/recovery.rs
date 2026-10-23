@@ -59,9 +59,9 @@ impl RecoveryAdmission {
             .map_err(|_| ApiError::conflict("Saved turn identity changed; recovery was refused"))?;
         if self.automatic
             && (!crate::runs::turn::automatic_candidate(state, source)
-                || request.text != source.input.text
-                || request.attachment_ids != source.input.attachment_ids
-                || request.skill != source.input.skill)
+                || request.text != source.effective_input().text
+                || request.attachment_ids != source.effective_input().attachment_ids
+                || request.skill != source.effective_input().skill)
         {
             return Err(ApiError::conflict(
                 "Automatic recovery requires the verified original never-started owner input",
@@ -139,7 +139,7 @@ pub(crate) fn continuation_prompt(source: &RunRecord, answers: &str) -> String {
         .turn
         .as_ref()
         .map(|t| &t.original_input)
-        .unwrap_or(&source.input);
+        .unwrap_or_else(|| source.effective_input());
     let progress = source
         .turn
         .as_ref()
@@ -165,8 +165,9 @@ impl AgentRunCoordinator {
                 .filter(|r| crate::runs::turn::automatic_candidate(&state, r))
                 .collect();
             candidates.sort_by(|a, b| {
-                a.created_at_ms
-                    .cmp(&b.created_at_ms)
+                a.queue_order()
+                    .cmp(&b.queue_order())
+                    .then_with(|| a.created_at_ms.cmp(&b.created_at_ms))
                     .then_with(|| a.id.cmp(&b.id))
             });
             candidates
@@ -190,21 +191,21 @@ impl AgentRunCoordinator {
             let request = AcceptRun {
                 agent_id: source.agent_id.clone(),
                 session_id: source.session_id.clone(),
-                text: source.input.text.clone(),
-                attachment_ids: source.input.attachment_ids.clone(),
+                text: source.effective_input().text.clone(),
+                attachment_ids: source.effective_input().attachment_ids.clone(),
                 idempotency_key: key.clone(),
                 mode: SessionRunMode::Queue,
                 source: source.source,
                 source_ref: None,
-                skill: source.input.skill.clone(),
+                skill: source.effective_input().skill.clone(),
             };
             let start = self.web_start_with_attachments(
                 source.agent_id.clone(),
                 room,
-                source.input.text.clone(),
+                source.effective_input().text.clone(),
                 key,
-                source.input.skill.clone(),
-                source.input.attachment_ids.clone(),
+                source.effective_input().skill.clone(),
+                source.effective_input().attachment_ids.clone(),
             );
             let admission = RecoveryAdmission {
                 source_run_id: source.id.clone(),
@@ -272,20 +273,20 @@ impl AgentRunCoordinator {
             agent_id: agent.clone(),
             session_id: source.session_id.clone(),
             text: text.clone(),
-            attachment_ids: source.input.attachment_ids.clone(),
+            attachment_ids: source.effective_input().attachment_ids.clone(),
             idempotency_key: key.clone(),
             mode: SessionRunMode::Queue,
             source: RunSource::Web,
             source_ref: None,
-            skill: source.input.skill.clone(),
+            skill: source.effective_input().skill.clone(),
         };
         let start = self.web_start_with_attachments(
             agent,
             room,
             text,
             key,
-            source.input.skill.clone(),
-            source.input.attachment_ids.clone(),
+            source.effective_input().skill.clone(),
+            source.effective_input().attachment_ids.clone(),
         );
         let admission = RecoveryAdmission {
             source_run_id: run,

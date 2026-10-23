@@ -63,7 +63,7 @@ pub(super) async fn capture_source(
         || run.parent_run_id.is_some()
         || matches!(run.source, RunSource::Delegation | RunSource::Peer)
         || (run.action_receipts.is_empty()
-            && !super::skill_evidence::correction_signal(&run.input.text))
+            && !super::skill_evidence::correction_signal(&run.effective_input().text))
         || run.action_receipts.iter().any(|receipt| {
             receipt.status == ActionStatus::Started
                 || receipt.durability != ActionDurability::Persistent
@@ -120,7 +120,7 @@ pub(super) async fn capture_source(
         return Err(ApiError::conflict("Learning source reply is not eligible"));
     }
     let identity = json!({"runId":run.id,"agentId":run.agent_id,"sessionId":run.session_id,
-        "input":run.input,"replyId":reply.message.id,"replyText":reply.message.content.text,
+        "input":run.effective_input(),"replyId":reply.message.id,"replyText":reply.message.content.text,
         "actions":run.action_receipts,"steps":run.steps,"model":run.model,"provider":run.provider});
     let digest = hex::encode(Sha256::digest(
         serde_json::to_vec(&identity).expect("JSON evidence serializes"),
@@ -147,7 +147,8 @@ pub(super) async fn capture_source(
         }
         actions.push(summary);
     }
-    let input = anima_core::skill_learning::safe_learning_excerpt(&run.input.text, 1536);
+    let input =
+        anima_core::skill_learning::safe_learning_excerpt(&run.effective_input().text, 1536);
     let reply_text =
         anima_core::skill_learning::safe_learning_excerpt(&reply.message.content.text, 3072);
     let (skill_learning_allowed, skill_signal, skills) =
@@ -167,7 +168,7 @@ pub(super) async fn capture_source(
         .collect();
     let mut brief = json!({"sourceRunId":run_id,"sessionId":run.session_id,
         "skillLearningAllowed":skill_learning_allowed,"skills":skills,"procedureEvidence":procedure_evidence,
-        "input":{"anchor":"input","text":input,"shortened":input.len()!=run.input.text.len()},
+        "input":{"anchor":"input","text":input,"shortened":input.len()!=run.effective_input().text.len()},
         "reply":{"anchor":"reply","messageId":reply_id,"text":reply_text,"shortened":reply_text.len()!=reply.message.content.text.len()},
         "actions":actions,"anchors":anchors,"receiptsShortened":run.action_receipts.len()>8,
         "stepRefs":step_refs,"stepRefsOmitted":step_refs.len()!=run.steps.len(),
@@ -295,10 +296,11 @@ pub(super) async fn capture_conversation(
         if reply.role != MessageRole::Assistant || reply.content.text.trim().is_empty() {
             continue;
         }
+        let owner_text = run.effective_input().text.clone();
         turns.push(Turn {
             run_id: run.id,
             session_id: run.session_id,
-            owner: run.input.text,
+            owner: owner_text,
             reply_id,
             reply: reply.content.text,
         });

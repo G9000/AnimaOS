@@ -225,7 +225,7 @@ type StartFn = Box<
 /// Starts an accepted run given its id and resolves once the run is over;
 /// `Err` says why it did not run.
 pub(crate) struct QueuedRunStart {
-    reserved_ticket: Option<super::RunTicket>,
+    pub(super) reserved_ticket: Option<super::RunTicket>,
     /// The room of a start whose admission (`acquire_accepted_ticket`) can
     /// take the room from its session queue (final fix wave S2-B): the queue
     /// then takes the room's lease before it picks the run, and hands it on.
@@ -260,10 +260,10 @@ pub(crate) enum QueuedStartError {
 }
 
 pub(super) struct QueuedStart {
-    run_id: String,
+    pub(super) run_id: String,
     /// The run's `createdAtMs`: when its message was accepted.
-    accepted_at_ms: u64,
-    start: QueuedRunStart,
+    pub(super) accepted_at_ms: u64,
+    pub(super) start: QueuedRunStart,
 }
 
 /// The answer to a message whose key this agent used within the window
@@ -1290,7 +1290,7 @@ impl AgentRunCoordinator {
         let key = (record.agent_id.clone(), record.session_id.clone());
         let next = QueuedStart {
             run_id: record.id.clone(),
-            accepted_at_ms: record.created_at_ms,
+            accepted_at_ms: record.queue_order(),
             start,
         };
         let spawn_drainer = {
@@ -1373,6 +1373,9 @@ impl AgentRunCoordinator {
                 None => None,
             };
             let mut next = {
+                // Claim under the same boundary as owner edit/reorder. Once
+                // removed here, even a run still waiting for a slot is frozen.
+                let _transaction = self.control_plane_transaction().await;
                 let mut queues = self
                     .session_queues
                     .lock()

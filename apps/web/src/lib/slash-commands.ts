@@ -1,4 +1,4 @@
-import type { Skill } from '@animaos/sdk';
+import type { Skill, SessionCompactInput } from '@animaos/sdk';
 
 /** Composer slash commands (spec §15.3). `/<skill>` comes from the owner's
  *  skills (M5). */
@@ -13,6 +13,10 @@ export type SlashCommandName =
   | 'search'
   | 'model'
   | 'compact'
+  | 'branch'
+  | 'fork'
+  | 'undo'
+  | 'retry'
   | 'usage'
   | 'learn'
   | 'help';
@@ -29,6 +33,8 @@ export interface SlashCommand {
   skill?: string;
   /** A built-in instruction handled by the daemon as an ordinary task. */
   turn?: boolean;
+  /** Optional arguments validated by the command itself. */
+  acceptsArgument?: boolean;
 }
 
 /** A skill's description in the menu, at most this many characters. */
@@ -41,14 +47,6 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   name: SlashCommandName;
 })[] = [
   { name: 'new', description: 'Return to the main chat' },
-  {
-    name: 'clear',
-    description: 'Clear the main chat; keep your companion and memories',
-  },
-  {
-    name: 'reset',
-    description: 'Clear the main chat; keep your companion and memories',
-  },
   { name: 'stop', description: 'Stop the reply in progress' },
   {
     name: 'rename',
@@ -58,6 +56,10 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   },
   { name: 'archive', description: 'Archive or unarchive this chat' },
   { name: 'export', description: 'Download this chat as Markdown' },
+  { name: 'branch', description: 'Continue a copy of this chat' },
+  { name: 'fork', description: 'Continue a copy of this chat' },
+  { name: 'undo', description: 'Open a revision without the latest exchange' },
+  { name: 'retry', description: 'Open a revision and edit the latest prompt' },
   {
     name: 'search',
     description: 'Search your chats',
@@ -68,12 +70,22 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   {
     name: 'compact',
     description: 'Summarize earlier messages to make room',
+    placeholder: '[keep 1–100 | focus <topic>]',
+    acceptsArgument: true,
   },
   {
     name: 'learn',
     description: 'Turn a workflow or source into a reusable skill',
     placeholder: '<workflow or source>',
     turn: true,
+  },
+  {
+    name: 'clear',
+    description: 'Clear the main chat; keep your companion and memories',
+  },
+  {
+    name: 'reset',
+    description: 'Clear the main chat; keep your companion and memories',
   },
   { name: 'usage', description: 'Show usage for this chat and today' },
   { name: 'help', description: 'Show every command' },
@@ -148,7 +160,32 @@ export function runSlashCommand(
     return `Add ${command.needs} after /${command.name}.`;
   // An argument-less command with text after it (S3b-D): refused, not
   // silently ignored, so the extra text is never discarded.
-  if (!command.needs && argument) return `/${command.name} takes no text.`;
+  if (!command.needs && !command.acceptsArgument && argument)
+    return `/${command.name} takes no text.`;
+  if (command.name === 'compact') {
+    try {
+      parseCompactOptions(argument);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
   handler(argument);
   return null;
+}
+
+/** Keep parsing local so invalid commands remain visible in the composer. */
+export function parseCompactOptions(argument: string): SessionCompactInput {
+  const text = argument.trim();
+  if (!text) return {};
+  const keep = /^(?:keep|here)\s+(\d+)$/.exec(text);
+  if (keep) {
+    const count = Number(keep[1]);
+    if (Number.isSafeInteger(count) && count >= 1 && count <= 100)
+      return { keepLatestExchanges: count };
+  }
+  const focus = /^focus\s+([\s\S]+)$/.exec(text)?.[1].trim();
+  if (focus && Array.from(focus).length <= 500) return { focus };
+  throw new Error(
+    'Use /compact, /compact keep 1–100, or /compact focus <topic up to 500 characters>.',
+  );
 }

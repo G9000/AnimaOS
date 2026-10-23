@@ -30,6 +30,7 @@ enum Origin {
     MemoryAdd(ToolDescriptor),
     HostDerived,
     MainChatClear,
+    OwnerChatControl,
     Mcp(crate::mcp::McpDispatchStamp),
 }
 /// A captured ceiling over the final, filtered run descriptors. Its only
@@ -86,6 +87,7 @@ impl RunToolCatalog {
                 }
                 match explicit {
                     _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
+                    _ if matches!(descriptor.name.as_str(), "rename_chat" | "compact_chat" | "export_chat") => Origin::OwnerChatControl,
                     Some(source) => Origin::Explicit(source.clone()),
                     None if descriptor.name == "core_memory"
                         && original.allows_tool("memory_add") =>
@@ -235,6 +237,13 @@ impl RunToolCatalog {
                     || !run.status.is_in_flight()
                     || !session.main_chat
                     || !session.has_main_chat_identity()
+                {
+                    return Err(REFUSED);
+                }
+            }
+            Origin::OwnerChatControl => {
+                if !self.peer_sources.is_empty() || self.delegated_parent.is_some()
+                    || crate::agent_runs::chat_controls::validate_owner_chat(state, &self.run).is_err()
                 {
                     return Err(REFUSED);
                 }
@@ -484,6 +493,11 @@ impl ModelToolSelector for RunToolCatalog {
         // independently of ordinary catalog grants on every model request.
         if self.entry_current(&guard, "clear_main_chat").is_ok() {
             names.insert("clear_main_chat".into());
+        }
+        for name in ["rename_chat", "compact_chat", "export_chat"] {
+            if self.entry_current(&guard, name).is_ok() {
+                names.insert(name.into());
+            }
         }
         names.retain(|name| {
             if matches!(name.as_str(), SEARCH | DESCRIBE) {

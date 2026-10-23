@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -83,6 +89,29 @@ beforeEach(() => {
 });
 
 describe('chat workflows integration', () => {
+  it('sends a literal retry /btw draft without creating a side question', () => {
+    const onSend = vi.fn();
+    const ask = vi.spyOn(daemon.interactions, 'sideQuestion');
+    renderView({
+      session: sessionFixture('room-7'),
+      composer: {
+        draft: '/btw quoted original input',
+        literalDraft: true,
+        setDraft: vi.fn(),
+        sending: false,
+        disabled: false,
+        offline: false,
+        onSend,
+        error: null,
+        onDismissError: vi.fn(),
+      },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Nova' }), {
+      key: 'Enter',
+    });
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(ask).not.toHaveBeenCalled();
+  });
   it.each([null, sessionFixture('helper-chat')])(
     'does not mount workflows for a helper agent with session %s',
     async (session) => {

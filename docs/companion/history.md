@@ -8,6 +8,48 @@ and saved memories. Other conversations remain available. Reset is unavailable
 while background helpers from this chat are still pending. Old queued inputs are
 discarded, and new input is accepted after durable history cleanup finishes.
 
+## Conversation controls
+
+In an ordinary web/API chat, you can ask Anima to rename, compact or export the
+conversation. The native `rename_chat`, `compact_chat` and `export_chat` tools
+operate only on the current direct owner conversation. They are unavailable to
+helpers, connector senders and delegated or scheduled turns. Export prepares an
+authenticated Markdown download; it does not upload the conversation or confirm
+that a download has completed.
+
+Use `/branch` (or `/fork`) to explore a new conversation with the same companion
+and saved memories. A message branch includes the complete user exchange that
+contains that message, so tool calls and results stay together. `/undo` opens a
+revision without the latest exchange. `/retry` opens that revision and restores
+the original prompt into the composer for review and an explicit fresh send.
+The original remains available through the revision's source link. These actions
+preserve the original run and action evidence; they cannot reverse completed
+external actions. A fresh retry may repeat actions. Files stay in the original
+chat and are marked unavailable in the revision; reattach needed files before
+sending. A revision has its own history and does not replace the main-chat
+designation. Finish or cancel queued/active work before revising its source.
+
+Waiting owner messages can be edited, moved before another waiting message, moved
+to the end, or canceled. The original accepted request remains identifiable for
+delivery retries, while the edited text becomes the executed prompt. Once the
+runtime claims a message, edits are refused. Connector, helper, system, recovery
+and browser-selection admissions retain their existing protections. The composer
+offers **Wait** to queue a separate turn and **Steer** to pass input to an active
+reply at its next supported checkpoint.
+
+`/compact` keeps the newest exchange by default. `/compact keep 3` keeps the three
+latest exchanges verbatim; `/compact focus project launch` emphasizes that topic
+in the summary while retaining decisions, open work and necessary continuity.
+The keep count ranges from 1 to 100 and focus text is limited to 500 characters.
+Compaction changes selected context, preserving the full exportable transcript.
+
+The context inspector shows local estimates for selected conversation, summary,
+checkpoint, system instructions, configured tool schemas, current companion files
+and always-on core memory. It lists unavailable or omitted contributions such as
+dynamic retrieval, host guidance, attachment hydration and draft input. These are
+partial estimates, separate from actual provider usage or billing. The existing
+conversation-budget meter keeps its original meaning.
+
 The owner console also provides **Messages** results in Ctrl K. Unlike the
 agent's conversation-discovery tool below, console search can return several
 individual matches in one conversation, including the current main chat and

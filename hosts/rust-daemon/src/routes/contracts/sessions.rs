@@ -104,6 +104,29 @@ pub(crate) struct SessionContextUsageResponse {
     /// Usable history budget after the reply reserve.
     pub(crate) budget_tokens: u64,
     pub(crate) reply_reserve_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) breakdown: Option<SessionContextBreakdownResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) coverage: Option<SessionContextCoverageResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionContextBreakdownResponse {
+    pub(crate) conversation_tokens: u64,
+    pub(crate) summary_tokens: u64,
+    pub(crate) checkpoint_tokens: u64,
+    pub(crate) system_instructions_tokens: u64,
+    pub(crate) tool_schemas_tokens: u64,
+    pub(crate) companion_files_tokens: Option<u64>,
+    pub(crate) memory_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionContextCoverageResponse {
+    pub(crate) basis: String,
+    pub(crate) omitted: Vec<String>,
 }
 
 impl From<crate::sessions::context::ContextUsage> for SessionContextUsageResponse {
@@ -112,6 +135,83 @@ impl From<crate::sessions::context::ContextUsage> for SessionContextUsageRespons
             estimated_tokens: value.estimated_tokens,
             budget_tokens: value.budget_tokens,
             reply_reserve_tokens: value.reply_reserve_tokens,
+            breakdown: None,
+            coverage: None,
+        }
+    }
+}
+
+impl From<crate::sessions::context::ContextInspection> for SessionContextUsageResponse {
+    fn from(value: crate::sessions::context::ContextInspection) -> Self {
+        let mut response = Self::from(value.usage);
+        let b = value.breakdown;
+        response.breakdown = Some(SessionContextBreakdownResponse {
+            conversation_tokens: b.conversation_tokens,
+            summary_tokens: b.summary_tokens,
+            checkpoint_tokens: b.checkpoint_tokens,
+            system_instructions_tokens: b.system_instructions_tokens,
+            tool_schemas_tokens: b.tool_schemas_tokens,
+            companion_files_tokens: b.companion_files_tokens,
+            memory_tokens: b.memory_tokens,
+        });
+        response.coverage = Some(SessionContextCoverageResponse {
+            basis: value.coverage.basis,
+            omitted: value.coverage.omitted,
+        });
+        response
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SessionCompactRequest {
+    pub(crate) keep_latest_exchanges: Option<usize>,
+    pub(crate) focus: Option<String>,
+}
+
+impl SessionCompactRequest {
+    pub(crate) fn options(
+        self,
+    ) -> Result<crate::sessions::compaction::CompactionOptions, &'static str> {
+        crate::sessions::compaction::CompactionOptions::new(self.keep_latest_exchanges, self.focus)
+    }
+}
+
+#[cfg(test)]
+mod compact_request_tests {
+    use super::SessionCompactRequest;
+
+    #[test]
+    fn compact_request_defaults_and_validates_owner_bounds_without_target_ids() {
+        let default = serde_json::from_str::<SessionCompactRequest>("{}")
+            .unwrap()
+            .options()
+            .unwrap();
+        assert_eq!(default.keep_latest_exchanges, 1);
+        assert!(default.focus.is_none());
+        let valid = serde_json::from_str::<SessionCompactRequest>(
+            r#"{"keepLatestExchanges":3,"focus":"  decisions  "}"#,
+        )
+        .unwrap()
+        .options()
+        .unwrap();
+        assert_eq!(valid.keep_latest_exchanges, 3);
+        assert_eq!(valid.focus.as_deref(), Some("decisions"));
+        for body in [
+            r#"{"keepLatestExchanges":0}"#,
+            r#"{"keepLatestExchanges":101}"#,
+        ] {
+            assert!(serde_json::from_str::<SessionCompactRequest>(body)
+                .unwrap()
+                .options()
+                .is_err());
+        }
+        for body in [
+            r#"{"keepLatestExchanges":1.5}"#,
+            r#"{"sessionId":"another"}"#,
+            r#"{"focus":5}"#,
+        ] {
+            assert!(serde_json::from_str::<SessionCompactRequest>(body).is_err());
         }
     }
 }

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { draftStorageKey, loadDraft, storeDraft } from './drafts';
+import {
+  draftStorageKey,
+  loadDraft,
+  storeDraft,
+  loadLiteralDraft,
+  storeLiteralDraft,
+} from './drafts';
 
 afterEach(() => {
   sessionStorage.clear();
@@ -8,6 +14,14 @@ afterEach(() => {
 });
 
 describe('drafts', () => {
+  it('preserves literal retry intent across reloads and clears it with the draft', () => {
+    const key = 'agent-main\u0000session:revision';
+    storeDraft(key, '/new');
+    storeLiteralDraft(key, true);
+    expect(loadLiteralDraft(key)).toBe(true);
+    storeDraft(key, '');
+    expect(loadLiteralDraft(key)).toBe(false);
+  });
   it('keeps a draft per agent and conversation in session storage', () => {
     const key = 'agent-main\u0000session:chat:1';
     storeDraft(key, 'Half a thought');

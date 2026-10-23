@@ -1616,6 +1616,14 @@ describe('Composer commands and live replies', () => {
     expect(props.onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(props.onSend).toHaveBeenCalledTimes(1);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Wait', exact: true }),
+    );
+    expect(props.onSend).toHaveBeenCalledTimes(2);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Steer', exact: true }),
+    );
+    expect(props.onSteer).toHaveBeenCalledTimes(2);
     // jsdom reports no Mac platform, so the hint names Ctrl+Enter (S3b-E).
     expect(
       screen.getByText('⏎ queue · Ctrl+Enter steer · ⇧⏎ new line'),

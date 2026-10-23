@@ -32,6 +32,10 @@ mod automations;
 mod compact;
 mod conversations;
 pub(crate) mod main_chat_clear;
+pub(crate) mod chat_revisions;
+pub(crate) mod chat_controls;
+mod queue_controls;
+pub(crate) use queue_controls::QueuedRunPatch;
 mod queue;
 mod recovery;
 mod shutdown;
@@ -2246,6 +2250,30 @@ impl AgentRunCoordinator {
         }
         // Session control is available only on a host-proven owner main-chat turn.
         tools.retain(|t| t.name != "clear_main_chat");
+        tools.retain(|tool| {
+            !matches!(
+                tool.name.as_str(),
+                "rename_chat" | "compact_chat" | "export_chat"
+            )
+        });
+        if standing_admission.local_owner
+            && delegated_parent.is_none()
+            && peer_sources.is_empty()
+            && !is_helper_config(&original_config)
+            && chat_controls::validate_owner_chat(
+                &*self.state.read().await,
+                &crate::runs::RunLink {
+                    agent_id: agent_id.clone(),
+                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
+                },
+            )
+            .is_ok()
+        {
+            for name in ["rename_chat", "compact_chat", "export_chat"] {
+                tools.push(registry.descriptor(name).expect("registered chat control"));
+            }
+        }
         if standing_admission.local_owner
             && delegated_parent.is_none()
             && peer_sources.is_empty()

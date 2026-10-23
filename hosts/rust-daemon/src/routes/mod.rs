@@ -11,6 +11,8 @@ mod browser;
 mod browser_tests;
 mod capabilities;
 mod chatgpt;
+mod chat_controls;
+mod queue_controls;
 mod coding;
 mod community_bundles;
 mod connectors;
@@ -237,6 +239,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         sessions::list_sessions, sessions::get_session, sessions::list_session_messages, sessions::search_session_messages,
         sessions::create_session, sessions::main_chat, sessions::update_session, sessions::delete_session, sessions::export_session, sessions::clear_session,
         sessions::compact_session,
+        chat_controls::revise_session,
+        queue_controls::update_queued_run,
         events::agent_events,
         runs::start_session_run, runs::list_session_runs, runs::get_run, runs::stop_run,
         learning_reviews::request_review, learning_reviews::list_reviews,
@@ -1058,6 +1062,14 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/clear",
             axum::routing::post(sessions::clear_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/revise",
+            axum::routing::post(chat_controls::revise_session),
+        )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}",
+            axum::routing::patch(queue_controls::update_queued_run),
         )
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/runs",

@@ -181,7 +181,7 @@ impl StandingAuthority {
             .ok_or_else(conflict)?;
         let owner = state.get_agent(agent).ok_or_else(conflict)?;
         let content = anima_core::Content {
-            text: run.input.text.clone(),
+            text: run.effective_input().text.clone(),
             ..Default::default()
         };
         if owner_sender(state, run, &owner.state.config, &content) != Some(OwnerSender::Local)

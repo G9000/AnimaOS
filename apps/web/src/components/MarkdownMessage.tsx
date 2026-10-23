@@ -12,6 +12,10 @@ import ReactMarkdown, {
   type Components,
 } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  ChatExportDownload,
+  chatExportTarget,
+} from './sessions/ChatExportDownload';
 
 function isAbsoluteWebUrl(href: string | undefined): boolean {
   return href !== undefined && /^https?:\/\//i.test(href);
@@ -202,18 +206,21 @@ const components: Components = {
       {children}
     </blockquote>
   ),
-  a: ({ children, href, className, node: _node, ...props }) => (
-    <a
-      {...props}
-      className={`break-words text-accent underline underline-offset-2 ${className ?? ''}`}
-      href={href}
-      {...(isAbsoluteWebUrl(href)
-        ? { target: '_blank', rel: 'noopener noreferrer' }
-        : {})}
-    >
-      {children}
-    </a>
-  ),
+  a: ({ children, href, className, node: _node, ...props }) =>
+    chatExportTarget(href) ? (
+      <ChatExportDownload url={href!}>{children}</ChatExportDownload>
+    ) : (
+      <a
+        {...props}
+        className={`break-words text-accent underline underline-offset-2 ${className ?? ''}`}
+        href={href}
+        {...(isAbsoluteWebUrl(href)
+          ? { target: '_blank', rel: 'noopener noreferrer' }
+          : {})}
+      >
+        {children}
+      </a>
+    ),
   img: ({ alt }) => (
     <span className="text-ink-3">
       {alt?.trim() ? `[Image: ${alt}]` : '[Image]'}

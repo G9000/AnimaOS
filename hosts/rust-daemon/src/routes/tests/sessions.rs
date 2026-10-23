@@ -7,6 +7,59 @@ use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource};
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+fn conversation_meter_fields(usage: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"estimatedTokens":usage["estimatedTokens"],"budgetTokens":usage["budgetTokens"],"replyReserveTokens":usage["replyReserveTokens"]})
+}
+
+#[tokio::test]
+async fn chat_revision_route_is_owner_scoped_and_returns_draft_without_starting_run() {
+    let (app, state, agent) = app_with_session().await;
+    let path = format!("/api/agents/{agent}/sessions/chat%3Aplans/revise");
+    let forbidden = app
+        .clone()
+        .oneshot(send(
+            "POST",
+            &path,
+            "https://untrusted.example",
+            serde_json::json!({"mode":"retry"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+    let before = state.read().await.runs.active_records().len();
+    let original = crate::sessions::views::full_transcript(&state, &agent, "chat:plans")
+        .await
+        .unwrap()
+        .2;
+    let response = app
+        .clone()
+        .oneshot(send(
+            "POST",
+            &path,
+            OWNER_ORIGIN,
+            serde_json::json!({"mode":"retry"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let revised = json(response).await;
+    assert_eq!(revised["session"]["parentSessionId"], "chat:plans");
+    assert_eq!(revised["session"]["mainChat"], false);
+    assert!(revised["retryPrompt"].is_string());
+    assert!(revised["notice"]
+        .as_str()
+        .unwrap()
+        .contains("may repeat actions"));
+    assert_eq!(state.read().await.runs.active_records().len(), before);
+    assert_eq!(
+        crate::sessions::views::full_transcript(&state, &agent, "chat:plans")
+            .await
+            .unwrap()
+            .2,
+        original
+    );
+}
+
 #[tokio::test]
 async fn main_chat_clear_preserves_companion_and_other_conversations() {
     let (app, state, agent) = app_with_session().await;
@@ -348,9 +401,14 @@ async fn conversation_context_usage_counts_selected_history_and_summary_with_nat
     assert_eq!(response.status(), StatusCode::OK);
     let body = json(response).await;
     assert_eq!(
-        body["session"]["contextUsage"],
+        conversation_meter_fields(&body["session"]["contextUsage"]),
         serde_json::json!({"estimatedTokens":62,"budgetTokens":80,"replyReserveTokens":20})
     );
+    assert!(body["session"]["contextUsage"]["breakdown"].is_object());
+    assert!(body["session"]["contextUsage"]["coverage"]["basis"]
+        .as_str()
+        .unwrap()
+        .contains("estimates"));
     let listed = json(
         app.oneshot(get(&format!("/api/agents/{agent}/sessions"), OWNER_ORIGIN))
             .await
@@ -382,7 +440,7 @@ async fn conversation_context_usage_accepts_empty_history_and_keeps_an_over_budg
     let path = format!("/api/agents/{agent}/sessions/chat%3Aempty");
     let empty = json(app.clone().oneshot(get(&path, OWNER_ORIGIN)).await.unwrap()).await;
     assert_eq!(
-        empty["session"]["contextUsage"],
+        conversation_meter_fields(&empty["session"]["contextUsage"]),
         serde_json::json!({"estimatedTokens":0,"budgetTokens":27904,"replyReserveTokens":4096})
     );
     {
@@ -408,7 +466,7 @@ async fn conversation_context_usage_accepts_empty_history_and_keeps_an_over_budg
     }
     let full = json(app.oneshot(get(&path, OWNER_ORIGIN)).await.unwrap()).await;
     assert_eq!(
-        full["session"]["contextUsage"],
+        conversation_meter_fields(&full["session"]["contextUsage"]),
         serde_json::json!({"estimatedTokens":33,"budgetTokens":5,"replyReserveTokens":5})
     );
 }

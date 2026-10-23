@@ -114,6 +114,8 @@ export interface Run {
    *  matches its own sends; `null` for a run without one. */
   idempotencyKey: string | null;
   status: RunStatus;
+  /** Effective waiting order; absent on older daemons and null outside the queue. */
+  queueOrder?: number | null;
   input: { text: string; attachmentIds: string[]; skill: string | null };
   createdAtMs: number;
   startedAtMs: number | null;
