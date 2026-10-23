@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
 use anima_core::primitives::now_millis;
-use anima_core::{RunControl, TokenUsage};
+use anima_core::{RunControl, TokenUsage, ToolDescriptor};
 use serde::Serialize;
 
 use super::{MAX_LIVE_TOOL_CARDS, MAX_SNAPSHOT_TEXT_BYTES};
@@ -44,6 +44,8 @@ pub(crate) struct LiveRunView {
 #[derive(Debug)]
 struct LiveRunState {
     control: RunControl,
+    /// Exact execution descriptor ceiling, populated before the first model call.
+    tool_scope: Option<Vec<ToolDescriptor>>,
     /// What `view` shows, except that `view.text` keeps up to twice
     /// `MAX_SNAPSHOT_TEXT_BYTES` (S2-J); `view` cuts it to the cap.
     view: LiveRunView,
@@ -105,6 +107,7 @@ impl LiveRuns {
             .entry(run_id.to_string())
             .or_insert_with(|| LiveRunState {
                 control: RunControl::new(),
+                tool_scope: None,
                 view: LiveRunView::default(),
                 text_units: 0,
                 steps: Vec::new(),
@@ -118,6 +121,21 @@ impl LiveRuns {
 
     pub(crate) fn control(&self, run_id: &str) -> Option<RunControl> {
         self.lock().get(run_id).map(|run| run.control.clone())
+    }
+
+    pub(crate) fn set_tool_scope(&self, run_id: &str, tools: Vec<ToolDescriptor>) {
+        if let Some(run) = self.lock().get_mut(run_id) {
+            // A turn cannot acquire a wider scope after its first model call.
+            if run.tool_scope.is_none() {
+                run.tool_scope = Some(tools);
+            }
+        }
+    }
+
+    pub(crate) fn tool_scope(&self, run_id: &str) -> Option<Vec<ToolDescriptor>> {
+        self.lock()
+            .get(run_id)
+            .and_then(|run| run.tool_scope.clone())
     }
 
     /// Forgets a finished run; false when it was not registered.

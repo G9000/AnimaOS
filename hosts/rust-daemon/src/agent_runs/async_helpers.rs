@@ -566,7 +566,8 @@ impl AgentRunCoordinator {
                 self.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
                     .map(|slot| (helper.clone(), slot))
             });
-            let config = super::helper_config_in(&parent_agent, name, worktree.as_ref());
+            let mut config = super::helper_config_in(&parent_agent, name, worktree.as_ref());
+            crate::chat_models::inherit_helper_model(&guard, Some(&parent), &mut config);
             let (helper, baseline, slot) = if let Some((helper, slot)) = available {
                 let previous = helper.state.config;
                 guard.restore_agent_config(&helper.state.id, config);

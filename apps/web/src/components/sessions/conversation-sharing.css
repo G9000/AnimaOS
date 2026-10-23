@@ -1,0 +1,23 @@
+.shared-conversation { max-width: 820px; margin: 0 auto; padding: 48px 24px; color: var(--text-primary, #ece7e1); }
+.share-eyebrow { color: var(--text-muted, #a69e95); font-size: 12px; letter-spacing: .08em; }
+.shared-conversation h1 { margin: 12px 0; font-size: 30px; }
+.share-scope, .share-dialog p { color: var(--text-muted, #a69e95); line-height: 1.6; }
+.share-login, .share-dialog form, .share-new-credential { display: grid; gap: 12px; }
+.share-login { max-width: 460px; margin-top: 32px; }
+.share-login label, .share-dialog label { display: grid; gap: 6px; font-size: 13px; }
+.share-login input, .share-dialog input { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border, #3b3835); background: var(--bg-panel, #211f1d); color: inherit; border-radius: 8px; }
+.share-viewer-controls { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
+.share-viewer-controls > span { flex: 1; }
+.share-transcript article { margin: 16px 0; padding: 18px 20px; border: 1px solid var(--border, #3b3835); border-radius: 12px; }
+.share-transcript article[data-role="user"] { background: color-mix(in srgb, var(--bg-panel, #211f1d) 70%, transparent); }
+.share-transcript article > strong { font-size: 12px; color: var(--text-muted, #a69e95); }
+.share-transcript article > p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.share-dialog-layer { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: #0008; }
+.share-dialog { width: min(640px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 24px; box-sizing: border-box; border-radius: 16px; border: 1px solid var(--border, #3b3835); background: var(--bg-panel, #211f1d); color: var(--text-primary, #ece7e1); box-shadow: 0 24px 80px #0006; }
+.share-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.share-dialog h2 { margin: 0; font-size: 20px; }
+.share-new-credential { margin: 24px 0; padding: 18px; border: 1px solid var(--border, #3b3835); border-radius: 12px; }
+.share-new-credential input { font-family: ui-monospace, monospace; font-size: 12px; }
+.share-viewer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border, #3b3835); }
+.share-viewer > span { display: grid; gap: 4px; flex: 1; min-width: 140px; }
+.share-viewer small { color: var(--text-muted, #a69e95); }

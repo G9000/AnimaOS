@@ -53,6 +53,7 @@ const READ_TOOLS: &[&str] = &[
     "list_workflows",
     "list_workflow_templates",
     "read_tool_result",
+    "list_results",
     "check_automation_status",
 ];
 /// Tools that change files and records (spec §7.1). The mail draft and the
@@ -62,6 +63,7 @@ const WRITE_TOOLS: &[&str] = &[
     "clear_main_chat",
     "rename_chat",
     "compact_chat",
+    "show_result",
     "write_file",
     "doctor_repair",
     "doctor_undo",

@@ -17,6 +17,7 @@ import {
   type SessionMessage,
   type BrowserPolicy,
   type BrowserScope,
+  type ChatResult,
 } from '@animaos/sdk';
 
 import { toolNamesForProfile } from './lib/agent-access';
@@ -900,6 +901,15 @@ beforeEach(() => {
   vi.spyOn(daemon, 'listMemoryEntities').mockResolvedValue([]);
   vi.spyOn(daemon, 'listMemoryRelationships').mockResolvedValue([]);
   routes = mockSessionRoutes();
+  vi.spyOn(daemon.chatResults, 'list').mockImplementation(
+    async (agentId, sessionId) => ({
+      clearGeneration:
+        routes.sessions.find(
+          (session) => session.agentId === agentId && session.id === sessionId,
+        )?.clearGeneration ?? 0,
+      results: [],
+    }),
+  );
   mockRuns();
   // No stream events unless a test scripts them; the harness polls.
   idleAgentEvents();
@@ -935,6 +945,116 @@ describe('persistent main conversation', () => {
     vi.spyOn(daemon, 'ensureMainSession').mockResolvedValue(main);
     return main;
   }
+
+  it('keeps pinned results in their saved conversation and removes them after its reset', async () => {
+    const user = userEvent.setup();
+    const main = mainFixture();
+    routes.sessions.push(
+      sessionFixture('chat:other-results', {
+        agentId: main.agentId,
+        title: 'Another conversation',
+      }),
+    );
+    let report: ChatResult = {
+      id: '11111111-1111-4111-8111-111111111111',
+      revision: 1,
+      agentId: main.agentId,
+      sessionId: main.id,
+      clearGeneration: 0,
+      title: 'Saved household report',
+      payload: {
+        kind: 'document',
+        format: 'text',
+        text: 'A report belonging only to the original conversation.',
+      },
+      pinned: false,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      sourceRunId: 'run-report',
+      sourceToolCallId: 'report-call',
+      requestKey: 'household-report',
+    };
+    const readResults = vi
+      .mocked(daemon.chatResults.list)
+      .mockImplementation(async (agentId, sessionId) => {
+        const generation =
+          routes.sessions.find(
+            (session) => session.agentId === agentId && session.id === sessionId,
+          )?.clearGeneration ?? 0;
+        return {
+          clearGeneration: generation,
+          results:
+            report.agentId === agentId &&
+            report.sessionId === sessionId &&
+            report.clearGeneration === generation
+              ? [report]
+              : [],
+        };
+      });
+    const pin = vi.spyOn(daemon.chatResults, 'pin').mockImplementation(
+      async (_agentId, _sessionId, _id, input) => {
+        report = { ...report, revision: 2, pinned: input.pinned };
+        return { result: report };
+      },
+    );
+    vi.spyOn(daemon, 'clearSession').mockImplementation(async () => {
+      const cleared = { ...main, clearGeneration: 1, messageCount: 0 };
+      routes.sessions = routes.sessions.map((session) =>
+        session.id === main.id ? cleared : session,
+      );
+      return cleared;
+    });
+    render(<ViewHarness />);
+    expect(await screen.findByText(report.title)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Pin report' }));
+    expect(pin).toHaveBeenCalledWith(main.agentId, main.id, report.id, {
+      clearGeneration: 0,
+      expectedRevision: 1,
+      pinned: true,
+    });
+    const shelf = await screen.findByRole('complementary', {
+      name: 'Pinned reports',
+    });
+    expect(within(shelf).getByText(report.title)).toBeVisible();
+    expect(screen.getAllByText(report.title)).toHaveLength(2);
+
+    await openSessions(user);
+    await user.click(
+      await screen.findByRole('button', { name: 'Another conversation' }),
+    );
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/s/chat%3Aother-results'),
+    );
+    expect(screen.queryByText(report.title)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('complementary', { name: 'Pinned reports' }),
+    ).not.toBeInTheDocument();
+    expect(readResults).toHaveBeenCalledWith(
+      main.agentId,
+      'chat:other-results',
+      { signal: expect.any(AbortSignal) },
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Main chat', exact: true }),
+    );
+    expect(await screen.findByRole('complementary', { name: 'Pinned reports' }))
+      .toBeVisible();
+    expect(screen.getAllByText(report.title)).toHaveLength(2);
+    const input = screen.getByPlaceholderText('Message Nova…');
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, '/clear{Enter}');
+    await waitFor(() =>
+      expect(daemon.clearSession).toHaveBeenCalledWith(main.agentId, main.id),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(report.title)).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('complementary', { name: 'Pinned reports' }),
+    ).not.toBeInTheDocument();
+    expect(daemon.startRun).not.toHaveBeenCalled();
+  });
 
   it.each(['slash', 'another window'] as const)(
     'clears an anchored main chat after reset from %s',

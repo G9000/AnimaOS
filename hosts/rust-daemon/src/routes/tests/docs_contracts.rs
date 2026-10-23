@@ -42,7 +42,62 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 295, "complete registered operation count");
+    assert_eq!(actual.len(), 309, "complete registered operation count");
+    let chat_suite_additions = [
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/model-preferences",
+        ),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/sessions/{session_id}/model-preferences",
+        ),
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/capabilities",
+        ),
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/results",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/results",
+        ),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/sessions/{session_id}/results/{result_id}",
+        ),
+        (
+            "GET",
+            "/api/agents/{agent_id}/sessions/{session_id}/reviews",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/reviews",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/reviews/{review_id}/cancel",
+        ),
+        ("GET", "/api/agents/{agent_id}/sessions/{session_id}/shares"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/sessions/{session_id}/shares",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/sessions/{session_id}/shares/{share_id}",
+        ),
+        ("GET", "/api/shared/conversations/{share_id}"),
+        ("GET", "/api/shared/conversations/{share_id}/messages"),
+    ];
+    for (method, path) in chat_suite_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "chat suite operation must be registered"
+        );
+    }
     let runtime_capability_additions = [
         ("GET", "/api/doctor"),
         ("GET", "/api/doctor/memory-index"),
@@ -437,6 +492,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
+                    && !chat_suite_additions.contains(&(method.as_str(), path.as_str()))
                     && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
                     && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
                     && !runtime_capability_additions.contains(&(method.as_str(), path.as_str()))
@@ -491,6 +547,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .filter(|(method, path)| !skill_learning_additions
                 .contains(&(method.as_str(), path.as_str()))
                 && !reusable_additions.contains(&(method.as_str(), path.as_str()))
+                && !chat_suite_additions.contains(&(method.as_str(), path.as_str()))
                 && !workflow_additions.contains(&(method.as_str(), path.as_str()))
                 && !additions.contains(&(method.as_str(), path.as_str()))
                 && !coding_additions.contains(&(method.as_str(), path.as_str()))

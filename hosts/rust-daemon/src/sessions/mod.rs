@@ -281,6 +281,17 @@ pub(crate) struct SessionRecord {
     /// Invalidates inputs that began waiting before the last conversation reset.
     #[serde(default)]
     pub(crate) clear_generation: u64,
+    /// Owner selection, independent of transcript content and compaction.
+    #[serde(default)]
+    pub(crate) model_preferences: crate::chat_models::ModelPreferences,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) chat_reviews: Vec<crate::chat_review::ReviewRecord>,
+    /// Dedicated read-only viewer grants; never exposed in owner session DTOs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) conversation_shares: Vec<crate::conversation_shares::ConversationShareGrant>,
+    /// Data-only inline results and pinned reports, scoped to this generation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) chat_results: Vec<crate::chat_results::ChatResult>,
     #[serde(default)]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default)]
@@ -347,6 +358,10 @@ impl SessionRecord {
             main_chat: false,
             pending_clear_run_id: None,
             clear_generation: 0,
+            model_preferences: crate::chat_models::ModelPreferences::default(),
+            chat_reviews: Vec::new(),
+            conversation_shares: Vec::new(),
+            chat_results: Vec::new(),
             parent_session_id: None,
             parent_run_id: None,
             parent_agent_id: None,
@@ -872,6 +887,7 @@ impl SessionRegistry {
             if let Some(checkpoint) = &record.checkpoint {
                 checkpoint.validate_for(&record.agent_id, &record.id, record.room_id())?;
             }
+            crate::chat_results::validate_session(record)?;
         }
         Ok(())
     }
@@ -879,8 +895,9 @@ impl SessionRegistry {
     /// The registry after a restart: sessions of missing agents are dropped.
     pub(crate) fn restored(records: Vec<SessionRecord>, live_agents: &HashSet<String>) -> Self {
         let mut registry = Self::default();
-        for record in records {
+        for mut record in records {
             if live_agents.contains(&record.agent_id) {
+                crate::chat_review::interrupt_on_restore(&mut record.chat_reviews);
                 registry.insert(record);
             }
         }

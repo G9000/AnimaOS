@@ -79,6 +79,10 @@ pub(crate) fn shape_openai_body(body: &mut serde_json::Value, shape: OpenAiReque
     let Some(object) = body.as_object_mut() else {
         return;
     };
+    // Custom compatible endpoints have no verified reasoning capability.
+    if !shape.max_completion_tokens {
+        object.remove("reasoning_effort");
+    }
     if shape.omit_temperature {
         object.remove("temperature");
     }

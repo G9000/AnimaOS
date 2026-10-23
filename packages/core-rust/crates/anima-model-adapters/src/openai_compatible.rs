@@ -33,6 +33,13 @@ pub(super) fn build_openai_compatible_body(
         body.insert("max_tokens".into(), json!(max_tokens));
     }
 
+    if let Some(effort) = crate::reasoning::effort(config) {
+        body.insert("reasoning_effort".into(), json!(effort));
+        if effort != "none" {
+            body.remove("temperature");
+        }
+    }
+
     Ok(Value::Object(body))
 }
 

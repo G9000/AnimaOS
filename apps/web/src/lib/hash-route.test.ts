@@ -117,4 +117,23 @@ describe('hash routes', () => {
     });
     expect(result.current[0]).toEqual({ kind: 'page', page: 'files' });
   });
+
+  it('leaves viewer hashes to AppEntry and fences late owner navigation', () => {
+    window.history.replaceState(null, '', '/#/s/chat%3Amain');
+    const { result } = renderHook(() => useHashRoute());
+    for (const viewerHash of ['#/shared/share-11111111-2222-4333-8444-555555555555', '#/shared/invalid']) {
+      act(() => {
+        window.history.replaceState(null, '', `/${viewerHash}`);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(result.current[0]).toEqual({ kind: 'session', sessionId: 'chat:main' });
+      act(() => result.current[1]({ kind: 'session', sessionId: 'chat:late' }, { replace: true }));
+      expect(window.location.hash).toBe(viewerHash);
+    }
+    act(() => {
+      window.history.replaceState(null, '', '/#/files');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(result.current[0]).toEqual({ kind: 'page', page: 'files' });
+  });
 });

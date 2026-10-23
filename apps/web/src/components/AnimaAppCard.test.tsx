@@ -233,7 +233,7 @@ describe('AnimaAppCard', () => {
       .click(screen.getByRole('button', { name: 'Stop' }));
 
     expect(client.action).toHaveBeenCalledWith('stop');
-    expect(screen.getByText(STOPPED_COPY)).toBeVisible();
+    expect(await screen.findByText(STOPPED_COPY)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Restart' })).toBeNull();
   });
 
@@ -246,7 +246,7 @@ describe('AnimaAppCard', () => {
       .setup({ advanceTimers: vi.advanceTimersByTime })
       .click(screen.getByRole('button', { name: 'Stop' }));
 
-    expect(screen.getByText('Waiting for 2 tasks to finish')).toBeVisible();
+    expect(await screen.findByText('Waiting for 2 tasks to finish')).toBeVisible();
     expect(screen.queryByText(STOPPED_COPY)).toBeNull();
   });
 
@@ -297,7 +297,7 @@ describe('AnimaAppCard', () => {
       .click(screen.getByRole('button', { name: 'Quit now' }));
 
     expect(client.action).toHaveBeenCalledWith('quit', { force: true });
-    expect(screen.getByText(STOPPED_COPY)).toBeVisible();
+    expect(await screen.findByText(STOPPED_COPY)).toBeVisible();
   });
 
   it('shows a refused action as text', async () => {

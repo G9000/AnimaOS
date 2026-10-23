@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { workspaceAvatarUrl } from '../lib/daemon-api';
+import { useDaemonImage } from '../hooks/useDaemonImage';
 
 const MAX_WORKSPACE_AVATAR_BYTES = 5 * 1024 * 1024;
 const WORKSPACE_AVATAR_TYPES = new Set([
@@ -47,6 +48,7 @@ export function WorkspaceAvatar({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
+  const daemonImage = useDaemonImage(hasAvatar || uploaded ? workspaceAvatarUrl(revision) : null);
 
   const releasePreview = () => {
     const current = previewRef.current;
@@ -107,7 +109,7 @@ export function WorkspaceAvatar({
   };
 
   const showImage =
-    previewUrl !== null || ((hasAvatar || uploaded) && !imageFailed);
+    previewUrl !== null || ((hasAvatar || uploaded) && !imageFailed && !daemonImage.failed && daemonImage.src !== null);
 
   return (
     <div className="relative shrink-0">
@@ -123,7 +125,7 @@ export function WorkspaceAvatar({
       >
         {showImage ? (
           <img
-            src={previewUrl ?? workspaceAvatarUrl(revision)}
+            src={previewUrl ?? daemonImage.src ?? undefined}
             alt=""
             onError={() => setImageFailed(true)}
             className="h-full w-full rounded-full object-cover"

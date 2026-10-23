@@ -89,7 +89,12 @@ impl RunToolCatalog {
                     _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
                     _ if matches!(
                         descriptor.name.as_str(),
-                        "rename_chat" | "compact_chat" | "export_chat" | "manage_mcp"
+                        "rename_chat"
+                            | "compact_chat"
+                            | "export_chat"
+                            | "manage_mcp"
+                            | "show_result"
+                            | "list_results"
                     ) =>
                     {
                         Origin::OwnerChatControl
@@ -502,7 +507,14 @@ impl ModelToolSelector for RunToolCatalog {
         if self.entry_current(&guard, "clear_main_chat").is_ok() {
             names.insert("clear_main_chat".into());
         }
-        for name in ["rename_chat", "compact_chat", "export_chat", "manage_mcp"] {
+        for name in [
+            "rename_chat",
+            "compact_chat",
+            "export_chat",
+            "manage_mcp",
+            "show_result",
+            "list_results",
+        ] {
             if self.entry_current(&guard, name).is_ok() {
                 names.insert(name.into());
             }

@@ -136,6 +136,8 @@ export interface Run {
   usage: RunTokenUsage;
   model: string;
   provider: string | null;
+  /** Requested effort at admission; individual fallback steps may differ. */
+  reasoningEffort?: string | null;
   parentRunId: string | null;
   recovery?: {
     fingerprint: string;

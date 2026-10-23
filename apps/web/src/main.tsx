@@ -3,11 +3,8 @@ import * as ReactDOM from 'react-dom/client';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import '@fontsource-variable/fraunces';
-import { App } from './app/app';
-import { claimConsoleSession } from './lib/console-session';
+import { AppEntry } from './app/AppEntry';
 import './styles.css';
-
-const consoleClaim = claimConsoleSession();
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
@@ -15,6 +12,6 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <StrictMode>
-    <App consoleClaim={consoleClaim} />
+    <AppEntry />
   </StrictMode>
 );

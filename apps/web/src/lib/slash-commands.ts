@@ -1,4 +1,5 @@
 import type { Skill, SessionCompactInput } from '@animaos/sdk';
+import { parseChatModelCommand } from './chat-model-command';
 
 /** Composer slash commands (spec §15.3). `/<skill>` comes from the owner's
  *  skills (M5). */
@@ -12,6 +13,10 @@ export type SlashCommandName =
   | 'export'
   | 'search'
   | 'model'
+  | 'tools'
+  | 'review'
+  | 'reports'
+  | 'share'
   | 'compact'
   | 'branch'
   | 'fork'
@@ -66,7 +71,11 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
     needs: 'words to find',
     placeholder: '<words>',
   },
-  { name: 'model', description: 'Choose the model in Settings' },
+  { name: 'model', description: 'Choose this chat’s model and thinking', acceptsArgument: true, placeholder: '[inherit | <provider> <model> [effort]]' },
+  { name: 'tools', description: 'Show this chat’s current tools and permissions' },
+  { name: 'review', description: 'Ask a different model for a second opinion', acceptsArgument: true, placeholder: '[focus]' },
+  { name: 'reports', description: 'Show saved results and pinned reports' },
+  { name: 'share', description: 'Manage authenticated read-only access to this chat' },
   {
     name: 'compact',
     description: 'Summarize earlier messages to make room',
@@ -168,6 +177,10 @@ export function runSlashCommand(
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
+  }
+  if (command.name === 'model') {
+    try { parseChatModelCommand(argument); }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
   }
   handler(argument);
   return null;

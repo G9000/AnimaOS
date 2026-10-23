@@ -108,13 +108,18 @@ export type Navigate = (
   options?: { replace?: boolean },
 ) => void;
 
+/** AppEntry owns this namespace, including malformed viewer links. */
+export const isViewerHash = (hash: string) => hash.startsWith('#/shared');
+
 /** The current hash route; a reload restores it and Back/Forward follow it. */
 export function useHashRoute(): [HashRoute, Navigate] {
   const [route, setRoute] = useState<HashRoute>(() =>
     parseHashRoute(window.location.hash),
   );
   useEffect(() => {
-    const update = () => setRoute(parseHashRoute(window.location.hash));
+    const update = () => {
+      if (!isViewerHash(window.location.hash)) setRoute(parseHashRoute(window.location.hash));
+    };
     window.addEventListener('hashchange', update);
     window.addEventListener('popstate', update);
     return () => {
@@ -123,6 +128,9 @@ export function useHashRoute(): [HashRoute, Navigate] {
     };
   }, []);
   const navigate = useCallback<Navigate>((next, options = {}) => {
+    // Owner effects can settle during the viewer transition or after unmount.
+    // They must not replace the viewer URL before AppEntry can switch surfaces.
+    if (isViewerHash(window.location.hash)) return;
     const hash = formatHashRoute(next);
     if (options.replace) {
       window.history.replaceState(window.history.state, '', hash);

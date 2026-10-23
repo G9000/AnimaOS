@@ -77,6 +77,7 @@ import {
   type WorkflowResumeInput,
 } from '@animaos/sdk';
 import { consoleSessionHeaders } from './console-session';
+import { ownerApiKeyHeaders } from './owner-api-key';
 
 export type {
   AddProviderKeyInput,
@@ -109,7 +110,7 @@ export type {
 /** Shared owner transport policy, for both fetch and multipart XHR: the
  *  console session's token half, when the console has one. */
 export function daemonRequestHeaders(): Record<string, string> {
-  return consoleSessionHeaders();
+  return { ...consoleSessionHeaders(), ...ownerApiKeyHeaders() };
 }
 
 const setupClient = createDaemonClient({
@@ -125,6 +126,9 @@ const setupClient = createDaemonClient({
 
 /** The Anima app's lifecycle (`/api/system`), with the owner transport. */
 export const systemApi = setupClient.system;
+export const chatCapabilitiesApi = setupClient.chatCapabilities;
+export const chatModelsApi = setupClient.chatModels;
+export const chatSharesApi = setupClient.conversationShares;
 
 /** All external-tool owner actions use the shared owner transport policy. */
 export const mcpOwnerApi = {
@@ -570,6 +574,8 @@ export interface WorkspaceResumeResponse {
 }
 
 export const daemon = {
+  chatModels: setupClient.chatModels,
+  chatResults: setupClient.chatResults,
   runs: setupClient.runs,
   interactions: setupClient.interactions,
   voice: setupClient.voice,

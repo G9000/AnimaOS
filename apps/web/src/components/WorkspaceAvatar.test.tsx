@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WorkspaceAvatar } from './WorkspaceAvatar';
+import { clearOwnerApiKey, setOwnerApiKey } from '../lib/owner-api-key';
 
 const createObjectURL = vi.fn(() => 'blob:workspace-avatar');
 const revokeObjectURL = vi.fn();
 
 beforeEach(() => {
+  clearOwnerApiKey();
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
   Object.defineProperties(URL, {
@@ -15,8 +17,21 @@ beforeEach(() => {
     revokeObjectURL: { configurable: true, value: revokeObjectURL },
   });
 });
+afterEach(() => { clearOwnerApiKey(); vi.unstubAllGlobals(); });
 
 describe('WorkspaceAvatar', () => {
+  it('loads the workspace image through owner headers when authentication is configured', async () => {
+    setOwnerApiKey('owner-secret');
+    const fetch = vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/webp' } }));
+    vi.stubGlobal('fetch', fetch);
+    const { container, unmount } = render(<WorkspaceAvatar placement="sidebar" hasAvatar uploadAvatar={vi.fn()} />);
+    await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', 'blob:workspace-avatar'));
+    expect(fetch.mock.calls[0][0]).toBe('/api/workspace/avatar?v=0');
+    expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'x-api-key': 'owner-secret' });
+    expect(container.querySelector('img')?.getAttribute('src')).not.toContain('owner-secret');
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:workspace-avatar');
+  });
   it('renders the current orb as an accessible sidebar change control', () => {
     const { container } = render(
       <WorkspaceAvatar

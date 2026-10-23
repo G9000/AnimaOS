@@ -41,6 +41,8 @@ const AUGMENTED: &[&str] = &[
     "rename_chat",
     "compact_chat",
     "export_chat",
+    "show_result",
+    "list_results",
 ];
 const MAX_FIXTURE_BYTES: usize = 512 * 1024;
 const REAL_OPT_IN_ERROR: &str =

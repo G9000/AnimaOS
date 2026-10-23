@@ -270,6 +270,9 @@ pub(crate) struct RunRecord {
     pub(crate) provider: Option<String>,
     #[serde(default)]
     pub(crate) parent_run_id: Option<String>,
+    /// Requested effort frozen with this turn's resolved primary selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) recovery: Option<super::recovery::RecoveryRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -356,6 +359,7 @@ impl RunRecord {
             model: start.model,
             provider: start.provider,
             parent_run_id: start.parent_run_id,
+            reasoning_effort: None,
             recovery: None,
             recovery_of: None,
             recovery_attempt: 0,

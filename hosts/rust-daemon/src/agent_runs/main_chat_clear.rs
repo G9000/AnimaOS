@@ -867,6 +867,7 @@ impl AgentRunCoordinator {
             fresh.main_chat = true;
             fresh.clear_generation = next_generation;
             fresh.created_at_ms = previous_session.created_at_ms;
+            fresh.model_preferences = previous_session.model_preferences.clone();
             guard.sessions.insert(fresh);
             // Accepted inputs from before the boundary are discarded as part of clearing.
             // Their queue workers require these exact records before starting a runtime.
@@ -911,6 +912,7 @@ impl AgentRunCoordinator {
             return Err(ApiError::service_unavailable(error.to_string()));
         }
         // Ordered after every old transcript commit and before any fresh input.
+        crate::chat_review::cancel_records(&previous_session.chat_reviews);
         history.enqueue_session_deletion(agent, session);
         history.forget_mirrored(removed_ids.iter().map(String::as_str));
         for run in &removed_runs {

@@ -809,6 +809,8 @@ pub(super) async fn delete_session(
         guard.clear_history_deletion(&deletion);
         return rejected(ApiError::service_unavailable(error.to_string()));
     }
+    // Durable now: old review workers no longer have a conversation to publish to.
+    crate::chat_review::cancel_records(&record.chat_reviews);
     // Durable now: the history rows may go (spec §3.3).
     let history = {
         let guard = state.daemon.read().await;

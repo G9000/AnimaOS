@@ -44,6 +44,11 @@ mod paired_devices;
 mod queue_controls;
 mod standing_intents;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
+mod chat_capabilities;
+mod chat_models;
+mod chat_results;
+mod chat_reviews;
+mod conversation_shares;
 mod oauth_apps;
 mod personality;
 mod profile;
@@ -241,6 +246,12 @@ use crate::runtime_model::provider_summaries_with_pool;
         sessions::list_sessions, sessions::get_session, sessions::list_session_messages, sessions::search_session_messages,
         sessions::create_session, sessions::main_chat, sessions::update_session, sessions::delete_session, sessions::export_session, sessions::clear_session,
         sessions::compact_session,
+        chat_capabilities::get,
+        chat_models::get_model_preferences, chat_models::update_model_preferences,
+        chat_reviews::list_reviews, chat_reviews::request_review, chat_reviews::cancel_review,
+        chat_results::list, chat_results::save, chat_results::pin,
+        conversation_shares::list, conversation_shares::create, conversation_shares::revoke,
+        conversation_shares::get, conversation_shares::messages,
         chat_controls::revise_session,
         queue_controls::update_queued_run,
         events::agent_events,
@@ -359,6 +370,7 @@ struct AppState {
     scheduler: SchedulerService,
     jobs: crate::jobs::JobService,
     local_owner: self::http::LocalOwnerPolicy,
+    sharing_owner_auth_configured: bool,
     logs: Arc<crate::logs::LogBuffer>,
     /// Drain and shutdown for a supervisor (`/api/system/*`).
     drain: crate::system::DrainController,
@@ -895,6 +907,7 @@ fn router_with_services_with_policies_and_integrations(
         logs,
         drain,
         supervisor,
+        sharing_owner_auth_configured: api_key.is_configured(),
         started_at_ms: anima_core::primitives::now_millis(),
         _history_owner: history_owner,
     };
@@ -1061,6 +1074,19 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/sessions/{session_id}/compact",
             axum::routing::post(sessions::compact_session),
         )
+        .route(
+            "/api/agents/{agent_id}/sessions/{session_id}/capabilities",
+            get(chat_capabilities::get),
+        )
+        .route("/api/agents/{agent_id}/sessions/{session_id}/model-preferences", get(chat_models::get_model_preferences).patch(chat_models::update_model_preferences))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/reviews", get(chat_reviews::list_reviews).post(chat_reviews::request_review))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/reviews/{review_id}/cancel", axum::routing::post(chat_reviews::cancel_review))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/results", get(chat_results::list).post(chat_results::save))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/results/{result_id}", axum::routing::patch(chat_results::pin))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/shares", get(conversation_shares::list).post(conversation_shares::create))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/shares/{share_id}", axum::routing::delete(conversation_shares::revoke))
+        .route("/api/shared/conversations/{share_id}", get(conversation_shares::get))
+        .route("/api/shared/conversations/{share_id}/messages", get(conversation_shares::messages))
         .route(
             "/api/agents/{agent_id}/sessions/{session_id}/clear",
             axum::routing::post(sessions::clear_session),
@@ -1608,6 +1634,9 @@ fn router_with_services_with_policies_and_integrations(
         .layer(axum::middleware::from_fn_with_state(
             api_key,
             self::http::enforce_api_key,
+        ))
+        .layer(axum::middleware::from_fn(
+            conversation_shares::reject_viewer_credentials,
         ))
         .fallback(not_found_entry)
         .layer(axum::middleware::from_fn(discord::protect_cache))

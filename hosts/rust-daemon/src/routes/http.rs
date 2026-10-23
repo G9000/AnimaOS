@@ -241,6 +241,9 @@ impl LocalOwnerPolicy {
 }
 
 impl ApiKeyPolicy {
+    pub(super) fn is_configured(&self) -> bool {
+        self.expected.is_some()
+    }
     pub(super) fn from_env() -> Self {
         let expected = std::env::var("ANIMAOS_RS_API_KEY")
             .ok()
@@ -427,6 +430,9 @@ pub(super) async fn enforce_api_key(
     request: AxumRequest,
     next: Next,
 ) -> Result<AxumResponse, AxumResponse> {
+    if super::conversation_shares::is_shared_read_request(&request) {
+        return Ok(next.run(request).await);
+    }
     let path = request.uri().path();
     // OAuth redirects cannot carry the API key. These exact GET callbacks
     // authenticate using their expiring, single-use OAuth state instead.

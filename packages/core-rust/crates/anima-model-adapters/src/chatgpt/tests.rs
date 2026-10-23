@@ -5,6 +5,32 @@ use anima_core::{
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[test]
+fn explicit_reasoning_effort_uses_responses_shape_and_unsupported_values_are_omitted() {
+    let mut config = config();
+    config.provider = Some("chatgpt".into());
+    config.model = "gpt-6-astra".into();
+    config
+        .settings
+        .get_or_insert_with(Default::default)
+        .additional
+        .insert("reasoningEffort".into(), DataValue::String("high".into()));
+    assert_eq!(
+        request_body(&config, &request()).unwrap()["reasoning"]["effort"],
+        "high"
+    );
+    config
+        .settings
+        .as_mut()
+        .unwrap()
+        .additional
+        .insert("reasoningEffort".into(), DataValue::String("none".into()));
+    assert!(request_body(&config, &request())
+        .unwrap()
+        .get("reasoning")
+        .is_none());
+}
+
 fn wire_tool_schema(schema: Value) -> Value {
     let mut config = config();
     config.tools.as_mut().unwrap()[0].parameters_schema =

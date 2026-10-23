@@ -446,6 +446,21 @@ the companion console sends to session `/runs` and consumes `/events`.
 
 | `PATCH` | `/api/agents/{agent_id}/sessions/{session_id}/queue/{run_id}` |
 
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/model-preferences` |
+| `PATCH` | `/api/agents/{agent_id}/sessions/{session_id}/model-preferences` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/capabilities` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/results` |
+| `POST` | `/api/agents/{agent_id}/sessions/{session_id}/results` |
+| `PATCH` | `/api/agents/{agent_id}/sessions/{session_id}/results/{result_id}` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/reviews` |
+| `POST` | `/api/agents/{agent_id}/sessions/{session_id}/reviews` |
+| `POST` | `/api/agents/{agent_id}/sessions/{session_id}/reviews/{review_id}/cancel` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/shares` |
+| `POST` | `/api/agents/{agent_id}/sessions/{session_id}/shares` |
+| `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/shares/{share_id}` |
+| `GET` | `/api/shared/conversations/{share_id}` |
+| `GET` | `/api/shared/conversations/{share_id}/messages` |
+
 <!-- openapi-route-inventory:end -->
 
 ### Current workspace report downloads
@@ -662,7 +677,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 295 operations, including active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 309 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

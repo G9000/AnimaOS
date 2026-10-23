@@ -14,6 +14,7 @@ mod google;
 mod models;
 mod ollama;
 mod openai_compatible;
+mod reasoning;
 mod speech;
 mod stream;
 mod transcription;
@@ -30,6 +31,7 @@ pub use models::{
     canonical_provider_id, estimate_cost_micros, model_info, model_table, price_usage,
     CostEstimate, ModelInfo, ModelPricing, PRICING_TABLE_DATE,
 };
+pub use reasoning::supported_reasoning_efforts;
 pub use speech::OpenAiSpeechAdapter;
 pub use stream::DeterministicModelAdapter;
 pub use transcription::OpenAiTranscriptionAdapter;

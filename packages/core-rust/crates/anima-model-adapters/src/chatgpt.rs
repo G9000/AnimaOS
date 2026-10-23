@@ -252,6 +252,9 @@ fn request_body(config: &AgentConfig, request: &ModelGenerateRequest) -> Result<
     // temperature / max_tokens controls are deliberately not sent to reasoning models.
     let mut body = json!({"model":config.model, "instructions":request.system, "input":input,
         "stream":true, "store":false});
+    if let Some(effort) = crate::reasoning::effort(config) {
+        body["reasoning"] = json!({"effort": effort});
+    }
     if !tools.is_empty() {
         body["tools"] = json!(tools);
         body["tool_choice"] = json!("auto");

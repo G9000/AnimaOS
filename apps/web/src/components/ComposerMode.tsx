@@ -15,6 +15,9 @@ export interface ComposerModelState {
   provider: string;
   current: string;
   busy?: boolean;
+  selectionLabel?: string;
+  choices?: readonly string[];
+  moreLabel?: string;
   error?: string | null;
   onPick(model: string): void;
   /** Every other model lives in Settings. */
@@ -64,7 +67,7 @@ export function ComposerMode({
     ? [
         ...new Set([
           model.current,
-          ...(MODEL_SUGGESTIONS[model.provider] ?? []),
+          ...(model.choices ?? MODEL_SUGGESTIONS[model.provider] ?? []),
         ]),
       ].filter(Boolean)
     : [];
@@ -89,6 +92,7 @@ export function ComposerMode({
         {model && (
           <span className="composer-chip-model">
             {model.current || model.provider}
+            {model.selectionLabel && <small className="ml-1 opacity-60">{model.selectionLabel}</small>}
           </span>
         )}
         <ChevronIcon size={12} />
@@ -174,7 +178,7 @@ export function ComposerMode({
                     model.onMore?.();
                   }}
                 >
-                  All models and providers…
+                  {model.moreLabel ?? 'All models and providers…'}
                 </button>
               )}
               {model.error && (

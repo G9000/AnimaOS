@@ -549,3 +549,8 @@ export type {
   DaemonWarningSource,
   DaemonWarningTransition,
 } from './daemon-health.js';
+
+export * from './chat-capabilities.js';
+export * from './chat-models.js';
+export * from './results.js';
+export * from './conversation-shares.js';

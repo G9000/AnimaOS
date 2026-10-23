@@ -720,7 +720,9 @@ mod tests {
                 "broadcast_message",
                 "rename_chat",
                 "compact_chat",
-                "export_chat"
+                "export_chat",
+                "show_result",
+                "list_results"
             ]
         );
         for tool in tools {

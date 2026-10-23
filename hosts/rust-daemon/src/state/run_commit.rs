@@ -159,7 +159,19 @@ impl DaemonState {
         adapter: Arc<dyn anima_core::ModelAdapter>,
     ) -> Option<RunBuild> {
         let canonical = self.agents.get(agent_id)?;
-        let config = config.unwrap_or_else(|| canonical.config());
+        let resolved_config;
+        let config = match config {
+            Some(config) => config,
+            None => {
+                resolved_config = crate::chat_models::primary_config(
+                    self,
+                    agent_id,
+                    &crate::sessions::session_id_for_room(room_id),
+                    canonical.config(),
+                );
+                &resolved_config
+            }
+        };
         let history = self.model_visible_history(agent_id, room_id);
         let session = self
             .sessions

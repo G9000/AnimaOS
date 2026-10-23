@@ -165,6 +165,8 @@ pub(crate) struct RunResponse {
     pub(crate) usage: TokenUsageResponse,
     pub(crate) model: String,
     pub(crate) provider: Option<String>,
+    /// Requested effort at admission; fallback steps may use another model.
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) parent_run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) recovery: Option<crate::runs::recovery::RecoveryRecord>,
@@ -223,6 +225,7 @@ impl From<&RunRecord> for RunResponse {
             usage: TokenUsageResponse::from(&record.usage),
             model: record.model.clone(),
             provider: record.provider.clone(),
+            reasoning_effort: record.reasoning_effort.clone(),
             parent_run_id: record.parent_run_id.clone(),
             recovery: record.recovery.clone(),
             recovery_of: record.recovery_of.clone(),

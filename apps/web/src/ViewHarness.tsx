@@ -38,6 +38,9 @@ import { useDaemonBootstrap } from './hooks/useDaemonBootstrap';
 import { useLiveSession } from './hooks/useLiveSession';
 import { useMainChat } from './hooks/useMainChat';
 import { useSessionCommands } from './hooks/useSessionCommands';
+import { useChatModelPreferences } from './hooks/useChatModelPreferences';
+import { parseChatModelCommand } from './lib/chat-model-command';
+import { chatPanelScope, type ChatPanelName, type ChatPanelRequest } from './components/sessions/ChatExtensions';
 import { useSessionPending } from './hooks/useSessionPending';
 import { useSessionSends } from './hooks/useSessionSends';
 import { useSkillCommands } from './hooks/useSkillCommands';
@@ -1302,6 +1305,37 @@ export function ViewHarness() {
     }
   };
 
+  const chatModel = useChatModelPreferences(activeSession, daemon.chatModels, sessionRereads);
+  const [chatPanel, setChatPanel] = useState<ChatPanelRequest | null>(null);
+  const currentOwnerScope = activeSession ? chatPanelScope(activeSession) : '';
+  const ownerScopeRef = useRef(currentOwnerScope);
+  ownerScopeRef.current = currentOwnerScope;
+  const openChatPanel = (panel: ChatPanelName, focus?: string, startReview = false) => {
+    const session = activeSession;
+    if (!session || session.kind !== 'chat') return;
+    const scope = chatPanelScope(session);
+    const id = crypto.randomUUID();
+    setChatPanel({ scope, panel, id, ...(focus ? { focus } : {}) });
+    if (panel === 'review' && startReview && daemon.chatModels) {
+      void daemon.chatModels.review(session.agentId, session.id, {
+        requestId: id, clearGeneration: session.clearGeneration ?? 0,
+        ...(focus ? { focus } : {}),
+      }).then(() => {
+        if (ownerScopeRef.current === scope) setChatPanel({ scope, panel, id: `${id}:started`, ...(focus ? { focus } : {}) });
+      }).catch(caught => {
+        if (ownerScopeRef.current === scope) setWorkspaceError(errorMessage(caught));
+      });
+    }
+  };
+  const chooseChatModel = (argument = '') => {
+    if (!activeSession) { navigate({ kind: 'page', page: 'model' }); return; }
+    openChatPanel('model');
+    try {
+      const preference = parseChatModelCommand(argument);
+      if (preference) void chatModel.update(preference);
+    } catch (caught) { setWorkspaceError(errorMessage(caught)); }
+  };
+
   const commands = useSessionCommands({
     companionId: agentId,
     canSend: () =>
@@ -1341,7 +1375,8 @@ export function ViewHarness() {
     newChat,
     showCommands: () => setDraft('/'),
     search: setSessionQuery,
-    chooseModel: () => navigate({ kind: 'page', page: 'model' }),
+    chooseModel: chooseChatModel,
+    openChatPanel: (panel, focus) => openChatPanel(panel, focus, panel === 'review'),
     rename: renameSession,
     archive: archiveSession,
     exportSession,
@@ -1524,6 +1559,11 @@ export function ViewHarness() {
           ),
       }}
       session={viewedSession}
+      extensions={viewedSession?.kind === 'chat' && ['web', 'api'].includes(viewedSession.origin) && !viewedSession.parentRunId && daemon.chatModels ? {
+        request: chatPanel,
+        onOpen: panel => openChatPanel(panel),
+        onModelSaved: chatModel.adopt,
+      } : undefined}
       historyAnchor={
         routeMessageId
           ? {
@@ -1593,12 +1633,18 @@ export function ViewHarness() {
         },
         model: agent
           ? {
-              provider: agent.provider,
-              current: agent.model,
-              busy: savingSettings,
-              error: settingsSaveError,
-              onPick: (model: string) => void saveSettings({ model }),
-              onMore: () => navigate({ kind: 'page', page: 'model' }),
+              provider: chatModel.view?.primary.provider ?? agent.provider,
+              current: chatModel.view?.primary.model ?? agent.model,
+              busy: activeSession ? chatModel.busy || !chatModel.view : savingSettings,
+              error: activeSession ? chatModel.error : settingsSaveError,
+              selectionLabel: activeSession && chatModel.view ? (chatModel.view.preferences.primary.mode === 'inherit' ? 'Inherited' : 'This chat') : undefined,
+              choices: activeSession && chatModel.view ? chatModel.view.availableModels.filter(choice => choice.provider === chatModel.view?.primary.provider).map(choice => choice.model) : undefined,
+              onPick: (model: string) => {
+                if (activeSession && chatModel.view) void chatModel.update({ mode: 'override', provider: chatModel.view.primary.provider, model });
+                else chooseChatModel();
+              },
+              onMore: () => chooseChatModel(),
+              moreLabel: activeSession ? 'Chat model & thinking…' : undefined,
             }
           : undefined,
         setDraft,

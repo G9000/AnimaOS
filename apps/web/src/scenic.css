@@ -202,7 +202,8 @@
 
 /* Anything stacked above the chat (a side thread's header, notices) stays
  * on top of it and clickable. */
-.scenic-shell :has(> .studio-conversation-body) > :has(~ .studio-conversation-body) {
+.scenic-shell :has(> :is(.studio-conversation-body, .chat-results-layout))
+  > :has(~ :is(.studio-conversation-body, .chat-results-layout)) {
   position: relative;
   z-index: 2;
 }

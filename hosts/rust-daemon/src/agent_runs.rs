@@ -30,6 +30,7 @@ mod async_helpers;
 pub(crate) mod attachments;
 mod automations;
 pub(crate) mod chat_controls;
+mod chat_results;
 pub(crate) mod chat_revisions;
 mod compact;
 mod conversations;
@@ -43,6 +44,7 @@ mod shutdown;
 mod skills;
 mod stop;
 mod titles;
+pub(crate) mod tool_scope;
 mod turn;
 #[cfg(test)]
 mod turn_tests;
@@ -733,7 +735,8 @@ impl AgentRunCoordinator {
                 let slot = coordinator.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)?;
                 Some((helper.clone(), slot))
             });
-            let config = helper_config_in(&parent.state, name, worktree);
+            let mut config = helper_config_in(&parent.state, name, worktree);
+            crate::chat_models::inherit_helper_model(&guard, parent_run.as_ref(), &mut config);
             let (helper, baseline, slot) = if let Some((helper, slot)) = available {
                 let baseline = helper.state.config.clone();
                 guard.restore_agent_config(&helper.state.id, config);
@@ -1858,6 +1861,8 @@ impl AgentRunCoordinator {
                     now_ms,
                 ),
             };
+            record.reasoning_effort =
+                crate::chat_models::effort(runtime.config()).map(str::to_owned);
             if system_followup.is_some() {
                 record.system_followup = Some(true);
             }
@@ -2207,35 +2212,6 @@ impl AgentRunCoordinator {
             && delegated_parent.is_none()
             && peer_sources.is_empty()
             && is_workspace_manager(&runtime.state());
-        let mut tools = original_config.tools.clone().unwrap_or_default();
-        tools.retain(|tool| {
-            !matches!(tool.name.as_str(), "delegate_to_agent" | "spawn_helper")
-                && (can_delegate
-                    || !matches!(
-                        tool.name.as_str(),
-                        "spawn_helper_async" | "list_helper_runs" | "steer_helper" | "stop_helper"
-                    ))
-        });
-        if is_workflow_job {
-            tools.retain(|tool| {
-                !is_coordination_tool(&tool.name)
-                    && !matches!(
-                        tool.name.as_str(),
-                        "create_workflow" | "save_workflow_template" | "run_workflow_template"
-                    )
-            });
-        }
-        if is_helper_completion {
-            tools.retain(|tool| {
-                !is_coordination_tool(&tool.name)
-                    && !crate::tools::is_automation_tool(&tool.name)
-                    && tool.name != "bg_start"
-            });
-        }
-        if delegated_parent.is_some() {
-            tools
-                .retain(|tool| !matches!(tool.name.as_str(), "send_message" | "broadcast_message"));
-        }
         let ready_mcp = if delegated_parent.is_none() && !is_helper_config(&original_config) {
             self.mcp
                 .as_ref()
@@ -2244,71 +2220,7 @@ impl AgentRunCoordinator {
         } else {
             vec![]
         };
-        // Only the run copy loses disconnected descriptors. Canonical exact
-        // grants survive restart and reconnect without widening authority.
-        tools.retain(|tool| !tool.name.starts_with("mcp_") || ready_mcp.contains(tool));
-        let registry = crate::tools::ToolRegistry::new();
-        // Core memory comes with `memory_add` in the agent's own runs: an agent
-        // that may save memories may also keep its always-on blocks. Helpers
-        // never do (they are separate agents with no core memory of their own),
-        // and delegated or peer runs stay bounded by their sender's own grants.
-        if !is_helper_config(&original_config)
-            && delegated_parent.is_none()
-            && peer_sources.is_empty()
-            && tools.iter().any(|tool| tool.name == "memory_add")
-            && !tools.iter().any(|tool| tool.name == "core_memory")
-        {
-            tools.push(
-                registry
-                    .descriptor("core_memory")
-                    .expect("registered core_memory tool"),
-            );
-        }
-        if delegated_parent.is_none() && !is_helper_completion && !is_workflow_job {
-            for name in ["list_workspace_agents", "send_message", "broadcast_message"] {
-                if !tools.iter().any(|tool| tool.name == name) {
-                    tools.push(registry.descriptor(name).expect("registered peer tool"));
-                }
-            }
-        }
-        if can_delegate {
-            for name in ["list_workspace_agents", "delegate_to_agent", "spawn_helper"] {
-                if !tools.iter().any(|tool| tool.name == name) {
-                    tools.push(registry.descriptor(name).expect("registered team tool"));
-                }
-            }
-        }
-        let discovery_enabled = !is_reminder_verification
-            && original_config
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.additional.get("toolDiscovery"))
-                == Some(&DataValue::Bool(true));
-        if discovery_enabled {
-            for name in ["search_tools", "describe_tool"] {
-                if !tools.iter().any(|tool| tool.name == name) {
-                    tools.push(
-                        registry
-                            .descriptor(name)
-                            .expect("registered discovery tool"),
-                    );
-                }
-            }
-        }
-        if is_reminder_verification {
-            // The scheduler already captured the single status snapshot. This
-            // isolated run may explain it, but cannot poll or start other work.
-            tools.clear();
-        }
-        // Session control is available only on a host-proven owner main-chat turn.
-        tools.retain(|t| t.name != "clear_main_chat");
-        tools.retain(|tool| {
-            !matches!(
-                tool.name.as_str(),
-                "rename_chat" | "compact_chat" | "export_chat" | "manage_mcp"
-            )
-        });
-        if standing_admission.local_owner
+        let owner_chat = standing_admission.local_owner
             && delegated_parent.is_none()
             && peer_sources.is_empty()
             && !is_helper_config(&original_config)
@@ -2320,20 +2232,8 @@ impl AgentRunCoordinator {
                     run_id: run_id.clone(),
                 },
             )
-            .is_ok()
-        {
-            for name in ["rename_chat", "compact_chat", "export_chat"] {
-                tools.push(registry.descriptor(name).expect("registered chat control"));
-            }
-            if self.mcp.is_some() {
-                tools.push(
-                    registry
-                        .descriptor("manage_mcp")
-                        .expect("registered MCP setup control"),
-                );
-            }
-        }
-        if standing_admission.local_owner
+            .is_ok();
+        let owner_main = standing_admission.local_owner
             && delegated_parent.is_none()
             && peer_sources.is_empty()
             && !is_helper_config(&original_config)
@@ -2343,14 +2243,26 @@ impl AgentRunCoordinator {
                 .await
                 .sessions
                 .get(&agent_id, &session_id)
-                .is_some_and(|s| s.main_chat)
-        {
-            tools.push(
-                registry
-                    .descriptor("clear_main_chat")
-                    .expect("registered chat control"),
-            );
-        }
+                .is_some_and(|s| s.main_chat);
+        let scope = tool_scope::Scope {
+            can_delegate,
+            helper_completion: is_helper_completion,
+            workflow_job: is_workflow_job,
+            reminder_verification: is_reminder_verification,
+            delegated: delegated_parent.is_some(),
+            peers: !peer_sources.is_empty(),
+            owner_chat,
+            owner_main,
+            mcp_available: self.mcp.is_some(),
+        };
+        let tools = tool_scope::select(&original_config, &ready_mcp, scope);
+        let discovery_enabled = tool_scope::discovery(&original_config, scope);
+        self.state
+            .read()
+            .await
+            .live
+            .runs()
+            .set_tool_scope(&run_id, tools.clone());
         let run_origin = if is_reminder_verification {
             "This is a one-time reminder verification. Explain the supplied runtime status snapshot and its timestamps. No tools or further checks are available. Never infer receipt from a run, spoke, or a send acknowledgement.".to_string()
         } else if source == RunSource::Discord {

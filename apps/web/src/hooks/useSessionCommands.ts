@@ -108,8 +108,9 @@ export interface SessionCommandOptions {
   /** Opens the command menu (`/help`). */
   showCommands: () => void;
   search: (words: string) => void;
-  /** Opens Settings, where the model is chosen (`/model`). */
-  chooseModel: () => void;
+  /** Opens or updates the current chat's model preference (`/model`). */
+  chooseModel: (argument?: string) => void;
+  openChatPanel?: (panel: 'tools' | 'review' | 'reports' | 'share', argument?: string) => void;
   rename: (session: Session, title: string) => Promise<boolean>;
   archive: (session: Session, archived: boolean) => Promise<boolean>;
   exportSession: (session: Session) => Promise<void>;
@@ -311,11 +312,16 @@ export function useSessionCommands(
         new: () => current.newChat(),
         help: () => current.showCommands(),
         search: (words) => current.search(words),
-        model: () => current.chooseModel(),
+        model: (argument) => current.chooseModel(argument),
         usage: () => current.navigate({ kind: 'page', page: 'usage' }),
       };
       const { session, activeRun } = current;
       if (!session) return result;
+      if (session.kind === 'chat' && ['web', 'api'].includes(session.origin) && !session.parentRunId && current.openChatPanel) {
+        for (const panel of ['tools', 'review', 'reports', 'share'] as const) {
+          result[panel] = (argument) => current.openChatPanel?.(panel, argument);
+        }
+      }
       const { capabilities } = session;
       if (session.mainChat && !activeRun) {
         const clear = async () => {

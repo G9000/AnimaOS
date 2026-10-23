@@ -8,6 +8,10 @@ import { createHash } from 'node:crypto';
 import type {
   AgentEvent,
   AgentFilesPreview,
+  ChatModelPreferences,
+  ChatModelPreferencesView,
+  ChatResult,
+  ChatReview,
   DiscordConnector,
   LearningPolicy,
   LearningReview,
@@ -27,12 +31,18 @@ export interface FixtureCall {
   path: string;
   body: unknown;
   key: string | null;
+  headers: Record<string, string>;
 }
 export interface ConsoleFixtureOptions {
   origin?: string;
   realStatic?: boolean;
   realMemory?: boolean;
   realWorkspaceFiles?: boolean;
+  chatSuite?: {
+    ownerApiKey?: string;
+    results?: ChatResult[];
+    viewer?: { shareId: string; viewerId: string; secret: string; revoked?: boolean };
+  };
 }
 export interface RealMemoryResponse {
   method: string;
@@ -108,6 +118,26 @@ export async function installConsoleFixture(
   state = createState(),
   options: ConsoleFixtureOptions = {},
 ) {
+  const models = new Map<string, ChatModelPreferencesView>();
+  const reviews = new Map<string, ChatReview[]>();
+  const results = options.chatSuite?.results ?? [];
+  const modelView = (id: string): ChatModelPreferencesView => {
+    let view = models.get(id);
+    if (!view) {
+      view = {
+        preferences: { primary: { mode: 'inherit' }, reviewer: { mode: 'inherit' } },
+        primary: { provider: 'openai', model: 'test-model' },
+        reviewer: { provider: 'openai', model: 'review-model' },
+        reviewerUnavailableReason: null, appliesTo: 'next_turn',
+        clearGeneration: state.sessions.find(s => s.id === id)?.clearGeneration ?? 0,
+        availableModels: ['test-model', 'alternate-model', 'review-model'].map(model => ({
+          provider: 'openai', model, reasoningEfforts: ['low', 'medium', 'high'],
+        })),
+      };
+      models.set(id, view);
+    }
+    return view;
+  };
   const origin = options.origin ?? ORIGIN;
   if (
     (options.realStatic || options.realMemory || options.realWorkspaceFiles) &&
@@ -418,7 +448,30 @@ export async function installConsoleFixture(
       path,
       body,
       key: request.headers()['idempotency-key'] ?? null,
+      headers: request.headers(),
     });
+    const viewer = options.chatSuite?.viewer;
+    if (path.startsWith('/api/shared/conversations/')) {
+      const headers = request.headers();
+      if (!viewer || viewer.revoked || method !== 'GET' ||
+        ![`/api/shared/conversations/${viewer.shareId}`, `/api/shared/conversations/${viewer.shareId}/messages`].includes(path) ||
+        headers['x-anima-viewer-id'] !== viewer.viewerId || headers['x-anima-viewer-secret'] !== viewer.secret) {
+        refusedUrls.add(request.url());
+        return json(route, { error: 'Viewer access is unavailable.' }, 401);
+      }
+      if (path.endsWith('/messages')) return json(route, {
+        title: 'Shared planning conversation', attachmentsOmitted: true, nextBefore: null,
+        messages: [
+          { id: 'shared-user', role: 'user', text: 'What should I prepare?', createdAtMs: 1 },
+          { id: 'shared-answer', role: 'assistant', text: 'Bring the agenda and a notebook.', createdAtMs: 2 },
+        ],
+      });
+      return json(route, { id: viewer.shareId, title: 'Shared planning conversation', viewerName: 'Guest reviewer', readOnly: true, attachmentsOmitted: true });
+    }
+    if (options.chatSuite?.ownerApiKey && request.headers()['x-api-key'] !== options.chatSuite.ownerApiKey) {
+      refusedUrls.add(request.url());
+      return json(route, { error: 'Owner API key required.' }, 401);
+    }
     if (options.realWorkspaceFiles) {
       if (path.startsWith('/api/workspace/file')) {
         const admission = workspaceFilesPolicy.admit({
@@ -485,6 +538,76 @@ export async function installConsoleFixture(
       return json(route, f.body, f.status);
     }
     const get = method === 'GET';
+    if (get && path === '/api/capabilities') return json(route, {});
+    if (options.chatSuite && get && path === '/api/skill-drafts')
+      return json(route, { drafts: [] });
+    if (options.chatSuite && get && path === `/api/agents/${AGENT}/workflows`)
+      return json(route, { workflows: [] });
+    if (options.chatSuite && get && /^\/api\/agents\/companion\/sessions\/[^/]+\/clarifications$/.test(path))
+      return json(route, { clarifications: [] });
+    if (options.chatSuite && method === 'POST' && path === `/api/agents/${AGENT}/main-chat`) {
+      let record = state.sessions.find(s => s.mainChat);
+      if (!record) {
+        record = { ...session(), mainChat: true, clearGeneration: 0 };
+        state.sessions.push(record); state.messages[record.id] = [];
+      }
+      return json(route, { session: record });
+    }
+    const extension = options.chatSuite && path.match(/^\/api\/agents\/companion\/sessions\/([^/]+)\/(model-preferences|capabilities|reviews|results|shares)(?:\/([^/]+))?$/);
+    if (extension) {
+      const [, id, resource, child] = extension;
+      const generation = state.sessions.find(s => s.id === id)?.clearGeneration ?? 0;
+      if (resource === 'model-preferences') {
+        const view = modelView(id);
+        if (method === 'PATCH') {
+          for (const target of ['primary', 'reviewer'] as const) {
+            const preference = body[target] as ChatModelPreferences[typeof target] | undefined;
+            if (preference) {
+              view.preferences[target] = preference;
+              view[target] = preference.mode === 'override' ? {
+                provider: preference.provider, model: preference.model,
+                ...(preference.reasoningEffort ? { reasoningEffort: preference.reasoningEffort } : {}),
+              } : { provider: 'openai', model: target === 'primary' ? 'test-model' : 'review-model' };
+            }
+          }
+        }
+        if (get || method === 'PATCH') return json(route, view);
+      }
+      if (get && resource === 'capabilities') return json(route, {
+        agentId: AGENT, sessionId: id, basis: 'next_owner_turn', runId: null, preparing: false,
+        notice: 'Approval policy still applies to every tool call.', connections: [],
+        tools: [{ name: 'read_file', description: 'Read an allowed workspace file', origin: 'native', risk: 'read', approval: 'allow', argumentDependent: true, available: true, reason: null }],
+      });
+      if (resource === 'reviews') {
+        if (get) return json(route, { reviews: reviews.get(id) ?? [] });
+        if (method === 'POST') {
+          const row: ChatReview = {
+            id: 'review-fixture', requestId: String(body.requestId), sourceMessageId: 'answer-1', sourceRunId: 'run-answer',
+            evidenceDigest: '0'.repeat(64), focus: typeof body.focus === 'string' ? body.focus : null,
+            reviewer: modelView(id).reviewer, status: 'completed', createdAtMs: 3, finishedAtMs: 4,
+            findings: 'The answer is consistent with the supplied chat evidence. Repository and live state were not inspected.',
+            error: null, evidenceLimited: true,
+          };
+          reviews.set(id, [row]); return json(route, { review: row }, 202);
+        }
+      }
+      if (resource === 'results') {
+        if (get) return json(route, { clearGeneration: generation, results: results.filter(result => result.sessionId === id) });
+        if (method === 'PATCH' && child) {
+          const result = results.find(result => result.id === child && result.sessionId === id);
+          if (!result) return json(route, { error: 'Unknown result' }, 404);
+          expect(body).toMatchObject({ clearGeneration: generation, expectedRevision: result.revision });
+          result.pinned = body.pinned === true; result.revision += 1;
+          return json(route, { result });
+        }
+      }
+      if (resource === 'shares') {
+        if (get) return json(route, { grants: [] });
+        if (method === 'POST' && viewer) return json(route, {
+          grant: { id: viewer.shareId, viewerId: viewer.viewerId, viewerName: String(body.viewerName), createdAtMs: 5, revokedAtMs: null, active: true }, secret: viewer.secret,
+        }, 201);
+      }
+    }
     if (get && path === '/api/health') return json(route, { status: 'ok' });
     if (get && path === `/api/agents/${AGENT}/connectors/discord`) {
       const dormant: { connectors: DiscordConnector[] } = { connectors: [] };

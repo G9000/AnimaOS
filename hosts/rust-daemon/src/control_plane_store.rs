@@ -14,6 +14,8 @@ use crate::connectors::{
     TelegramOutboundRecord,
 };
 use crate::schedules::ScheduledPromptRecord;
+#[cfg(test)]
+mod chat_suite_upgrade_tests;
 
 /// Snapshot format version. Version 5 adds sessions (companion console M2);
 /// version 6 adds the live-run fields (M3: accepted `queued` runs and each
@@ -39,7 +41,8 @@ use crate::schedules::ScheduledPromptRecord;
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 28;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 29;
+pub(crate) const PRE_CHAT_SUITE_BACKUP_SUFFIX: &str = ".pre-chat-suite.bak";
 pub(crate) const PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX: &str = ".pre-execution-budgets.bak";
 pub(crate) const PRE_TURN_RECOVERY_BACKUP_SUFFIX: &str = ".pre-turn-recovery.bak";
 pub(crate) const PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX: &str = ".pre-memory-maintenance.bak";
@@ -557,8 +560,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_MEMORY_MAINTENANCE_BACKUP_SUFFIX
             } else if loaded_version < 27 {
                 PRE_TURN_RECOVERY_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 28 {
                 PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX
+            } else {
+                PRE_CHAT_SUITE_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)

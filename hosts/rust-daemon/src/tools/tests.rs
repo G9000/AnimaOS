@@ -447,6 +447,16 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("export_chat", &[][..], &[][..]),
         (
+            "show_result",
+            &["expectedRevision", "requestKey", "title", "payload"][..],
+            &["id"][..],
+        ),
+        (
+            "list_results",
+            &[][..],
+            &["id", "expectedRevision", "offset", "limit"][..],
+        ),
+        (
             "manage_mcp",
             &["action"][..],
             &[

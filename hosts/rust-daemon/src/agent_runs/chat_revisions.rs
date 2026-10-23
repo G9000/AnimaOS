@@ -200,6 +200,7 @@ impl AgentRunCoordinator {
             now,
         );
         record.parent_session_id = Some(source.id.clone());
+        record.model_preferences = source.model_preferences.clone();
         record.last_read_at_ms = Some(now);
         let message_namespace = uuid::Uuid::new_v4();
         for (index, message) in messages.iter_mut().enumerate() {
