@@ -244,6 +244,8 @@ pub(crate) struct ControlPlaneSnapshot {
     /// for the owner's undo.
     #[serde(default)]
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
+    #[serde(default)]
+    pub(crate) skill_evaluations: crate::skills::evaluation::EvaluationRegistry,
     /// Repositories where helper worktrees were created, for the startup sweep.
     #[serde(default)]
     pub(crate) helper_worktree_repos: Vec<String>,
@@ -738,6 +740,7 @@ impl ControlPlaneSnapshot {
             coding_keys: vec![],
             agent_autonomy: vec![],
             skill_ledger: vec![],
+            skill_evaluations: crate::skills::evaluation::EvaluationRegistry::default(),
             helper_worktree_repos: vec![],
             skills: vec![],
             skill_drafts: vec![],

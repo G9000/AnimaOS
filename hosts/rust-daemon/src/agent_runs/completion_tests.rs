@@ -386,6 +386,52 @@ async fn completion_review_run_local_opt_in_and_budget_preserve_existing_behavio
 }
 
 #[tokio::test]
+async fn quality_change_bound_completion_missing_contract_uses_one_advisory_without_extra_commands()
+{
+    let saved = "pub fn answer() -> u8 { 42 }\n";
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("save-code", "write_file", [
+            ("file_path", DataValue::String("lib.rs".into())),
+            ("content", DataValue::String(saved.into())),
+        ])]),
+        Step::Tools(vec![read("read-code", "lib.rs")]),
+        Step::Text(vec!["The code is saved."]),
+        Step::Text(vec!["Saved and read back; verification is unavailable because no owner contract is configured."]),
+    ]);
+    let fixture = Fixture::new(model.clone(), true, 8, false);
+    let result = fixture
+        .run("save code with missing verification contract")
+        .await;
+    assert_eq!(result.result.status, "success");
+    assert_eq!(model.requests().len(), 4);
+    assert!(model.secondary_requests().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join("lib.rs")).unwrap(),
+        saved
+    );
+    let state = fixture.coordinator.state.read().await;
+    let messages = state.agents[&fixture.agent].messages();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message
+                .content
+                .text
+                .contains("Evaluator requested a revision: Completion review:"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.role == MessageRole::Tool)
+            .count(),
+        2
+    );
+    assert_paired(messages);
+}
+
+#[tokio::test]
 #[ignore = "explicit opt-in: one bounded real subscription task in an isolated file-only workspace"]
 async fn completion_review_live_invoice_reconciliation_and_quiet_restart() {
     let adapter = Arc::new(crate::runtime_model::RuntimeModelAdapter::from_env(

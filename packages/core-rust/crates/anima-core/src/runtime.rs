@@ -101,6 +101,8 @@ pub struct AgentRuntime {
     model_adapter: Arc<dyn ModelAdapter>,
     /// Per-run request selection, never persisted or used as execution authority.
     model_tool_selector: Option<Arc<dyn crate::ModelToolSelector>>,
+    /// Frozen host admission; applies only to per-call request copies.
+    tool_output_pruning: crate::tool_output_pruning::ToolOutputPruning,
     db: Option<Arc<dyn DatabaseAdapter>>,
     persistence_agent_id: Option<String>,
     step_counter: u64,
@@ -153,6 +155,7 @@ impl AgentRuntime {
             evaluators: Vec::new(),
             model_adapter,
             model_tool_selector: None,
+            tool_output_pruning: Default::default(),
             db: None,
             persistence_agent_id: None,
             step_counter: 0,
@@ -198,6 +201,7 @@ impl AgentRuntime {
             evaluators: Vec::new(),
             model_adapter,
             model_tool_selector: None,
+            tool_output_pruning: Default::default(),
             db: None,
             persistence_agent_id: None,
             step_counter: snapshot.step_count,
@@ -213,6 +217,15 @@ impl AgentRuntime {
     /// Restricts only tools advertised on each subsequent model request.
     pub fn set_model_tool_selector(&mut self, selector: Option<Arc<dyn crate::ModelToolSelector>>) {
         self.model_tool_selector = selector;
+    }
+
+    /// Configure request-only projection. This admission is never persisted,
+    /// expanded by model output, or treated as permission to retrieve artifacts.
+    pub fn set_tool_output_pruning(
+        &mut self,
+        pruning: crate::tool_output_pruning::ToolOutputPruning,
+    ) {
+        self.tool_output_pruning = pruning;
     }
 
     /// Applies one accepted run snapshot; never mutates canonical configuration.
@@ -601,7 +614,7 @@ impl AgentRuntime {
             });
             let request = ModelGenerateRequest {
                 system,
-                messages: conversation.clone(),
+                messages: self.tool_output_pruning.project(&conversation),
                 temperature: self
                     .state
                     .config

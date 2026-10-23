@@ -3,6 +3,7 @@
 //! valid session id; those map to a stable `legacy-room:<hash>` id and keep
 //! their room on the record.
 
+pub(crate) mod checkpoint;
 pub(crate) mod compaction;
 pub(crate) mod context;
 pub(crate) mod history_read;
@@ -282,6 +283,9 @@ pub(crate) struct SessionRecord {
     pub(crate) parent_agent_id: Option<String>,
     #[serde(default)]
     pub(crate) summary: Option<SessionSummary>,
+    /// Historical continuity data, never Fact memory or execution authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) checkpoint: Option<checkpoint::SessionCheckpoint>,
     #[serde(default)]
     pub(crate) context_trimmed: Option<SessionContextTrimmed>,
     /// The last run's reported prompt tokens over its estimate, in permille
@@ -339,6 +343,7 @@ impl SessionRecord {
             parent_run_id: None,
             parent_agent_id: None,
             summary: None,
+            checkpoint: None,
             context_trimmed: None,
             context_calibration_permille: None,
             compaction_error: None,
@@ -855,6 +860,9 @@ impl SessionRegistry {
                         record.id
                     ));
                 }
+            }
+            if let Some(checkpoint) = &record.checkpoint {
+                checkpoint.validate_for(&record.agent_id, &record.id, record.room_id())?;
             }
         }
         Ok(())

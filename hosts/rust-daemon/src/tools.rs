@@ -138,7 +138,7 @@ pub(crate) struct ToolExecutionContext {
     pub(super) approvals: Option<crate::approvals::ApprovalGate>,
     action_journal: Option<crate::agent_runs::action_receipts::RunActionJournal>,
     rpc_fence: Option<crate::tool_rpc::RpcGrantFence>,
-    completion_review: Option<anima_core::CompletionReview>,
+    completion_review: Option<completion::HostCompletionReview>,
     tool_rpc_service: Arc<crate::tool_rpc::ToolRpcService>,
     /// The owner's time zone, for reading and scheduling wall-clock times.
     pub(super) owner_time_zone: crate::clock::OwnerTimeZone,
@@ -264,9 +264,9 @@ impl ToolExecutionContext {
 
     pub(crate) fn with_completion_review(
         mut self,
-        review: Option<anima_core::CompletionReview>,
+        review: Option<impl Into<completion::HostCompletionReview>>,
     ) -> Self {
-        self.completion_review = review;
+        self.completion_review = review.map(Into::into);
         self
     }
 
@@ -415,8 +415,8 @@ impl ToolExecutionContext {
             tool_call.clone(),
         );
         let completion = self.completion_review.clone().map(|review| {
-            let checkpoint = review.checkpoint();
-            (review, checkpoint, tool_call.clone())
+            let prepared = review.prepare(self.workspace_root.as_deref(), &tool_call);
+            (review, prepared, tool_call.clone())
         });
         let result = self
             .execute_tool_inner(agent, user_message, tool_call)
@@ -424,8 +424,8 @@ impl ToolExecutionContext {
         // execute_tool_inner acknowledges the action journal before returning.
         // An actual effect with an uncertain outcome save is an error here and
         // cannot be converted into successful completion evidence.
-        if let Some((review, checkpoint, call)) = completion {
-            completion::observe(&review, checkpoint, &call, &result);
+        if let Some((review, prepared, call)) = completion {
+            review.settle(prepared, &call, &result);
         }
         let (store, agent, workspace, run, call) = projection;
         let result = crate::tool_results::project_result(

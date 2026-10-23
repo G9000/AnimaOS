@@ -42,6 +42,8 @@ pub(crate) enum UsageSource {
     /// The autonomy smart check judging a risky command.
     Approval,
     SideQuestion,
+    /// Fresh tool-free baseline/candidate skill trials.
+    SkillEvaluation,
 }
 
 impl UsageSource {
@@ -61,6 +63,7 @@ impl UsageSource {
             Self::Agency => "agency",
             Self::Approval => "approval",
             Self::SideQuestion => "side_question",
+            Self::SkillEvaluation => "skill_evaluation",
         }
     }
 }

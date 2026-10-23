@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 285, "complete registered operation count");
+    assert_eq!(actual.len(), 290, "complete registered operation count");
     let runtime_capability_additions = [
         ("GET", "/api/doctor"),
         ("GET", "/api/doctor/memory-index"),
@@ -118,6 +118,11 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         );
     }
     let skill_learning_additions = [
+        ("GET", "/api/skills/{slug}/evaluation-suite"),
+        ("PUT", "/api/skills/{slug}/evaluation-suite"),
+        ("GET", "/api/skill-drafts/{draft_id}/evaluation"),
+        ("POST", "/api/skill-drafts/{draft_id}/evaluation"),
+        ("POST", "/api/skill-drafts/{draft_id}/evaluation/cancel"),
         ("GET", "/api/skills/{slug}/learning"),
         ("POST", "/api/skills/{slug}/feedback"),
     ];

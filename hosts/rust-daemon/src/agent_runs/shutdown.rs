@@ -121,10 +121,16 @@ impl AcceptedRuns {
             .send_modify(|lifecycle| lifecycle.closing = true);
     }
 
+    #[cfg(test)]
     async fn close_and_wait(&self) -> Vec<String> {
+        self.close_and_wait_until(tokio::time::Instant::now() + self.wait)
+            .await
+    }
+
+    async fn close_and_wait_until(&self, deadline: tokio::time::Instant) -> Vec<String> {
         let mut lifecycle = self.lifecycle.subscribe();
         self.request_shutdown();
-        let ended = tokio::time::timeout(self.wait, async {
+        let ended = tokio::time::timeout_at(deadline, async {
             let _ = lifecycle
                 .wait_for(|lifecycle| lifecycle.going.is_empty())
                 .await;
@@ -182,14 +188,28 @@ impl AgentRunCoordinator {
     /// module documentation.
     pub(crate) async fn shutdown(&self) {
         self.request_shutdown();
+        self.skills().close_evaluations().await;
         self.learning.shutdown().await;
-        let left = self.accepted_runs.close_and_wait().await;
+        // Agent runs and retiring evaluation transports share one existing
+        // shutdown wait budget; neither adds an unbounded second wait.
+        let deadline = tokio::time::Instant::now() + self.accepted_runs.wait;
+        let left = self.accepted_runs.close_and_wait_until(deadline).await;
         if !left.is_empty() {
             warn!(
                 run_ids = ?left,
                 wait_ms = self.accepted_runs.wait.as_millis() as u64,
                 "accepted runs were still going when shutdown stopped waiting; the restart interrupts them"
             );
+        }
+        let evaluation_slots = self.state.read().await.skill_evaluation_slots.clone();
+        while evaluation_slots.available_permits() == 0 {
+            if tokio::time::timeout_at(deadline, tokio::time::sleep(Duration::from_millis(20)))
+                .await
+                .is_err()
+            {
+                warn!("skill evaluation transport did not retire within the shared shutdown deadline; late usage is unconfirmed and work will not replay");
+                break;
+            }
         }
         if let Some(manager) = self.mcp_manager() {
             manager.shutdown().await;
@@ -244,6 +264,46 @@ impl AgentRunCoordinator {
 #[cfg(test)]
 mod typed_shutdown_tests {
     use super::*;
+    #[tokio::test]
+    async fn quality_skill_evaluation_shutdown_waits_for_physical_retirement() {
+        let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let coordinator =
+            AgentRunCoordinator::new(state.clone(), Arc::new(tokio::sync::Semaphore::new(1)))
+                .with_accepted_shutdown_wait(Duration::from_millis(200));
+        let slots = state.read().await.skill_evaluation_slots.clone();
+        let physical = slots.clone().try_acquire_owned().unwrap();
+        let shutdown = tokio::spawn(async move { coordinator.shutdown().await });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(slots.is_closed());
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must retain its worker retirement wait"
+        );
+        drop(physical);
+        tokio::time::timeout(Duration::from_millis(400), shutdown)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn quality_skill_evaluation_shutdown_shares_the_existing_run_wait_deadline() {
+        let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        let coordinator =
+            AgentRunCoordinator::new(state.clone(), Arc::new(tokio::sync::Semaphore::new(1)))
+                .with_accepted_shutdown_wait(Duration::from_millis(300));
+        let going = coordinator.accepted_runs.begin("held-run").unwrap();
+        let slots = state.read().await.skill_evaluation_slots.clone();
+        let physical = slots.clone().try_acquire_owned().unwrap();
+        let started = tokio::time::Instant::now();
+        coordinator.shutdown().await;
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "retirement must not stack another shutdown budget"
+        );
+        assert_eq!(slots.available_permits(), 0);
+        drop(going);
+        drop(physical);
+    }
     #[test]
     fn classification_uses_kind_instead_of_display_text() {
         assert!(is_shutting_down(&ApiError::daemon_shutting_down(

@@ -15,6 +15,7 @@ impl AgentRunCoordinator {
     /// control-plane transaction.
     pub(crate) fn skills(&self) -> SkillService {
         SkillService::new(Arc::clone(&self.state), self.control_plane_transactions())
+            .with_evaluation_admission(self.work_admission_probe())
     }
 
     /// Adds the skills index and a `/skill` message's instructions to this

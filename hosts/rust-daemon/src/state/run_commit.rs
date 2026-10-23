@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+#[path = "run_commit/pruning.rs"]
+mod pruning;
+
 use anima_core::primitives::now_millis;
 use anima_core::{
     select_context, AgentConfig, AgentRuntime, AgentRuntimeSnapshot, AgentState, AgentStatus,
@@ -12,7 +15,8 @@ use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
 use super::DaemonState;
 use crate::runs::{RunChangeSet, RunError, RunOutcome, RunSource, RunStatus, AGENT_DELETED};
 use crate::sessions::context::{
-    model_visible, newest_left_out, uncovered_pruned_through, ContextBudget, SessionSummaryProvider,
+    model_visible, newest_left_out, uncovered_pruned_through, ContextBudget,
+    SessionCheckpointProvider, SessionSummaryProvider,
 };
 use crate::tools::ToolExecutionContext;
 
@@ -160,6 +164,10 @@ impl DaemonState {
                 text: summary.text.clone(),
                 through_message_id: summary.through_message_id.clone(),
             });
+        let checkpoint = session.and_then(|session| session.checkpoint.clone());
+        let checkpoint_text = checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.prompt_text());
         let estimator = TokenEstimator::new(
             session
                 .and_then(|session| session.context_calibration_permille)
@@ -171,6 +179,11 @@ impl DaemonState {
             summary.as_ref(),
             budget
                 .history_tokens(estimator.content_tokens(input))
+                .saturating_sub(
+                    checkpoint_text
+                        .as_ref()
+                        .map_or(0, |text| estimator.text_tokens(text)),
+                )
                 .saturating_sub(
                     (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil()
                         as u64,
@@ -187,6 +200,9 @@ impl DaemonState {
             + summary
                 .as_ref()
                 .map_or(0, |summary| raw.text_tokens(&summary.text))
+            + checkpoint_text
+                .as_ref()
+                .map_or(0, |text| raw.text_tokens(text))
             + files.estimated_tokens;
         let pruned = session.and_then(|session| uncovered_pruned_through(session, &history));
         let context = RunContextReport {
@@ -200,16 +216,25 @@ impl DaemonState {
             Arc::clone(&adapter),
         );
         runtime.replace_config(config.clone());
+        let pruning = pruning::policy(self, agent_id, room_id, config, runtime.messages());
+        runtime.set_tool_output_pruning(pruning);
         runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
-        if let Some(summary) = summary {
+        if summary.is_some() || checkpoint.is_some() {
             let mut providers = crate::components::default_providers_in_zone(
                 Arc::clone(&self.memory),
                 Arc::clone(&self.memory_embeddings),
                 self.owner_time_zone.clone(),
             );
-            providers
-                .push(Arc::new(SessionSummaryProvider { text: summary.text }) as Arc<dyn Provider>);
+            if let Some(summary) = summary {
+                providers
+                    .push(Arc::new(SessionSummaryProvider { text: summary.text })
+                        as Arc<dyn Provider>);
+            }
+            if let Some(checkpoint) = checkpoint {
+                providers
+                    .push(Arc::new(SessionCheckpointProvider { checkpoint }) as Arc<dyn Provider>);
+            }
             runtime.set_providers(providers);
         }
         let base = runtime.run_base();

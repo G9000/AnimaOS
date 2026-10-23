@@ -1,13 +1,7 @@
 import type { DaemonClient } from './client.js';
 
 export type SystemAction =
-  | 'start'
-  | 'stop'
-  | 'restart'
-  | 'quit'
-  | 'update'
-  | 'check-update'
-  | 'cancel';
+  'start' | 'stop' | 'restart' | 'quit' | 'update' | 'check-update' | 'cancel';
 
 /** The work a drain waits for, by kind. */
 export interface SystemInFlight {
@@ -21,6 +15,7 @@ export interface SystemInFlight {
   acpSessions: number;
   /** Additional native work categories are absent on older daemons. */
   memoryReviews?: number;
+  skillEvaluations?: number;
   doctorRepairs?: number;
   standingIntentChanges?: number;
   executionJobs?: number;

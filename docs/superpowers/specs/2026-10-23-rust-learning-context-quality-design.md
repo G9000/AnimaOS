@@ -1,0 +1,27 @@
+# Rust learning and context quality
+
+The owner authorized implementing all four capabilities in this chat, starting with skill evaluation, on main without staging or commits. Existing approvals, Undo and runtime authority remain mandatory.
+
+## 1. Skill evaluation before promotion
+
+Owner-defined, per-skill enforced suites compare an immutable baseline package and exact candidate package using the same captured agent/model configuration. Suites contain bounded train and held-out fixtures, deterministic exact-text or canonical-JSON oracles and explicit output/token/call/time limits. Expected answers never enter model requests. Trials are fresh, tool-free and have no canonical memory, workspace or external-action tools. These tests cover response procedures; they do not claim to validate arbitrary side-effecting skills. Costs and errors are reported separately from correctness.
+
+An enforced suite is opt-in because fixtures and provider spending require owner authority; absent suites preserve existing behavior. When configured, all persisted Agent/Import draft approvals and File-draft approvals, including Free activation and owner-edited candidates, require a current passing result. The result binds workspace, suite revision/digest, baseline package hash, candidate package hash, draft/source identity, grader version and captured model configuration. Both settlement and approval inside the shared transaction compare these against current state; a report matching only its own captured configuration is insufficient. Any missing trial, baseline provider failure or incomplete suite makes the entire result ineligible. Required cases cannot regress; held-out cases must pass and any configured improvement threshold must be met. Missing, failed, stale, interrupted or uncertain results never pass. Evaluation success never itself grants approval, broadens tools or replaces the existing source/base/Undo checks. Direct owner save/approve_changed operations and exact Undo restoration are explicit authoring/restoration exceptions; they invalidate old evidence. Deliberate policy changes retain their explicit owner authority. A new skill has a no-skill baseline; an existing skill with unavailable approved baseline bytes cannot be evaluated as if that baseline were empty.
+
+Run bounded physical work without holding control-plane locks. Persist reservation/results and refuse duplicate in-flight evaluation. Cancellation/shutdown retain custody until work is retired; restart marks unfinished trials interrupted and never replays provider work automatically. Persist results and policy through the existing control-plane transaction, validate bounds on restore, and expose owner-only no-store configuration/evaluation/report controls. Per-suite status must distinguish not configured, pending, passed, failed, stale and interrupted.
+
+## 2. Checkpoint before compaction
+
+Before dropping historical detail, derive a bounded structured session checkpoint from the same historical-only input used by compaction. Preserve goals, decisions, unresolved work and settled evidence/artifact identifiers with source IDs/digests and sender provenance. The already-admitted current user input stays out of housekeeping. Checkpoints are untrusted continuity data, never permissions or independently verified facts. Store in session state, not canonical Fact memory. Persist checkpoint before using a compacted context, retain it through restart and include it in existing rollback/revalidation. No additional model authority or mutation tools. Failed, cancelled or stale work cannot replace a newer checkpoint.
+
+## 3. Selective old tool-output projection
+
+Use a bounded host-neutral policy to shorten eligible old, large tool results on outgoing prompt copies only. Preserve canonical messages/history, identities, recent/current-run evidence, approvals, unknown outcomes, structured artifacts and tool-call/result pairing. Keep a stable digest/identifier and honest truncation marker; content remains untrusted. Expose an explicit bounded opt-in policy and demonstrate reduced request bytes without changing canonical state. Avoid claiming token or cache savings from bytes alone.
+
+## 4. Change-bound completion verification
+
+Replace the one global verification bit with bounded per-path/version coverage. Capture exact host-observed edited paths and content identity. A successful recognized command is insufficient without a resolved scope. Owner-defined exact command/cwd/coverage contracts are authoritative scope declarations; unknown commands and filtered/foreign-project checks cannot clear unrelated requirements. Bind evidence to the actual pre-dispatch workspace and changed-file versions; re-check after settlement. Concurrent edits, changed bytes, failed/unknown checks and stale reads do not discharge requirements. Keep the existing single advisory reminder and tool/cancel budgets; do not turn evidence into a claim that the whole task is correct.
+
+## Acceptance and limits
+
+Test meaningful behavior first and retain RED/GREEN evidence. Include baseline-versus-candidate regression and heldout tests, stale suite/base/model/body/source changes, approval/Undo/persistence, no-tool trial captures, cancellation, restart, context continuity, projection immutability and scope/version-specific verification. Use Nx checks required by AGENTS.md, plus SDK checks if wire clients change. Distinguish scripted deterministic adapters from real provider acceptance. Re-inspect cached and unstaged diffs and preserve concurrent edits.

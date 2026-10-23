@@ -56,7 +56,7 @@ struct Stored {
 fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
-fn workspace_key(path: &Path) -> Result<String, String> {
+pub(crate) fn workspace_key(path: &Path) -> Result<String, String> {
     let root =
         crate::tools::workspace_bytes::WorkspaceBytes::open(path).map_err(|_| UNAVAILABLE)?;
     Ok(hash(root.canonical_root.to_string_lossy().as_bytes()))
@@ -375,6 +375,20 @@ impl ToolResultStore {
         Ok(value)
     }
 
+    /// Returns only metadata after the same ownership and payload-integrity
+    /// checks as a download. It does not grant model read permission.
+    pub(crate) fn describe_verified(
+        &self,
+        agent: &str,
+        workspace: &Path,
+        id: &str,
+    ) -> Result<ToolResultArtifact, String> {
+        let workspace = workspace_key(workspace)?;
+        let dir = open_directory(&self.root, false)?;
+        self.load_from(&dir, agent, &workspace, id)
+            .map(|value| value.artifact)
+    }
+
     pub(crate) fn download(
         &self,
         agent: &str,
@@ -488,6 +502,49 @@ pub(crate) fn project_result(
     call: &anima_core::ToolCall,
     mut result: TaskResult<Content>,
 ) -> TaskResult<Content> {
+    // Structured management/search envelopes retain their exact wire format.
+    // Only tools supported by request pruning need this native scope.
+    if matches!(
+        call.name.as_str(),
+        "read_file" | "bash" | "grep" | "glob" | "list_files" | "search_files"
+    ) {
+        let returned_capture_complete = capture_complete(&result);
+        // Overwrite provider/native payload claims with the actual dispatched
+        // workspace and call scope. Legacy unscoped inline output stays unpruned.
+        if let Some(content) = result.data.as_mut() {
+            let metadata = content.metadata.get_or_insert_with(Default::default);
+            metadata.remove("toolOutputScope");
+            if let (Some(workspace), Some(run)) = (workspace, run) {
+                if run.agent_id == agent && result.status == anima_core::TaskStatus::Success {
+                    if let Ok(workspace) = workspace_key(workspace) {
+                        metadata.insert(
+                            "toolOutputScope".into(),
+                            anima_core::DataValue::Object(std::collections::BTreeMap::from([
+                                ("version".into(), anima_core::DataValue::Number(1.0)),
+                                (
+                                    "captureComplete".into(),
+                                    anima_core::DataValue::Bool(returned_capture_complete),
+                                ),
+                                ("workspace".into(), anima_core::DataValue::String(workspace)),
+                                (
+                                    "agentId".into(),
+                                    anima_core::DataValue::String(agent.into()),
+                                ),
+                                (
+                                    "runId".into(),
+                                    anima_core::DataValue::String(run.run_id.clone()),
+                                ),
+                                (
+                                    "toolCallId".into(),
+                                    anima_core::DataValue::String(call.id.clone()),
+                                ),
+                            ])),
+                        );
+                    }
+                }
+            }
+        }
+    }
     if call.name == "read_tool_result"
         || serde_json::to_vec(&result).is_ok_and(|bytes| bytes.len() <= INLINE_LIMIT)
         || bounded_helper_management(call, &result)

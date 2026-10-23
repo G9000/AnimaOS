@@ -1,5 +1,9 @@
 # Documentation changelog
 
+## 2026-10-23
+
+- Document opt-in skill evaluation before promotion, historical compaction checkpoints, request-copy output pruning, and completion evidence bound to file versions. Describe approval/Undo boundaries, provider and usage limits, and the SDK controls; update the Rust daemon API inventory to 290 operations.
+
 ## 2026-10-20 (reference cleanup)
 
 - Removed optional comparison branding and contribution prose from documentation, design text and source comments. Renamed component license files to generic third-party notices while retaining their copyright and full MIT terms.

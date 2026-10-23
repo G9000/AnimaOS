@@ -472,6 +472,7 @@ async function start(restart = false) {
     TEMP: path.join(root, 'tmp'), TMP: path.join(root, 'tmp'),
     ANIMAOS_RS_HOST: '127.0.0.1', ANIMAOS_RS_PORT: String(port),
     ANIMAOS_RS_PERSISTENCE_MODE: 'memory',
+    ANIMAOS_RS_MEMORY_EMBEDDINGS: 'local', // Isolated acceptance needs no model download.
     ANIMAOS_RS_CONTROL_PLANE_FILE: path.join(root, 'control-plane.json'),
     ANIMAOS_RS_MEMORY_FILE: path.join(root, 'memory.json'),
     ANIMAOS_RS_HISTORY_SQLITE_FILE: path.join(root, 'history.sqlite'),

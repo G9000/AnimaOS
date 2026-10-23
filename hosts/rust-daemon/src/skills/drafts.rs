@@ -324,8 +324,10 @@ impl SkillService {
                     "Only agent-proposed drafts can activate automatically",
                 ));
             }
-            return self.approve_file_draft(slug, approval).await;
+            let evidence = self.evaluation_preflight(id, &approval).await?;
+            return self.approve_file_draft(slug, approval, evidence).await;
         }
+        let evidence = self.evaluation_preflight(id, &approval).await?;
         let id = id.to_string();
         // Read before the transaction; a decided or unknown draft is
         // answered by `apply` below.
@@ -480,8 +482,35 @@ impl SkillService {
             } else {
                 None
             };
+            let source_hash = if evidence.is_some() {
+                let workspace = root.clone();
+                let slug = linked.as_ref().ok_or(SkillError::NotFound)?.slug.clone();
+                blocking(move || super::package::read_package(&workspace, &slug))
+                    .await?
+                    .map_err(SkillError::Unavailable)?
+                    .map(|package| package.hash())
+            } else {
+                None
+            };
+            let gate = linked
+                .as_ref()
+                .map(|draft| super::evaluation_service::EvaluationGate {
+                    draft_id: id.clone(),
+                    slug: draft.slug.clone(),
+                    source_hash,
+                    candidate_hash: anima_core::skill_packages::skill_package_hash(
+                        compose_skill_file(
+                            &draft.name,
+                            &draft.description,
+                            approval.body.as_deref().unwrap_or(&draft.body),
+                        )
+                        .as_bytes(),
+                        approval.files.as_deref().unwrap_or(&draft.files),
+                    ),
+                    evidence,
+                });
             let (slug, draft) = service
-                .apply_with_ledger(&root, ledger, move |skills, now_ms| {
+                .apply_with_ledger(&root, ledger, gate, move |skills, now_ms| {
                     let previous_draft = skills.draft(&id).cloned().ok_or(SkillError::NotFound)?;
                     if !previous_draft.is_pending() {
                         return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
@@ -557,6 +586,7 @@ impl SkillService {
         &self,
         slug: &str,
         approval: DraftApproval,
+        evidence: Option<super::evaluation::EvaluationIdentity>,
     ) -> Result<ApprovedDraft, SkillError> {
         if !is_valid_slug(slug) {
             return Err(SkillError::NotFound);
@@ -598,9 +628,25 @@ impl SkillService {
                 return Err(SkillError::conflict(SKILL_HASH_MISMATCH));
             }
             crate::community_bundles::check_skill_edit(&*service.state.read().await, &slug, true)?;
+            let source_hash = if evidence.is_some() {
+                let (workspace, target) = (root.clone(), slug.clone());
+                blocking(move || super::package::read_package(&workspace, &target))
+                    .await?
+                    .map_err(SkillError::Unavailable)?
+                    .map(|package| package.hash())
+            } else {
+                Some(reviewed.clone())
+            };
+            let gate = super::evaluation_service::EvaluationGate {
+                draft_id: file_draft_id(&slug),
+                slug: slug.clone(),
+                candidate_hash: approved_hash.clone(),
+                source_hash,
+                evidence,
+            };
             let (target, approved_file) = (slug.clone(), file.clone());
             service
-                .apply(&root, move |skills, now_ms| {
+                .apply_with_ledger(&root, None, Some(gate), move |skills, now_ms| {
                     if skills.get(&target).is_some() {
                         return Err(SkillError::conflict(SKILL_DRAFT_DECIDED));
                     }

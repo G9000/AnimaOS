@@ -1,5 +1,12 @@
 //! Translate settled native outcomes into host-neutral completion observations.
 mod command;
+mod contracts;
+mod evidence;
+
+pub(crate) use evidence::HostCompletionReview;
+
+#[cfg(test)]
+mod change_bound_tests;
 
 use anima_core::{
     completion::CompletionCheckpoint, AgentConfig, CompletionObservation, CompletionReview,
@@ -227,12 +234,26 @@ mod tests {
         assert!(!needs_review(&review).await);
     }
     #[tokio::test]
-    async fn completion_review_post_edit_read_and_command_satisfy_observations() {
+    async fn completion_review_post_edit_read_and_unscoped_command_leave_verification_pending() {
         let review = CompletionReview::default();
         settled(&review, &call("edit_file"), &ok());
         settled(&review, &call("read_file"), &ok());
         settled(&review, &bash("cargo test -p example"), &ok());
-        assert!(!needs_review(&review).await);
+        assert!(needs_review(&review).await);
+    }
+
+    #[tokio::test]
+    async fn quality_change_bound_completion_foreign_green_check_leaves_changed_code_pending() {
+        for command in [
+            "cargo test -p unrelated",
+            "bun x nx run @animaos/docs:build",
+        ] {
+            let review = CompletionReview::default();
+            settled(&review, &call("write_file"), &ok());
+            settled(&review, &call("read_file"), &ok());
+            settled(&review, &bash(command), &ok());
+            assert!(needs_review(&review).await, "unresolved scope: {command}");
+        }
     }
 
     #[tokio::test]
@@ -306,8 +327,8 @@ mod tests {
         settled(&review, &bash("cargo test"), &ok());
         settled(&review, &bash("git status"), &ok());
         assert!(
-            !needs_review(&review).await,
-            "ordinary success preserves a verified check"
+            needs_review(&review).await,
+            "unscoped success never establishes coverage"
         );
     }
 
@@ -343,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn completion_review_supported_simple_checks_supply_verification() {
+    async fn completion_review_supported_simple_checks_still_require_resolved_scope() {
         for command in [
             "cargo test -p example --lib -- --exact selected_test",
             "cargo check --workspace --all-features",
@@ -364,7 +385,10 @@ mod tests {
             settled(&review, &call("write_file"), &ok());
             settled(&review, &call("read_file"), &ok());
             settled(&review, &bash(command), &ok());
-            assert!(!needs_review(&review).await, "recognized check: {command}");
+            assert!(
+                needs_review(&review).await,
+                "recognized but unscoped check: {command}"
+            );
         }
     }
 

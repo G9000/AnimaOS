@@ -2222,7 +2222,12 @@ impl AgentRunCoordinator {
             && !is_reminder_verification
             && delegated_parent.is_none()
             && !is_helper_config(&original_config))
-        .then(anima_core::CompletionReview::default);
+        .then(|| {
+            crate::tools::completion::HostCompletionReview::new(
+                &original_config,
+                crate::tools::ctx_workspace_root(&tool_context),
+            )
+        });
         if let Some(review) = &completion_review {
             runtime.register_evaluator(Arc::new(review.clone()));
         }

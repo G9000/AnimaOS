@@ -1698,6 +1698,8 @@ pub(crate) struct DaemonState {
     pub(crate) plan_first: std::collections::HashSet<(String, String)>,
     /// Skills agents in Free saved themselves, newest last (at most 200).
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
+    pub(crate) skill_evaluations: crate::skills::evaluation::EvaluationRegistry,
+    pub(crate) skill_evaluation_slots: Arc<tokio::sync::Semaphore>,
     /// Skill records, drafts, and the last scan (spec §8).
     pub(crate) skills: crate::skills::SkillRegistry,
     /// Automation fires the history store does not hold yet (spec §9.1).
@@ -2336,6 +2338,8 @@ impl DaemonState {
             approvals: crate::approvals::ApprovalRegistry::default(),
             autonomy: crate::approvals::autonomy::AutonomyRegistry::default(),
             skill_ledger: Vec::new(),
+            skill_evaluations: crate::skills::evaluation::EvaluationRegistry::default(),
+            skill_evaluation_slots: Arc::new(tokio::sync::Semaphore::new(1)),
             skills: crate::skills::SkillRegistry::default(),
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
@@ -2610,6 +2614,7 @@ impl DaemonState {
         snapshot.coding_keys = crate::coding_keys::records(&self.live_agent_ids());
         snapshot.agent_autonomy = self.autonomy.snapshot(&self.live_agent_ids());
         snapshot.skill_ledger = self.skill_ledger.clone();
+        snapshot.skill_evaluations = self.skill_evaluations.clone();
         snapshot.helper_worktree_repos = self.helper_worktree_repos.clone();
         let skills = self.skills.snapshot();
         snapshot.skills = skills.skills;
@@ -2911,6 +2916,9 @@ impl DaemonState {
         self.autonomy =
             crate::approvals::autonomy::AutonomyRegistry::restored(snapshot.agent_autonomy.clone());
         self.skill_ledger = crate::skills::ledger::restored(snapshot.skill_ledger.clone());
+        self.skill_evaluations = snapshot.skill_evaluations.clone();
+        self.skill_evaluations
+            .interrupt_active(anima_core::primitives::now_millis());
         self.helper_worktree_repos = snapshot.helper_worktree_repos.clone();
         // A deleted session's approvals never reach the history store.
         let sessions = &self.sessions;
@@ -3088,6 +3096,7 @@ impl DaemonState {
             &snapshot.approval_rules,
         )?;
         crate::skills::SkillRegistry::validate(&snapshot.skills, &snapshot.skill_drafts)?;
+        snapshot.skill_evaluations.validate()?;
         crate::community_bundles::validate_snapshot(snapshot)?;
         for draft in &snapshot.skill_drafts {
             if let Some(source) = &draft.learning_source {

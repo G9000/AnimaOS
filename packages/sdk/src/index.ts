@@ -255,6 +255,14 @@ export type {
   SkillStatus,
   SkillSupportingFile,
 } from './skills.js';
+export type {
+  SkillEvaluationSuite,
+  SkillEvaluationFixture,
+  SkillEvaluationSuiteRecord,
+  SkillEvaluationIdentity,
+  SkillEvaluationTrial,
+  SkillEvaluationReport,
+} from './skill-evaluations.js';
 export { automationMessageMeta } from './automation-messages.js';
 export type {
   AutomationCardMeta,

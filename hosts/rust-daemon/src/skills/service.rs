@@ -193,6 +193,7 @@ impl FileReview {
 pub(crate) struct SkillService {
     pub(super) state: SharedDaemonState,
     pub(super) transactions: Arc<Mutex<()>>,
+    pub(super) evaluation_admission: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl SkillService {
@@ -200,7 +201,16 @@ impl SkillService {
         Self {
             state,
             transactions,
+            evaluation_admission: None,
         }
+    }
+
+    pub(crate) fn with_evaluation_admission(
+        mut self,
+        probe: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.evaluation_admission = Some(probe);
+        self
     }
 
     pub(super) async fn workspace(&self) -> Result<PathBuf, SkillError> {
@@ -243,7 +253,7 @@ impl SkillService {
         root: &Path,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
-        self.apply_with_ledger(root, None, change).await
+        self.apply_with_ledger(root, None, None, change).await
     }
 
     /// Automatic activation and its complete undo record share this save.
@@ -252,9 +262,13 @@ impl SkillService {
         &self,
         root: &Path,
         ledger: Option<super::ledger::SkillLedgerEntry>,
+        evaluation: Option<super::evaluation_service::EvaluationGate>,
         change: impl FnOnce(&mut SkillRegistry, u64) -> Result<Change<T>, SkillError>,
     ) -> Result<T, SkillError> {
         let mut guard = self.state.write().await;
+        if let Some(gate) = evaluation.as_ref() {
+            super::evaluation_service::check_promotion(&guard, root, gate)?;
+        }
         if ledger.as_ref().is_some_and(|entry| {
             !guard.agents.contains_key(&entry.agent_id)
                 || !guard.agent_autonomy(&entry.agent_id).is_free()
@@ -265,6 +279,11 @@ impl SkillService {
         }
         let now_ms = now_millis();
         let change = change(&mut guard.skills, now_ms)?;
+        if let Some(slug) = change.slug.as_deref() {
+            // Explicit authoring, activation, and exact Undo each invalidate
+            // old response evidence. None grants another approval.
+            guard.skill_evaluations.invalidate(slug);
+        }
         let managed = change
             .slug
             .as_ref()

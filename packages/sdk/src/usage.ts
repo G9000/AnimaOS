@@ -14,13 +14,10 @@ export type UsageSource =
   | 'profile'
   | 'agency'
   | 'approval'
-  | 'side_question';
+  | 'side_question'
+  | 'skill_evaluation';
 export type PricingSource =
-  | 'table'
-  | 'override'
-  | 'free'
-  | 'subscription'
-  | 'unknown';
+  'table' | 'override' | 'free' | 'subscription' | 'unknown';
 
 /** One model call (spec §11). Money is micro-USD; times are epoch ms. */
 export interface UsageRecord {

@@ -12,6 +12,7 @@ use tracing::warn;
 use super::AgentRunCoordinator;
 use crate::live::{LiveEvent, LiveEventBody, LiveRun};
 use crate::runs::RunRecord;
+use crate::sessions::checkpoint::{CheckpointInputs, SessionCheckpoint};
 use crate::sessions::compaction::{
     auto_compact_enabled, compaction_input_chars, pruned_turns, summarize, PrunedSpan,
     COMPACTING_PHASE, COMPACTION_TIMED_OUT,
@@ -147,7 +148,19 @@ impl AgentRunCoordinator {
         run: Option<&RunCompaction<'_>>,
         cancel: Option<CancelSignal>,
     ) -> Compacted {
-        let (adapter, config, previous, pruned, store, through, documents) = {
+        let (
+            adapter,
+            config,
+            previous,
+            previous_checkpoint,
+            session_identity,
+            pruned,
+            store,
+            through,
+            documents,
+            artifact_store,
+            workspace,
+        ) = {
             let guard = self.state.read().await;
             let Some(runtime) = guard.agents.get(agent_id) else {
                 return Compacted::Failed("The companion no longer exists".into());
@@ -173,6 +186,8 @@ impl AgentRunCoordinator {
                 Arc::clone(&guard.model_adapter),
                 run.map_or_else(|| runtime.config().clone(), |run| run.config.clone()),
                 session.summary.clone(),
+                session.checkpoint.clone(),
+                (session.created_at_ms, session.room_id().to_string()),
                 pruned,
                 guard.history.store(),
                 through,
@@ -183,6 +198,11 @@ impl AgentRunCoordinator {
                     agent_id.into(),
                     session_id.into(),
                 ),
+                guard.tool_result_store(),
+                guard
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root_path.clone()),
             )
         };
         let budget_tokens = ContextBudget::for_config(&config).budget_tokens;
@@ -221,14 +241,47 @@ impl AgentRunCoordinator {
                 return Err(NO_EARLIER_TURNS.to_string());
             }
             let mut turns = turns.into_owned();
+            // Capture source identities/digests before document hydration changes
+            // these prompt copies. The admitted current input never joins turns.
+            let checkpoint_inputs = CheckpointInputs::capture(
+                agent_id,
+                session_id,
+                &session_identity.1,
+                previous_checkpoint.as_ref(),
+                &turns,
+            );
+            let checkpoint_inputs = tokio::task::spawn_blocking(move || {
+                checkpoint_inputs.verify_artifacts(artifact_store.as_ref(), workspace.as_deref())
+            })
+            .await
+            .map_err(|_| "Historical artifact validation failed".to_string())?;
             documents.prepare_compaction_documents(&mut turns).await;
             let previous = previous.as_ref().map(|summary| summary.text.as_str());
-            let text = side_call(&self.state, &config, deadline, |config| {
-                let (meter, turns) = (&meter, &turns);
-                async move { summarize(meter, &config, previous, turns, budget_tokens).await }
+            let output = side_call(&self.state, &config, deadline, |config| {
+                let (meter, turns, inputs, checkpoint) = (
+                    &meter,
+                    &turns,
+                    &checkpoint_inputs,
+                    previous_checkpoint.as_ref(),
+                );
+                async move {
+                    summarize(
+                        meter,
+                        &config,
+                        previous,
+                        turns,
+                        budget_tokens,
+                        checkpoint,
+                        inputs,
+                    )
+                    .await
+                }
             })
             .await?;
-            Ok::<_, String>((text, turns.len()))
+            let checkpoint = output
+                .checkpoint
+                .and_then(|draft| checkpoint_inputs.accept(draft, &through, now_millis()));
+            Ok::<_, String>((output.text, turns.len(), checkpoint))
         };
         let acceptance_cancel = cancel.clone();
         let stopped = async move {
@@ -237,7 +290,7 @@ impl AgentRunCoordinator {
                 None => std::future::pending().await,
             }
         };
-        let summary: Option<Result<(String, usize), String>> = tokio::select! {
+        let summary: Option<Result<(String, usize, Option<SessionCheckpoint>), String>> = tokio::select! {
             outcome = work => Some(outcome),
             () = tokio::time::sleep_until(deadline) => Some(Err(COMPACTION_TIMED_OUT.to_string())),
             () = stopped => None,
@@ -264,10 +317,26 @@ impl AgentRunCoordinator {
             let Some(session) = guard.sessions.get_mut(agent_id, session_id) else {
                 return Compacted::Failed(SESSION_GONE.into());
             };
-            let before = (session.summary.clone(), session.context_trimmed.clone());
+            if session.created_at_ms != session_identity.0
+                || session.room_id() != session_identity.1
+                || session.summary != previous
+                || session.checkpoint != previous_checkpoint
+            {
+                return Compacted::Failed(
+                    "The session changed while its history was being compacted".into(),
+                );
+            }
+            let before = (
+                session.summary.clone(),
+                session.checkpoint.clone(),
+                session.context_trimmed.clone(),
+            );
             let mut rebuilt = None;
             match &summary {
-                Ok((text, folded)) => {
+                Ok((text, folded, checkpoint)) => {
+                    if let Some(checkpoint) = checkpoint {
+                        session.checkpoint = Some(checkpoint.clone());
+                    }
                     session.summary = Some(SessionSummary {
                         text: text.clone(),
                         through_message_id: through,
@@ -316,7 +385,7 @@ impl AgentRunCoordinator {
             };
             let mut guard = self.state.write().await;
             if let Some(session) = guard.sessions.get_mut(agent_id, session_id) {
-                (session.summary, session.context_trimmed) = before;
+                (session.summary, session.checkpoint, session.context_trimmed) = before;
                 // Kept unsaved: the next save persists it. Announced now, so
                 // the page shows it before then (fix round 1).
                 session.compaction_error = Some(compaction_error(&message, now_ms));

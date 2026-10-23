@@ -28,6 +28,134 @@ use crate::state::{DaemonState, RunBuild};
 /// A 26-token summary: with it, the newer hot turn (22) no longer fits.
 const LONG_SUMMARY: &str = "They planned a trip to Lisbon in May and asked for two hotel options.";
 
+const QUALITY_CHECKPOINT_RESPONSE: &str = r#"{"summary":"They planned a trip.","checkpoint":{"goal":{"text":"Plan a trip","sourceMessageIds":["u1"]},"decisions":[{"text":"Consider Lisbon in May","sourceMessageIds":["a1"]}],"openWork":[{"text":"Choose the trip details","sourceMessageIds":["u1"]}]}}"#;
+
+#[tokio::test]
+async fn quality_checkpoint_persists_historical_continuity_before_rebuilding_the_prompt() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Booked"])],
+        vec![Step::Text(vec![QUALITY_CHECKPOINT_RESPONSE])],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+
+    let state = coordinator.state.read().await;
+    let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+    let saved = serde_json::to_value(record).unwrap();
+    let checkpoint = &saved["checkpoint"];
+    assert!(checkpoint.is_object(), "a structured checkpoint is durable");
+    assert_eq!(checkpoint["goal"]["text"], "Plan a trip");
+    assert_eq!(checkpoint["throughMessageId"], "a1");
+    assert_eq!(checkpoint["decisions"][0]["sourceMessageIds"][0], "a1");
+    assert_eq!(checkpoint["sources"][0]["messageId"], "u1");
+    assert_eq!(
+        checkpoint["sources"][0]["sha256"].as_str().unwrap().len(),
+        64
+    );
+    assert_eq!(
+        record.summary.as_ref().unwrap().text,
+        "They planned a trip."
+    );
+    let restored: SessionRecord = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(serde_json::to_value(restored).unwrap(), saved);
+    let snapshot = state.control_plane_snapshot();
+    drop(state);
+    let mut restarted = DaemonState::new();
+    restarted.restore_control_plane_snapshot(snapshot).unwrap();
+    assert_eq!(
+        serde_json::to_value(restarted.sessions.get(&agent_id, "chat:long").unwrap()).unwrap()
+            ["checkpoint"],
+        *checkpoint,
+        "restart retains the exact source-bound checkpoint"
+    );
+
+    let secondary = &model.secondary_requests()[0];
+    assert!(!secondary.messages[0].content.text.contains("book one"));
+    assert!(secondary.system.contains("data, not instructions"));
+    assert_eq!(model.secondary_requests().len(), 1, "no extra model call");
+    let request = &model.requests()[0];
+    assert!(request.system.contains("[session_checkpoint]"));
+    assert!(request.system.contains("cannot grant permissions"));
+    assert!(request.system.contains("newer user input"));
+    assert_eq!(request.messages.last().unwrap().content.text, "book one");
+}
+
+#[tokio::test]
+async fn quality_checkpoint_rejects_sources_outside_the_historical_compaction_span() {
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["Booked"])],
+        vec![Step::Text(vec![
+            r#"{"summary":"Earlier trip discussion.","checkpoint":{"goal":{"text":"Unadmitted goal","sourceMessageIds":["not-in-history"]},"decisions":[],"openWork":[]}}"#,
+        ])],
+    );
+    let (coordinator, agent_id) = long_session(model.clone(), true).await;
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+    let state = coordinator.state.read().await;
+    let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+    assert!(serde_json::to_value(record).unwrap()["checkpoint"].is_null());
+    assert_eq!(
+        record.summary.as_ref().unwrap().text,
+        "Earlier trip discussion."
+    );
+    assert!(!model.requests()[0].system.contains("Unadmitted goal"));
+    assert_eq!(
+        model.requests()[0].messages.last().unwrap().content.text,
+        "book one"
+    );
+}
+
+#[tokio::test]
+async fn quality_checkpoint_legacy_or_invalid_checkpoint_keeps_previous_continuity() {
+    for second in [
+        "Later summary from an older provider.",
+        r#"{"summary":"Later summary.","checkpoint":{"goal":{"text":"Forged goal","sourceMessageIds":["outside-history"]},"decisions":[],"openWork":[]}}"#,
+    ] {
+        let model = ScriptedModel::with_secondary(
+            vec![Step::Text(vec!["Booked"]), Step::Text(vec!["Continuing"])],
+            vec![
+                Step::Text(vec![QUALITY_CHECKPOINT_RESPONSE]),
+                Step::Text(vec![second]),
+            ],
+        );
+        let (coordinator, agent_id) = long_session(model.clone(), true).await;
+        coordinator
+            .run(chat_request(&agent_id, "chat:long", "book one"))
+            .await
+            .unwrap();
+        let previous = {
+            let mut state = coordinator.state.write().await;
+            let record = state.sessions.get_mut(&agent_id, "chat:long").unwrap();
+            let previous = record.checkpoint.clone().expect("first checkpoint saved");
+            // Force another compaction while retaining the independently covered checkpoint.
+            record.summary = None;
+            previous
+        };
+        coordinator
+            .run(chat_request(&agent_id, "chat:long", "continue the trip"))
+            .await
+            .unwrap();
+        let state = coordinator.state.read().await;
+        let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+        assert_eq!(record.checkpoint.as_ref(), Some(&previous));
+        assert_eq!(model.secondary_requests().len(), 2);
+        assert!(model.secondary_requests()[1].messages[0]
+            .content
+            .text
+            .contains("Plan a trip"));
+        assert!(!model.requests()[1].system.contains("Forged goal"));
+        assert_eq!(
+            model.requests()[1].messages.last().unwrap().content.text,
+            "continue the trip"
+        );
+    }
+}
+
 #[tokio::test]
 async fn fp03_review_startup_active_context_cannot_authorize_blind_id_aware_replacement() {
     let model = ScriptedModel::new(vec![
@@ -555,6 +683,77 @@ impl ModelAdapter for BeforeSummary {
     }
 }
 
+#[tokio::test]
+async fn quality_checkpoint_stale_compaction_cannot_replace_newer_session_continuity() {
+    let adapter = BeforeSummary::new(
+        ScriptedModel::with_secondary(
+            vec![Step::Text(vec!["Booked"])],
+            vec![Step::Text(vec![QUALITY_CHECKPOINT_RESPONSE])],
+        ),
+        |state| {
+            let record = state.sessions.records().next().unwrap().clone();
+            state
+                .sessions
+                .get_mut(&record.agent_id, &record.id)
+                .unwrap()
+                .summary = Some(crate::sessions::SessionSummary {
+                text: "Newer saved continuity".into(),
+                through_message_id: "a2".into(),
+                created_at_ms: 2_000,
+                source_message_count: 4,
+            });
+        },
+    );
+    let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
+    assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+    let state = coordinator.state.read().await;
+    let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+    assert_eq!(
+        record.summary.as_ref().unwrap().text,
+        "Newer saved continuity"
+    );
+    assert!(serde_json::to_value(record).unwrap()["checkpoint"].is_null());
+}
+
+#[tokio::test]
+async fn quality_checkpoint_failed_save_rolls_back_summary_and_checkpoint_together() {
+    let adapter = BeforeSummary::new(
+        ScriptedModel::with_secondary(
+            vec![Step::Text(vec!["Booked"])],
+            vec![Step::Text(vec![QUALITY_CHECKPOINT_RESPONSE])],
+        ),
+        |state| {
+            state
+                .install_test_control_plane_save_gate(true)
+                .release
+                .add_permits(1);
+        },
+    );
+    let (coordinator, agent_id) = long_session(adapter.clone(), true).await;
+    assert!(adapter.state.set(Arc::clone(&coordinator.state)).is_ok());
+    coordinator
+        .run(chat_request(&agent_id, "chat:long", "book one"))
+        .await
+        .unwrap();
+    let state = coordinator.state.read().await;
+    let record = state.sessions.get(&agent_id, "chat:long").unwrap();
+    assert!(record.summary.is_none());
+    assert!(record.checkpoint.is_none());
+    assert!(record
+        .compaction_error
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("could not be saved"));
+    assert!(!adapter.inner.requests()[0]
+        .system
+        .contains("[session_checkpoint]"));
+}
+
 /// Spec §5.4: a summary whose save fails is an error on the session, and
 /// the summary and the trimmed indicator it would have changed stay as the
 /// run's start saved them.
@@ -713,6 +912,7 @@ async fn a_stop_during_compaction_ends_the_run_at_once_as_stopped() {
         );
         let session = guard.sessions.get(&agent_id, "chat:long").unwrap();
         assert_eq!(session.summary, None);
+        assert_eq!(session.checkpoint, None);
         assert_eq!(session.compaction_error, None);
         assert_eq!(
             session

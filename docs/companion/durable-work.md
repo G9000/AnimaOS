@@ -2,6 +2,8 @@
 
 Anima supports reviewed recovery, side questions, durable structured questions, completion checks, reusable procedure authoring, owner event automations and programmatic native tool chains through the existing Rust daemon. The detailed owner guide is [Companion workflows](../../apps/docs/src/content/docs/companion-workflows.mdx).
 
+See [Learning and context quality](learning-context-quality.md) for opt-in evaluation before promotion, saved compaction checkpoints, request-copy pruning and file-version completion evidence.
+
 ## Saved workflows
 
 Enable **Permissions -> Allow workflows in chat**, save, then ask the companion to create a saved workflow with task, approval, and question steps. The agent's workflows appear inside ordinary web chat. Approve with **Approve checkpoint**, or enter **Your answer** and choose **Submit answer** on the workflow card. Decisions go directly through the owner API; ordinary composer messages do not approve or answer checkpoints. The chat section is agent-scoped and includes workflows created elsewhere. Turning off the grant prevents model creation/listing while leaving the owner's saved workflow controls available.

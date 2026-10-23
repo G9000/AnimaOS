@@ -30,6 +30,9 @@ pub struct InFlight {
     pub acp_sessions: u32,
     #[serde(default)]
     pub memory_reviews: u32,
+    /// Includes logically stopped evaluations whose model transport is retiring.
+    #[serde(default)]
+    pub skill_evaluations: u32,
     #[serde(default)]
     pub doctor_repairs: u32,
     #[serde(default)]
@@ -54,6 +57,7 @@ impl InFlight {
             + self.app_sessions
             + self.acp_sessions
             + self.memory_reviews
+            + self.skill_evaluations
             + self.doctor_repairs
             + self.standing_intent_changes
             + self.execution_jobs
@@ -126,6 +130,7 @@ impl DrainController {
             chat_runs: count(occurrences),
             jobs: count(jobs),
             memory_reviews: u32::from(guard.learning_slots.available_permits() == 0),
+            skill_evaluations: u32::from(guard.skill_evaluation_slots.available_permits() == 0),
             doctor_repairs: u32::from(guard.doctor_slots.available_permits() == 0),
             standing_intent_changes: u32::from(
                 guard.standing_intent_slots.available_permits() == 0,

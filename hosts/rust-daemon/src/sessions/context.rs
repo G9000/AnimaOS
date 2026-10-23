@@ -27,6 +27,7 @@ pub(crate) const DEFAULT_REPLY_RESERVE_TOKENS: u64 = 4_096;
 pub(crate) const DEFAULT_CONTEXT_BUDGET_CAP_TOKENS: u64 = 200_000;
 /// The provider name the session summary appears under in the system prompt.
 pub(crate) const SESSION_SUMMARY_PROVIDER: &str = "session_summary";
+pub(crate) const SESSION_CHECKPOINT_PROVIDER: &str = "session_checkpoint";
 
 /// A run's budget and the share of it kept for the reply (spec §5.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,14 +111,17 @@ pub(crate) fn conversation_context_usage(
         through_message_id: summary.through_message_id.clone(),
     });
     let budget_tokens = budget.history_tokens(0);
+    let checkpoint_tokens = record.checkpoint.as_ref().map_or(0, |checkpoint| {
+        estimator.text_tokens(&checkpoint.prompt_text())
+    });
     let selection = select_context(
         model_visible_history,
         summary.as_ref(),
-        budget_tokens,
+        budget_tokens.saturating_sub(checkpoint_tokens),
         &estimator,
     );
     ContextUsage {
-        estimated_tokens: selection.estimated_tokens,
+        estimated_tokens: selection.estimated_tokens + checkpoint_tokens,
         budget_tokens,
         reply_reserve_tokens: budget.reply_reserve_tokens,
     }
@@ -165,6 +169,32 @@ fn is_revised_draft(message: &Message) -> bool {
 /// (spec §5.4).
 pub(crate) struct SessionSummaryProvider {
     pub(crate) text: String,
+}
+
+pub(crate) struct SessionCheckpointProvider {
+    pub(crate) checkpoint: super::checkpoint::SessionCheckpoint,
+}
+
+#[async_trait]
+impl Provider for SessionCheckpointProvider {
+    fn name(&self) -> &str {
+        SESSION_CHECKPOINT_PROVIDER
+    }
+
+    fn description(&self) -> &str {
+        "Historical task continuity for this session"
+    }
+
+    async fn get(
+        &self,
+        _runtime: &AgentRuntime,
+        _message: &Message,
+    ) -> Result<ProviderResult, String> {
+        Ok(ProviderResult {
+            text: self.checkpoint.prompt_text(),
+            metadata: None,
+        })
+    }
 }
 
 #[async_trait]

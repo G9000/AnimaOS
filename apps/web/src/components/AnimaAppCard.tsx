@@ -34,6 +34,7 @@ const IN_FLIGHT_LABELS: [keyof SystemInFlight, string][] = [
   ['appSessions', 'App sessions'],
   ['acpSessions', 'Coding-agent sessions'],
   ['memoryReviews', 'Learning reviews'],
+  ['skillEvaluations', 'Skill evaluations'],
   ['doctorRepairs', 'Repairs'],
   ['standingIntentChanges', 'Saved instruction changes'],
   ['executionJobs', 'Commands'],

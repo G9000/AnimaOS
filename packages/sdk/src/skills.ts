@@ -1,4 +1,9 @@
 import type { DaemonClient } from './client.js';
+import type {
+  SkillEvaluationSuite,
+  SkillEvaluationSuiteRecord,
+  SkillEvaluationReport,
+} from './skill-evaluations.js';
 
 /** What the owner can rely on (spec §8.1): only `active` skills load. */
 export type SkillStatus = 'active' | 'changed' | 'missing' | 'invalid';
@@ -220,6 +225,54 @@ export class SkillsClient {
       { method: 'POST' },
     );
     return response.draft;
+  }
+
+  async evaluationSuite(
+    slug: string,
+  ): Promise<SkillEvaluationSuiteRecord | null> {
+    const response = await this.client.requestJson<{
+      suite: SkillEvaluationSuiteRecord | null;
+    }>(`${skillPath(slug)}/evaluation-suite`);
+    return response.suite;
+  }
+
+  async setEvaluationSuite(
+    slug: string,
+    suite: SkillEvaluationSuite,
+  ): Promise<SkillEvaluationSuiteRecord> {
+    const response = await this.client.requestJson<{
+      suite: SkillEvaluationSuiteRecord;
+    }>(`${skillPath(slug)}/evaluation-suite`, { method: 'PUT', body: suite });
+    return response.suite;
+  }
+
+  /** Starts a fresh bounded comparison; never approves the candidate. */
+  async evaluateDraft(
+    id: string,
+    approval: SkillDraftApproval = {},
+  ): Promise<SkillEvaluationReport> {
+    const response = await this.client.requestJson<{
+      evaluation: SkillEvaluationReport;
+    }>(`${draftPath(id)}/evaluation`, { method: 'POST', body: approval });
+    return response.evaluation;
+  }
+
+  async draftEvaluation(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SkillEvaluationReport | null> {
+    const response = await this.client.requestJson<{
+      evaluation: SkillEvaluationReport | null;
+    }>(`${draftPath(id)}/evaluation`, { signal: options.signal });
+    return response.evaluation;
+  }
+
+  /** Logical stop; physical transport custody remains visible until retirement. */
+  async cancelDraftEvaluation(id: string): Promise<SkillEvaluationReport> {
+    const response = await this.client.requestJson<{
+      evaluation: SkillEvaluationReport;
+    }>(`${draftPath(id)}/evaluation/cancel`, { method: 'POST' });
+    return response.evaluation;
   }
 
   /** Imports a SKILL.md as a pending draft (spec §8.4). */

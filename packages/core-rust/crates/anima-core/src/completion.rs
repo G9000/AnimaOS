@@ -4,7 +4,7 @@
 //! The host supplies settled observations, not model claims. Even a recognized
 //! check's success and a file excerpt are not a correctness proof.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ pub enum CompletionObservation {
     CommandFinished {
         passed: bool,
     },
-    /// The host recognized a verification invocation; scope/relevance remain unproven.
+    /// Recognition alone supplies no resolved scope and cannot verify edits.
     VerificationFinished {
         passed: bool,
     },
@@ -44,15 +44,52 @@ pub struct CompletionReview(Arc<Mutex<ReviewState>>);
 #[derive(Clone, Copy)]
 pub struct CompletionCheckpoint(u64);
 
+/// Workspace identity and canonical relative path are supplied by the host.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CompletionFile {
+    pub workspace: String,
+    pub path: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompletionCheckOutcome {
+    Passed,
+    Failed,
+    Unknown,
+}
+
+/// Captured before dispatch. Its fields cannot be replaced by a settled result.
+#[derive(Clone, Debug)]
+pub struct CompletionAttempt {
+    id: u64,
+    contract: String,
+    versions: Vec<(CompletionFile, u64, Option<String>)>,
+}
+
+struct FileState {
+    revision: u64,
+    digest: Option<String>,
+    unread: bool,
+    requires_check: bool,
+    required_contracts: BTreeSet<String>,
+}
+
+struct CheckState {
+    attempt: CompletionAttempt,
+    outcome: CompletionCheckOutcome,
+    settled: bool,
+}
+
 #[derive(Default)]
 struct ReviewState {
-    unread: BTreeSet<String>,
+    files: BTreeMap<CompletionFile, FileState>,
+    checks: BTreeMap<String, CheckState>,
     overflow: bool,
-    code_changed: bool,
-    needs_check: bool,
+    ordinary_failure: bool,
     unfinished: usize,
     prompted: bool,
     revision: u64,
+    next_attempt: u64,
 }
 
 impl CompletionReview {
@@ -91,28 +128,33 @@ impl CompletionReview {
                 path,
                 requires_check,
             } => {
-                state.revision = state.revision.saturating_add(1);
-                // Evidence remains bounded even for a long-running caller.
-                if path.len() > 4096 || (state.unread.len() >= 64 && !state.unread.contains(&path))
-                {
-                    state.overflow = true;
-                } else {
-                    state.unread.insert(path);
-                }
-                state.code_changed |= requires_check;
-                state.needs_check |= requires_check;
+                let digest = Some(format!(
+                    "observed-edit-{}",
+                    state.revision.saturating_add(1)
+                ));
+                record_edit(
+                    &mut state,
+                    CompletionFile {
+                        workspace: String::new(),
+                        path,
+                    },
+                    digest,
+                    requires_check,
+                    Vec::new(),
+                );
             }
             CompletionObservation::ReadBack { path } => {
-                state.unread.remove(&path);
-            }
-            CompletionObservation::CommandFinished { passed } => {
-                if state.code_changed && !passed {
-                    state.needs_check = true;
+                if let Some(file) = state.files.get_mut(&CompletionFile {
+                    workspace: String::new(),
+                    path,
+                }) {
+                    file.unread = false;
                 }
             }
-            CompletionObservation::VerificationFinished { passed } => {
-                if state.code_changed {
-                    state.needs_check = !passed;
+            CompletionObservation::CommandFinished { passed }
+            | CompletionObservation::VerificationFinished { passed } => {
+                if !passed && state.files.values().any(|file| file.requires_check) {
+                    state.ordinary_failure = true;
                 }
             }
             CompletionObservation::TasksSaved { unfinished } => {
@@ -121,23 +163,195 @@ impl CompletionReview {
         }
     }
 
+    /// Record an acknowledged native edit and the bytes actually observed by
+    /// the host. Missing identities remain gaps rather than success evidence.
+    pub fn record_edit(
+        &self,
+        file: CompletionFile,
+        digest: Option<String>,
+        requires_check: bool,
+        required_contracts: Vec<String>,
+    ) {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        record_edit(&mut state, file, digest, requires_check, required_contracts);
+    }
+
+    pub fn tracked_files(&self) -> Vec<CompletionFile> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .files
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Refresh an already tracked file from bounded real-byte host snapshots.
+    /// External changes invalidate both read-back and verification versions.
+    pub fn refresh_file(&self, file: &CompletionFile, digest: Option<String>) {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let digest = bounded_digest(digest);
+        if state
+            .files
+            .get(file)
+            .is_some_and(|current| current.digest != digest)
+        {
+            state.revision = state.revision.saturating_add(1);
+            let revision = state.revision;
+            let current = state.files.get_mut(file).expect("tracked file");
+            current.digest = digest;
+            current.revision = revision;
+            current.unread = true;
+        }
+    }
+
+    pub fn read_back(
+        &self,
+        checkpoint: CompletionCheckpoint,
+        file: &CompletionFile,
+        digest: Option<&str>,
+    ) {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if checkpoint.0 != state.revision || digest.is_none() {
+            return;
+        }
+        if let Some(current) = state.files.get_mut(file) {
+            if current.digest.as_deref() == digest {
+                current.unread = false;
+            }
+        }
+    }
+
+    pub fn note_gap(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .overflow = true;
+    }
+
+    /// Starting a newer attempt immediately supersedes older success. Pending,
+    /// failed and uncertain attempts all leave their requirements unresolved.
+    pub fn begin_check(&self, contract: &str, files: Vec<CompletionFile>) -> CompletionAttempt {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        state.next_attempt = state.next_attempt.saturating_add(1);
+        let valid = valid_id(contract)
+            && files.len() <= 64
+            && (state.checks.len() < 32 || state.checks.contains_key(contract));
+        if !valid {
+            state.overflow = true;
+        }
+        let versions = if valid {
+            files
+                .into_iter()
+                .filter_map(|file| {
+                    let current = state.files.get(&file)?;
+                    Some((file, current.revision, current.digest.clone()))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let attempt = CompletionAttempt {
+            id: state.next_attempt,
+            contract: contract.into(),
+            versions,
+        };
+        if valid {
+            state.checks.insert(
+                contract.into(),
+                CheckState {
+                    attempt: attempt.clone(),
+                    outcome: CompletionCheckOutcome::Unknown,
+                    settled: false,
+                },
+            );
+        }
+        attempt
+    }
+
+    pub fn finish_check(&self, attempt: CompletionAttempt, outcome: CompletionCheckOutcome) {
+        let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if !state
+            .checks
+            .get(&attempt.contract)
+            .is_some_and(|latest| latest.attempt.id == attempt.id && !latest.settled)
+        {
+            return;
+        }
+        let unchanged = !attempt.versions.is_empty()
+            && attempt.versions.iter().all(|(file, revision, digest)| {
+                digest.is_some()
+                    && state.files.get(file).is_some_and(|current| {
+                        current.revision == *revision && current.digest == *digest
+                    })
+            });
+        let outcome = if outcome == CompletionCheckOutcome::Passed && !unchanged {
+            CompletionCheckOutcome::Unknown
+        } else {
+            outcome
+        };
+        let latest = state
+            .checks
+            .get_mut(&attempt.contract)
+            .expect("current attempt");
+        latest.outcome = outcome;
+        latest.settled = true;
+    }
+
     fn take_feedback(&self) -> Option<String> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let unread = state.files.values().any(|file| file.unread);
+        let unchecked = state
+            .files
+            .iter()
+            .filter(|(_, file)| file.requires_check)
+            .filter(|(path, file)| {
+                file.digest.is_none()
+                    || file.required_contracts.is_empty()
+                    || file.required_contracts.iter().any(|contract| {
+                        !state.checks.get(contract).is_some_and(|check| {
+                            check.outcome == CompletionCheckOutcome::Passed
+                                && check.attempt.versions.iter().any(
+                                    |(covered, revision, digest)| {
+                                        covered == *path
+                                            && *revision == file.revision
+                                            && *digest == file.digest
+                                    },
+                                )
+                        })
+                    })
+            })
+            .map(|(path, _)| path.path.chars().take(160).collect::<String>())
+            .take(5)
+            .collect::<Vec<_>>();
         if state.prompted
-            || (state.unread.is_empty()
+            || (!unread
                 && !state.overflow
-                && !state.needs_check
+                && unchecked.is_empty()
+                && !state.ordinary_failure
                 && state.unfinished == 0)
         {
             return None;
         }
         state.prompted = true;
         let mut gaps = Vec::new();
-        if !state.unread.is_empty() || state.overflow {
+        if unread {
             gaps.push("some edited files have no later read-back observation".to_string());
         }
-        if state.needs_check {
-            gaps.push("no successful recognized verification command follows the latest code edit, or a later command failed".to_string());
+        if !unchecked.is_empty() {
+            gaps.push(format!("changed files lack current successful command evidence for every matching owner verification contract (missing contracts, failed/unknown outcomes or stale versions): {unchecked:?}"));
+        }
+        if state.ordinary_failure {
+            gaps.push(
+                "a later unscoped command failed; inspect and report its actual outcome"
+                    .to_string(),
+            );
+        }
+        if state.overflow {
+            gaps.push(
+                "some evidence could not be captured within the path or snapshot bounds"
+                    .to_string(),
+            );
         }
         if state.unfinished > 0 {
             gaps.push(format!(
@@ -147,6 +361,48 @@ impl CompletionReview {
         }
         Some(format!("Completion review: {}. Before finishing, inspect the actual settled results, perform relevant permitted checks and read back the saved output. Update only tasks you actually completed; preserve unrelated or blocked tasks. A successful command or file excerpt does not prove the whole task. If checks are unavailable, denied, failed or outside the remaining budget, stop and clearly report the completed work, remaining work and limitations. Do not invent evidence or repeat uncertain external actions. This is the only automatic completion reminder.", gaps.join("; ")))
     }
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+}
+
+fn bounded_digest(digest: Option<String>) -> Option<String> {
+    digest.filter(|value| {
+        !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+    })
+}
+
+fn record_edit(
+    state: &mut ReviewState,
+    file: CompletionFile,
+    digest: Option<String>,
+    requires_check: bool,
+    required_contracts: Vec<String>,
+) {
+    if file.path.is_empty()
+        || file.path.len() > 4096
+        || file.workspace.len() > 4096
+        || file.path.chars().any(char::is_control)
+        || file.workspace.chars().any(char::is_control)
+        || (state.files.len() >= 64 && !state.files.contains_key(&file))
+        || required_contracts.len() > 32
+        || required_contracts.iter().any(|id| !valid_id(id))
+    {
+        state.overflow = true;
+        return;
+    }
+    state.revision = state.revision.saturating_add(1);
+    state.files.insert(
+        file,
+        FileState {
+            revision: state.revision,
+            digest: bounded_digest(digest),
+            unread: true,
+            requires_check,
+            required_contracts: required_contracts.into_iter().collect(),
+        },
+    );
 }
 
 #[async_trait]
@@ -181,16 +437,116 @@ mod tests {
     use super::*;
 
     fn edit(review: &CompletionReview, path: &str, requires_check: bool) {
-        review.observe(CompletionObservation::Edited {
-            path: path.into(),
+        review.record_edit(
+            CompletionFile {
+                workspace: String::new(),
+                path: path.into(),
+            },
+            Some(path.into()),
             requires_check,
-        });
+            vec!["check".into()],
+        );
     }
     fn read(review: &CompletionReview, path: &str) {
         review.observe(CompletionObservation::ReadBack { path: path.into() });
     }
     fn check(review: &CompletionReview, passed: bool) {
-        review.observe(CompletionObservation::VerificationFinished { passed });
+        let attempt = review.begin_check("check", review.tracked_files());
+        review.finish_check(
+            attempt,
+            if passed {
+                CompletionCheckOutcome::Passed
+            } else {
+                CompletionCheckOutcome::Failed
+            },
+        );
+    }
+
+    fn scoped_file(path: &str) -> CompletionFile {
+        CompletionFile {
+            workspace: "workspace".into(),
+            path: path.into(),
+        }
+    }
+
+    #[test]
+    fn change_bound_completion_union_preserves_uncovered_paths() {
+        for both in [false, true] {
+            let review = CompletionReview::default();
+            for (path, contract) in [("a/lib.rs", "a"), ("b/lib.rs", "b")] {
+                let file = scoped_file(path);
+                review.record_edit(
+                    file.clone(),
+                    Some("saved".into()),
+                    true,
+                    vec![contract.into()],
+                );
+            }
+            for file in review.tracked_files() {
+                review.read_back(review.checkpoint(), &file, Some("saved"));
+            }
+            let a = review.begin_check("a", vec![scoped_file("a/lib.rs")]);
+            review.finish_check(a, CompletionCheckOutcome::Passed);
+            if both {
+                let b = review.begin_check("b", vec![scoped_file("b/lib.rs")]);
+                review.finish_check(b, CompletionCheckOutcome::Passed);
+            }
+            assert_eq!(review.take_feedback().is_some(), !both);
+        }
+    }
+
+    #[test]
+    fn change_bound_completion_newer_failure_or_unknown_fences_old_pass() {
+        for outcome in [
+            CompletionCheckOutcome::Failed,
+            CompletionCheckOutcome::Unknown,
+        ] {
+            let review = CompletionReview::default();
+            edit(&review, "lib.rs", true);
+            read(&review, "lib.rs");
+            let old = review.begin_check("check", review.tracked_files());
+            let newer = review.begin_check("check", review.tracked_files());
+            review.finish_check(newer, outcome);
+            review.finish_check(old, CompletionCheckOutcome::Passed);
+            assert!(review.take_feedback().is_some());
+        }
+    }
+
+    #[test]
+    fn change_bound_completion_changed_digest_and_missing_bytes_remain_unverified() {
+        for digest in [None, Some("different".into())] {
+            let review = CompletionReview::default();
+            let file = scoped_file("lib.rs");
+            review.record_edit(
+                file.clone(),
+                Some("saved".into()),
+                true,
+                vec!["check".into()],
+            );
+            review.read_back(review.checkpoint(), &file, Some("saved"));
+            let attempt = review.begin_check("check", vec![file.clone()]);
+            review.refresh_file(&file, digest);
+            review.finish_check(attempt, CompletionCheckOutcome::Passed);
+            let feedback = review.take_feedback().unwrap();
+            assert!(feedback.contains("read-back"));
+            assert!(feedback.contains("command"));
+        }
+    }
+
+    #[test]
+    fn change_bound_completion_each_declared_requirement_needs_current_success() {
+        let review = CompletionReview::default();
+        let file = scoped_file("lib.rs");
+        review.record_edit(
+            file.clone(),
+            Some("saved".into()),
+            true,
+            vec!["test".into(), "lint".into()],
+        );
+        review.read_back(review.checkpoint(), &file, Some("saved"));
+        let attempt = review.begin_check("test", vec![file]);
+        review.finish_check(attempt, CompletionCheckOutcome::Passed);
+        assert!(review.take_feedback().is_some());
     }
 
     #[test]
@@ -260,6 +616,18 @@ mod tests {
         read(&review, "src/lib.rs");
         review.observe(CompletionObservation::CommandFinished { passed: true });
         assert!(review.take_feedback().is_some());
+    }
+
+    #[test]
+    fn change_bound_completion_unscoped_green_check_cannot_verify_changed_code() {
+        let review = CompletionReview::default();
+        edit(&review, "crate-a/src/lib.rs", true);
+        read(&review, "crate-a/src/lib.rs");
+        review.observe(CompletionObservation::VerificationFinished { passed: true });
+        assert!(
+            review.take_feedback().is_some(),
+            "a green command without resolved scope cannot cover crate A"
+        );
     }
 
     #[test]
