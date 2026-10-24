@@ -1,4 +1,5 @@
 import {
+  type ActionReceipt,
   automationMessageMeta,
   isTerminalRunStatus,
   type Automation,
@@ -91,6 +92,13 @@ export type TranscriptItem =
   | { kind: 'revised'; key: string; message: ChatMessage }
   | { kind: 'tools'; key: string; steps: ToolStep[]; messageIds: string[] }
   | { kind: 'run'; key: string; live: LiveRun }
+  | {
+      kind: 'receipts';
+      key: string;
+      runId: string;
+      createdAtMs: number;
+      receipts: ActionReceipt[];
+    }
   | { kind: 'outcome'; key: string; run: Run }
   | { kind: 'learning-review'; key: string; run: Run }
   | { kind: 'model-note'; key: string; text: string }
@@ -888,6 +896,22 @@ export function placeRuns(
           item.message.id === run.replyMessageId &&
           messageRunId(item.message) === run.id,
       );
+      const receipts = run.actionReceipts?.filter(
+        (receipt) => receipt.status !== 'started',
+      );
+      if (
+        run.status === 'completed' &&
+        hasLinkedReply &&
+        receipts?.length
+      ) {
+        itemsForRun.push({
+          kind: 'receipts',
+          key: `receipts:${run.id}`,
+          runId: run.id,
+          createdAtMs: run.finishedAtMs ?? run.createdAtMs,
+          receipts,
+        });
+      }
       if (canReviewCompletedRun(run, hasLinkedReply))
         itemsForRun.push({
           kind: 'learning-review',

@@ -7,7 +7,7 @@ import { MarkdownMessage } from './MarkdownMessage';
  *  from earlier. Its summary opens in a panel under the bar. */
 export function HeaderContextLine() {
   const state = useHeaderContextState();
-  const summary = state?.summary ?? null;
+  const summary = state?.summaryInline ? null : (state?.summary ?? null);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 

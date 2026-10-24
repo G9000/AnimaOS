@@ -11,9 +11,9 @@ afterEach(() => {
 });
 
 describe('chat background preference', () => {
-  it('is off until the owner chooses', () => {
-    expect(DEFAULT_CHAT_BACKGROUND).toBe('off');
-    expect(readChatBackground()).toBe('off');
+  it('uses the edge orb from the main chat design until the owner chooses', () => {
+    expect(DEFAULT_CHAT_BACKGROUND).toBe('quiet');
+    expect(readChatBackground()).toBe('quiet');
   });
 
   it('keeps a choice, and tells the app when it changes', () => {

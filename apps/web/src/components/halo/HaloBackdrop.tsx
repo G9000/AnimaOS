@@ -1,6 +1,10 @@
 import { revealInvisible } from '../../lib/skills';
 import type { PresenceMode } from '../../lib/presence';
 import type { ChatBackground } from '../../lib/chat-background';
+import {
+  APPEARANCE_ACCENT_HEX,
+  type AppearanceAccent,
+} from '../../lib/appearance-preferences';
 import { HaloOrb } from './HaloOrb';
 
 const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
@@ -13,8 +17,11 @@ const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
 
 /** How the orb looks while the agent is in each state: the same orb in the
  *  background and in the header avatar. */
-export function presenceLook(mode: PresenceMode) {
-  return LOOK[mode];
+export function presenceLook(
+  mode: PresenceMode,
+  accent: AppearanceAccent = 'pink',
+) {
+  return { ...LOOK[mode], accent: APPEARANCE_ACCENT_HEX[accent] };
 }
 
 /** At rest in the quiet background the orb barely moves. */
@@ -31,12 +38,14 @@ export function HaloBackdrop({
   mode,
   words = '',
   variant = 'full',
+  accent = 'pink',
 }: {
   mode: PresenceMode;
   words?: string;
   variant?: ChatBackground;
+  accent?: AppearanceAccent;
 }) {
-  const look = LOOK[mode];
+  const look = presenceLook(mode, accent);
   const energy =
     variant === 'quiet' && mode === 'calm' ? QUIET_CALM_ENERGY : look.energy;
   const shown = revealInvisible(words.trim()).text;

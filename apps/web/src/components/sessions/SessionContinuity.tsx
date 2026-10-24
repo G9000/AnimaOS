@@ -21,11 +21,14 @@ function validUsage(usage: Session['contextUsage']): usage is ContextUsage {
   );
 }
 
-/** What the agent kept from earlier in the chat. The top bar shows it when
- *  there is one; a view without a top bar keeps it at the top of the thread. */
+/** Publishes the summary for the header; the main chat renders its own inline
+ *  summary card, while other sessions may use the header or local fallback. */
 export function SessionContinuity({ session }: { session: Session }) {
-  const inHeader = usePublishHeaderSummary(session.summary ?? null);
-  return session.summary && !inHeader ? (
+  const inHeader = usePublishHeaderSummary(
+    session.summary ?? null,
+    session.mainChat === true,
+  );
+  return session.summary && !inHeader && !session.mainChat ? (
     <div className="session-continuity">
       <KeptSummary summary={session.summary} />
     </div>
@@ -38,9 +41,11 @@ export function SessionContinuity({ session }: { session: Session }) {
 export function ContextNote({
   usage,
   agentName,
+  mainChat = false,
 }: {
   usage: Session['contextUsage'];
   agentName: string;
+  mainChat?: boolean;
 }) {
   const descriptionId = useId();
   if (!validUsage(usage)) return null;
@@ -50,7 +55,13 @@ export function ContextNote({
   const explanation = `Estimate of selected conversation history and saved summary only: ~${usage.estimatedTokens.toLocaleString()} of ${usage.budgetTokens.toLocaleString()} tokens. Excludes system instructions and provider context, tool schemas, files, the current draft, and the reply (${usage.replyReserveTokens.toLocaleString()} tokens reserved).`;
   return (
     <>
-      <details className="mx-4 my-2 text-xs text-ink-3">
+      <details
+        className={
+          mainChat
+            ? 'main-chat-context-inspector sr-only'
+            : 'mx-4 my-2 text-xs text-ink-3'
+        }
+      >
         <summary className="cursor-pointer">Inspect context estimates</summary>
         <p className="my-2">
           Preview estimates, not billed or actual provider usage. The

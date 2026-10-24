@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { SessionSummary } from '@animaos/sdk';
 import type { AgentDetail, ChatMessage } from '../lib/types';
 import { createDaemonClient, type Run } from '@animaos/sdk';
 import { toChatMessage } from '../lib/daemon-api';
@@ -290,6 +291,119 @@ function settledReceipts(count: number): NonNullable<Run['actionReceipts']> {
 }
 
 describe('MessageList', () => {
+  it('shows the main-chat summary in the transcript and loads originals from its card', async () => {
+    const user = userEvent.setup();
+    const summary: SessionSummary = {
+      text: '- Restart recovery shipped.\n- You prefer short summaries.',
+      throughMessageId: 'older-214',
+      createdAtMs: 1_725_000_000_000,
+      sourceMessageCount: 214,
+    };
+    const onLoadOlder = vi.fn();
+    render(
+      <MessageList
+        agent={agent}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        summary={summary}
+        hasOlder
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const card = screen.getByRole('region', { name: 'Conversation summary' });
+    expect(card).not.toHaveTextContent('Restart recovery shipped.');
+    await user.click(within(card).getByRole('button', { name: 'Show' }));
+    expect(card).toHaveTextContent('Restart recovery shipped.');
+    expect(card).toHaveTextContent('You prefer short summaries.');
+    const originals = within(card).getByRole('button', {
+      name: 'Show the 214 original messages',
+    });
+    await user.click(originals);
+    expect(onLoadOlder).toHaveBeenCalledOnce();
+  });
+
+  it('renders completed run receipts as a compact action summary card', () => {
+    render(
+      <MessageList
+        agent={agent}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={[
+          {
+            kind: 'receipts',
+            key: 'receipts:run-1',
+            runId: 'run-1',
+            createdAtMs: 1_725_000_000_000,
+            receipts: [
+              {
+                toolCallId: 'read-1',
+                name: 'read_file',
+                status: 'succeeded',
+                startedAtMs: 1,
+                finishedAtMs: 2,
+                durationMs: 1,
+                argumentsPreview: 'path: board-deck.pdf',
+                argumentsTruncated: false,
+                resultPreview: 'Deck contents',
+                resultTruncated: false,
+                durability: 'persistent',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const card = screen.getByRole('region', { name: 'What I did' });
+    expect(card).toHaveTextContent(/1 action/i);
+    expect(within(card).getByText('Read file')).toBeVisible();
+    expect(within(card).getByText('Reported success')).toBeInTheDocument();
+    expect(within(card).queryByText('Deck contents')).not.toBeInTheDocument();
+  });
+
+  it('keeps long action histories compact until the owner expands them', async () => {
+    const user = userEvent.setup();
+    const receipts = Array.from({ length: 5 }, (_, index) => ({
+      toolCallId: `tool-${index + 1}`,
+      name: `tool_${index + 1}`,
+      status: 'succeeded' as const,
+      startedAtMs: 1,
+      finishedAtMs: 2,
+      durationMs: 1,
+      argumentsPreview: '{}',
+      argumentsTruncated: false,
+      resultPreview: null,
+      resultTruncated: false,
+      durability: 'persistent' as const,
+    }));
+    render(
+      <MessageList
+        agent={agent}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={[
+          {
+            kind: 'receipts',
+            key: 'receipts:many',
+            runId: 'many',
+            createdAtMs: 1_725_000_000_000,
+            receipts,
+          },
+        ]}
+      />,
+    );
+
+    const card = screen.getByRole('region', { name: 'What I did' });
+    expect(within(card).getByText('Tool 4')).toBeVisible();
+    expect(within(card).queryByText('Tool 5')).not.toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Show all 5' }));
+    expect(within(card).getByText('Tool 5')).toBeVisible();
+  });
+
   it.each([true, false])(
     'excludes tail growth from older-history scroll preservation (resize delivered: %s)',
     (deliverResize) => {
@@ -1490,6 +1604,42 @@ describe('Composer commands and live replies', () => {
     await user.keyboard('{Escape}');
     expect(tray).not.toHaveAttribute('data-open');
     expect(more).toHaveFocus();
+  });
+
+  it('keeps the main chat send control visible while the draft is empty', async () => {
+    class Recognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onresult: (() => void) | null = null;
+      start() {}
+      stop() {}
+      abort() {}
+    }
+    vi.stubGlobal('SpeechRecognition', Recognition);
+    try {
+      render(
+        <Composer
+          {...composerProps({
+            sendAlways: true,
+            conversationKey: 'main-chat',
+            attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
+          })}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      const more = screen.getByRole('button', { name: 'More input options' });
+      const tray = document.getElementById(more.getAttribute('aria-controls')!)!;
+      expect(tray).not.toHaveAttribute('data-open');
+      await userEvent.click(more);
+      expect(screen.getByRole('button', { name: 'Dictate message' })).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows Record audio for an attach-capable composer without requesting microphone access', () => {

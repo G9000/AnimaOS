@@ -554,6 +554,8 @@ export function SessionView({
       }
       onJumpToLatest={historyAnchor?.onReturnToLatest}
       onAtBottomChange={onAtBottomChange}
+      summary={session?.mainChat ? session.summary ?? undefined : undefined}
+      summaryKey={session?.id ?? 'new'}
       tail={
         <>
           {inlineResults}
@@ -575,6 +577,7 @@ export function SessionView({
     <section
       className="flex h-full min-h-0 flex-col"
       aria-label={session?.title ?? 'New chat'}
+      data-main-chat={session?.mainChat ? 'true' : undefined}
     >
       {/* The main chat's header is the top bar; rename, export and usage
        *  stay one / command away. */}
@@ -707,6 +710,7 @@ export function SessionView({
       {footer.kind === 'composer' && session && (
         <ContextNote
           agentName={agent.name}
+          mainChat={session.mainChat === true}
           usage={
             composer.offline
               ? undefined
@@ -719,6 +723,7 @@ export function SessionView({
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}
+          sendAlways={!session || session.mainChat === true}
           label={footer.label}
           draft={composer.draft}
           setDraft={composer.setDraft}

@@ -5,6 +5,7 @@ import { AgentAvatar } from './AgentAvatar';
 import { HaloOrb } from './halo/HaloOrb';
 import { presenceLook } from './halo/HaloBackdrop';
 import type { PresenceMode } from '../lib/presence';
+import type { AppearanceAccent } from '../lib/appearance-preferences';
 import {
   BrainIcon,
   ChevronIcon,
@@ -46,6 +47,7 @@ export function AgentSwitcher({
   subtitle,
   needsYou = false,
   presence = 'calm',
+  appearanceAccent = 'pink',
   onOpenConversations,
   onImport,
   onOpenMemory,
@@ -71,6 +73,7 @@ export function AgentSwitcher({
   needsYou?: boolean;
   /** What the agent is doing: its avatar orb moves and glows to match. */
   presence?: PresenceMode;
+  appearanceAccent?: AppearanceAccent;
   onOpenConversations?: () => void;
   onImport?: () => void;
   onOpenMemory?: () => void;
@@ -95,7 +98,7 @@ export function AgentSwitcher({
     return AVATAR_ACCENTS[index % AVATAR_ACCENTS.length];
   };
   const thread = title !== undefined;
-  const look = presenceLook(presence);
+  const look = presenceLook(presence, appearanceAccent);
   const coins = others.slice(0, MAX_COINS);
   const hidden = others.length - coins.length;
 

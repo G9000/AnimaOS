@@ -39,32 +39,98 @@
 }
 
 .session-kept-summary {
-  max-width: 42rem;
-  margin: 0.5rem auto 0;
-  border: 1px solid var(--color-line);
-  border-radius: 0.5rem;
+  display: flex;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 8px;
+  background: #191918f2;
+  color: #ece6da;
 }
 
-.session-kept-summary > summary {
-  cursor: pointer;
-  padding: 0.5rem 0.75rem;
+.session-kept-summary-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: #ece6da;
+  font-size: 13px;
 }
 
-.session-kept-summary > summary:focus-visible {
+.session-kept-summary-head > svg {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.session-kept-summary-head > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.session-kept-summary-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.session-kept-summary-toggle:focus-visible,
+.session-kept-summary-foot button:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
 .session-kept-summary-body {
   max-height: 18rem;
   overflow: auto;
-  padding: 0 0.75rem 0.75rem;
+  color: rgb(236 230 218 / 0.62);
   overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
-.session-kept-summary-meta {
-  margin-bottom: 0.5rem;
-  color: var(--color-ink-3);
+.session-kept-summary-body [data-testid='markdown-message'] {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.session-kept-summary-body li::marker {
+  color: #7fcb8a;
+}
+
+.session-kept-summary-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+.session-kept-summary-foot button {
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 12px;
+  text-align: left;
+}
+
+.session-kept-summary-foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(236 230 218 / 0.45);
+  font-size: 11px;
 }
 
 .session-history-anchor {

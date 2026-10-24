@@ -1,21 +1,59 @@
+import { useState } from 'react';
 import { MarkdownMessage } from '../MarkdownMessage';
 import type { SessionSummary } from '@animaos/sdk';
+import { CheckIcon, ChevronIcon, SparkIcon } from '../icons';
 
 /** The persisted compaction result, available even outside the loaded page. */
-export function KeptSummary({ summary }: { summary: SessionSummary }) {
+export function KeptSummary({
+  summary,
+  onShowOriginals,
+  initiallyOpen = false,
+}: {
+  summary: SessionSummary;
+  onShowOriginals?: () => void;
+  initiallyOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
   return (
-    <details className="session-kept-summary">
-      <summary>What anima kept</summary>
-      <div className="session-kept-summary-body">
-        <p className="session-kept-summary-meta">
-          From {summary.sourceMessageCount.toLocaleString()} messages ·{' '}
-          <time dateTime={new Date(summary.createdAtMs).toISOString()}>
-            {new Date(summary.createdAtMs).toLocaleString()}
-          </time>
-        </p>
-        <MarkdownMessage>{summary.text}</MarkdownMessage>
-      </div>
-    </details>
+    <section className="session-kept-summary" aria-label="Conversation summary">
+      <header className="session-kept-summary-head">
+        <SparkIcon size={14} aria-hidden />
+        <span>
+          <span>What anima kept</span>
+          {' · '}
+          {summary.sourceMessageCount.toLocaleString()}{' '}
+          earlier {summary.sourceMessageCount === 1 ? 'message' : 'messages'}
+          {' summarized'}
+        </span>
+        <button
+          type="button"
+          className="session-kept-summary-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? 'Hide' : 'Show'}
+          <ChevronIcon size={12} />
+        </button>
+      </header>
+      {open && (
+        <>
+          <div className="session-kept-summary-body">
+            <MarkdownMessage>{summary.text}</MarkdownMessage>
+          </div>
+          {onShowOriginals && (
+            <footer className="session-kept-summary-foot">
+              <button type="button" onClick={onShowOriginals}>
+                Show the {summary.sourceMessageCount.toLocaleString()} original{' '}
+                {summary.sourceMessageCount === 1 ? 'message' : 'messages'}
+              </button>
+              <span>
+                <CheckIcon size={11} aria-hidden /> Originals stay searchable
+              </span>
+            </footer>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

@@ -83,7 +83,8 @@ export function ConversationControls({
   };
   return (
     <div
-      className="space-y-2 px-4 py-2 text-xs text-ink-3"
+      className="main-chat-conversation-controls space-y-2 px-4 py-2 text-xs text-ink-3"
+      data-main-chat={session.mainChat ? 'true' : undefined}
       aria-label="Chat controls"
     >
       {session.parentSessionId && onOpenSource && (

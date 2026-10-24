@@ -4711,8 +4711,8 @@ it('shows a pending approval inline and in the inbox, once, and decides it', asy
     ).not.toBeInTheDocument(),
   );
   expect(
-    screen.getByRole('button', { name: 'Inbox, nothing waiting' }),
-  ).toBeVisible();
+    screen.queryByRole('button', { name: 'Inbox, nothing waiting' }),
+  ).not.toBeInTheDocument();
 });
 
 it('streams a reply without rendering unchanged history again', async () => {

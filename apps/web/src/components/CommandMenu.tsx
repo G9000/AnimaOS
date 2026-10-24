@@ -1,6 +1,7 @@
 import { useResetOnChange } from '../hooks/useResetOnChange';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type {
+  MemorySearchResult,
   SessionMessageSearchHit,
   SessionMessageSearchPage,
 } from '@animaos/sdk';
@@ -18,7 +19,10 @@ export function CommandMenu({
   commands,
   close,
   searchMessages,
+  searchMemories,
   onOpenMessage,
+  onOpenMemory,
+  mainSessionId,
 }: {
   commands: StudioCommand[];
   close: () => void;
@@ -26,7 +30,13 @@ export function CommandMenu({
     query: string,
     signal: AbortSignal,
   ) => Promise<SessionMessageSearchPage>;
+  searchMemories?: (
+    query: string,
+    signal: AbortSignal,
+  ) => Promise<MemorySearchResult[]>;
   onOpenMessage?: (hit: SessionMessageSearchHit) => void;
+  onOpenMemory?: (hit: MemorySearchResult) => void;
+  mainSessionId?: string;
 }) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -38,8 +48,12 @@ export function CommandMenu({
   const [messageRead, setMessageRead] = useState<{
     query: string;
     search: typeof searchMessages;
+    memorySearch: typeof searchMemories;
     status: 'loading' | 'ready' | 'failed';
     page: SessionMessageSearchPage;
+    memories: MemorySearchResult[];
+    messageFailed: boolean;
+    memoryFailed: boolean;
   } | null>(null);
   const results = commands.filter((command) =>
     `${command.title} ${command.description} ${command.group}`
@@ -49,53 +63,91 @@ export function CommandMenu({
   // Callback identity changes with the selected companion/connection. Never
   // expose a prior companion's results while its replacement request starts.
   const currentRead =
-    messageRead?.query === trimmedQuery && messageRead.search === searchMessages
+    messageRead?.query === trimmedQuery &&
+    messageRead.search === searchMessages &&
+    messageRead.memorySearch === searchMemories
       ? messageRead
       : null;
   const messageResults =
     currentRead?.status === 'ready' ? currentRead.page.results : [];
-  const totalResults = results.length + messageResults.length;
+  const memoryResults =
+    currentRead?.status === 'ready' ? currentRead.memories : [];
+  const orderedMessages = mainSessionId
+    ? [
+        ...messageResults.filter((hit) => hit.sessionId === mainSessionId),
+        ...messageResults.filter((hit) => hit.sessionId !== mainSessionId),
+      ]
+    : messageResults;
+  const totalResults =
+    results.length + orderedMessages.length + memoryResults.length;
   const selected = Math.min(active, Math.max(totalResults - 1, 0));
 
-  useResetOnChange([trimmedQuery, searchMessages, retry], () => {
+  useResetOnChange([trimmedQuery, searchMessages, searchMemories, retry], () => {
     setMessageRead(
-      trimmedQuery && searchMessages
+      trimmedQuery && (searchMessages || searchMemories)
         ? {
             query: trimmedQuery,
             search: searchMessages,
+            memorySearch: searchMemories,
             page: { results: [], hasMore: false },
+            memories: [],
+            messageFailed: false,
+            memoryFailed: false,
             status: 'loading',
           }
         : null,
     );
   });
   useEffect(() => {
-    if (!trimmedQuery || !searchMessages) return;
+    if (!trimmedQuery || (!searchMessages && !searchMemories)) return;
     const controller = new AbortController();
     let current = true;
     const state = {
       query: trimmedQuery,
       search: searchMessages,
+      memorySearch: searchMemories,
       page: { results: [], hasMore: false },
+      memories: [],
+      messageFailed: false,
+      memoryFailed: false,
     };
     const timer = setTimeout(() => {
-      void Promise.resolve()
-        .then(() => searchMessages(trimmedQuery, controller.signal))
-        .then((page) => {
-          if (current && !controller.signal.aborted)
-            setMessageRead({ ...state, page, status: 'ready' });
-        })
-        .catch(() => {
-          if (current && !controller.signal.aborted)
-            setMessageRead({ ...state, status: 'failed' });
+      void Promise.allSettled([
+        searchMessages
+          ? searchMessages(trimmedQuery, controller.signal)
+          : Promise.resolve({ results: [], hasMore: false }),
+        searchMemories
+          ? searchMemories(trimmedQuery, controller.signal)
+          : Promise.resolve([]),
+      ]).then(([messageRead, memoryRead]) => {
+        if (!current || controller.signal.aborted) return;
+        const succeeded =
+          (searchMessages !== undefined &&
+            messageRead.status === 'fulfilled') ||
+          (searchMemories !== undefined &&
+            memoryRead.status === 'fulfilled');
+        setMessageRead({
+          ...state,
+          page:
+            messageRead.status === 'fulfilled'
+              ? messageRead.value
+              : { results: [], hasMore: false },
+          memories:
+            memoryRead.status === 'fulfilled' ? memoryRead.value : [],
+          messageFailed:
+            searchMessages !== undefined && messageRead.status === 'rejected',
+          memoryFailed:
+            searchMemories !== undefined && memoryRead.status === 'rejected',
+          status: succeeded ? 'ready' : 'failed',
         });
+      });
     }, 200);
     return () => {
       current = false;
       clearTimeout(timer);
       controller.abort();
     };
-  }, [trimmedQuery, searchMessages, retry]);
+  }, [trimmedQuery, searchMessages, searchMemories, retry]);
 
   useEffect(() => {
     const trigger =
@@ -124,11 +176,19 @@ export function CommandMenu({
     onOpenMessage?.(hit);
   }
 
+  function chooseMemory(hit: MemorySearchResult) {
+    close();
+    onOpenMemory?.(hit);
+  }
+
   function chooseSelected() {
     if (selected < results.length) choose(results[selected]);
-    else {
-      const hit = messageResults[selected - results.length];
+    else if (selected < results.length + orderedMessages.length) {
+      const hit = orderedMessages[selected - results.length];
       if (hit) chooseMessage(hit);
+    } else {
+      const hit = memoryResults[selected - results.length - orderedMessages.length];
+      if (hit) chooseMemory(hit);
     }
   }
 
@@ -182,8 +242,8 @@ export function CommandMenu({
               totalResults ? `${id}-${selected}` : undefined
             }
             placeholder={
-              searchMessages
-                ? 'Search commands and saved messages…'
+              searchMessages || searchMemories
+                ? 'Search commands, messages and memories…'
                 : 'Where do you want to go?'
             }
             maxLength={200}
@@ -225,7 +285,7 @@ export function CommandMenu({
           className="studio-command-results"
           role="listbox"
           id={`${id}-results`}
-          aria-label={searchMessages ? 'Commands and messages' : 'Commands'}
+          aria-label={searchMessages || searchMemories ? 'Commands, messages and memories' : 'Commands'}
         >
           {results.map((command, index) => (
             <Fragment key={command.id}>
@@ -266,11 +326,72 @@ export function CommandMenu({
               >
                 Messages
               </div>
-              {messageResults.map((hit, index) => {
+              {orderedMessages.map((hit, index) => {
                 const position = results.length + index;
+                const group =
+                  mainSessionId && hit.sessionId === mainSessionId
+                    ? 'Main chat'
+                    : mainSessionId
+                      ? 'Elsewhere'
+                      : null;
+                const previous = orderedMessages[index - 1];
+                const previousGroup =
+                  previous && mainSessionId
+                    ? previous.sessionId === mainSessionId
+                      ? 'Main chat'
+                      : 'Elsewhere'
+                    : null;
+                return (
+                  <Fragment key={`${hit.sessionId}\u0000${hit.messageId}`}>
+                    {group && group !== previousGroup && (
+                      <div className="studio-command-subheading">{group}</div>
+                    )}
+                    <button
+                      type="button"
+                      role="option"
+                      tabIndex={-1}
+                      aria-selected={selected === position}
+                      id={`${id}-${position}`}
+                      className="studio-command-option"
+                      onMouseMove={() => setActive(position)}
+                      onClick={() => chooseMessage(hit)}
+                    >
+                      <span className="studio-command-symbol" aria-hidden>
+                        {group === 'Main chat' ? '⌂' : '↩'}
+                      </span>
+                      <span>
+                        <strong>{hit.title}</strong>
+                        <small className="studio-command-message-snippet">
+                          {hit.snippet}
+                        </small>
+                        <small>
+                          {hit.role === 'user'
+                            ? 'You'
+                            : hit.role === 'assistant'
+                              ? 'anima'
+                              : 'Tool'}{' '}
+                          ·{' '}
+                          <time
+                            dateTime={new Date(hit.createdAtMs).toISOString()}
+                          >
+                            {new Date(hit.createdAtMs).toLocaleString()}
+                          </time>
+                        </small>
+                      </span>
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+          )}
+          {searchMemories && trimmedQuery && memoryResults.length > 0 && (
+            <div role="group" aria-label="Memory">
+              <div className="studio-command-message-heading">Memory</div>
+              {memoryResults.map((memory, index) => {
+                const position = results.length + orderedMessages.length + index;
                 return (
                   <button
-                    key={`${hit.sessionId}\u0000${hit.messageId}`}
+                    key={memory.id}
                     type="button"
                     role="option"
                     tabIndex={-1}
@@ -278,29 +399,13 @@ export function CommandMenu({
                     id={`${id}-${position}`}
                     className="studio-command-option"
                     onMouseMove={() => setActive(position)}
-                    onClick={() => chooseMessage(hit)}
+                    onClick={() => chooseMemory(memory)}
                   >
-                    <span className="studio-command-symbol" aria-hidden>
-                      ↩
-                    </span>
+                    <span className="studio-command-symbol" aria-hidden>✳</span>
                     <span>
-                      <strong>{hit.title}</strong>
-                      <small className="studio-command-message-snippet">
-                        {hit.snippet}
-                      </small>
-                      <small>
-                        {hit.role === 'user'
-                          ? 'You'
-                          : hit.role === 'assistant'
-                            ? 'anima'
-                            : 'Tool'}{' '}
-                        ·{' '}
-                        <time
-                          dateTime={new Date(hit.createdAtMs).toISOString()}
-                        >
-                          {new Date(hit.createdAtMs).toLocaleString()}
-                        </time>
-                      </small>
+                      <strong>{memory.agentName} · {memory.type.replace('_', ' ')}</strong>
+                      <small className="studio-command-message-snippet">{memory.content}</small>
+                      <small>{memory.scope} · {new Date(memory.createdAt).toLocaleDateString()}</small>
                     </span>
                   </button>
                 );
@@ -308,18 +413,22 @@ export function CommandMenu({
             </div>
           )}
         </div>
-        {!results.length && (
+        {!results.length && !trimmedQuery && (
           <p role="status" className="studio-command-empty">
             No commands found. Try “workspace”, “plan”, or “settings”.
           </p>
         )}
-        {searchMessages && trimmedQuery && (
+        {(searchMessages || searchMemories) && trimmedQuery && (
           <div className="studio-command-empty" role="status">
             {!currentRead || currentRead.status === 'loading' ? (
-              'Searching messages…'
+              searchMemories ? 'Searching messages and memory…' : 'Searching messages…'
             ) : currentRead.status === 'failed' ? (
               <>
-                <span>Message search is unavailable. Try again.</span>{' '}
+                <span>
+                  {searchMemories
+                    ? 'Search is unavailable. Try again.'
+                    : 'Message search is unavailable. Try again.'}
+                </span>{' '}
                 <button
                   type="button"
                   className="studio-tool-button"
@@ -328,12 +437,25 @@ export function CommandMenu({
                   Search again
                 </button>
               </>
-            ) : messageResults.length === 0 ? (
-              'No messages found.'
+            ) : currentRead.messageFailed || currentRead.memoryFailed ? (
+              <>
+                <span>Some search results are unavailable.</span>{' '}
+                <button
+                  type="button"
+                  className="studio-tool-button"
+                  onClick={() => setRetry((value) => value + 1)}
+                >
+                  Search again
+                </button>
+              </>
+            ) : messageResults.length === 0 && memoryResults.length === 0 ? (
+              searchMemories
+                ? 'No matching messages or memories.'
+                : 'No messages found.'
             ) : currentRead.page.hasMore ? (
               'Showing the newest matches. Narrow your search to find more.'
             ) : (
-              `${messageResults.length} message${messageResults.length === 1 ? '' : 's'} found.`
+              `${messageResults.length + memoryResults.length} results found.`
             )}
           </div>
         )}

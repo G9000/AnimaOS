@@ -491,13 +491,13 @@ describe('SessionView', () => {
       ],
     });
 
-    const disclosure = screen.getByText('What anima kept');
+    const disclosure = screen.getByRole('button', { name: 'Show' });
     expect(screen.getAllByText('What anima kept')).toHaveLength(1);
-    expect(screen.getByText('Saturday free')).not.toBeVisible();
+    expect(screen.queryByText('Saturday free')).not.toBeInTheDocument();
     await userEvent.click(disclosure);
     expect(screen.getByText('Saturday free')).toBeVisible();
     expect(screen.getByText('Saturday free').tagName).toBe('STRONG');
-    expect(screen.getByText(/12 messages/)).toBeVisible();
+    expect(screen.getByText(/12 earlier messages/)).toBeVisible();
     expect(screen.getByText('Unsafe')).not.toHaveAttribute(
       'href',
       expect.stringMatching(/^javascript:/),
@@ -514,7 +514,7 @@ describe('SessionView', () => {
       },
     });
     const view = renderView({ session: first });
-    await userEvent.click(screen.getByText('What anima kept'));
+    await userEvent.click(screen.getByRole('button', { name: 'Show' }));
     view.rerender({
       session: {
         ...first,
@@ -546,10 +546,10 @@ describe('SessionView', () => {
       sourceMessageCount: 2,
     };
     view.rerender({ session: sessionFixture('chat:first', { summary }) });
-    await userEvent.click(screen.getByText('What anima kept'));
+    await userEvent.click(screen.getByRole('button', { name: 'Show' }));
     expect(screen.getByText('Saved context.')).toBeVisible();
     view.rerender({ session: sessionFixture('chat:second', { summary }) });
-    expect(screen.getByText('Saved context.')).not.toBeVisible();
+    expect(screen.queryByText('Saved context.')).not.toBeInTheDocument();
   });
 
   it('offers native speech for a saved assistant reply without starting playback', () => {

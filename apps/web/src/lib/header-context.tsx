@@ -14,11 +14,14 @@ import type { SessionSummary } from '@animaos/sdk';
 export interface HeaderContextState {
   day: string | null;
   summary: SessionSummary | null;
+  /** The main chat shows this as the first transcript card. */
+  summaryInline: boolean;
 }
 
 interface Publisher {
   setDay: (day: string | null) => void;
   setSummary: (summary: SessionSummary | null) => void;
+  setSummaryInline: (inline: boolean) => void;
 }
 
 const StateContext = createContext<HeaderContextState | null>(null);
@@ -27,9 +30,16 @@ const PublisherContext = createContext<Publisher | null>(null);
 export function HeaderContextProvider({ children }: { children: ReactNode }) {
   const [day, setDay] = useState<string | null>(null);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
-  const state = useMemo(() => ({ day, summary }), [day, summary]);
+  const [summaryInline, setSummaryInline] = useState(false);
+  const state = useMemo(
+    () => ({ day, summary, summaryInline }),
+    [day, summary, summaryInline],
+  );
   // Setters are stable, so publishing never re-renders the publisher.
-  const publisher = useMemo(() => ({ setDay, setSummary }), []);
+  const publisher = useMemo(
+    () => ({ setDay, setSummary, setSummaryInline }),
+    [],
+  );
   return (
     <PublisherContext.Provider value={publisher}>
       <StateContext.Provider value={state}>{children}</StateContext.Provider>
@@ -56,12 +66,17 @@ export function usePublishHeaderDay(day: string | null): void {
  *  a view rendered outside the shell has no header and shows it itself. */
 export function usePublishHeaderSummary(
   summary: SessionSummary | null,
+  inline = false,
 ): boolean {
   const publisher = useContext(PublisherContext);
   useEffect(() => {
     if (!publisher) return;
     publisher.setSummary(summary);
-    return () => publisher.setSummary(null);
-  }, [publisher, summary]);
+    publisher.setSummaryInline(inline);
+    return () => {
+      publisher.setSummary(null);
+      publisher.setSummaryInline(false);
+    };
+  }, [publisher, summary, inline]);
   return publisher !== null;
 }

@@ -3,6 +3,23 @@ import { describe, expect, it } from 'vitest';
 import { ContextNote } from './SessionContinuity';
 
 describe('context inspector', () => {
+  it('keeps the main-chat inspector accessible without adding a visible row', () => {
+    render(
+      <ContextNote
+        agentName="Nova"
+        mainChat
+        usage={{
+          estimatedTokens: 5,
+          budgetTokens: 10000,
+          replyReserveTokens: 500,
+        }}
+      />,
+    );
+    expect(
+      screen.getByText('Inspect context estimates').closest('details'),
+    ).toHaveClass('main-chat-context-inspector', 'sr-only');
+  });
+
   it('exposes estimates and omissions even when history usage is low', () => {
     render(
       <ContextNote

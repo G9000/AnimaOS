@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   isTerminalRunStatus,
+  type MemorySearchResult,
   type RunMode,
   type Session,
   type UploadedAttachment,
@@ -351,6 +352,18 @@ export function ViewHarness() {
         limit: 20,
         signal,
       });
+    },
+    [agentId, connection],
+  );
+  const searchMemories = useCallback(
+    (query: string, signal: AbortSignal): Promise<MemorySearchResult[]> => {
+      if (signal.aborted)
+        return Promise.reject(
+          signal.reason ?? new DOMException('Search canceled', 'AbortError'),
+        );
+      if (!agentId || connection !== 'online')
+        return Promise.reject(new Error('Reconnect to search memory.'));
+      return daemon.searchMemories(query, agentId, 8);
     },
     [agentId, connection],
   );
@@ -1877,6 +1890,9 @@ export function ViewHarness() {
           onNewChat={newChat}
           searchMessages={
             agentId && connection === 'online' ? searchMessages : undefined
+          }
+          searchMemories={
+            agentId && connection === 'online' ? searchMemories : undefined
           }
           onOpenMessage={openMessage}
           onSelectAgent={selectAgent}

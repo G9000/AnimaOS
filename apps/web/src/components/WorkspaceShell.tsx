@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import type {
+  MemorySearchResult,
   Session,
   SessionMessageSearchHit,
   SessionMessageSearchPage,
@@ -38,13 +39,17 @@ import { WorkspaceCapabilities } from './WorkspaceCapabilities';
 import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey, shouldShowSession } from '../lib/session-groups';
-import { ChevronIcon, GlobeIcon, InboxIcon, SearchIcon, XIcon } from './icons';
+import { ChevronIcon, GlobeIcon, SearchIcon, XIcon } from './icons';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
 import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
 import { HeaderContextLine } from './HeaderContextLine';
 import { AppearancePage } from './AppearancePage';
 import { useChatBackground } from '../lib/chat-background';
+import {
+  useAppearancePreferences,
+  type AppearanceTheme,
+} from '../lib/appearance-preferences';
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
@@ -288,6 +293,7 @@ export function WorkspaceShell({
   onSelectAgent,
   newAgent = null,
   searchMessages,
+  searchMemories,
   onOpenMessage,
   inbox = null,
   onOpenReport,
@@ -338,6 +344,10 @@ export function WorkspaceShell({
     query: string,
     signal: AbortSignal,
   ) => Promise<SessionMessageSearchPage>;
+  searchMemories?: (
+    query: string,
+    signal: AbortSignal,
+  ) => Promise<MemorySearchResult[]>;
   onOpenMessage?: (hit: SessionMessageSearchHit) => void;
   /** Switches the conversation to another companion. */
   onSelectAgent?: (agentId: string) => void;
@@ -356,6 +366,34 @@ export function WorkspaceShell({
 }) {
   const page = availablePage(route);
   const [chatBackground] = useChatBackground();
+  const [appearance] = useAppearancePreferences();
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = (systemIsLight = false) => {
+      const effectiveTheme: Exclude<AppearanceTheme, 'system'> =
+        appearance.theme === 'system'
+          ? systemIsLight
+            ? 'light'
+            : 'dark'
+          : appearance.theme;
+      root.dataset.appearanceTheme = effectiveTheme;
+      root.dataset.appearanceThemeChoice = appearance.theme;
+      root.dataset.appearanceAccent = appearance.accent;
+      root.dataset.appearanceTextSize = appearance.textSize;
+      root.dataset.appearanceDensity = appearance.density;
+      root.dataset.appearanceReduceMotion = String(appearance.reduceMotion);
+    };
+    const media =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: light)')
+        : null;
+    apply(media?.matches ?? false);
+    const onSystemThemeChange = (event: MediaQueryListEvent) => {
+      if (appearance.theme === 'system') apply(event.matches);
+    };
+    media?.addEventListener('change', onSystemThemeChange);
+    return () => media?.removeEventListener('change', onSystemThemeChange);
+  }, [appearance]);
   const presenceSignals = usePresenceSignals();
   const presence = presenceMode({
     signals: presenceSignals,
@@ -536,6 +574,7 @@ export function WorkspaceShell({
               variant={chatBackground}
               mode={page === null ? presence : 'calm'}
               words={presenceSignals.listening?.words}
+              accent={appearance.accent}
             />
             <div className="studio-topbar scenic-topbar">
               <div className="scenic-identity">
@@ -575,6 +614,7 @@ export function WorkspaceShell({
                   }
                   needsYou={(inbox?.count ?? 0) > 0}
                   presence={page === null ? presence : 'calm'}
+                  appearanceAccent={appearance.accent}
                   onOpenConversations={
                     sidebar !== null ? () => setDrawerOpen(true) : undefined
                   }
@@ -808,7 +848,10 @@ export function WorkspaceShell({
           commands={commands}
           close={() => setCommandsOpen(false)}
           searchMessages={searchMessages}
+          searchMemories={searchMemories}
           onOpenMessage={onOpenMessage}
+          onOpenMemory={() => navigate({ kind: 'page', page: 'memory' })}
+          mainSessionId={sessions.find((session) => session.mainChat)?.id}
         />
       )}
     </HeaderContextProvider>
@@ -855,26 +898,20 @@ function InboxButton({
   const waiting = inbox.count > 0;
   return (
     <div ref={root} className="needs-you-anchor">
-      <button
-        ref={button}
-        type="button"
-        className={`studio-tool-button needs-you-button${waiting ? ' has-items' : ''}`}
-        aria-label={
-          waiting ? `Inbox, ${inbox.count} need you` : 'Inbox, nothing waiting'
-        }
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {waiting ? (
-          <>
-            <i aria-hidden />
-            Needs you · {inbox.count}
-          </>
-        ) : (
-          <InboxIcon size={15} />
-        )}
-      </button>
+      {waiting && (
+        <button
+          ref={button}
+          type="button"
+          className="studio-tool-button needs-you-button has-items"
+          aria-label={`Inbox, ${inbox.count} need you`}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <i aria-hidden />
+          Needs you · {inbox.count}
+        </button>
+      )}
       {open && (
         <div className="needs-you-popover" role="dialog" aria-label="Inbox">
           {inbox.render(close)}

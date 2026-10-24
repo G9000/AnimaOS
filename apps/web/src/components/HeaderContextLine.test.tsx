@@ -78,6 +78,21 @@ describe('header context line', () => {
     expect(screen.getByRole('button', { name: 'Show summary' })).toBeVisible();
   });
 
+  it('leaves the main-chat summary for its inline transcript card', () => {
+    render(
+      <HeaderContextProvider>
+        <HeaderContextLine />
+        <SessionContinuity session={session({ mainChat: true })} />
+      </HeaderContextProvider>,
+    );
+    expect(
+      screen.queryByText(/earlier messages summarized/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Show summary' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('keeps the summary in the thread when there is no top bar', () => {
     render(<SessionContinuity session={session()} />);
     expect(screen.getByText('What anima kept')).toBeInTheDocument();

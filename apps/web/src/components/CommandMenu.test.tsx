@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type {
+  MemorySearchResult,
   SessionMessageSearchHit,
   SessionMessageSearchPage,
 } from '@animaos/sdk';
@@ -48,6 +49,47 @@ afterEach(() => {
 });
 
 describe('CommandMenu saved message search', () => {
+  it('searches memory separately and opens the selected memory result', async () => {
+    const memory: MemorySearchResult = {
+      id: 'memory-bank-call',
+      agentId: 'agent-a',
+      agentName: 'Alpha',
+      type: 'fact',
+      content: 'The bank call is at 2:00 PM.',
+      importance: 0.7,
+      createdAt: 1_725_000_000_000,
+      scope: 'shared',
+      score: 0.93,
+    };
+    const searchMessages = vi.fn(async () => ({
+      results: [hit('message-bank', 'The bank call is at 2:00 PM.')],
+      hasMore: false,
+    }));
+    const searchMemories = vi.fn(async () => [memory]);
+    const onOpenMemory = vi.fn();
+    const close = vi.fn();
+    render(
+      <CommandMenu
+        commands={[]}
+        close={close}
+        searchMessages={searchMessages}
+        searchMemories={searchMemories}
+        onOpenMemory={onOpenMemory}
+      />,
+    );
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: 'bank' } });
+    await debounce();
+    expect(searchMessages).toHaveBeenCalledWith('bank', expect.any(AbortSignal));
+    expect(searchMemories).toHaveBeenCalledWith('bank', expect.any(AbortSignal));
+    expect(screen.getByRole('group', { name: 'Memory' })).toBeVisible();
+    expect(screen.getByRole('option', { name: /Alpha · fact/ })).toBeVisible();
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(close).toHaveBeenCalledOnce();
+    expect(onOpenMemory).toHaveBeenCalledWith(memory);
+  });
+
   it('debounces trimmed nonempty queries and keeps loading distinct from no matches', async () => {
     const request = deferred<SessionMessageSearchPage>();
     const searchMessages = vi.fn(

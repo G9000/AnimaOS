@@ -29,6 +29,48 @@ it('never treats a host-generated recovery prompt as owner-authored resend input
   expect(isOwnerWritten(child)).toBe(false);
 });
 
+it('places completed action receipts after the linked assistant reply', () => {
+  const run = runFixture('receipt-run', {
+    status: 'completed',
+    startedAtMs: 2,
+    finishedAtMs: 4,
+    replyMessageId: 'receipt-reply',
+    actionReceipts: [
+      {
+        toolCallId: 'call-read',
+        name: 'read_file',
+        status: 'succeeded',
+        startedAtMs: 2,
+        finishedAtMs: 3,
+        durationMs: 1,
+        argumentsPreview: 'path: board-deck.pdf',
+        argumentsTruncated: false,
+        resultPreview: 'Deck text',
+        resultTruncated: false,
+        durability: 'persistent',
+      },
+    ],
+  });
+  const assistant = message('receipt-reply', 'Assistant', 'Three takeaways.', {
+    runId: run.id,
+  });
+  const items = buildTranscript({
+    messages: [message('receipt-input', 'User', 'Summarize the deck.'), assistant],
+    runs: [emptyLiveRun(run)],
+  });
+
+  expect(items.map((item) => item.kind)).toEqual([
+    'message',
+    'message',
+    'receipts',
+  ]);
+  expect(items[2]).toMatchObject({
+    kind: 'receipts',
+    runId: run.id,
+    receipts: [{ toolCallId: 'call-read', name: 'read_file' }],
+  });
+});
+
 it('replaces only a linked persisted recovery input with a short system notice', () => {
   const internal = 'Host recovery evidence: private quoted action details';
   const recovery = runFixture('recovery-child', {

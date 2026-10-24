@@ -46,7 +46,11 @@ export function ChatExtensions({
     </button>
   );
   return (
-    <div className="shrink-0 border-b border-white/10 text-xs">
+    <div
+      className="main-chat-extensions shrink-0 border-b border-white/10 text-xs"
+      data-main-chat={session.mainChat ? 'true' : undefined}
+      data-panel={panel ?? ''}
+    >
       <nav
         className="flex flex-wrap gap-1 px-3 py-1"
         aria-label="Chat controls"

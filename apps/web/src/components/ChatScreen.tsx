@@ -16,6 +16,7 @@ import { usePresenceSignals } from '../lib/presence';
 import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
+import type { ActionReceipt, SessionSummary } from '@animaos/sdk';
 import type { AgentDetail, ChatMessage } from '../lib/types';
 import {
   AlertIcon,
@@ -44,7 +45,11 @@ import { RunOutcomeCard } from './sessions/RunOutcomeCard';
 import { AutomationMessageCard } from './sessions/AutomationMessageCard';
 import { TaskReviewAction } from './learning/TaskReviewAction';
 import { TaskReviewProvider } from './learning/TaskReviewContext';
-import { DelegatedTurn, TrimmedDivider } from './sessions/TranscriptNotes';
+import {
+  DelegatedTurn,
+  KeptSummary,
+  TrimmedDivider,
+} from './sessions/TranscriptNotes';
 import { slashSuggestions, type SlashCommand } from '../lib/slash-commands';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
 import {
@@ -335,7 +340,84 @@ function itemTime(item: TranscriptItem): number | null {
     item.kind === 'delegated' ||
     item.kind === 'revised'
     ? item.message.created_at_ms
+    : item.kind === 'receipts'
+      ? item.createdAtMs
     : null;
+}
+
+function receiptLabel(name: string): string {
+  if (/^(remember|memory_(?:store|write|remember))/i.test(name))
+    return 'Remembered';
+  if (/^mcp_[a-f0-9]{16,}(?:_[a-f0-9]{12,})?$/i.test(name))
+    return 'Connected tool';
+  const words = name.replace(/[_-]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : 'Completed action';
+}
+
+function ActionReceiptCard({
+  receipts,
+  createdAtMs,
+}: {
+  receipts: ActionReceipt[];
+  createdAtMs: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!receipts.length) return null;
+  const successes = receipts.filter(
+    (receipt) => receipt.status === 'succeeded',
+  ).length;
+  const failures = receipts.length - successes;
+  const visibleReceipts = expanded ? receipts : receipts.slice(0, 4);
+  return (
+    <section className="action-receipts-card" aria-label="What I did">
+      <header className="action-receipts-head">
+        <span>WHAT I DID</span>
+        <span>
+          {receipts.length} {receipts.length === 1 ? 'ACTION' : 'ACTIONS'}
+          {successes > 0 && ` · ${successes} REPORTED SUCCESS`}
+          {failures > 0 && ` · ${failures} REPORTED FAILURE`}
+        </span>
+        {receipts.length > 4 && (
+          <button
+            type="button"
+            className="action-receipts-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? 'Show fewer' : `Show all ${receipts.length}`}
+          </button>
+        )}
+      </header>
+      <ul className="action-receipts">
+        {visibleReceipts.map((receipt) => {
+          const status =
+            receipt.status === 'succeeded'
+              ? 'success'
+              : receipt.status === 'failed'
+                ? 'failed'
+                : 'unknown';
+          const accessibleStatus =
+            status === 'success'
+              ? 'Reported success'
+              : status === 'failed'
+                ? 'Reported failure'
+                : 'Outcome unknown';
+          return (
+            <li key={receipt.toolCallId} data-status={status}>
+              <span className="action-receipt-status" aria-hidden>
+                {status === 'success' ? '✓' : status === 'failed' ? '!' : '·'}
+              </span>
+              <span className="action-receipt-label">
+                {receiptLabel(receipt.name)}
+              </span>
+              <time>{formatTime(receipt.finishedAtMs ?? createdAtMs)}</time>
+              <span className="sr-only">{accessibleStatus}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 function dayLabel(ms: number, now = new Date()): string {
@@ -482,6 +564,13 @@ const TranscriptEntry = memo(function TranscriptEntry({
           resent={actions?.resentRunIds?.has(item.run.id) ?? false}
         />
       );
+    case 'receipts':
+      return (
+        <ActionReceiptCard
+          receipts={item.receipts}
+          createdAtMs={item.createdAtMs}
+        />
+      );
     case 'learning-review':
       return <TaskReviewAction run={item.run} />;
     case 'model-note':
@@ -523,6 +612,8 @@ export const MessageList = memo(function MessageList({
   jumpReady = true,
   onJumpToLatest,
   onAtBottomChange,
+  summary,
+  summaryKey,
 }: {
   agent: AgentDetail;
   sending: boolean;
@@ -551,6 +642,10 @@ export const MessageList = memo(function MessageList({
   /** Tells the page whether the newest message is in view, so a toast for a
    *  new automation card shows only when it would otherwise be missed. */
   onAtBottomChange?: (atBottom: boolean) => void;
+  /** Persisted summary shown as the first card in the main chat. */
+  summary?: SessionSummary;
+  /** Remounts the summary disclosure when the active conversation changes. */
+  summaryKey?: string;
 }) {
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   useEffect(() => {
@@ -832,6 +927,13 @@ export const MessageList = memo(function MessageList({
               api={actions?.taskReviews}
             >
               <div className="studio-messages mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6 sm:px-6">
+                {summary && (
+                  <KeptSummary
+                    key={summaryKey ?? summary.createdAtMs}
+                    summary={summary}
+                    onShowOriginals={hasOlder ? onLoadOlder : undefined}
+                  />
+                )}
                 {hasOlder && onLoadOlder && (
                   <button
                     type="button"
@@ -946,6 +1048,7 @@ export function Composer({
   tools,
   mode,
   model,
+  sendAlways = false,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -983,6 +1086,8 @@ export function Composer({
    *  message. */
   mode?: ComposerModeState;
   model?: ComposerModelState;
+  /** The main chat keeps its send control visible when the draft is empty. */
+  sendAlways?: boolean;
   attachments?: {
     items: readonly AttachmentDraft[];
     onAdd(files: readonly File[]): void;
@@ -1004,7 +1109,7 @@ export function Composer({
   const trayId = useId();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
-  const hasTray = Boolean(attachments || tools);
+  const hasTray = Boolean(attachments || tools || sendAlways);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const [blurred, setBlurred] = useState(false);
@@ -1031,10 +1136,11 @@ export function Composer({
   // dictation listens the mic stays, so its words never stop it.
   const listening = usePresenceSignals().listening !== null;
   const showSend =
-    !listening &&
-    (draft.trim().length > 0 ||
-      (attachments?.items.length ?? 0) > 0 ||
-      savedAttachmentCount > 0);
+    sendAlways ||
+    (!listening &&
+      (draft.trim().length > 0 ||
+        (attachments?.items.length ?? 0) > 0 ||
+        savedAttachmentCount > 0));
 
   useResetOnChange([draft], () => setActiveIndex(0));
 
@@ -1163,6 +1269,14 @@ export function Composer({
                 onAdd={attachments.onAdd}
               />
             )}
+            {sendAlways && (
+              <DictationControl
+                compact
+                disabled={!canPick || voiceDisabled}
+                conversationKey={conversationKey}
+                onTranscript={appendDictation}
+              />
+            )}
             {nativeVoice && attachments && (
               <NativeTranscription
                 key={JSON.stringify([
@@ -1271,7 +1385,7 @@ export function Composer({
                 <>
                   <button
                     type="button"
-                    className="cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
+                    className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
                     disabled={!canSend}
                     onClick={() => onSend()}
                     title="Wait for the current reply, then send this message"
@@ -1281,7 +1395,7 @@ export function Composer({
                   {steerable && (
                     <button
                       type="button"
-                      className="cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
+                      className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
                       disabled={!canSend}
                       onClick={() => onSteer?.()}
                       title="Add this message to the reply in progress"
@@ -1296,7 +1410,7 @@ export function Composer({
                   type="button"
                   onClick={onStop}
                   aria-label="Stop"
-                  className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
+                  className="composer-send composer-stop flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
                 >
                   <StopIcon size={14} />
                 </button>
