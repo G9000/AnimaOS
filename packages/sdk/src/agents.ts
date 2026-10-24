@@ -191,6 +191,9 @@ export interface AgentSchedule extends AgentScheduleInput {
 
 export interface AgentUpdateInput {
   name?: string;
+  bio?: string;
+  /** Copy successful helper results into the owner's designated main chat. */
+  showInMainChat?: boolean;
   model?: string;
   /** An empty string restores the daemon default. */
   provider?: string;

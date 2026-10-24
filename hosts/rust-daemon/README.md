@@ -275,6 +275,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/system`                                                                                |
 | `GET`    | `/api/system/drain`                                                                          |
 | `GET`    | `/api/usage/export.csv`                                                                      |
+| `GET`    | `/api/usage/limit`                                                                           |
 | `GET`    | `/api/usage/pricing`                                                                         |
 | `GET`    | `/api/usage/records`                                                                         |
 | `GET`    | `/api/usage/summary`                                                                         |
@@ -421,6 +422,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
 | `PUT`    | `/api/settings/side-model`                                                                   |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
+| `PUT`    | `/api/usage/limit`                                                                           |
 | `PUT`    | `/api/usage/pricing`                                                                         |
 | `PUT`    | `/api/workspace`                                                                             |
 | `PUT`    | `/api/workspace/avatar`                                                                      |
@@ -451,6 +453,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST` | `/api/agents/{agent_id}/paired-devices/{device_id}/revoke` |
 
 | `GET` | `/api/agents/{agent_id}/personality` | Read the active personality source |
+| `POST` | `/api/agents/{agent_id}/personality/preview` | Preview a personality without saving it |
 | `PUT` | `/api/agents/{agent_id}/personality` | Save a revision-checked personality |
 
 | `POST` | `/api/agents/{agent_id}/sessions/{session_id}/revise` |
@@ -688,7 +691,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 309 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 312 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

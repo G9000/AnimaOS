@@ -118,6 +118,11 @@ export interface Pricing {
   tableDate: string;
 }
 
+export interface MonthlySpendLimit {
+  /** USD micros; null clears the limit. */
+  limitMicros: number | null;
+}
+
 /** The daemon's limits (spec §16); the SDK validates nothing. */
 export const MAX_PRICING_OVERRIDES = 100;
 export const MAX_PRICE_MICROS_PER_MTOK = 1_000_000_000_000;
@@ -196,6 +201,17 @@ export class UsageClient {
     return this.client.requestJson<Pricing>('/api/usage/pricing', {
       method: 'PUT',
       body: { overrides: overrides.map(overrideBody) },
+    });
+  }
+
+  async monthlySpendLimit(): Promise<MonthlySpendLimit> {
+    return this.client.requestJson<MonthlySpendLimit>('/api/usage/limit');
+  }
+
+  async setMonthlySpendLimit(limitMicros: number | null): Promise<MonthlySpendLimit> {
+    return this.client.requestJson<MonthlySpendLimit>('/api/usage/limit', {
+      method: 'PUT',
+      body: { limitMicros },
     });
   }
 }

@@ -121,11 +121,10 @@ export function ProviderKeys({
   return (
     <section className="settings-group" aria-labelledby="settings-api-keys">
       <h3 id="settings-api-keys" className="settings-group-title">
-        API keys
+        Brains
       </h3>
       <p className="settings-group-help">
-        Several keys for one provider take turns. A key that hits a limit rests
-        and the next one is used.
+        Keys stay in the operating-system keychain, never in anima's files.
       </p>
       {shown.some((pool) => !pool.persisted) && (
         <p role="note" className="key-warning">

@@ -546,6 +546,7 @@ export function SessionView({
       onLoadOlder={onLoadOlder}
       emptyState={session && session.kind !== 'chat' ? NO_MESSAGES : undefined}
       readAloud={readAloud}
+      conversationKey={voiceKey}
       knownAttachments={knownAttachments}
       highlightMessageId={historyAnchor?.messageId}
       jumpRequestKey={jumpRequestKey}

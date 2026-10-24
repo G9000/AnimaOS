@@ -68,6 +68,11 @@ import {
 import { ReadAloud } from './voice/ReadAloud';
 import type { ReadAloudController } from '../hooks/useReadAloud';
 import { revealInvisible } from '../lib/skills';
+import {
+  consumeRecentSpokenInput,
+  markSpokenInput,
+  useVoiceSettings,
+} from '../lib/voice-settings';
 import { usePublishHeaderDay } from '../lib/header-context';
 import {
   EMPTY_RUN_ATTACHMENTS,
@@ -606,6 +611,7 @@ export const MessageList = memo(function MessageList({
   items,
   actions,
   readAloud,
+  conversationKey,
   knownAttachments = EMPTY_RUN_ATTACHMENTS,
   highlightMessageId = null,
   jumpRequestKey = 0,
@@ -632,6 +638,7 @@ export const MessageList = memo(function MessageList({
   items?: readonly TranscriptItem[];
   actions?: TranscriptActions;
   readAloud?: ReadAloudController;
+  conversationKey?: string | null;
   knownAttachments?: KnownRunAttachments;
   /** A bounded history result; waits for its transcript anchor to mount. */
   highlightMessageId?: string | null;
@@ -687,6 +694,44 @@ export const MessageList = memo(function MessageList({
     () => items ?? buildTranscript({ messages: agent.messages }),
     [items, agent.messages],
   );
+  const voiceSettings = useVoiceSettings();
+  const latestAssistant = useMemo(() => {
+    for (let index = transcript.length - 1; index >= 0; index--) {
+      const item = transcript[index];
+      if (item.kind === 'message' && item.message.role === 'Assistant')
+        return item.message;
+    }
+    return null;
+  }, [transcript]);
+  const lastAutoRead = useRef<{
+    conversationKey: string | null | undefined;
+    messageId: string | null;
+  }>({ conversationKey, messageId: latestAssistant?.id ?? null });
+  useEffect(() => {
+    if (lastAutoRead.current.conversationKey !== conversationKey) {
+      lastAutoRead.current = {
+        conversationKey,
+        messageId: latestAssistant?.id ?? null,
+      };
+      return;
+    }
+    if (!latestAssistant || lastAutoRead.current.messageId === latestAssistant.id)
+      return;
+    lastAutoRead.current.messageId = latestAssistant.id;
+    if (
+      !voiceSettings.readRepliesAfterSpeech ||
+      !readAloud?.supported ||
+      readAloud.disabled ||
+      !consumeRecentSpokenInput(conversationKey)
+    )
+      return;
+    readAloud.read(latestAssistant.id, latestAssistant.content.text);
+  }, [
+    latestAssistant,
+    conversationKey,
+    readAloud,
+    voiceSettings.readRepliesAfterSpeech,
+  ]);
   const anchorsByItem = useMemo(() => anchorsFor(transcript), [transcript]);
   const showsReviews = useMemo(
     () => transcript.some((item) => item.kind === 'learning-review'),
@@ -1097,13 +1142,22 @@ export function Composer({
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const latestDraftRef = useLatest(draft);
+  const spokenDraftRef = useRef(false);
   const changeDraft = (value: string) => {
     latestDraftRef.current = value;
     setDraft(value);
   };
   const appendDictation = (text: string) => {
+    spokenDraftRef.current = true;
     const previous = latestDraftRef.current.trimEnd();
     changeDraft(`${previous}${previous ? ' ' : ''}${text}`);
+  };
+  const send = (text?: string) => {
+    if (spokenDraftRef.current) {
+      markSpokenInput(conversationKey);
+      spokenDraftRef.current = false;
+    }
+    onSend(text);
   };
   const menuId = useId();
   const trayId = useId();
@@ -1175,7 +1229,7 @@ export function Composer({
       taRef.current?.focus();
       return;
     }
-    if (canPick) onSend(`/${command.name}`);
+    if (canPick) send(`/${command.name}`);
   };
 
   return (
@@ -1348,7 +1402,7 @@ export function Composer({
                     e.preventDefault();
                     if (!canSend) return;
                     if ((e.metaKey || e.ctrlKey) && steerable) onSteer?.();
-                    else onSend();
+                    else send();
                   }
                 }}
                 onFocus={() => setBlurred(false)}
@@ -1387,7 +1441,7 @@ export function Composer({
                     type="button"
                     className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
                     disabled={!canSend}
-                    onClick={() => onSend()}
+                    onClick={() => send()}
                     title="Wait for the current reply, then send this message"
                   >
                     Wait
@@ -1420,11 +1474,12 @@ export function Composer({
                   disabled={!canPick || voiceDisabled}
                   conversationKey={conversationKey}
                   onTranscript={appendDictation}
+                  onPushToTalkStop={() => send(latestDraftRef.current)}
                 />
               ) : (
                 <button
                   type="button"
-                  onClick={() => onSend()}
+                  onClick={() => send()}
                   disabled={!canSend}
                   aria-label="Send"
                   className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"

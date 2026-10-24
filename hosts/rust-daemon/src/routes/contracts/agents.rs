@@ -465,6 +465,8 @@ pub(crate) struct AgentConfigRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentUpdateRequest {
     pub(crate) name: Option<String>,
+    pub(crate) bio: Option<String>,
+    pub(crate) show_in_main_chat: Option<bool>,
     pub(crate) model: Option<String>,
     pub(crate) provider: Option<String>,
     pub(crate) system: Option<String>,
@@ -480,6 +482,17 @@ impl AgentUpdateRequest {
         let name = self
             .name
             .map(|value| required_string(Some(value), "name must not be empty"))
+            .transpose()?;
+        let bio = self
+            .bio
+            .map(|value| {
+                let value = value.trim().to_string();
+                if value.chars().count() > 500 {
+                    Err("bio must be at most 500 characters")
+                } else {
+                    Ok(value)
+                }
+            })
             .transpose()?;
         let model = self
             .model
@@ -515,6 +528,8 @@ impl AgentUpdateRequest {
             .transpose()?
             .unwrap_or_default();
         if name.is_none()
+            && bio.is_none()
+            && self.show_in_main_chat.is_none()
             && model.is_none()
             && provider.is_none()
             && system.is_none()
@@ -527,6 +542,8 @@ impl AgentUpdateRequest {
         }
         Ok(AgentConfigUpdate {
             name,
+            bio,
+            show_in_main_chat: self.show_in_main_chat,
             model,
             provider,
             system,

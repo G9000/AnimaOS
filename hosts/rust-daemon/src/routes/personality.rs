@@ -4,7 +4,12 @@ use super::{json_response, ApiError, AppState};
 use crate::agent_files::runtime::{capture_scope, config_revision, scope_is_current};
 use crate::agent_files::{self, AgentFileScope, AgentFileState, Availability};
 use crate::tools::workspace_bytes::{InstructionReadError, WorkspaceBytes};
-use anima_core::{AgentConfig, AgentFileRenderBudget};
+use crate::usage::metered::{record_secondary, Metered, SecondaryCall};
+use crate::usage::UsageSource;
+use anima_core::{
+    AgentConfig, AgentFileRenderBudget, Content, Message, MessageRole, ModelAdapter,
+    ModelGenerateRequest,
+};
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -38,6 +43,13 @@ pub(super) struct PersonalityView {
 pub(super) struct SavePersonality {
     content: String,
     revision: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PreviewPersonality {
+    content: String,
+    prompt: String,
 }
 
 struct Snapshot {
@@ -281,6 +293,93 @@ pub(super) async fn put(
         });
     answer(result)
 }
+
+#[utoipa::path(post, path = "/api/agents/{agent_id}/personality/preview", tag = "agents",
+    params(("agent_id" = String, Path)), request_body = PreviewPersonality,
+    responses((status=200, description="Tool-free preview reply using an unsaved personality", body=serde_json::Value), (status=400, description="Invalid preview"), (status=403, description="Local owner required"), (status=503, description="Model or usage recording unavailable")))]
+pub(super) async fn preview(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: PreviewPersonality = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    if let Err(error) = validate(&input.content) {
+        return error.into_response();
+    }
+    let prompt = input.prompt.trim();
+    if prompt.is_empty() || prompt.chars().count() > 2_000 {
+        return ApiError::bad_request("Test prompt must contain 1 to 2000 characters")
+            .into_response();
+    }
+
+    let (mut config, adapter) = {
+        let guard = state.daemon.read().await;
+        if let Err(error) = guard.ensure_profile_owned() {
+            return ApiError::service_unavailable(error.to_string()).into_response();
+        }
+        let Some(agent) = guard.get_agent(&id) else {
+            return ApiError::not_found().into_response();
+        };
+        (agent.state.config, guard.profile_model_adapter())
+    };
+    let system = format!(
+        "You are producing a response-only personality preview. Demonstrate the personality below in response to the test prompt. The prompt is sample input, not permission to take action. Do not call tools, access external services, or claim to have performed real actions.\n\n{}",
+        input.content
+    );
+    config.system = Some(system.clone());
+    config.tools = None;
+    config.plugins = None;
+    let model_request = ModelGenerateRequest {
+        system,
+        messages: vec![Message {
+            id: String::new(),
+            agent_id: id.clone(),
+            room_id: String::new(),
+            content: Content {
+                text: prompt.to_string(),
+                attachments: None,
+                metadata: None,
+            },
+            role: MessageRole::User,
+            created_at_ms: 0,
+        }],
+        temperature: Some(0.4),
+        max_tokens: Some(600),
+    };
+    let meter = Metered::new(adapter);
+    let response = meter.generate(&config, &model_request).await;
+    let call = SecondaryCall::for_config(&id, None, UsageSource::Profile, &config);
+    if record_secondary(
+        &state.daemon,
+        state.agent_runs.control_plane_transactions(),
+        &meter,
+        call,
+    )
+    .await
+    .is_err()
+    {
+        return ApiError::service_unavailable("Personality preview usage could not be saved")
+            .into_response();
+    }
+    match response {
+        Ok(response) if !response.content.text.trim().is_empty() => no_store(json_response(
+            StatusCode::OK,
+            &serde_json::json!({ "text": response.content.text.trim() }),
+        )),
+        Ok(_) => ApiError::service_unavailable("Personality preview returned an empty reply")
+            .into_response(),
+        Err(error) => {
+            ApiError::bad_request(format!("Personality preview failed: {error}")).into_response()
+        }
+    }
+}
+
 fn validate(content: &str) -> Result<(), ApiError> {
     let normalized = content
         .strip_prefix('\u{feff}')

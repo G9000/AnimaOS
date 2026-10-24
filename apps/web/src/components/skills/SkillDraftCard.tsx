@@ -165,51 +165,56 @@ export function SkillDraftCard({
         />
       ) : (
         <>
-          {diff ? (
-            <pre
-              className="skill-diff"
-              aria-label="Changes from the current version"
-            >
-              {diff.map((line, index) => (
-                <span key={index} className={`skill-diff-${line.kind}`}>
-                  {DIFF_PREFIX[line.kind]}
-                  {revealInvisible(line.text).text}
-                  {'\n'}
-                </span>
-              ))}
-            </pre>
-          ) : (
-            <pre className="skill-body" aria-label="Instructions">
-              {body.text}
-            </pre>
-          )}
-          <SkillSupportingFiles files={draft.files} />
-          <div className="skill-actions">
-            <button
-              type="button"
-              className="studio-tool-button"
-              disabled={blocked}
-              onClick={() => void approve({})}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              className="studio-tool-button"
-              disabled={blocked}
-              onClick={() => setEditing(true)}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              className="studio-tool-button"
-              disabled={busy}
-              onClick={() => void reject()}
-            >
-              Reject
-            </button>
-          </div>
+            <div className="skill-draft-actions">
+              <details className="skill-draft-steps">
+                <summary>See steps</summary>
+                {diff ? (
+                  <pre
+                    className="skill-diff"
+                    aria-label="Changes from the current version"
+                  >
+                    {diff.map((line, index) => (
+                      <span key={index} className={`skill-diff-${line.kind}`}>
+                        {DIFF_PREFIX[line.kind]}
+                        {revealInvisible(line.text).text}
+                        {'\n'}
+                      </span>
+                    ))}
+                  </pre>
+                ) : (
+                  <pre className="skill-body" aria-label="Instructions">
+                    {body.text}
+                  </pre>
+                )}
+                <SkillSupportingFiles files={draft.files} />
+              </details>
+              <div className="skill-actions">
+                <button
+                  type="button"
+                  className="studio-tool-button"
+                  disabled={blocked}
+                  onClick={() => setEditing(true)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="studio-tool-button skill-draft-discard"
+                  disabled={busy}
+                  onClick={() => void reject()}
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="studio-tool-button skill-draft-keep"
+                  disabled={blocked}
+                  onClick={() => void approve({})}
+                >
+                  Keep
+                </button>
+              </div>
+            </div>
         </>
       )}
     </section>

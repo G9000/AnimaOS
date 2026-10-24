@@ -1,3 +1,4 @@
+import { ownerFetch } from '../lib/owner-fetch';
 import {
   createContext,
   useContext,
@@ -21,7 +22,7 @@ import { useConnectorLifetime } from '../hooks/useConnectorLifetime';
 import { useLatest } from '../hooks/useLatest';
 import { useResetOnChange } from '../hooks/useResetOnChange';
 
-const client = createDaemonClient({ baseUrl: '' }).connectors;
+const client = createDaemonClient({ baseUrl: '', fetch: ownerFetch }).connectors;
 const button =
   'rounded-lg border border-line px-3 py-2 text-xs text-ink-2 hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -955,6 +956,8 @@ function CalendarCard({ agentId }: { agentId: string }) {
 }
 export function ConnectorsView({
   agentId,
+  agentName = 'anima',
+  mode = 'all',
   telegram,
   discord,
   disabled = false,
@@ -967,6 +970,8 @@ export function ConnectorsView({
   mcpPermissionsBusy = false,
 }: {
   agentId: string;
+  agentName?: string;
+  mode?: 'all' | 'connections' | 'tools';
   telegram: ReactNode;
   discord?: ReactNode;
   disabled?: boolean;
@@ -980,11 +985,13 @@ export function ConnectorsView({
 }) {
   const lifetime = useConnectorLifetime(agentId, online, epoch);
   const [ownerBusy, setOwnerBusy] = useState(false);
+  const [telegramDetail, setTelegramDetail] = useState(false);
   const busyClaims = useRef(0);
   const [mcpRefreshRequired, setMcpRefreshRequired] = useState(false);
   useResetOnChange([lifetime.token], () => {
     setOwnerBusy(false);
     setMcpRefreshRequired(false);
+    setTelegramDetail(false);
   });
   useLayoutEffect(() => {
     busyClaims.current = 0;
@@ -1018,105 +1025,168 @@ export function ConnectorsView({
               Offline — reconnect to review current connection status.
             </p>
           )}
-          <section
-            aria-labelledby="oauth-app-setup-heading"
-            className="space-y-4 connections-card"
-          >
-            <div>
-              <h2
-                id="oauth-app-setup-heading"
-                className="text-base font-semibold text-ink"
-              >
-                OAuth app setup
-              </h2>
-              <p className="mt-1 text-xs leading-relaxed text-ink-3">
-                Add the daemon credentials used to start account connections.
-              </p>
-            </div>
-            <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
-              <OAuthAppCard
-                key={`${agentId}:google`}
-                provider="google"
-                onChanged={() => oauthChanged('google')}
+          {mode === 'connections' && telegramDetail ? (
+            <section className="connections-telegram-detail" aria-labelledby="telegram-settings-title">
+              <button type="button" className="connections-back" onClick={() => setTelegramDetail(false)}>
+                <span aria-hidden="true">←</span> Connections
+              </button>
+              <header>
+                <h2 id="telegram-settings-title">Telegram</h2>
+                <p>
+                  Talk to {agentName} from Telegram. Your private chat joins the
+                  main chat; groups get their own thread.
+                </p>
+              </header>
+              <div className="connections-card">{telegram}</div>
+            </section>
+          ) : (
+          <>
+          {(mode === 'all' || mode === 'tools') && (
+            <section className="connections-section" aria-labelledby="mcp-tools-heading">
+              <div className="connections-section-heading">
+                <div>
+                  <h2 id="mcp-tools-heading">From MCP servers</h2>
+                  <p>Tools from servers you connect, with their current permission state.</p>
+                </div>
+              </div>
+              <McpConnectionsPanel
+                key={`${agentId}:mcp`}
+                agentId={agentId}
+                online={online}
+                epoch={epoch}
+                disabled={disabled || ownerBusy || mcpRefreshRequired}
+                permissionsUncertain={mcpPermissionsUncertain}
+                permissionsBusy={mcpPermissionsBusy || ownerBusy}
+                onGrantsChanged={async (names) => {
+                  await onMcpGrantsChanged?.(names);
+                  if (lifetime.isCurrent(lifetime.token))
+                    setMcpRefreshRequired(false);
+                }}
+                onBusyChanged={reportOwnerBusy}
+                onPermissionsUncertain={onMcpPermissionsUncertain}
               />
-              <OAuthAppCard
-                key={`${agentId}:microsoft`}
-                provider="microsoft"
-                onChanged={() => oauthChanged('microsoft')}
+              {mcpRefreshRequired && (
+                <p className="text-xs text-ink-3">
+                  A bundle changed its saved components. Use Refresh status in
+                  External tools before editing those connections; your entered
+                  fields are kept.
+                </p>
+              )}
+              <CommunityBundlesPanel
+                key={`${agentId}:bundles`}
+                agentId={agentId}
+                online={online}
+                epoch={epoch}
+                disabled={disabled || ownerBusy}
+                permissionsUncertain={mcpPermissionsUncertain}
+                permissionsBusy={mcpPermissionsBusy || ownerBusy}
+                onGrantsChanged={async (names) => {
+                  await onMcpGrantsChanged?.(names);
+                  if (lifetime.isCurrent(lifetime.token))
+                    setMcpRefreshRequired(true);
+                }}
+                onBusyChanged={reportOwnerBusy}
+                onPermissionsUncertain={onMcpPermissionsUncertain}
               />
-            </div>
-          </section>
-          <McpConnectionsPanel
-            key={`${agentId}:mcp`}
-            agentId={agentId}
-            online={online}
-            epoch={epoch}
-            disabled={disabled || ownerBusy || mcpRefreshRequired}
-            permissionsUncertain={mcpPermissionsUncertain}
-            permissionsBusy={mcpPermissionsBusy || ownerBusy}
-            onGrantsChanged={async (names) => {
-              await onMcpGrantsChanged?.(names);
-              if (lifetime.isCurrent(lifetime.token))
-                setMcpRefreshRequired(false);
-            }}
-            onBusyChanged={reportOwnerBusy}
-            onPermissionsUncertain={onMcpPermissionsUncertain}
-          />
-          {mcpRefreshRequired && (
-            <p className="text-xs text-ink-3">
-              A bundle changed its saved components. Use Refresh status in
-              External tools before editing those connections; your entered
-              fields are kept.
-            </p>
+            </section>
           )}
-          <CommunityBundlesPanel
-            key={`${agentId}:bundles`}
-            agentId={agentId}
-            online={online}
-            epoch={epoch}
-            disabled={disabled || ownerBusy}
-            permissionsUncertain={mcpPermissionsUncertain}
-            permissionsBusy={mcpPermissionsBusy || ownerBusy}
-            onGrantsChanged={async (names) => {
-              await onMcpGrantsChanged?.(names);
-              if (lifetime.isCurrent(lifetime.token))
-                setMcpRefreshRequired(true);
-            }}
-            onBusyChanged={reportOwnerBusy}
-            onPermissionsUncertain={onMcpPermissionsUncertain}
-          />
-          <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
-            <div className="min-w-0 connections-card">{telegram}</div>
-            {discord && (
-              <div className="min-w-0 connections-card">{discord}</div>
-            )}
-            <CalendarCard
-              key={`${agentId}:calendar:${oauthGeneration.google}`}
-              agentId={agentId}
-            />
-            <GoogleDriveCard
-              key={`${agentId}:drive:${oauthGeneration.google}`}
-              agentId={agentId}
-              online={online}
-              epoch={epoch}
-              disabled={disabled}
-            />
-            <MailCard
-              key={`${agentId}:email`}
-              agentId={agentId}
-              provider="email"
-            />
-            <MailCard
-              key={`${agentId}:gmail:${oauthGeneration.google}`}
-              agentId={agentId}
-              provider="gmail"
-            />
-            <MailCard
-              key={`${agentId}:outlook:${oauthGeneration.microsoft}`}
-              agentId={agentId}
-              provider="outlook"
-            />
-          </div>
+          {(mode === 'all' || mode === 'connections') && (
+            <>
+              <details className="connections-oauth-setup">
+                <summary>OAuth app setup</summary>
+                <p>
+                  Add the daemon credentials used to start Google and Microsoft
+                  account connections.
+                </p>
+                <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
+                  <OAuthAppCard
+                    key={`${agentId}:google`}
+                    provider="google"
+                    onChanged={() => oauthChanged('google')}
+                  />
+                  <OAuthAppCard
+                    key={`${agentId}:microsoft`}
+                    provider="microsoft"
+                    onChanged={() => oauthChanged('microsoft')}
+                  />
+                </div>
+              </details>
+              <section className="connections-section" aria-labelledby="service-connections-heading">
+                <div className="connections-section-heading">
+                  <div>
+                    <h2 id="service-connections-heading">Services</h2>
+                    <p>Accounts and services this agent can work with.</p>
+                  </div>
+                </div>
+                <div className="connections-service-list">
+                  <MailCard
+                    key={`${agentId}:gmail:${oauthGeneration.google}`}
+                    agentId={agentId}
+                    provider="gmail"
+                  />
+                  <MailCard
+                    key={`${agentId}:email`}
+                    agentId={agentId}
+                    provider="email"
+                  />
+                  <CalendarCard
+                    key={`${agentId}:calendar:${oauthGeneration.google}`}
+                    agentId={agentId}
+                  />
+                  <GoogleDriveCard
+                    key={`${agentId}:drive:${oauthGeneration.google}`}
+                    agentId={agentId}
+                    online={online}
+                    epoch={epoch}
+                    disabled={disabled}
+                  />
+                  <MailCard
+                    key={`${agentId}:outlook:${oauthGeneration.microsoft}`}
+                    agentId={agentId}
+                    provider="outlook"
+                  />
+                </div>
+              </section>
+              <section className="connections-section" aria-labelledby="chat-app-connections-heading">
+                <div className="connections-section-heading">
+                  <div>
+                    <h2 id="chat-app-connections-heading">Chat apps</h2>
+                    <p>
+                      Talk to {agentName} from apps you already use. Same memory
+                      everywhere.
+                    </p>
+                  </div>
+                </div>
+                <div className="connections-chat-list">
+                  <div className="connections-app-row">
+                    <div>
+                      <strong>Telegram</strong>
+                      <p>Private chats join your main chat; groups get their own thread.</p>
+                    </div>
+                    <button type="button" onClick={() => setTelegramDetail(true)}>
+                      Manage
+                    </button>
+                  </div>
+                  {discord && (
+                    <div className="min-w-0 connections-card">{discord}</div>
+                  )}
+                  {(['WhatsApp', 'Slack'] as const).map((app) => (
+                    <div key={app} className="connections-app-row is-unavailable">
+                      <div>
+                        <strong>{app}</strong>
+                        <p>Not connected · setup is not available yet</p>
+                      </div>
+                      <button type="button" disabled aria-label={`Connect ${app} (not available yet)`}>
+                        Connect
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
+          </>
+          )}
         </div>
       </section>
     </ConnectorContext.Provider>

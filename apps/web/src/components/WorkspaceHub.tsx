@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { AgentTask } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { describeTrigger } from '../lib/automations';
 import type { AgentDetail } from '../lib/types';
@@ -11,12 +12,15 @@ import { useLatest } from '../hooks/useLatest';
 import { useRenderScope } from '../hooks/useRenderScope';
 
 type Section = 'Notes' | 'Tasks' | 'Schedules' | 'Runs' | 'Workflows' | 'Goals';
+type TaskStatusFilter = 'All' | 'In progress' | 'Pending' | 'Done';
 type Entry = {
   id: string;
   agentId: string;
   content: string;
   detail: string;
   timestamp?: number;
+  taskStatus?: AgentTask['status'];
+  activeForm?: string;
 };
 type LoadResult = {
   entries: Entry[];
@@ -82,12 +86,14 @@ async function loadEntries(
       id: String(index),
       agentId,
       content: item.content,
+      activeForm: item.activeForm,
       detail: {
         pending: 'Pending',
         in_progress: 'In progress',
         completed: 'Completed',
         cancelled: 'Cancelled',
       }[item.status],
+      taskStatus: item.status,
     }));
   }
   const { schedules } = await daemon.listSchedules(agentId);
@@ -129,6 +135,9 @@ export function WorkspaceHub({
   initialSection?: Section;
 }) {
   const [section, setSection] = useState<Section>(initialSection);
+  const [taskStatusFilter, setTaskStatusFilter] =
+    useState<TaskStatusFilter>('All');
+  const [workflowCount, setWorkflowCount] = useState<number | null>(null);
   const [agentFilter, setAgentFilter] = useState('');
   const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0);
@@ -199,13 +208,39 @@ export function WorkspaceHub({
     ? agentFilter
     : '';
   const managed = agents.find((agent) => agent.id === managedId);
-  const entries = result?.entries.filter(
+  const agentEntries = result?.entries.filter(
+    (entry) => !selectedId || entry.agentId === selectedId,
+  );
+  const entries = agentEntries?.filter(
     (entry) =>
-      (!selectedId || entry.agentId === selectedId) &&
       `${entry.content} ${entry.detail} ${agents.find((agent) => agent.id === entry.agentId)?.name ?? ''}`
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
+  const taskCounts = {
+    All: agentEntries?.filter((entry) => entry.taskStatus).length ?? 0,
+    'In progress':
+      agentEntries?.filter((entry) => entry.taskStatus === 'in_progress').length ?? 0,
+    Pending:
+      agentEntries?.filter((entry) => entry.taskStatus === 'pending').length ?? 0,
+    Done:
+      agentEntries?.filter(
+        (entry) =>
+          entry.taskStatus === 'completed' || entry.taskStatus === 'cancelled',
+      ).length ?? 0,
+  };
+  const visibleEntries =
+    section === 'Tasks'
+      ? entries?.filter((entry) => {
+          if (taskStatusFilter === 'All') return Boolean(entry.taskStatus);
+          if (taskStatusFilter === 'In progress')
+            return entry.taskStatus === 'in_progress';
+          if (taskStatusFilter === 'Pending') return entry.taskStatus === 'pending';
+          return (
+            entry.taskStatus === 'completed' || entry.taskStatus === 'cancelled'
+          );
+        })
+      : entries;
   const errors = result?.errors.filter(
     (error) => !selectedId || error.agentId === selectedId,
   );
@@ -250,70 +285,74 @@ export function WorkspaceHub({
           </div>
         ) : (
           <>
-            <div
-              role="tablist"
-              aria-label="Work categories"
-              className="work-tabs"
-            >
-              {(
-                [
-                  'Notes',
-                  'Tasks',
-                  'Schedules',
-                  'Runs',
-                  'Workflows',
-                  'Goals',
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item}
-                  id={`hub-tab-${item}`}
-                  type="button"
-                  role="tab"
-                  tabIndex={section === item ? 0 : -1}
-                  onKeyDown={(event) => {
-                    const tabs: Section[] = [
-                      'Notes',
-                      'Tasks',
-                      'Schedules',
-                      'Runs',
-                      'Workflows',
-                      'Goals',
-                    ];
-                    const offset =
-                      event.key === 'ArrowRight'
-                        ? 1
-                        : event.key === 'ArrowLeft'
-                          ? -1
-                          : 0;
-                    const next =
-                      event.key === 'Home'
-                        ? tabs[0]
-                        : event.key === 'End'
-                          ? tabs[tabs.length - 1]
-                          : offset
-                            ? tabs[
-                                (tabs.indexOf(item) + offset + tabs.length) %
-                                  tabs.length
-                              ]
-                            : null;
-                    if (!next) return;
-                    event.preventDefault();
-                    setSection(next);
-                    setQuery('');
-                    document.getElementById(`hub-tab-${next}`)?.focus();
-                  }}
-                  aria-selected={section === item}
-                  aria-controls="hub-panel"
-                  className="work-tab"
-                  onClick={() => {
-                    setSection(item);
-                    setQuery('');
-                  }}
-                >
-                  {item}
-                </button>
-              ))}
+            <div className="work-navigation">
+              <div role="tablist" aria-label="Work views" className="work-tabs">
+                {(['Tasks', 'Workflows'] as const).map((item) => (
+                  <button
+                    key={item}
+                    id={`hub-tab-${item}`}
+                    type="button"
+                    role="tab"
+                    tabIndex={section === item ? 0 : -1}
+                    onKeyDown={(event) => {
+                      const tabs = ['Tasks', 'Workflows'] as const;
+                      const offset =
+                        event.key === 'ArrowRight'
+                          ? 1
+                          : event.key === 'ArrowLeft'
+                            ? -1
+                            : 0;
+                      const next =
+                        event.key === 'Home'
+                          ? tabs[0]
+                          : event.key === 'End'
+                            ? tabs[tabs.length - 1]
+                            : offset
+                              ? tabs[(tabs.indexOf(item) + offset + tabs.length) % tabs.length]
+                              : null;
+                      if (!next) return;
+                      event.preventDefault();
+                      setSection(next);
+                      setTaskStatusFilter('All');
+                      setQuery('');
+                      setManagedId(null);
+                      document.getElementById(`hub-tab-${next}`)?.focus();
+                    }}
+                    aria-selected={section === item}
+                    aria-controls="hub-panel"
+                    className="work-tab"
+                    onClick={() => {
+                      setSection(item);
+                      setTaskStatusFilter('All');
+                      setQuery('');
+                      setManagedId(null);
+                    }}
+                  >
+                    {item === 'Tasks'
+                      ? `Tasks · ${taskCounts.All}`
+                      : `Workflows${workflowCount === null ? '' : ` · ${workflowCount}`}`}
+                  </button>
+                ))}
+              </div>
+              <details className="work-more-views">
+                <summary>{['Notes', 'Schedules', 'Runs', 'Goals'].includes(section) ? `More · ${section}` : 'More'}</summary>
+                <div role="group" aria-label="More work views">
+                  {(['Notes', 'Schedules', 'Runs', 'Goals'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-current={section === item ? 'page' : undefined}
+                      onClick={() => {
+                        setSection(item);
+                        setQuery('');
+                        setManagedId(null);
+                      }}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </details>
             </div>
             <div
               role="tabpanel"
@@ -321,8 +360,26 @@ export function WorkspaceHub({
               aria-labelledby={`hub-tab-${section}`}
               className="space-y-6"
             >
+              {section === 'Tasks' && (
+                <div className="work-status-filters" role="group" aria-label="Task status">
+                  {(['All', 'In progress', 'Pending', 'Done'] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      aria-pressed={taskStatusFilter === filter}
+                      onClick={() => setTaskStatusFilter(filter)}
+                    >
+                      {filter} · {taskCounts[filter]}
+                    </button>
+                  ))}
+                </div>
+              )}
               {section === 'Workflows' ? (
-                <WorkspaceWorkflows agents={agents} online={online} />
+                <WorkspaceWorkflows
+                  agents={agents}
+                  online={online}
+                  onCountChange={setWorkflowCount}
+                />
               ) : section === 'Goals' ? (
                 <WorkspaceGoals agents={agents} />
               ) : section === 'Runs' ? (
@@ -352,13 +409,13 @@ export function WorkspaceHub({
                 </div>
               ) : (
                 <>
+                  {section !== 'Tasks' && (
                   <p className="text-sm leading-relaxed text-ink-3">
                     {section === 'Notes'
                       ? 'Saved facts and notes, newest first. Recent notes only; search applies to the notes shown.'
-                      : section === 'Tasks'
-                        ? 'Each agent keeps their own task list. Choose an agent below to add tasks or update progress.'
-                        : 'Schedules run through the daemon, even when this page is closed. Choose an agent to create, pause, or remove a schedule.'}
+                      : 'Schedules run through the daemon, even when this page is closed. Choose an agent to create, pause, or remove a schedule.'}
                   </p>
+                  )}
                   <div className="work-toolbar">
                     <label className="min-w-40 flex-1 space-y-2 text-sm">
                       Agent
@@ -376,15 +433,17 @@ export function WorkspaceHub({
                         ))}
                       </select>
                     </label>
-                    <label className="min-w-40 flex-[2] space-y-2 text-sm">
-                      Search
-                      <input
-                        className="field"
-                        value={query}
-                        placeholder={`Search ${section.toLowerCase()}…`}
-                        onChange={(event) => setQuery(event.target.value)}
-                      />
-                    </label>
+                    {section !== 'Tasks' && (
+                      <label className="min-w-40 flex-[2] space-y-2 text-sm">
+                        Search
+                        <input
+                          className="field"
+                          value={query}
+                          placeholder={`Search ${section.toLowerCase()}…`}
+                          onChange={(event) => setQuery(event.target.value)}
+                        />
+                      </label>
+                    )}
                     <button
                       type="button"
                       className="rounded-xl border border-line px-4 py-3 text-sm"
@@ -401,7 +460,7 @@ export function WorkspaceHub({
                       Refresh
                     </button>
                   </div>
-                  {section !== 'Notes' && (
+                  {section !== 'Notes' && section !== 'Tasks' && (
                     <div className="flex flex-wrap gap-3">
                       {agents
                         .filter(
@@ -438,17 +497,17 @@ export function WorkspaceHub({
                     <p role="status">Loading {section.toLowerCase()}…</p>
                   ) : (
                     <>
-                      <p className="text-xs text-ink-3">
-                        {entries?.length}{' '}
-                        {entries?.length === 1
+                      {section !== 'Tasks' && <p className="text-xs text-ink-3">
+                        {visibleEntries?.length}{' '}
+                        {visibleEntries?.length === 1
                           ? section.toLowerCase().slice(0, -1)
                           : section.toLowerCase()}{' '}
                         shown
                         {errors?.length
                           ? ' · Some agents could not be loaded'
                           : ''}
-                      </p>
-                      {entries?.length === 0 && (
+                      </p>}
+                      {visibleEntries?.length === 0 && (
                         <p className="rounded-2xl border border-dashed border-line p-8 text-sm text-ink-3">
                           {query
                             ? 'No matches. Try another search.'
@@ -458,7 +517,7 @@ export function WorkspaceHub({
                         </p>
                       )}
                       <div className="settings-list work-list">
-                        {entries?.map((entry) => {
+                        {visibleEntries?.map((entry) => {
                           const agent = agents.find(
                             (item) => item.id === entry.agentId,
                           );
@@ -468,14 +527,16 @@ export function WorkspaceHub({
                               className="work-row"
                               data-section={section}
                             >
-                              {section === 'Tasks' && (
+                              {section === 'Tasks' && entry.taskStatus && (
                                 <span
                                   className="work-status"
-                                  data-status={entry.detail
-                                    .toLowerCase()
-                                    .replace(' ', '-')}
+                                  data-status={entry.taskStatus === 'cancelled' ? 'completed' : entry.taskStatus.replace('_', '-')}
                                 >
-                                  {entry.detail}
+                                  {entry.taskStatus === 'in_progress'
+                                    ? 'In progress'
+                                    : entry.taskStatus === 'completed' || entry.taskStatus === 'cancelled'
+                                      ? 'Done'
+                                      : 'Pending'}
                                 </span>
                               )}
                               <div className="work-row-who">
@@ -486,7 +547,15 @@ export function WorkspaceHub({
                                 <span className="text-sm font-semibold">
                                   {agent?.name ?? entry.agentId}
                                 </span>
-                                {onSelectAgent && (
+                                {section === 'Tasks' ? (
+                                  <button
+                                    type="button"
+                                    className="ml-auto text-xs underline"
+                                    onClick={() => setManagedId(entry.agentId)}
+                                  >
+                                    Manage
+                                  </button>
+                                ) : onSelectAgent && (
                                   <button
                                     type="button"
                                     className="ml-auto text-xs underline"
@@ -497,6 +566,9 @@ export function WorkspaceHub({
                                 )}
                               </div>
                               <p className="work-row-text">{entry.content}</p>
+                              {section === 'Tasks' && entry.activeForm && (
+                                <p className="work-row-detail">{entry.activeForm}</p>
+                              )}
                               {section !== 'Tasks' && (
                                 <p className="work-row-detail">
                                   {entry.detail}

@@ -11,6 +11,8 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SecondsFormat, Utc};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::contracts::{
     ErrorBody, PricingEnvelope, PricingOverrideBody, PricingPutRequest, UsageRecordResponse,
@@ -43,6 +45,20 @@ pub(super) const CSV_HEADER: &str = "id,createdAt,agentId,sessionId,runId,source
 
 const DAY_MS: u64 = 86_400_000;
 const MAX_TZ_OFFSET_MINUTES: i32 = 840;
+const MAX_MONTHLY_SPEND_LIMIT_MICROS: u64 = 1_000_000_000_000;
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MonthlySpendLimitRequest {
+    /// Monthly limit in USD micros, or null to remove the limit.
+    pub(crate) limit_micros: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MonthlySpendLimitResponse {
+    pub(crate) limit_micros: Option<u64>,
+}
 
 type Params = HashMap<String, String>;
 
@@ -457,6 +473,77 @@ pub(super) async fn put_pricing(State(state): State<AppState>, request: Request)
         }
         drop(transaction);
         no_store(json_response(StatusCode::OK, &pricing_envelope(&list)))
+    });
+    match operation.await {
+        Ok(response) => response,
+        Err(_) => rejected(ApiError::service_unavailable(USAGE_TASK_FAILED)),
+    }
+}
+
+#[utoipa::path(get, path = "/api/usage/limit", tag = "usage",
+    responses(
+        (status = 200, description = "The owner's monthly spend limit, or null when no limit is set", body = MonthlySpendLimitResponse),
+        (status = 403, description = "Local owner required", body = ErrorBody)
+    ))]
+pub(super) async fn get_monthly_spend_limit(
+    State(state): State<AppState>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    let response = MonthlySpendLimitResponse {
+        limit_micros: state.daemon.read().await.monthly_spend_limit_micros,
+    };
+    no_store(json_response(StatusCode::OK, &response))
+}
+
+#[utoipa::path(put, path = "/api/usage/limit", tag = "usage",
+    request_body = MonthlySpendLimitRequest,
+    responses(
+        (status = 200, description = "The monthly limit saved; null clears it", body = MonthlySpendLimitResponse),
+        (status = 400, description = "The limit is zero or exceeds the supported maximum", body = ErrorBody),
+        (status = 403, description = "Local owner required", body = ErrorBody),
+        (status = 503, description = "The limit could not be saved; the old value stays", body = ErrorBody)
+    ))]
+pub(super) async fn put_monthly_spend_limit(
+    State(state): State<AppState>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: MonthlySpendLimitRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    if input
+        .limit_micros
+        .is_some_and(|limit| limit == 0 || limit > MAX_MONTHLY_SPEND_LIMIT_MICROS)
+    {
+        return rejected(ApiError::bad_request_static(
+            "monthly spend limit must be between $0.01 and $1,000,000, or null",
+        ));
+    }
+    let limit = input.limit_micros;
+    let operation = tokio::spawn(async move {
+        let transaction = state.agent_runs.control_plane_transaction().await;
+        let (previous, persist) = {
+            let mut guard = state.daemon.write().await;
+            let previous = std::mem::replace(&mut guard.monthly_spend_limit_micros, limit);
+            (previous, guard.control_plane_persist_request())
+        };
+        if let Err(error) = persist.save().await {
+            state.daemon.write().await.monthly_spend_limit_micros = previous;
+            return rejected(ApiError::service_unavailable(error.to_string()));
+        }
+        drop(transaction);
+        no_store(json_response(
+            StatusCode::OK,
+            &MonthlySpendLimitResponse {
+                limit_micros: limit,
+            },
+        ))
     });
     match operation.await {
         Ok(response) => response,

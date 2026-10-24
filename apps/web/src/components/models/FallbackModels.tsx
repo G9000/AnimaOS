@@ -42,12 +42,14 @@ export function FallbackModels({
   primary,
   fallbacks,
   providers,
+  agentName = 'anima',
   save,
   disabled = false,
 }: {
   primary: ModelChoice;
   fallbacks: readonly ModelChoice[];
   providers: readonly DaemonProvider[] | null;
+  agentName?: string;
   /** Resolves true when the daemon took the new list. */
   save: (fallbacks: ModelChoice[]) => Promise<boolean>;
   disabled?: boolean;
@@ -131,10 +133,11 @@ export function FallbackModels({
   return (
     <section className="fallback-models" aria-labelledby="settings-fallbacks">
       <h4 id="settings-fallbacks" className="settings-group-title">
-        If this model fails
+        When it can't answer
       </h4>
       <p className="settings-group-help">
-        Tried in order, only before the reply starts.
+        If the main model fails or hits a limit, {agentName} tries these in
+        order and tells you in the chat.
       </p>
       {rows.length > 0 && (
         <ol className="fallback-list">

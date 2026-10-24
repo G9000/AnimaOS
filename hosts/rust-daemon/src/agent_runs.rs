@@ -6,6 +6,7 @@ use anima_core::{
     AgentState, Content, DataValue, RunControl, TaskResult,
 };
 use anima_memory::{MemoryType, NewMemory};
+use chrono::{Datelike, TimeZone};
 use futures::future::{select, Either};
 use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
 use tracing::warn;
@@ -1692,6 +1693,128 @@ impl AgentRunCoordinator {
         self.run_locked_inner(request, ticket, commit, rollback, accepted, None, None)
             .await
     }
+    async fn enforce_monthly_spend_limit(&self) -> Result<(), ApiError> {
+        let (limit, store, zone) = {
+            let guard = self.state.read().await;
+            (
+                guard.monthly_spend_limit_micros,
+                guard.history.store(),
+                guard.owner_time_zone.effective(),
+            )
+        };
+        let Some(limit) = limit else {
+            return Ok(());
+        };
+
+        let now = chrono::Utc::now();
+        let local = now.with_timezone(&zone);
+        let start = chrono::NaiveDate::from_ymd_opt(local.year(), local.month(), 1)
+            .and_then(|date| date.and_hms_opt(0, 0, 0))
+            .and_then(|start| zone.from_local_datetime(&start).earliest())
+            .ok_or_else(|| {
+                ApiError::service_unavailable("The monthly spend window could not be determined")
+            })?;
+        let summary = crate::usage::summary::summarize(
+            &*store,
+            crate::usage::summary::SummaryQuery {
+                from_ms: start.timestamp_millis().max(0) as u64,
+                to_ms: now.timestamp_millis().saturating_add(1).max(0) as u64,
+                agent_id: None,
+                session_id: None,
+                group_by: None,
+                tz_offset_minutes: 0,
+            },
+        )
+        .await
+        .map_err(|error| {
+            ApiError::service_unavailable(format!("Monthly spend could not be checked: {error}"))
+        })?;
+
+        if summary.truncated || summary.totals.unpriced_calls > 0 {
+            return Err(ApiError::conflict(
+                "New model calls are paused because monthly spend cannot be confirmed. Add prices for unpriced calls in Usage, or remove the monthly limit.",
+            ));
+        }
+        if summary.totals.cost_micros >= limit.saturating_mul(9) / 10 {
+            return Err(ApiError::conflict(
+                "New model calls are paused at 90% of the monthly spend limit. Raise or remove the limit in Settings › Usage to continue.",
+            ));
+        }
+        Ok(())
+    }
+
+    fn stage_helper_result_in_main_chat(
+        guard: &mut DaemonState,
+        run_id: &str,
+        result_text: &str,
+    ) -> Option<(String, String, Vec<crate::chat_results::ChatResult>, u64)> {
+        if result_text.trim().is_empty() {
+            return None;
+        }
+        let run = guard.runs.get(run_id)?.clone();
+        if run.status != RunStatus::Completed {
+            return None;
+        }
+        let helper = run.async_helper.as_ref()?;
+        let show_in_main_chat = guard
+            .agents
+            .get(&run.agent_id)
+            .and_then(|agent| agent.config().settings.as_ref())
+            .and_then(|settings| settings.additional.get("showInMainChat"))
+            .is_none_or(|value| !matches!(value, DataValue::Bool(false)));
+        if !show_in_main_chat {
+            return None;
+        }
+        let main_chat = guard.main_chat_session(&helper.owner_agent_id)?.clone();
+        // The ordinary helper-completion continuation already returns its
+        // result to this conversation when it is the designated main chat.
+        if main_chat.id == helper.owner_session_id {
+            return None;
+        }
+        let helper_name = guard
+            .agents
+            .get(&run.agent_id)
+            .map(|agent| agent.state().name.clone())
+            .unwrap_or_else(|| "Helper".into());
+        let input = crate::chat_results::SaveResultInput {
+            id: None,
+            expected_revision: 0,
+            request_key: format!("helper-result:{}", run.id),
+            title: format!("{} result", async_helpers::bounded_text(&helper_name, 160)),
+            payload: crate::chat_results::ResultPayload::Document {
+                format: crate::chat_results::DocumentFormat::Markdown,
+                text: async_helpers::bounded_text(result_text, 8_192),
+            },
+        };
+        let session = guard
+            .sessions
+            .get_mut(&helper.owner_agent_id, &main_chat.id)?;
+        let previous_results = session.chat_results.clone();
+        let previous_activity = session.last_activity_at_ms;
+        match crate::chat_results::upsert(
+            session,
+            input,
+            &run.id,
+            "helper-result",
+            anima_core::primitives::now_millis(),
+        ) {
+            Ok(_) => {
+                session.last_activity_at_ms =
+                    anima_core::primitives::now_millis().max(previous_activity);
+                Some((
+                    helper.owner_agent_id.clone(),
+                    main_chat.id,
+                    previous_results,
+                    previous_activity,
+                ))
+            }
+            Err(error) => {
+                warn!(%run_id, %error, "helper result could not be mirrored into the main chat");
+                None
+            }
+        }
+    }
+
     async fn run_locked_inner<F>(
         &self,
         request: AgentRunRequest,
@@ -1735,6 +1858,7 @@ impl AgentRunCoordinator {
         // Phase A: record the run as running and publish that durable marker
         // before any model work (the run-start save that already existed).
         let transaction = self.control_plane_transaction().await;
+        self.enforce_monthly_spend_limit().await?;
         let (
             runtime,
             _tool_context,
@@ -2737,6 +2861,7 @@ impl AgentRunCoordinator {
             history_outbox,
             persist_request,
             orphaned_approvals,
+            helper_result_undo,
             side_posts,
         ) = {
             let mut guard = self.state.write().await;
@@ -2819,6 +2944,9 @@ impl AgentRunCoordinator {
                 rolled_back?;
                 return Err(error);
             }
+            let helper_result_undo = result.data.as_ref().and_then(|reply| {
+                Self::stage_helper_result_in_main_chat(&mut guard, &run_id, &reply.text)
+            });
             let snapshot = guard
                 .get_agent(&agent_id)
                 .expect("a committed agent stays registered");
@@ -2864,6 +2992,7 @@ impl AgentRunCoordinator {
                 guard.history.clone(),
                 guard.control_plane_persist_request(),
                 orphaned_approvals,
+                helper_result_undo,
                 guard.take_side_posts(),
             )
         };
@@ -2876,6 +3005,12 @@ impl AgentRunCoordinator {
                 guard.learning.uncount_turn(counted);
             }
             guard.revert_side_posts(side_posts);
+            if let Some((agent, session, results, activity)) = helper_result_undo {
+                if let Some(saved) = guard.sessions.get_mut(&agent, &session) {
+                    saved.chat_results = results;
+                    saved.last_activity_at_ms = activity;
+                }
+            }
             let offered =
                 guard.rollback_run(&change_set, RunError::new(COMMIT_FAILED, error.to_string()));
             if let Some(record) = guard.runs.get(&run_id) {
@@ -2901,6 +3036,13 @@ impl AgentRunCoordinator {
         }
         self.announce_stopped_approvals(&orphaned_approvals).await;
         drop(transaction);
+        if let Some((agent, session, _, _)) = &helper_result_undo {
+            self.state.read().await.publish_session_event(
+                agent,
+                session,
+                LiveEventBody::SessionUpdated,
+            );
+        }
         if !side_posts.is_empty() {
             let guard = self.state.read().await;
             for post in &side_posts {

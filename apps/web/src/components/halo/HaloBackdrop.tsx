@@ -6,6 +6,10 @@ import {
   type AppearanceAccent,
 } from '../../lib/appearance-preferences';
 import { HaloOrb } from './HaloOrb';
+import {
+  orbPixel,
+  useAgentOrbStyle,
+} from '../../lib/orb-style-preferences';
 
 const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
   calm: { accent: '#E94DAB', energy: 0.3 },
@@ -39,15 +43,26 @@ export function HaloBackdrop({
   words = '',
   variant = 'full',
   accent = 'pink',
+  agentId = '',
 }: {
   mode: PresenceMode;
   words?: string;
   variant?: ChatBackground;
   accent?: AppearanceAccent;
+  agentId?: string;
 }) {
+  const orbStyle = useAgentOrbStyle(agentId);
   const look = presenceLook(mode, accent);
-  const energy =
+  const presenceEnergy =
     variant === 'quiet' && mode === 'calm' ? QUIET_CALM_ENERGY : look.energy;
+  const energy = Math.min(
+    presenceEnergy,
+    orbStyle.motion === 'calm'
+      ? 0.35
+      : orbStyle.motion === 'restless'
+        ? 1
+        : 0.8,
+  );
   const shown = revealInvisible(words.trim()).text;
   return (
     <>
@@ -61,12 +76,13 @@ export function HaloBackdrop({
           <>
             <div
               className="halo-glow"
-              style={{ ['--halo-accent' as string]: look.accent }}
+              style={{ ['--halo-accent' as string]: orbStyle.color }}
             />
             {variant === 'quiet' && <div className="halo-wash" />}
             <HaloOrb
-              accent={look.accent}
+              accent={orbStyle.color}
               energy={energy}
+              pixel={orbPixel(orbStyle.grain)}
               className="halo-backdrop-orb"
             />
           </>

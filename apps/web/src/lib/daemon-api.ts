@@ -262,6 +262,8 @@ export interface DaemonSnapshot {
 
 export interface AgentUpdateInput {
   name?: string;
+  bio?: string;
+  showInMainChat?: boolean;
   model?: string;
   provider?: string;
   system?: string;
@@ -589,6 +591,14 @@ export const daemon = {
     id: string,
     input: import('@animaos/sdk').SaveAgentPersonality,
   ) => setupClient.agentFiles.savePersonality(id, input),
+  previewPersonality: (
+    id: string,
+    input: { content: string; prompt: string },
+  ) =>
+    request<{ text: string }>(
+      `/agents/${encodeURIComponent(id)}/personality/preview`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
   capabilities: () => setupClient.capabilities(),
   listWorkspaceFiles: () => setupClient.workspace.listFiles(),
   readWorkspaceFile: (path: string) => setupClient.workspace.readFile(path),
@@ -841,6 +851,9 @@ export const daemon = {
   usagePricing: () => setupClient.usage.pricing(),
   setUsagePricing: (overrides: PricingOverride[]) =>
     setupClient.usage.setPricing(overrides),
+  monthlySpendLimit: () => setupClient.usage.monthlySpendLimit(),
+  setMonthlySpendLimit: (limitMicros: number | null) =>
+    setupClient.usage.setMonthlySpendLimit(limitMicros),
   /** Logs and health (spec §11.2, §11.3, §15.4). */
   logs: (query: LogsQuery) => setupClient.logs.list(query),
   logStream: (options: {
@@ -1012,9 +1025,9 @@ export const daemon = {
       body: JSON.stringify(patch),
     }),
 
-  recentAgentMemories: (id: string) =>
+  recentAgentMemories: (id: string, limit = 100) =>
     request<{ memories: AgentMemory[] }>(
-      `/agents/${encodeURIComponent(id)}/memories/recent?limit=100`,
+      `/agents/${encodeURIComponent(id)}/memories/recent?limit=${Math.max(1, Math.floor(limit))}`,
     ),
   setAgentAvatar: (id: string, file: File) =>
     request<void>(`/agents/${encodeURIComponent(id)}/avatar`, {
@@ -1262,6 +1275,8 @@ export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
     id: state.id,
     name: state.name,
     ...(state.config.bio ? { bio: state.config.bio } : {}),
+    showInMainChat:
+      state.config.settings?.additional?.showInMainChat !== false,
     provider: state.config.provider ?? 'default',
     model: state.config.model,
     toolNames: state.config.tools?.map((tool) => tool.name) ?? [],

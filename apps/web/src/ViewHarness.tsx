@@ -724,6 +724,9 @@ export function ViewHarness() {
   const [settingsSaveError, setSettingsSaveError] = useState<string | null>(
     null,
   );
+  const [pendingSkillCounts, setPendingSkillCounts] = useState<
+    Record<string, number>
+  >({});
   const [resetError, setResetError] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -1046,6 +1049,81 @@ export function ViewHarness() {
   };
 
   const resetAgent = async () => {
+    if (
+      !agent ||
+      mcpBusyRef.current ||
+      mcpPermissionsUnknownRef.current ||
+      savingSettingsRef.current ||
+      resetInFlightRef.current !== null
+    ) {
+      return;
+    }
+    const targetAgentId = agent.id;
+    const operation = beginAgentOperation(targetAgentId);
+    resetInFlightRef.current = operation;
+    setResetting(true);
+    setResetError(null);
+    setSettingsSaveError(null);
+    try {
+      const [personality, core, recent] = await Promise.all([
+        daemon.agentPersonality(targetAgentId),
+        daemon.coreMemory(targetAgentId),
+        daemon.recentAgentMemories(targetAgentId, 1000),
+      ]);
+      if (personality.source === 'workspace_soul') {
+        throw new Error(
+          'This agent reads a shared workspace SOUL.md. Reset it from Files so the shared instructions are not changed for other agents.',
+        );
+      }
+      const agentMemories = recent.memories.filter(
+        (memory) => memory.scope !== 'shared',
+      );
+      const clearCore = [
+        ...core.user.entries.map((entry) =>
+          daemon.removeCoreEntry(targetAgentId, 'user', entry.id),
+        ),
+        ...core.notes.entries.map((entry) =>
+          daemon.removeCoreEntry(targetAgentId, 'notes', entry.id),
+        ),
+      ];
+      const clearMemory = agentMemories.map((memory) =>
+        daemon.deleteMemory(memory.id, memory.content),
+      );
+      const removals = [...clearCore, ...clearMemory];
+      for (let index = 0; index < removals.length; index += 25) {
+        await Promise.all(removals.slice(index, index + 25));
+      }
+      const balanced = [
+        '# Soul',
+        `You are ${agent.name}, the owner’s personal companion. Keep a consistent identity across conversations and channels.`,
+        '',
+        '## How you talk',
+        'Suggest a useful next step when it helps, and keep answers concise.',
+        '',
+        '## Boundaries',
+        'Stay within granted permissions. Ask before spending money, publishing, deleting important data, or sending consequential external messages.',
+      ].join('\n');
+      await daemon.saveAgentPersonality(targetAgentId, {
+        content: balanced,
+        revision: personality.revision,
+      });
+      window.dispatchEvent(
+        new CustomEvent('anima:personality-changed', { detail: targetAgentId }),
+      );
+      if (isCurrentResetOperation(operation)) setResetError(null);
+    } catch (caught) {
+      if (isCurrentResetOperation(operation)) {
+        setResetError(errorMessage(caught));
+      }
+    } finally {
+      if (resetInFlightRef.current === operation) {
+        resetInFlightRef.current = null;
+        setResetting(false);
+      }
+    }
+  };
+
+  const deleteAgent = async () => {
     if (
       !agent ||
       mcpBusyRef.current ||
@@ -1490,6 +1568,18 @@ export function ViewHarness() {
     snoozeAutomation: automations.snooze,
     openSessionAt,
   });
+  const reportPendingSkillCount = useCallback(
+    (count: number) => {
+      const currentAgentId = agent?.id;
+      if (!currentAgentId) return;
+      setPendingSkillCounts((current) =>
+        current[currentAgentId] === count
+          ? current
+          : { ...current, [currentAgentId]: count },
+      );
+    },
+    [agent?.id],
+  );
 
   if (connection === 'unknown' || (connection === 'online' && !loaded)) {
     return <ConnectingState />;
@@ -1536,6 +1626,7 @@ export function ViewHarness() {
       key={sections?.join()}
       refreshProviders={retryProviders}
       agent={agent}
+      agents={agents}
       providers={providers}
       saving={savingSettings || mcpBusy}
       resetting={resetting}
@@ -1543,6 +1634,8 @@ export function ViewHarness() {
       resetError={resetError}
       saveSettings={saveSettings}
       resetAgent={resetAgent}
+      deleteAgent={deleteAgent}
+      isMainAgent={agent.workspaceRole !== 'helper'}
       sections={sections}
     />
   );
@@ -1883,6 +1976,7 @@ export function ViewHarness() {
       <div data-testid="workspace-background" className="contents">
         <WorkspaceShell
           mainAgent={mainAgent ?? agent}
+          settingsAgent={agent}
           agents={agents}
           connection={connection}
           route={route}
@@ -1944,6 +2038,7 @@ export function ViewHarness() {
           locked={settingsBusy}
           profile={settingsPage(['profile'])}
           model={settingsPage(['model'])}
+          builtinTools={settingsPage(['builtins'])}
           runtime={
             <RuntimePage
               agent={agent}
@@ -1957,9 +2052,11 @@ export function ViewHarness() {
               current.trim() ? `${current}\n\n${prompt}` : prompt,
             )
           }
-          connectors={
+          connectors={(mode) => (
             <ConnectorsView
+              mode={mode}
               agentId={agent.id}
+              agentName={agent.name}
               online={connection === 'online'}
               epoch={live.state.epoch}
               disabled={
@@ -2076,10 +2173,11 @@ export function ViewHarness() {
                 />
               }
             />
-          }
+          )}
           approvals={
             <ApprovalsPage
               agentId={agent.id}
+              agentName={agent.name}
               live={live.state}
               streamOpen={live.status === 'open'}
               sessions={sessions.sessions}
@@ -2129,15 +2227,12 @@ export function ViewHarness() {
           }
           usage={
             <UsagePage
-              agentId={agent.id}
+              agentId={null}
               online={connection === 'online'}
               epoch={live.state.epoch}
-              sessionId={
-                conversationRoute.kind === 'session' &&
-                !conversationRoute.agentId
-                  ? conversationRoute.sessionId
-                  : null
-              }
+              sessionId={null}
+              allAgents
+              agents={agents}
             />
           }
           logs={<LogsPage online={connection === 'online'} />}
@@ -2152,6 +2247,7 @@ export function ViewHarness() {
               version={live.state.skillsVersion}
               epoch={live.state.epoch}
               online={connection === 'online'}
+              onPendingCountChange={reportPendingSkillCount}
               onOpenSession={(proposer) =>
                 commands.openTarget({
                   agentId: proposer.agentId,
@@ -2172,6 +2268,7 @@ export function ViewHarness() {
             live.status === 'open',
             sessions.sessions,
           )}
+          pendingSkills={pendingSkillCounts[agent.id] ?? 0}
           sessions={sessions.sessions}
           onOpenSession={openSession}
           workspaceState={workspace}

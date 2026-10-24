@@ -17,13 +17,13 @@ const MODES: readonly { value: PresetMode; label: string; summary: string }[] =
   [
     {
       value: 'free',
-      label: 'Free',
+      label: 'Only for risky things',
       summary:
         'Works on its own and tells you what it did. Dangerous things still ask.',
     },
     {
       value: 'strict',
-      label: 'Strict',
+      label: 'Before every change',
       summary: 'Asks before it changes or runs anything.',
     },
   ];
@@ -153,7 +153,7 @@ export function AutonomyCard({
       className="approvals-section autonomy"
       aria-labelledby="approvals-autonomy"
     >
-      <h2 id="approvals-autonomy">Autonomy</h2>
+      <h2 id="approvals-autonomy">When it checks with you</h2>
       <p className="approvals-help">
         How much anima asks before it acts. Everything it does shows up in Work,
         and you can stop it any time.
@@ -202,9 +202,8 @@ export function AutonomyCard({
             >
               <span className="autonomy-mode-title">Custom</span>
               <span className="autonomy-mode-summary">
-                {autonomy.mode === 'custom'
-                  ? "You've set your own rules below."
-                  : 'Shows up when you set your own rules below.'}
+                Appears when you've set your own rules. Pick one of the others
+                to reset.
               </span>
             </div>
           </div>
@@ -213,8 +212,8 @@ export function AutonomyCard({
             <div>
               <p className="autonomy-smart-title">Smart check</p>
               <p className="approvals-help">
-                Let anima's model approve risky commands it judges safe (extra
-                model call each time).
+                Let anima's model approve risky commands it judges safe (an
+                extra model call each time).
               </p>
             </div>
             <Switch
@@ -311,8 +310,7 @@ export function AutonomyCard({
             <div className="autonomy-floor-column">
               <h3 id="autonomy-always-asks">Always asks, in any mode</h3>
               <p className="approvals-help">
-                Free never skips these. You can relax one at a time in the rules
-                below.
+                Never skipped. You can relax one at a time.
               </p>
               <ul
                 className="autonomy-list"

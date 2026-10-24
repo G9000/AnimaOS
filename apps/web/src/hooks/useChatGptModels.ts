@@ -1,9 +1,10 @@
+import { ownerFetch } from '../lib/owner-fetch';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDaemonClient, type ChatGptModelsSnapshot } from '@animaos/sdk';
 import { useLatest } from './useLatest';
 import { useRenderScope } from './useRenderScope';
 
-const client = createDaemonClient({ baseUrl: '' }).chatgpt;
+const client = createDaemonClient({ baseUrl: '', fetch: ownerFetch }).chatgpt;
 const readError =
   'Model metadata is unavailable. You can enter a custom model.';
 const refreshError =

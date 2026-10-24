@@ -95,9 +95,11 @@ function definitionError(draft: WorkflowInput): string | null {
 export function WorkspaceWorkflows({
   agents,
   online,
+  onCountChange,
 }: {
   agents: readonly AgentDetail[];
   online: boolean;
+  onCountChange?: (count: number | null) => void;
 }) {
   const [selection, setSelection] = useState('');
   const agentId = agents.some((agent) => agent.id === selection)
@@ -116,7 +118,10 @@ export function WorkspaceWorkflows({
           className="field"
           aria-label="Agent"
           value={agentId}
-          onChange={(event) => setSelection(event.target.value)}
+          onChange={(event) => {
+            onCountChange?.(null);
+            setSelection(event.target.value);
+          }}
           disabled={!agents.length}
         >
           {agents.map((agent) => (
@@ -132,6 +137,7 @@ export function WorkspaceWorkflows({
           agentId={agentId}
           membership={membership}
           online={online}
+          onCountChange={onCountChange}
         />
       ) : (
         <p className="text-sm text-ink-3">
@@ -148,12 +154,14 @@ export function WorkflowAgentView({
   online,
   surface = 'work',
   refreshKey,
+  onCountChange,
 }: {
   agentId: string;
   membership: string;
   online: boolean;
   surface?: 'work' | 'chat';
   refreshKey?: string | number;
+  onCountChange?: (count: number | null) => void;
 }) {
   const draftKey = `anima:workflow-draft:${agentId}`;
   const commandKey = `anima:workflow-command:${agentId}`;
@@ -181,6 +189,7 @@ export function WorkflowAgentView({
   );
   const [refresh, setRefresh] = useState(0);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const contextKey = JSON.stringify([agentId, membership, online]);
   const context = useRenderScope(contextKey);
   const contextRef = useLatest(context);
@@ -205,6 +214,10 @@ export function WorkflowAgentView({
     !online || !current || current.loading || !current.workflows || saving;
   const validContext = () =>
     mounted.current && contextRef.current === context && online;
+
+  useEffect(() => {
+    if (current?.workflows) onCountChange?.(current.workflows.length);
+  }, [current?.workflows, onCountChange]);
 
   useEffect(() => {
     const update = (event: Event) => {
@@ -313,7 +326,10 @@ export function WorkflowAgentView({
       notifyWorkflowChange(agentId);
       if (!validContext()) return;
       remember(null);
-      if (command.type === 'create') setDraft(newDraft());
+      if (command.type === 'create') {
+        setDraft(newDraft());
+        setNewWorkflowOpen(false);
+      }
     } catch (error) {
       if (!validContext()) return;
       setActionError({
@@ -365,8 +381,22 @@ export function WorkflowAgentView({
   return (
     <Container
       aria-label={chat ? 'Active workflows' : undefined}
-      className="space-y-5"
+      className={chat ? 'space-y-5' : 'settings-workflows'}
     >
+      {!chat && (
+        <header className="settings-workflows-head">
+          <h2>Workflows</h2>
+          <button
+            type="button"
+            className="studio-tool-button"
+            disabled={!online || saving || current?.loading}
+            aria-expanded={newWorkflowOpen}
+            onClick={() => setNewWorkflowOpen((open) => !open)}
+          >
+            {newWorkflowOpen ? 'Close' : 'New workflow'}
+          </button>
+        </header>
+      )}
       {chat && visibleWorkflows.length > 0 && (
         <h2 className="text-base font-semibold">Active workflows</h2>
       )}
@@ -443,9 +473,9 @@ export function WorkflowAgentView({
           </button>
         </div>
       )}
-      {surface === 'work' && (
+      {surface === 'work' && newWorkflowOpen && (
         <form
-          className="space-y-4 rounded-2xl border border-line bg-surface p-5"
+          className="settings-workflow-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (!validation && !pending)
@@ -618,7 +648,7 @@ function WorkflowCard({
   return (
     <article
       aria-label={workflow.title}
-      className="space-y-4 rounded-2xl border border-line bg-surface p-5 sm:p-6"
+      className="settings-workflow-card space-y-4 rounded-2xl border border-line bg-surface p-5 sm:p-6"
     >
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-lg font-semibold">{workflow.title}</h3>

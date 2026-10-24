@@ -7,7 +7,7 @@ import {
 import { COMPANION_UNREACHABLE } from './approvals';
 
 /** The ranges the Usage page offers, in days (spec §15.4). */
-export const USAGE_RANGES_DAYS = [7, 30, 90] as const;
+export const USAGE_RANGES_DAYS = [7, 14, 30, 90] as const;
 export type UsageRangeDays = (typeof USAGE_RANGES_DAYS)[number];
 export const DEFAULT_USAGE_RANGE_DAYS: UsageRangeDays = 30;
 

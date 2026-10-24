@@ -180,7 +180,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         get_agent_avatar_entry,
         get_agent_tasks_entry,
         agent_files::preview,
-        personality::get, personality::put,
+        personality::get, personality::put, personality::preview,
         put_agent_tasks_entry,
         put_agent_avatar_entry,
         delete_agent_avatar_entry,
@@ -286,6 +286,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         logs::list_logs, logs::stream_logs,
         usage::usage_summary, usage::usage_records, usage::usage_export,
         usage::get_pricing, usage::put_pricing,
+        usage::get_monthly_spend_limit, usage::put_monthly_spend_limit,
         side_model::get_side_model, side_model::put_side_model,
         provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
         provider_keys::wake_key,
@@ -1320,6 +1321,10 @@ fn router_with_services_with_policies_and_integrations(
             get(usage::get_pricing).put(usage::put_pricing),
         )
         .route(
+            "/api/usage/limit",
+            get(usage::get_monthly_spend_limit).put(usage::put_monthly_spend_limit),
+        )
+        .route(
             "/api/settings/side-model",
             get(side_model::get_side_model).put(side_model::put_side_model),
         )
@@ -1447,6 +1452,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/personality",
             get(personality::get).put(personality::put),
+        )
+        .route(
+            "/api/agents/{agent_id}/personality/preview",
+            axum::routing::post(personality::preview),
         )
         .route(
             "/api/agents/{agent_id}/avatar",

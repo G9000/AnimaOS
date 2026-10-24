@@ -310,6 +310,9 @@ pub(crate) struct ControlPlaneSnapshot {
     /// The owner's price overrides (spec §11.1).
     #[serde(default)]
     pub(crate) pricing_overrides: Vec<crate::usage::PricingOverride>,
+    /// Optional monthly owner spend cap, in USD micros.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) monthly_spend_limit_micros: Option<u64>,
     /// The owner's IANA time zone, as their web console last reported it.
     #[serde(default)]
     pub(crate) owner_time_zone: Option<String>,
@@ -837,6 +840,7 @@ impl ControlPlaneSnapshot {
             skill_drafts: vec![],
             schedule_fires: vec![],
             pricing_overrides: vec![],
+            monthly_spend_limit_micros: None,
             owner_time_zone: None,
             side_model: None,
             learning_reviews: vec![],

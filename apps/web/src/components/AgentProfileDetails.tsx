@@ -8,10 +8,12 @@ import { useResetOnChange } from '../hooks/useResetOnChange';
 export function AgentProfileDetails({
   agent,
   disabled,
+  editing = false,
   children,
 }: {
   agent: AgentDetail;
   disabled: boolean;
+  editing?: boolean;
   children?: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,61 +44,63 @@ export function AgentProfileDetails({
     }
   };
   return (
-    <section className="profile-identity" aria-label="Agent identity">
-      <div className="profile-identity-row">
-        <div className="profile-avatar-controls">
-          <button
-            type="button"
-            aria-label="Change agent avatar"
-            disabled={disabled || busy}
-            onClick={() => inputRef.current?.click()}
-            className="profile-avatar-change"
-          >
-            <AgentAvatar id={agent.id} name={agent.name} size={72} />
-            <span>Change</span>
-          </button>
-          <input
-            ref={inputRef}
-            aria-label="Agent avatar image file"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            disabled={disabled || busy}
-            className="sr-only"
-            tabIndex={-1}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void change(file);
-            }}
-          />
-        </div>
-        <div className="profile-identity-fields">{children}</div>
+    <section
+      className={`profile-identity settings-item${editing ? ' is-editing' : ''}`}
+      aria-label="Agent identity"
+    >
+      <button
+        type="button"
+        aria-label="Change agent avatar"
+        disabled={disabled || busy}
+        onClick={() => inputRef.current?.click()}
+        className="profile-avatar-change"
+      >
+        <AgentAvatar id={agent.id} name={agent.name} size={28} />
+      </button>
+      <input
+        ref={inputRef}
+        aria-label="Agent avatar image file"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        disabled={disabled || busy}
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) void change(file);
+        }}
+      />
+      <div className="profile-identity-fields">
+        {children}
+        {editing && (
+          <div className="profile-avatar-help">
+            <span>PNG, JPEG or WebP · up to 5 MB</span>
+            <button
+              type="button"
+              disabled={disabled || busy}
+              onClick={() => void change(null)}
+            >
+              Remove avatar
+            </button>
+          </div>
+        )}
+        {busy && (
+          <p role="status" className="profile-avatar-status">
+            Saving avatar…
+          </p>
+        )}
+        {notice && (
+          <p role="status" className="profile-avatar-status">
+            {notice}
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="profile-avatar-error">
+            {error}
+          </p>
+        )}
       </div>
-      <div className="profile-avatar-help">
-        <span>PNG, JPEG or WebP · up to 5 MB</span>
-        <button
-          type="button"
-          disabled={disabled || busy}
-          onClick={() => void change(null)}
-        >
-          Remove avatar
-        </button>
-      </div>
-      {busy && (
-        <p role="status" className="text-xs">
-          Saving avatar…
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="text-xs">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error}
-        </p>
-      )}
     </section>
   );
 }

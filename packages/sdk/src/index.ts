@@ -313,6 +313,7 @@ export type {
   UsageExportQuery,
   UsageGroup,
   UsageGroupBy,
+  MonthlySpendLimit,
   UsageQuery,
   UsageRecord,
   UsageRecordsPage,

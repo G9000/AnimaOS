@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DaemonHttpError } from '@animaos/sdk';
 import type { Skill, SkillDraftProposer, SkillFile } from '@animaos/sdk';
 
@@ -33,6 +33,8 @@ export interface SkillsPageProps {
   /** How the companion learns from finished tasks: its review switch and
    *  the task reviews that propose skills. */
   learning?: ReactNode;
+  /** Pending draft count for the Settings navigation badge. */
+  onPendingCountChange?: (count: number) => void;
 }
 
 type Editing = {
@@ -56,8 +58,12 @@ export function SkillsPage({
   online,
   onOpenSession,
   learning = null,
+  onPendingCountChange,
 }: SkillsPageProps) {
   const view = useSkills({ version, epoch, enabled: online });
+  useEffect(() => {
+    onPendingCountChange?.(online && view.loaded ? view.pending.length : 0);
+  }, [online, view.loaded, view.pending.length, onPendingCountChange]);
   // Task reviews belong to the companion, so they show even when the
   // skills folder cannot be read.
   const learningSection = learning && (
@@ -167,12 +173,9 @@ export function SkillsPage({
           {unreviewedFile && ` ${FILE_UNREVIEWED_HINT}`}
         </p>
       )}
-      <section className="skills-section" aria-labelledby="skills-waiting">
-        <h2 id="skills-waiting">Waiting for review</h2>
-        {view.pending.length === 0 ? (
-          <p className="skills-empty">No skill drafts are waiting for you.</p>
-        ) : (
-          shown.shown.map((draft) => (
+      {view.pending.length > 0 && (
+        <section className="skills-section skills-pending" aria-label="New skills to keep">
+          {shown.shown.map((draft) => (
             <SkillDraftCard
               key={draft.id}
               draft={draft}
@@ -186,13 +189,13 @@ export function SkillsPage({
               }}
               onOpenSession={onOpenSession}
             />
-          ))
-        )}
-        {moreFiles && <p className="skills-empty">{moreFiles}</p>}
-      </section>
+          ))}
+          {moreFiles && <p className="skills-empty">{moreFiles}</p>}
+        </section>
+      )}
       <section className="skills-section" aria-labelledby="skills-list">
         <div className="skills-section-header">
-          <h2 id="skills-list">Skills</h2>
+          <h2 id="skills-list">Your skills</h2>
           <button
             type="button"
             className="studio-tool-button"
@@ -343,98 +346,122 @@ export function SkillsPage({
             No skills yet. Write one, import a SKILL.md, or approve a draft.
           </p>
         ) : (
-          <ul className="skills-list">
-            {view.skills.map((skill) => (
-              <li
-                key={skill.slug}
-                aria-label={revealInvisible(skill.name).text}
-                className="skills-row"
-              >
-                <div className="skills-row-text">
-                  <strong>{revealInvisible(skill.name).text}</strong>
-                  <code>/{skill.slug}</code>
-                  <span
-                    className={`skills-status skills-status-${skill.status}`}
-                  >
-                    {STATUS_LABELS[skill.status]}
-                  </span>
-                  <span className="skills-description">
-                    {revealInvisible(skill.description).text}
-                  </span>
-                </div>
-                <div className="skill-actions">
-                  <label className="skills-switch">
-                    <input
-                      type="checkbox"
-                      checked={skill.enabled}
-                      aria-label={`${revealInvisible(skill.name).text} is ${skill.enabled ? 'on' : 'off'}`}
-                      onChange={(event) => {
-                        begin();
-                        void view.setEnabled(skill, event.target.checked);
-                      }}
-                    />
-                    {skill.enabled ? 'On' : 'Off'}
-                  </label>
-                  {skill.status === 'changed' && (
-                    <button
-                      type="button"
-                      className="studio-tool-button"
-                      onClick={() => void openReview(skill)}
+          <div className="skills-table-wrap">
+            <table className="skills-table">
+              <thead>
+                <tr>
+                  <th scope="col">Skill</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Uses</th>
+                  <th scope="col">Last improved</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.skills.map((skill) => (
+                  <tr key={skill.slug}>
+                    <th
+                      scope="row"
+                      aria-label={revealInvisible(skill.name).text}
                     >
-                      Review changes
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="studio-tool-button"
-                    onClick={() => void edit(skill)}
-                  >
-                    Edit
-                  </button>
-                  {confirming === skill.slug ? (
-                    <>
-                      <span className="skills-confirm">
-                        Its folder moves to the workspace trash.
+                      <span className="skills-row-name">
+                        {revealInvisible(skill.name).text}
                       </span>
-                      <button
-                        type="button"
-                        className="studio-tool-button"
-                        onClick={async () => {
-                          begin();
-                          if (await view.remove(skill)) setConfirming(null);
-                        }}
+                      <code>/{skill.slug}</code>
+                      <span
+                        className={`skills-status skills-status-${skill.status}`}
                       >
-                        Delete /{skill.slug}
-                      </button>
-                      <button
-                        type="button"
-                        className="studio-tool-button"
-                        onClick={() => setConfirming(null)}
-                      >
-                        Keep it
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="studio-tool-button"
-                      onClick={() => setConfirming(skill.slug)}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+                        {STATUS_LABELS[skill.status]}
+                      </span>
+                      <span className="skills-description">
+                        {revealInvisible(skill.description).text}
+                      </span>
+                      <details className="skills-row-manage">
+                        <summary>Manage</summary>
+                        <div className="skill-actions">
+                          <label className="skills-switch">
+                            <input
+                              type="checkbox"
+                              checked={skill.enabled}
+                              aria-label={`${revealInvisible(skill.name).text} is ${skill.enabled ? 'on' : 'off'}`}
+                              onChange={(event) => {
+                                begin();
+                                void view.setEnabled(skill, event.target.checked);
+                              }}
+                            />
+                            {skill.enabled ? 'On' : 'Off'}
+                          </label>
+                          {skill.status === 'changed' && (
+                            <button
+                              type="button"
+                              className="studio-tool-button"
+                              onClick={() => void openReview(skill)}
+                            >
+                              Review
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="studio-tool-button"
+                            onClick={() => void edit(skill)}
+                          >
+                            Edit
+                          </button>
+                          {confirming === skill.slug ? (
+                            <>
+                              <span className="skills-confirm">
+                                Its folder moves to the workspace trash.
+                              </span>
+                              <button
+                                type="button"
+                                className="studio-tool-button"
+                                onClick={async () => {
+                                  begin();
+                                  if (await view.remove(skill))
+                                    setConfirming(null);
+                                }}
+                              >
+                                Delete
+                              </button>
+                              <button
+                                type="button"
+                                className="studio-tool-button"
+                                onClick={() => setConfirming(null)}
+                              >
+                                Keep
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="studio-tool-button"
+                              onClick={() => setConfirming(skill.slug)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </details>
+                    </th>
+                    <td title="Skill origin is not recorded">—</td>
+                    <td title="Version history is not recorded">—</td>
+                    <td title="Skill usage is not recorded">—</td>
+                    <td>
+                      <time dateTime={new Date(skill.updatedAtMs).toISOString()}>
+                        {formatWhen(skill.updatedAtMs)}
+                      </time>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
       {learningSection}
-      <section className="skills-section" aria-labelledby="skills-decided">
-        <h2 id="skills-decided">Recently decided</h2>
-        {view.decided.length === 0 ? (
-          <p className="skills-empty">No drafts decided in the last 30 days.</p>
-        ) : (
+      {view.decided.length > 0 && (
+        <details className="skills-decided-details">
+          <summary>Recently decided</summary>
           <ul className="skills-decided">
             {view.decided.map((draft) => (
               <li key={draft.id}>
@@ -451,8 +478,8 @@ export function SkillsPage({
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </details>
+      )}
     </div>
   );
 }

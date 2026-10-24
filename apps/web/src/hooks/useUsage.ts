@@ -26,6 +26,8 @@ export interface UsageOptions {
   enabled: boolean;
   days: UsageRangeDays;
   agentId: string | null;
+  /** Include usage from every agent instead of filtering to `agentId`. */
+  allAgents?: boolean;
   /** `LiveState.epoch`: bumped by every snapshot and resync. */
   epoch: number;
   /** The clock; tests fix it. */
@@ -71,6 +73,7 @@ export function useUsage({
   enabled,
   days,
   agentId,
+  allAgents = false,
   epoch,
   now = () => new Date(),
 }: UsageOptions): UsageView {
@@ -88,7 +91,7 @@ export function useUsage({
     status: number | null;
   } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const scope = useRenderScope(enabled, agentId, days, epoch);
+  const scope = useRenderScope(enabled, allAgents, agentId, days, epoch);
   const [previousScope, setPreviousScope] = useState(scope);
   if (previousScope !== scope) {
     setPreviousScope(scope);
@@ -101,13 +104,13 @@ export function useUsage({
   const agentRef = useLatest(agentId);
 
   const load = useCallback(async () => {
-    if (!agentId) return;
+    if (!agentId && !allAgents) return;
     const mine = ++sequence.current;
     const next = rangeFor(days, clock.current);
     const query = {
       from: next.from,
       to: next.to,
-      agentId,
+      ...(allAgents ? {} : { agentId: agentId! }),
       tzOffsetMinutes: next.tzOffsetMinutes,
     };
     const settled = await Promise.allSettled(
@@ -151,7 +154,7 @@ export function useUsage({
         : null,
     );
     setLoaded(true);
-  }, [agentId, days, clock]);
+  }, [agentId, allAgents, days, clock]);
 
   useEffect(() => {
     unmounted.current = false;
@@ -161,11 +164,11 @@ export function useUsage({
   }, []);
 
   useEffect(() => {
-    if (!enabled || !agentId) return;
+    if (!enabled || (!agentId && !allAgents)) return;
     // State changes only after all awaited daemon responses have settled.
     // eslint-disable-next-line react/set-state-in-effect
     void load();
-  }, [enabled, agentId, days, epoch, load]);
+  }, [enabled, agentId, allAgents, days, epoch, load]);
 
   const refresh = useCallback(() => {
     setExportError(null);
@@ -174,13 +177,17 @@ export function useUsage({
 
   const exportCsv = useCallback(async () => {
     const owner = agentRef.current;
-    if (!owner) return false;
+    if (!owner && !allAgents) return false;
     // The range as of the click, from the current selection and clock: the
     // last read may be older than either.
     const { from, to } = usageRange(daysRef.current, clock.current());
     setExportError(null);
     try {
-      const text = await daemon.exportUsageCsv({ from, to, agentId: owner });
+      const text = await daemon.exportUsageCsv({
+        from,
+        to,
+        ...(allAgents ? {} : { agentId: owner! }),
+      });
       downloadText(usageCsvFilename({ from, to }), text, 'text/csv');
       return true;
     } catch (error) {
@@ -193,7 +200,7 @@ export function useUsage({
         );
       return false;
     }
-  }, [clock, agentRef, daysRef]);
+  }, [clock, agentRef, daysRef, allAgents]);
 
   return {
     range,

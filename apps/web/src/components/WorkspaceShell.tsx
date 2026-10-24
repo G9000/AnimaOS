@@ -19,6 +19,7 @@ import type { DaemonWorkspaceState } from '../lib/daemon-api';
 import type { HashPage, HashRoute, Navigate } from '../lib/hash-route';
 import type { AgentDetail } from '../lib/types';
 import { AgentPresence } from './AgentPresence';
+import { AgentAvatar } from './AgentAvatar';
 import {
   SettingsSidebar,
   DestinationNavigation,
@@ -40,6 +41,7 @@ import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey, shouldShowSession } from '../lib/session-groups';
 import { ChevronIcon, GlobeIcon, SearchIcon, XIcon } from './icons';
+import { PenIcon } from './PenIcon';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
 import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
@@ -264,6 +266,7 @@ export function agentStatusText({
 
 export function WorkspaceShell({
   mainAgent,
+  settingsAgent = mainAgent,
   agents,
   connection,
   route,
@@ -272,6 +275,7 @@ export function WorkspaceShell({
   conversationRoute,
   sidebar = null,
   connectors = null,
+  builtinTools = null,
   approvals = null,
   automations = null,
   skills = null,
@@ -280,6 +284,7 @@ export function WorkspaceShell({
   logs = null,
   health = null,
   pendingApprovals = 0,
+  pendingSkills = 0,
   sessions = [],
   onOpenSession,
   workspaceState = null,
@@ -300,6 +305,8 @@ export function WorkspaceShell({
   onExportConversation,
 }: {
   mainAgent: AgentDetail;
+  /** The agent currently selected for agent-scoped Settings pages. */
+  settingsAgent?: AgentDetail;
   agents: readonly AgentDetail[];
   connection: Exclude<DaemonConnection, 'unknown'>;
   route: HashRoute;
@@ -310,7 +317,12 @@ export function WorkspaceShell({
   conversationRoute?: HashRoute;
   /** The sessions list shown by the thread switcher. */
   sidebar?: ReactNode | null;
-  connectors?: ReactNode | null;
+  connectors?:
+    | ReactNode
+    | ((mode: 'connections' | 'tools') => ReactNode)
+    | null;
+  /** Built-in tool permissions, shown at the top of Tools. */
+  builtinTools?: ReactNode | null;
   /** The Approvals page, shown at `#/approvals` as Permissions. */
   approvals?: ReactNode | null;
   /** The Automations page, shown at `#/automations`. */
@@ -327,6 +339,8 @@ export function WorkspaceShell({
   health?: ReactNode | null;
   /** Approvals waiting for the owner, for the destination's badge. */
   pendingApprovals?: number;
+  /** Skill drafts waiting for the owner, for the Skills destination badge. */
+  pendingSkills?: number;
   /** The listed sessions the command menu and thread button use. */
   sessions?: readonly Session[];
   onOpenSession?: (session: Session) => void;
@@ -365,6 +379,10 @@ export function WorkspaceShell({
   onExportConversation?: () => void;
 }) {
   const page = availablePage(route);
+  const connectorContent =
+    typeof connectors === 'function'
+      ? connectors(page === 'capabilities' ? 'tools' : 'connections')
+      : connectors;
   const [chatBackground] = useChatBackground();
   const [appearance] = useAppearancePreferences();
   useEffect(() => {
@@ -575,6 +593,7 @@ export function WorkspaceShell({
               mode={page === null ? presence : 'calm'}
               words={presenceSignals.listening?.words}
               accent={appearance.accent}
+              agentId={settingsAgent.id}
             />
             <div className="studio-topbar scenic-topbar">
               <div className="scenic-identity">
@@ -674,9 +693,16 @@ export function WorkspaceShell({
                 >
                   {desktopNavigation && (
                     <SettingsSidebar
+                      agent={settingsAgent}
+                      agents={agents}
+                      onSelectAgent={onSelectAgent}
+                      onCreateAgent={() =>
+                        navigate({ kind: 'page', page: 'new-agent' })
+                      }
                       page={page}
                       navigate={navigate}
                       pendingApprovals={pendingApprovals}
+                      pendingSkills={pendingSkills}
                       locked={locked}
                       searchRef={settingsSearchRef}
                       query={settingsQuery}
@@ -693,8 +719,15 @@ export function WorkspaceShell({
                           >
                             {SETTINGS_PAGE_META[page]?.scope === 'agent' ? (
                               <>
-                                <strong>{mainAgent.name}</strong>
-                                <i aria-hidden>·</i>only this agent
+                                <AgentAvatar
+                                  id={settingsAgent.id}
+                                  name={settingsAgent.name}
+                                  size={16}
+                                />
+                                <strong>{settingsAgent.name}</strong>
+                                <span className="settings-scope-sub">
+                                  · only this agent
+                                </span>
                               </>
                             ) : (
                               <>
@@ -710,7 +743,9 @@ export function WorkspaceShell({
                         {page && SETTINGS_PAGE_META[page] && (
                           <p className="settings-profile-description">
                             {SETTINGS_PAGE_META[page]?.description(
+                              settingsAgent.name,
                               mainAgent.name,
+                              settingsAgent.workspaceRole === 'helper',
                             )}
                           </p>
                         )}
@@ -731,7 +766,7 @@ export function WorkspaceShell({
                         onClick={openConversation}
                       >
                         <span className="scenic-hide-narrow">ESC</span>
-                        <XIcon size={14} />
+                        <PenIcon name="x-circle-fill" size={16} />
                       </button>
                     </div>
                     <div className="settings-window-page">
@@ -782,16 +817,23 @@ export function WorkspaceShell({
                       ) : page === 'health' ? (
                         health
                       ) : page === 'connectors' ? (
-                        connectors
+                        connectorContent
                       ) : page === 'files' ? (
                         <WorkspaceFiles online={connection === 'online'} />
                       ) : page === 'capabilities' ? (
-                        <WorkspaceCapabilities
-                          online={connection === 'online'}
-                        />
+                        <>
+                          {builtinTools}
+                          <details className="tools-inventory-details">
+                            <summary>Registered tools and runtime details</summary>
+                            <WorkspaceCapabilities
+                              online={connection === 'online'}
+                            />
+                          </details>
+                          {connectorContent}
+                        </>
                       ) : page === 'work' ? (
                         <WorkspaceHub
-                          agents={[mainAgent]}
+                          agents={agents}
                           online={connection === 'online'}
                           initialSection="Tasks"
                         />
@@ -803,6 +845,7 @@ export function WorkspaceShell({
                         navigate={navigate}
                         placement="bottom-dock"
                         pendingApprovals={pendingApprovals}
+                        pendingSkills={pendingSkills}
                         locked={locked}
                       />
                     )}

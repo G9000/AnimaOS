@@ -1,25 +1,10 @@
 import type { ReactNode, RefObject } from 'react';
 import type { Navigate } from '../lib/hash-route';
+import type { AgentDetail } from '../lib/types';
 import type { AvailablePage } from './WorkspaceShell';
 import { isMacPlatform } from '../lib/platform';
-import {
-  UserRoundIcon,
-  PuzzleIcon,
-  ChipIcon,
-  ShieldCheckIcon,
-  BrainIcon,
-  BlocksIcon,
-  LinkIcon,
-  CalendarClockIcon,
-  ListChecksIcon,
-  FolderIcon,
-  ServerIcon,
-  ChartIcon,
-  PulseIcon,
-  ScrollTextIcon,
-  SearchIcon,
-  SlidersIcon,
-} from './icons';
+import { SettingsAgentPicker } from './SettingsAgentPicker';
+import { PenIcon } from './PenIcon';
 
 interface Destination {
   page: AvailablePage;
@@ -37,30 +22,50 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
   {
     label: 'Agent',
     items: [
-      { page: 'profile', label: 'Profile', icon: <UserRoundIcon size={15} /> },
-      { page: 'model', label: 'Model', icon: <ChipIcon size={15} /> },
+      {
+        page: 'profile',
+        label: 'Profile',
+        icon: <PenIcon name="user-circle-fill" size={14} />,
+      },
+      {
+        page: 'model',
+        label: 'Model',
+        icon: <PenIcon name="cpu-fill" size={14} />,
+      },
       {
         page: 'approvals',
         label: 'Permissions',
-        icon: <ShieldCheckIcon size={15} />,
+        icon: <PenIcon name="shield-check-fill" size={14} />,
       },
     ],
   },
   {
     label: 'Learning',
     items: [
-      { page: 'skills', label: 'Skills', icon: <PuzzleIcon size={15} /> },
-      { page: 'memory', label: 'Memory', icon: <BrainIcon size={15} /> },
+      {
+        page: 'skills',
+        label: 'Skills',
+        icon: <PenIcon name="lightbulb-fill" size={14} />,
+      },
+      {
+        page: 'memory',
+        label: 'Memory',
+        icon: <PenIcon name="notebook-fill" size={14} />,
+      },
     ],
   },
   {
     label: 'Abilities',
     items: [
-      { page: 'capabilities', label: 'Tools', icon: <BlocksIcon size={15} /> },
+      {
+        page: 'capabilities',
+        label: 'Tools',
+        icon: <PenIcon name="wrench-fill" size={14} />,
+      },
       {
         page: 'connectors',
         label: 'Connections',
-        icon: <LinkIcon size={15} />,
+        icon: <PenIcon name="plugs-connected-fill" size={14} />,
       },
     ],
   },
@@ -70,10 +75,18 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
       {
         page: 'automations',
         label: 'Automations',
-        icon: <CalendarClockIcon size={15} />,
+        icon: <PenIcon name="repeat-fill" size={14} />,
       },
-      { page: 'work', label: 'Work', icon: <ListChecksIcon size={15} /> },
-      { page: 'files', label: 'Files', icon: <FolderIcon size={15} /> },
+      {
+        page: 'work',
+        label: 'Work',
+        icon: <PenIcon name="list-checks-fill" size={14} />,
+      },
+      {
+        page: 'files',
+        label: 'Files',
+        icon: <PenIcon name="folder-fill" size={14} />,
+      },
     ],
   },
   {
@@ -82,12 +95,28 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
       {
         page: 'appearance',
         label: 'Appearance',
-        icon: <SlidersIcon size={15} />,
+        icon: <PenIcon name="palette-fill" size={14} />,
       },
-      { page: 'runtime', label: 'Runtime', icon: <ServerIcon size={15} /> },
-      { page: 'usage', label: 'Usage', icon: <ChartIcon size={15} /> },
-      { page: 'health', label: 'Diagnostics', icon: <PulseIcon size={15} /> },
-      { page: 'logs', label: 'Logs', icon: <ScrollTextIcon size={15} /> },
+      {
+        page: 'runtime',
+        label: 'Runtime',
+        icon: <PenIcon name="hard-drives-fill" size={14} />,
+      },
+      {
+        page: 'usage',
+        label: 'Usage',
+        icon: <PenIcon name="chart-bar-fill" size={14} />,
+      },
+      {
+        page: 'health',
+        label: 'Diagnostics',
+        icon: <PenIcon name="heartbeat-fill" size={14} />,
+      },
+      {
+        page: 'logs',
+        label: 'Logs',
+        icon: <PenIcon name="scroll-fill" size={14} />,
+      },
     ],
   },
 ];
@@ -99,13 +128,22 @@ export const SETTINGS_DESTINATIONS = DESTINATION_GROUPS.flatMap(
 export const SETTINGS_PAGE_META: Partial<
   Record<
     AvailablePage,
-    { scope: 'agent' | 'all'; description: (agent: string) => string }
+    {
+      scope: 'agent' | 'all';
+      description: (
+        agent: string,
+        mainAgent?: string,
+        isHelper?: boolean,
+      ) => string;
+    }
   >
 > = {
   profile: {
     scope: 'agent',
-    description: (agent) =>
-      `Who ${agent} is, what it thinks with, and how it sounds.`,
+    description: (agent, _mainAgent, isHelper) =>
+      isHelper
+        ? `Who ${agent} is, what it's for, and what it can touch.`
+        : `Who ${agent} is, what it thinks with, and how it sounds.`,
   },
   model: {
     scope: 'agent',
@@ -119,7 +157,8 @@ export const SETTINGS_PAGE_META: Partial<
   },
   skills: {
     scope: 'agent',
-    description: (agent) => `What ${agent} has learned to do.`,
+    description: (agent) =>
+      `What ${agent} has learned to do. It writes skills from experience and improves them as it uses them.`,
   },
   memory: {
     scope: 'agent',
@@ -143,7 +182,8 @@ export const SETTINGS_PAGE_META: Partial<
   },
   work: {
     scope: 'all',
-    description: (agent) => `Tasks ${agent} is tracking, across every agent.`,
+    description: (_agent, mainAgent = 'anima') =>
+      `Tasks ${mainAgent} is tracking, across every agent.`,
   },
   files: {
     scope: 'agent',
@@ -156,12 +196,13 @@ export const SETTINGS_PAGE_META: Partial<
   },
   runtime: {
     scope: 'all',
-    description: (agent) => `Where ${agent} lives, and where its commands run.`,
+    description: (_agent, mainAgent = 'anima') =>
+      `Where ${mainAgent} lives, and where its commands run.`,
   },
   usage: {
     scope: 'all',
-    description: (agent) =>
-      `What ${agent} costs, by day, by agent and by chat.`,
+    description: (_agent, mainAgent = 'anima') =>
+      `What ${mainAgent} costs, by day, by agent and by chat.`,
   },
   health: {
     scope: 'all',
@@ -178,6 +219,7 @@ export function DestinationNavigation({
   navigate,
   placement,
   pendingApprovals,
+  pendingSkills = 0,
   locked,
   query = '',
 }: {
@@ -185,6 +227,7 @@ export function DestinationNavigation({
   navigate: Navigate;
   placement: 'sidebar' | 'bottom-dock';
   pendingApprovals: number;
+  pendingSkills?: number;
   locked: boolean;
   query?: string;
 }) {
@@ -200,7 +243,12 @@ export function DestinationNavigation({
   })).filter((group) => group.items.length > 0);
   const itemClass = `studio-nav-item ${sidebar ? 'is-row' : 'is-tab'}`;
   const destination = (item: Destination) => {
-    const waiting = item.page === 'approvals' ? pendingApprovals : 0;
+    const waiting =
+      item.page === 'approvals'
+        ? pendingApprovals
+        : item.page === 'skills'
+          ? pendingSkills
+          : 0;
     return (
       <button
         key={item.page}
@@ -255,31 +303,51 @@ export function DestinationNavigation({
 }
 
 export function SettingsSidebar({
+  agent,
+  agents,
+  onSelectAgent,
+  onCreateAgent,
   searchRef,
   query,
   onQueryChange,
-  ...navigation
+  page,
+  navigate,
+  pendingApprovals,
+  pendingSkills = 0,
+  locked,
 }: {
+  agent: AgentDetail;
+  agents: readonly AgentDetail[];
+  onSelectAgent?: (agentId: string) => void;
+  onCreateAgent?: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQueryChange: (query: string) => void;
   page: AvailablePage | null;
   navigate: Navigate;
   pendingApprovals: number;
+  pendingSkills?: number;
   locked: boolean;
 }) {
   return (
     <aside className="studio-sidebar settings-window-nav">
       <p className="settings-window-title">Settings</p>
+      <SettingsAgentPicker
+        agent={agent}
+        agents={agents}
+        onSelect={onSelectAgent}
+        onCreateAgent={onCreateAgent}
+        locked={locked}
+      />
       <label className="settings-search">
-        <SearchIcon size={13} />
+        <PenIcon name="magnifying-glass-fill" size={12} />
         <input
           ref={searchRef}
           type="search"
           aria-label="Search settings"
           placeholder="Search settings"
           value={query}
-          disabled={navigation.locked}
+          disabled={locked}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape' && query) {
@@ -292,7 +360,11 @@ export function SettingsSidebar({
         <kbd aria-hidden>{isMacPlatform() ? '⌘K' : 'Ctrl K'}</kbd>
       </label>
       <DestinationNavigation
-        {...navigation}
+        page={page}
+        navigate={navigate}
+        pendingApprovals={pendingApprovals}
+        pendingSkills={pendingSkills}
+        locked={locked}
         placement="sidebar"
         query={query}
       />

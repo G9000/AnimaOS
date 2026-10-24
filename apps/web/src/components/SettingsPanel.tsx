@@ -1,7 +1,6 @@
 import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ACCESS_PROFILES,
   BROWSER_TOOL_ACCESS,
   BACKGROUND_HELPER_TOOL_ACCESS,
   isBrowserTool,
@@ -20,7 +19,8 @@ import {
   type AgentUpdateInput,
   type DaemonProvider,
 } from '../lib/daemon-api';
-import { AlertIcon, ChipIcon, FolderIcon, TrashIcon } from './icons';
+import { AlertIcon } from './icons';
+import { PenIcon } from './PenIcon';
 import { ProfileVoice } from './ProfileVoice';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
@@ -31,11 +31,12 @@ import { FallbackModels } from './models/FallbackModels';
 import { DelegationSettings } from './models/DelegationSettings';
 import { ProviderKeys } from './models/ProviderKeys';
 import { SideModel } from './models/SideModel';
+import { OrbStyleDialog } from './OrbStyleDialog';
 import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
 
 /** The parts of the companion's own configuration. Each Settings page shows
  *  the ones it is about; one save covers whatever the page shows. */
-export type SettingsSection = 'profile' | 'model' | 'access';
+export type SettingsSection = 'profile' | 'model' | 'access' | 'builtins';
 const ALL_SECTIONS: readonly SettingsSection[] = ['profile', 'model', 'access'];
 
 const ACCESS_ORDER: readonly AccessProfile[] = [
@@ -43,6 +44,53 @@ const ACCESS_ORDER: readonly AccessProfile[] = [
   'collaborate',
   'operate',
 ];
+
+const ACCESS_PROFILE_COPY: Record<
+  AccessProfile,
+  { label: string; summary: string; kicker?: string }
+> = {
+  observe: {
+    label: 'Look only',
+    summary: 'Reads files and todos. Changes nothing.',
+  },
+  collaborate: {
+    label: 'Edit files',
+    summary: 'Reads and edits files. Never runs commands.',
+    kicker: 'RECOMMENDED',
+  },
+  operate: {
+    label: 'Run commands',
+    summary: 'Edits files, runs commands and uses any app on this computer.',
+    kicker: 'RULES STILL APPLY',
+  },
+};
+
+const OWNER_NAME_LINE = /^The owner's name is (.+)\.$/m;
+
+function ownerNameFromSystem(system: string | null | undefined): string {
+  return system?.match(OWNER_NAME_LINE)?.[1]?.trim() ?? '';
+}
+
+function systemWithOwnerName(
+  system: string | null | undefined,
+  ownerName: string,
+): string {
+  const existing = system ?? '';
+  const nextLine = `The owner's name is ${ownerName}.`;
+  if (ownerName) {
+    if (OWNER_NAME_LINE.test(existing)) {
+      return existing.replace(OWNER_NAME_LINE, nextLine);
+    }
+    return `${nextLine}\n\n${existing || 'You are a helpful task agent.'}`;
+  }
+
+  const withoutOwnerName = existing
+    .replace(/^The owner's name is .+\.(?:\r?\n){0,2}/m, '')
+    .trim();
+  return withoutOwnerName === 'You are a helpful task agent.'
+    ? ''
+    : withoutOwnerName;
+}
 
 function AbilityToggle({
   id,
@@ -77,6 +125,83 @@ function AbilityToggle({
   );
 }
 
+const BUILT_IN_TOOL_GROUPS = [
+  {
+    id: 'files-documents',
+    label: 'Files & documents',
+    help: 'Read and update workspace files, tasks and supported documents.',
+    tools: [
+      'read_file', 'list_dir', 'glob', 'grep', 'write_file', 'edit_file',
+      'multi_edit', 'todo_read', 'todo_write', 'read_document',
+    ],
+  },
+  {
+    id: 'apps-terminals',
+    label: 'Apps & terminals',
+    help: 'Run commands, background work, apps and coding agents.',
+    tools: [
+      'bash', 'bg_start', 'bg_output', 'bg_stop', 'bg_list', 'bg_wait',
+      'app_start', 'app_send', 'app_read', 'app_stop', 'app_list',
+      'acp_start', 'acp_prompt', 'acp_read', 'acp_cancel', 'acp_stop',
+      'acp_list', 'execute_code',
+    ],
+  },
+  {
+    id: 'research',
+    label: 'Research',
+    help: 'Search the web, your conversations and saved skills.',
+    tools: [
+      'web_search', 'web_fetch', 'search_conversations',
+      'read_conversation_window', 'load_skill', 'skill_history',
+    ],
+  },
+  {
+    id: 'browser',
+    label: 'Browser',
+    help: 'Navigate, inspect pages, interact and transfer files.',
+    tools: BROWSER_TOOL_ACCESS.map(({ name }) => name),
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    help: 'Find, save, update and manage remembered facts.',
+    tools: [
+      'memory_search', 'memory_add', 'recent_memories', 'memory_update',
+      'memory_remove', 'memory_consolidate',
+    ],
+  },
+  {
+    id: 'team-coordination',
+    label: 'Team coordination',
+    help: 'Plan work and coordinate background helpers.',
+    tools: [
+      'propose_plan', 'spawn_helper_async', 'spawn_helpers',
+      'wait_helper_runs', 'list_helper_runs', 'steer_helper', 'stop_helper',
+    ],
+  },
+  {
+    id: 'connected-work',
+    label: 'Connected work',
+    help: 'Use automations and saved workflows.',
+    tools: [
+      'list_automations', 'check_automation_status', 'create_automation',
+      'pause_automation', 'complete_reminder', 'snooze_reminder',
+      ...WORKFLOW_TOOL_ACCESS.tools, ...WORKFLOW_TEMPLATE_TOOL_ACCESS.tools,
+    ],
+  },
+  {
+    id: 'utilities',
+    label: 'Utilities',
+    help: 'Use time, calculations, clarifications and saved results.',
+    tools: [
+      'get_current_time', 'calculate', 'clarify', 'read_tool_result',
+      'propose_skill', 'remove_skill', 'undo_skill',
+    ],
+  },
+] as const;
+
+type BuiltInToolGroupId = (typeof BUILT_IN_TOOL_GROUPS)[number]['id'];
+
 /**
  * The companion's own settings, shown inside the Settings window. Saves
  * through PATCH /api/agents/:id: the conversation is kept and changes apply
@@ -91,10 +216,14 @@ export function SettingsPanel({
   resetError,
   saveSettings,
   resetAgent,
+  deleteAgent = () => undefined,
+  isMainAgent = agent.workspaceRole !== 'helper',
   refreshProviders,
   sections = ALL_SECTIONS,
+  agents = [agent],
 }: {
   agent: AgentDetail;
+  agents?: readonly AgentDetail[];
   providers: DaemonProvider[] | null;
   saving: boolean;
   resetting: boolean;
@@ -102,6 +231,8 @@ export function SettingsPanel({
   resetError: string | null;
   saveSettings: (patch: AgentUpdateInput) => Promise<boolean>;
   resetAgent: () => void;
+  deleteAgent?: () => void;
+  isMainAgent?: boolean;
   refreshProviders?: () => void | Promise<void>;
   sections?: readonly SettingsSection[];
 }) {
@@ -149,6 +280,15 @@ export function SettingsPanel({
   );
 
   const [name, setName] = useState(agent.name);
+  const [bio, setBio] = useState(agent.bio ?? '');
+  const [showInMainChat, setShowInMainChat] = useState(
+    agent.showInMainChat ?? true,
+  );
+  const [ownerName, setOwnerName] = useState(() =>
+    ownerNameFromSystem(agent.system),
+  );
+  const [ownerNameEditing, setOwnerNameEditing] = useState(false);
+  const [personalityEditing, setPersonalityEditing] = useState(false);
   const [provider, setProvider] = useState(agent.provider);
   const [model, setModel] = useState(seedModel);
   const [customModel, setCustomModel] = useState(
@@ -183,14 +323,25 @@ export function SettingsPanel({
   const [templatesChanged, setTemplatesChanged] = useState(false);
   const [allowToolResultRead, setAllowToolResultRead] =
     useState(hasToolResultRead);
+  const [toolGroupSelections, setToolGroupSelections] = useState<
+    Partial<Record<BuiltInToolGroupId, boolean>>
+  >({});
   const [toolChainStatus, setToolChainStatus] = useState('loading');
   const [savedFlash, setSavedFlash] = useState(false);
+  const [orbStyleOpen, setOrbStyleOpen] = useState(false);
+  const [confirmDangerous, setConfirmDangerous] = useState(false);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
   const controlsDisabled = saving || resetting;
+  const mainAgent =
+    agents.find((candidate) => candidate.workspaceRole !== 'helper') ?? agent;
+  const helperMatchesMainModel =
+    !isMainAgent &&
+    agent.provider === mainAgent.provider &&
+    agent.model === mainAgent.model;
   const shows = (section: SettingsSection) => sections.includes(section);
   useEffect(() => {
-    if (!sections.includes('access')) return;
+    if (!sections.includes('access') && !sections.includes('builtins')) return;
     let active = true;
     daemon
       .capabilities()
@@ -214,6 +365,9 @@ export function SettingsPanel({
     [
       agent.id,
       agent.name,
+      agent.bio,
+      agent.showInMainChat,
+      agent.system,
       agent.provider,
       agent.model,
       agentToolsKey,
@@ -237,6 +391,10 @@ export function SettingsPanel({
           ? agent.model
           : '__custom__';
       setName(agent.name);
+      setBio(agent.bio ?? '');
+      setShowInMainChat(agent.showInMainChat ?? true);
+      setOwnerName(ownerNameFromSystem(agent.system));
+      setOwnerNameEditing(false);
       setProvider(agent.provider);
       setModel(seeded);
       setCustomModel(seeded === '__custom__' ? agent.model : '');
@@ -257,6 +415,7 @@ export function SettingsPanel({
       setAllowWorkflowTemplates(hasWorkflowTemplates);
       setTemplatesChanged(false);
       setAllowToolResultRead(hasToolResultRead);
+      setToolGroupSelections({});
     },
   );
 
@@ -279,6 +438,13 @@ export function SettingsPanel({
     accessSelection !== derivedAccess;
   const toolsDirty =
     accessDirty ||
+    BUILT_IN_TOOL_GROUPS.some((group) => {
+      const selected = toolGroupSelections[group.id];
+      if (selected === undefined) return false;
+      return selected
+        ? group.tools.some((tool) => !agent.toolNames.includes(tool))
+        : group.tools.some((tool) => agent.toolNames.includes(tool));
+    }) ||
     (workflowsChanged &&
       WORKFLOW_TOOL_ACCESS.tools.some(
         (tool) => agent.toolNames.includes(tool) !== allowWorkflows,
@@ -305,6 +471,9 @@ export function SettingsPanel({
     allowToolChains !== hasToolChains;
   const dirty =
     name.trim() !== agent.name ||
+    (!isMainAgent && bio.trim() !== (agent.bio ?? '')) ||
+    (!isMainAgent && showInMainChat !== (agent.showInMainChat ?? true)) ||
+    (isMainAgent && ownerName.trim() !== ownerNameFromSystem(agent.system)) ||
     provider !== agent.provider ||
     resolvedModel !== agent.model ||
     toolsDirty;
@@ -312,14 +481,33 @@ export function SettingsPanel({
   const save = async () => {
     const patch: AgentUpdateInput = {};
     if (name.trim() && name.trim() !== agent.name) patch.name = name.trim();
+    if (!isMainAgent && bio.trim() !== (agent.bio ?? ''))
+      patch.bio = bio.trim();
+    if (!isMainAgent && showInMainChat !== (agent.showInMainChat ?? true))
+      patch.showInMainChat = showInMainChat;
+    if (
+      isMainAgent &&
+      ownerName.trim() !== ownerNameFromSystem(agent.system)
+    ) {
+      patch.system = systemWithOwnerName(agent.system, ownerName.trim());
+    }
     if (provider !== agent.provider) patch.provider = provider;
     if (resolvedModel && resolvedModel !== agent.model)
       patch.model = resolvedModel;
     if (toolsDirty) {
-      const selectedTools =
+      let selectedTools =
         accessDirty && accessSelection
           ? toolNamesForProfile(accessSelection)
-          : agent.toolNames;
+          : [...agent.toolNames];
+      for (const group of BUILT_IN_TOOL_GROUPS) {
+        const enabled = toolGroupSelections[group.id];
+        if (enabled === undefined) continue;
+        selectedTools = enabled
+          ? [...new Set([...selectedTools, ...group.tools])]
+          : selectedTools.filter(
+              (tool) => !group.tools.some((name) => name === tool),
+            );
+      }
       patch.tools = selectedTools.filter(
         (tool) =>
           (tool !== 'memory_remove' || allowMemoryRemove) &&
@@ -514,12 +702,107 @@ export function SettingsPanel({
     },
   ];
 
+  const setBuiltInToolGroup = (
+    id: BuiltInToolGroupId,
+    enabled: boolean,
+  ) => {
+    setToolGroupSelections((current) => ({ ...current, [id]: enabled }));
+    switch (id) {
+      case 'files-documents':
+        setAllowDocumentRead(enabled);
+        break;
+      case 'apps-terminals':
+        setAllowToolChains(enabled && toolChainStatus !== 'unsupported');
+        break;
+      case 'research':
+        setAllowWebSearch(enabled);
+        setAllowWebFetch(enabled);
+        setAllowConversationRead(enabled);
+        break;
+      case 'browser':
+        setBrowserGrants(enabled ? BROWSER_TOOL_ACCESS.map(({ name }) => name) : []);
+        break;
+      case 'memory':
+        setAllowMemoryRemove(enabled);
+        setAllowMemoryConsolidate(enabled);
+        break;
+      case 'team-coordination':
+        setAllowBackgroundHelpers(enabled);
+        setBackgroundHelpersChanged(true);
+        break;
+      case 'connected-work':
+        setAllowWorkflows(enabled);
+        setWorkflowsChanged(true);
+        setAllowWorkflowTemplates(enabled);
+        setTemplatesChanged(true);
+        break;
+      case 'utilities':
+        setAllowToolResultRead(enabled);
+        break;
+    }
+  };
+
+  const isBuiltInToolEnabled = (tool: string) => {
+    if (isBrowserTool(tool)) return browserGrants.includes(tool);
+    if (tool === 'memory_remove') return allowMemoryRemove;
+    if (tool === 'memory_consolidate') return allowMemoryConsolidate;
+    if (tool === 'read_conversation_window') return allowConversationRead;
+    if (tool === 'read_document') return allowDocumentRead;
+    if (tool === 'web_search') return allowWebSearch;
+    if (tool === 'web_fetch') return allowWebFetch;
+    if (tool === 'execute_code') return allowToolChains;
+    if (WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool))
+      return workflowsChanged ? allowWorkflows : agent.toolNames.includes(tool);
+    if (BACKGROUND_HELPER_TOOL_ACCESS.tools.some((name) => name === tool))
+      return backgroundHelpersChanged
+        ? allowBackgroundHelpers
+        : agent.toolNames.includes(tool);
+    if (WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some((name) => name === tool))
+      return templatesChanged
+        ? allowWorkflowTemplates
+        : agent.toolNames.includes(tool);
+    if (tool === TOOL_RESULT_ACCESS.name) return allowToolResultRead;
+    const selectedGroup = BUILT_IN_TOOL_GROUPS.find((group) =>
+      group.tools.some((name) => name === tool),
+    );
+    const groupSelection = selectedGroup
+      ? toolGroupSelections[selectedGroup.id]
+      : undefined;
+    if (groupSelection !== undefined) return groupSelection;
+    return agent.toolNames.includes(tool);
+  };
+
+  const builtInToolGroups = BUILT_IN_TOOL_GROUPS.map((group) => {
+    const enabledCount = group.tools.filter(isBuiltInToolEnabled).length;
+    return {
+      ...group,
+      enabledCount,
+      enabled: enabledCount === group.tools.length,
+      mixed: enabledCount > 0 && enabledCount < group.tools.length,
+    };
+  });
+
   return (
     <div
       className={`settings-form${shows('profile') ? ' settings-profile' : ''}`}
       aria-busy={controlsDisabled}
     >
       {shows('profile') && (
+        personalityEditing ? (
+          <div className="settings-profile-editor-view">
+            <PersonalityEditor
+              key={agent.id + '-soul'}
+              agentId={agent.id}
+              disabled={controlsDisabled}
+              initialScreen="editor"
+              onBackToProfile={() => setPersonalityEditing(false)}
+            />
+            <details className="settings-advanced settings-profile-files">
+              <summary>Instruction files</summary>
+              <AgentFilesPanel agentId={agent.id} />
+            </details>
+          </div>
+        ) : (
         <>
           <section
             className="settings-group"
@@ -533,53 +816,147 @@ export function SettingsPanel({
                 key={agent.id}
                 agent={agent}
                 disabled={controlsDisabled}
+                editing={ownerNameEditing}
               >
-                <div className="profile-name-row">
-                  <div>
-                    <label className={labelCls} htmlFor="settings-name">
-                      Name
-                    </label>
-                    <input
-                      id="settings-name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      disabled={controlsDisabled}
-                      className="field"
-                    />
-                  </div>
+                <div className="profile-identity-row">
+                  {ownerNameEditing ? (
+                    <div className="profile-identity-edit-fields">
+                      <div>
+                        <label className={labelCls} htmlFor="settings-name">
+                          Name
+                        </label>
+                        <input
+                          id="settings-name"
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          disabled={controlsDisabled}
+                          className="field"
+                        />
+                      </div>
+                      {isMainAgent ? (
+                        <div>
+                          <label
+                            className={labelCls}
+                            htmlFor="settings-owner-name"
+                          >
+                            Calls you
+                          </label>
+                          <input
+                            id="settings-owner-name"
+                            value={ownerName}
+                            maxLength={80}
+                            autoComplete="given-name"
+                            onChange={(event) =>
+                              setOwnerName(event.target.value)
+                            }
+                            disabled={controlsDisabled}
+                            className="field"
+                          />
+                        </div>
+                      ) : (
+                        <div>
+                          <label
+                            className={labelCls}
+                            htmlFor="settings-agent-purpose"
+                          >
+                            Purpose
+                          </label>
+                          <textarea
+                            id="settings-agent-purpose"
+                            className="field"
+                            rows={2}
+                            maxLength={500}
+                            value={bio}
+                            placeholder="What this agent is for"
+                            onChange={(event) => setBio(event.target.value)}
+                            disabled={controlsDisabled}
+                          />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="profile-orb-style-action"
+                        onClick={() => setOrbStyleOpen(true)}
+                        disabled={controlsDisabled}
+                      >
+                        Orb style
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="profile-identity-summary">
+                      <strong>{name || agent.name}</strong>
+                      <small>
+                        {isMainAgent
+                          ? 'Calls you ' + (ownerName || 'Not set')
+                          : bio || 'Helper agent'}
+                      </small>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="settings-item-action"
+                    aria-expanded={ownerNameEditing}
+                    disabled={controlsDisabled}
+                    onClick={() =>
+                      setOwnerNameEditing((editing) => !editing)
+                    }
+                  >
+                    {ownerNameEditing
+                      ? 'Done'
+                      : isMainAgent
+                        ? 'Change'
+                        : 'Rename'}
+                  </button>
                 </div>
               </AgentProfileDetails>
+              <PersonalityEditor
+                key={agent.id}
+                agentId={agent.id}
+                disabled={controlsDisabled}
+                compactProfile
+              />
             </div>
           </section>
-          <PersonalityEditor
-            key={agent.id}
-            agentId={agent.id}
-            disabled={controlsDisabled}
-          />
           {!shows('model') && (
             <section
               className="settings-group"
               aria-labelledby="profile-model-title"
             >
               <h3 id="profile-model-title" className="settings-group-title">
-                Model and voice
+                {isMainAgent ? 'Model and voice' : 'Model and access'}
               </h3>
               <div className="settings-list">
                 <div className="settings-item">
-                  <span className="settings-item-icon" aria-hidden="true">
-                    <ChipIcon size={16} />
+                  <span
+                    className="settings-item-icon profile-model-icon"
+                    aria-hidden="true"
+                  >
+                    <PenIcon name="cpu-fill" size={16} />
                   </span>
                   <div className="settings-item-text">
-                    <strong>{agent.model || 'No model chosen'}</strong>
+                    <strong>
+                      {helperMatchesMainModel
+                        ? `Same as ${mainAgent.name}`
+                        : agent.model || 'No model chosen'}
+                    </strong>
                     <small>
-                      {agent.provider === 'chatgpt'
-                        ? 'ChatGPT subscription'
-                        : (providers?.find((item) => item.id === agent.provider)
-                            ?.label ?? agent.provider)}
+                      {!isMainAgent && (
+                        <>
+                          {agent.model || 'No model chosen'}
+                          {' · '}
+                        </>
+                      )}
+                      {helperMatchesMainModel
+                        ? `matches ${mainAgent.name}'s current model`
+                        : agent.provider === 'chatgpt'
+                          ? 'ChatGPT plan'
+                          : (providers?.find(
+                              (item) => item.id === agent.provider,
+                            )?.label ?? agent.provider)}
                     </small>
                   </div>
                   <a
-                    className="settings-item-action"
+                    className="settings-item-action profile-model-action"
                     href="#/model"
                     aria-disabled={controlsDisabled || dirty || undefined}
                     title={
@@ -591,12 +968,101 @@ export function SettingsPanel({
                       if (controlsDisabled || dirty) event.preventDefault();
                     }}
                   >
+                    <PenIcon name="caret-down-fill" size={10} />
                     Change
                   </a>
                 </div>
-                <ProfileVoice agentName={agent.name} />
+                <ProfileVoice
+                  agentName={agent.name}
+                  inheritedFrom={!isMainAgent ? mainAgent.name : undefined}
+                />
               </div>
             </section>
+          )}
+          {!isMainAgent && (
+            <>
+              <section
+                className="settings-group settings-helper-capabilities"
+                aria-labelledby="settings-helper-capabilities-title"
+              >
+                <h3
+                  id="settings-helper-capabilities-title"
+                  className="settings-group-title"
+                >
+                  What it can do
+                </h3>
+                <p className="settings-group-help">
+                  Choose the helper’s default access. Its permission rules still
+                  apply.
+                </p>
+                <fieldset
+                  disabled={controlsDisabled}
+                  className="settings-fieldset"
+                >
+                  <div className="settings-access-options">
+                    {ACCESS_ORDER.map((profileName) => {
+                      const profile = ACCESS_PROFILE_COPY[profileName];
+                      const inputId = `settings-helper-access-${profileName}`;
+                      return (
+                        <div
+                          key={profileName}
+                          className={`settings-access-option${accessSelection === profileName ? ' is-selected' : ''}`}
+                        >
+                          <input
+                            id={inputId}
+                            type="radio"
+                            name="settings-helper-access"
+                            value={profileName}
+                            checked={accessSelection === profileName}
+                            onChange={() => {
+                              setAccessSelection(profileName);
+                              setAccessChanged(true);
+                              setAllowMemoryRemove(false);
+                              setAllowMemoryConsolidate(false);
+                              setAllowConversationRead(false);
+                              setAllowDocumentRead(false);
+                              setAllowWebSearch(false);
+                              setAllowWebFetch(false);
+                              setAllowToolChains(false);
+                              setBrowserGrants([]);
+                            }}
+                          />
+                          <label htmlFor={inputId}>
+                            <span className="settings-access-name">
+                              {profile.label}
+                            </span>
+                            <span className="settings-access-summary">
+                              {profile.summary}
+                            </span>
+                            {profile.kicker && (
+                              <span className="settings-access-kicker">
+                                {profile.kicker}
+                              </span>
+                            )}
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              </section>
+              <label className="settings-item settings-helper-main-chat">
+                <span className="settings-item-text">
+                  <strong>Shows up in the main chat</strong>
+                  <small>
+                    Posts results to your main chat as well as its own
+                  </small>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="Shows up in the main chat"
+                  checked={showInMainChat}
+                  disabled={controlsDisabled}
+                  onChange={(event) => setShowInMainChat(event.target.checked)}
+                />
+              </label>
+            </>
           )}
           <section
             className="settings-group"
@@ -606,44 +1072,90 @@ export function SettingsPanel({
               Advanced
             </h3>
             <div className="settings-list">
-              <details className="settings-item settings-advanced">
-                <summary>
-                  <span className="settings-item-icon" aria-hidden="true">
-                    <FolderIcon size={16} />
-                  </span>
-                  <span className="settings-item-text">
-                    <strong>Instruction files</strong>
-                    <small>
-                      The files {agent.name} reads along with its prompt.
-                    </small>
-                  </span>
-                </summary>
-                <AgentFilesPanel agentId={agent.id} />
-              </details>
+              <button
+                type="button"
+                className="settings-item profile-soul-open"
+                onClick={() => setPersonalityEditing(true)}
+              >
+                <span className="settings-item-icon" aria-hidden="true">
+                  <PenIcon name="file-text-fill" size={16} />
+                </span>
+                <span className="settings-item-text">
+                  <strong>SOUL.md</strong>
+                  <small>
+                    The personality file {agent.name} reads before every reply
+                  </small>
+                </span>
+                <span className="settings-item-action">Edit</span>
+              </button>
               <section
                 className="settings-item settings-danger"
                 aria-labelledby="settings-reset"
               >
-                <span className="settings-item-icon" aria-hidden="true">
-                  <TrashIcon size={16} />
+                <span
+                  className="settings-item-icon profile-reset-icon"
+                  aria-hidden="true"
+                >
+                  <PenIcon name="arrow-counter-clockwise-fill" size={16} />
                 </span>
                 <div className="settings-item-text">
-                  <h3 id="settings-reset">Reset {agent.name}</h3>
-                  <p>Deletes the companion and every conversation with it.</p>
+                  <h3 id="settings-reset">
+                    {isMainAgent ? `Reset ${agent.name}` : `Delete ${agent.name}`}
+                  </h3>
+                  <p>
+                    {isMainAgent
+                      ? 'Clears personality and memory. Files stay.'
+                      : `Removes ${agent.name}, its chats and memories. Other agents stay.`}
+                  </p>
                 </div>
                 <button
-                  onClick={resetAgent}
+                  type="button"
+                  onClick={() => setConfirmDangerous(true)}
                   aria-describedby={
                     resetError ? 'settings-reset-error' : undefined
                   }
                   disabled={resetting || saving}
                 >
-                  {resetting ? 'Resetting…' : 'Reset'}
+                  {resetting ? 'Working…' : isMainAgent ? 'Reset…' : 'Delete…'}
                 </button>
               </section>
+              {confirmDangerous && (
+                <div
+                  className="settings-danger-confirm"
+                  role="alertdialog"
+                  aria-labelledby="settings-danger-confirm-title"
+                  aria-describedby="settings-danger-confirm-copy"
+                >
+                  <div>
+                    <strong id="settings-danger-confirm-title">
+                      {isMainAgent ? `Reset ${agent.name}?` : `Delete ${agent.name}?`}
+                    </strong>
+                    <p id="settings-danger-confirm-copy">
+                      {isMainAgent
+                        ? 'This clears its personality and agent memory, then restores the Balanced personality. Its files and chats stay.'
+                        : 'This permanently removes the agent and its conversations. This cannot be undone.'}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setConfirmDangerous(false)} disabled={resetting}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={resetting || saving}
+                    onClick={() => {
+                      setConfirmDangerous(false);
+                      if (isMainAgent) resetAgent();
+                      else deleteAgent();
+                    }}
+                  >
+                    {isMainAgent ? 'Reset' : 'Delete agent'}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
         </>
+        )
       )}
 
       {shows('model') && (
@@ -652,12 +1164,13 @@ export function SettingsPanel({
             Main model
           </h3>
           <p className="settings-group-help">
-            The model {agent.name} thinks with. Switching keeps every
-            conversation.
+            Used for every reply unless a task asks for something stronger.
           </p>
           <div className="settings-model-block">
             <div className="settings-model-summary" data-testid="main-model">
-              <span className="settings-model-mark" aria-hidden="true" />
+              <span className="settings-model-mark" aria-hidden="true">
+                <PenIcon name="cpu-fill" size={16} />
+              </span>
               <div className="settings-model-text">
                 <strong>
                   {(model === '__custom__' ? customModel : model).trim() ||
@@ -666,7 +1179,7 @@ export function SettingsPanel({
                 </strong>
                 <span>
                   {provider === 'chatgpt'
-                    ? 'ChatGPT subscription'
+                    ? 'ChatGPT plan'
                     : (providers?.find((p) => p.id === provider)?.label ??
                       provider)}
                   {providers
@@ -678,7 +1191,10 @@ export function SettingsPanel({
               </div>
             </div>
             <details className="settings-model-more">
-              <summary>Change model</summary>
+              <summary>
+                <PenIcon name="caret-down-fill" size={12} />
+                Change
+              </summary>
               <div className="settings-model-change">
                 <label className={labelCls} htmlFor="settings-provider">
                   Provider
@@ -712,7 +1228,7 @@ export function SettingsPanel({
                     .map((id) => (
                       <option key={id} value={id}>
                         {id === 'chatgpt'
-                          ? 'ChatGPT subscription'
+                          ? 'ChatGPT plan'
                           : (providers?.find((p) => p.id === id)?.label ?? id)}
                       </option>
                     ))}
@@ -789,6 +1305,7 @@ export function SettingsPanel({
             primary={{ provider: agent.provider, model: agent.model }}
             fallbacks={agent.fallbacks ?? []}
             providers={providers}
+            agentName={agent.name}
             disabled={controlsDisabled}
             save={(fallbacks) => saveSettings({ fallbacks })}
           />
@@ -814,16 +1331,23 @@ export function SettingsPanel({
         </>
       )}
 
-      {shows('access') && (
+      {(shows('access') || shows('builtins')) && (
         <section className="settings-group" aria-labelledby="settings-access">
           <h3 id="settings-access" className="settings-group-title">
-            What {agent.name} can do
+            {shows('builtins') ? 'Built-in' : 'Default access'}
           </h3>
-          <p className="settings-group-help">
-            Pick how far {agent.name} may act on its own. Rules below decide
-            when it still asks you first.
-          </p>
-          {agent.toolNames.some((name) =>
+          {shows('access') && (
+            <p className="settings-group-help">
+              Applies to {agent.name} and every helper it brings in.
+            </p>
+          )}
+          {shows('builtins') && (
+            <p className="settings-group-help">
+              Turn built-in tools on or off for this agent. Permission rules
+              still decide when an action asks first.
+            </p>
+          )}
+          {shows('builtins') && agent.toolNames.some((name) =>
             /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
           ) && (
             <p className="settings-group-help">
@@ -832,7 +1356,7 @@ export function SettingsPanel({
               saved connections and reviews are kept.
             </p>
           )}
-          {derivedAccess === 'custom' ? (
+          {shows('access') && derivedAccess === 'custom' ? (
             <div className="settings-custom-access">
               <p className="font-semibold text-ink">Custom access</p>
               <p>
@@ -848,10 +1372,12 @@ export function SettingsPanel({
             </div>
           ) : null}
           <fieldset disabled={controlsDisabled} className="settings-fieldset">
-            <legend className={labelCls}>Access profile</legend>
-            <div className="settings-access-options">
+            {shows('access') && (
+              <>
+                <legend className={labelCls}>Access profile</legend>
+                <div className="settings-access-options">
               {ACCESS_ORDER.map((profileName) => {
-                const profile = ACCESS_PROFILES[profileName];
+                const profile = ACCESS_PROFILE_COPY[profileName];
                 const inputId = `settings-access-${profileName}`;
                 return (
                   <div
@@ -884,73 +1410,108 @@ export function SettingsPanel({
                       <span className="settings-access-summary">
                         {profile.summary}
                       </span>
-                      <span className="settings-access-risk">
-                        {profile.risk}
-                      </span>
                     </label>
+                    {profile.kicker && (
+                      <span
+                        className={`settings-access-kicker${profileName === 'collaborate' ? ' is-recommended' : ''}`}
+                      >
+                        {profile.kicker}
+                      </span>
+                    )}
                   </div>
                 );
               })}
-            </div>
-            {accessSelection === 'operate' && (
+                </div>
+              </>
+            )}
+            {shows('access') && accessSelection === 'operate' && (
               <p className="settings-access-note">
-                <span aria-hidden="true">↳</span>
                 <span>
-                  Operate lets {agent.name} run commands and apps. Autonomy
-                  decides when it asks first.
+                  Helpers get the same access as {agent.name}. Commands run in
+                  a Docker sandbox.
                 </span>
-                <button
-                  type="button"
+                <a
                   className="settings-access-note-link"
-                  onClick={() =>
-                    document
-                      .getElementById('approvals-autonomy')
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                  }
+                  href="#/runtime"
                 >
-                  Change in Autonomy
-                </button>
+                  Change in Runtime
+                </a>
               </p>
             )}
-            <SectionTitle>Extra abilities</SectionTitle>
-            <div className="settings-abilities">
-              {abilities.map(
-                ({ id, label, checked, setChecked, help, disabled }) => (
-                  <AbilityToggle
-                    key={id}
-                    id={id}
-                    label={label}
-                    help={help}
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={setChecked}
-                  />
-                ),
-              )}
-            </div>
-            <SectionTitle>Browser</SectionTitle>
-            <div className="settings-ability is-list">
-              <p>
-                Each chat task also needs an installed browser policy. Existing
-                action approval rules still apply.
-              </p>
-              {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
-                <label key={name}>
-                  <input
-                    type="checkbox"
-                    checked={browserGrants.includes(name)}
-                    onChange={(event) =>
-                      setBrowserGrants((current) =>
-                        event.target.checked
-                          ? [...current.filter((tool) => tool !== name), name]
-                          : current.filter((tool) => tool !== name),
-                      )
-                    }
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
+            {shows('builtins') && (
+              <div className="settings-tool-groups">
+                {builtInToolGroups.map((group) => (
+                  <label
+                    key={group.id}
+                    className="settings-tool-group"
+                    data-mixed={group.mixed || undefined}
+                  >
+                    <span className="settings-tool-group-copy">
+                      <strong>{group.label}</strong>
+                      <small>
+                        {group.enabledCount} of {group.tools.length} tools on
+                      </small>
+                      <span>{group.help}</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-label={group.label}
+                      aria-checked={group.mixed ? 'mixed' : group.enabled}
+                      checked={group.enabled}
+                      disabled={controlsDisabled}
+                      onChange={(event) =>
+                        setBuiltInToolGroup(group.id, event.target.checked)
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {shows('builtins') && (
+              <details className="settings-tools-advanced">
+                <summary>Specific permissions</summary>
+                <SectionTitle>Individual capabilities</SectionTitle>
+                <div className="settings-abilities">
+                  {abilities.map(
+                    ({ id, label, checked, setChecked, help, disabled }) => (
+                      <AbilityToggle
+                        key={id}
+                        id={id}
+                        label={label}
+                        help={help}
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={setChecked}
+                      />
+                    ),
+                  )}
+                </div>
+                <SectionTitle>Browser tools</SectionTitle>
+                <div className="settings-ability is-list">
+                  <p>
+                    Each chat task also needs an installed browser policy. Existing
+                    action approval rules still apply.
+                  </p>
+                  {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
+                    <label key={name}>
+                      <input
+                        type="checkbox"
+                        checked={browserGrants.includes(name)}
+                        onChange={(event) =>
+                          setBrowserGrants((current) =>
+                            event.target.checked
+                              ? [...current.filter((tool) => tool !== name), name]
+                              : current.filter((tool) => tool !== name),
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </details>
+            )}
           </fieldset>
         </section>
       )}
@@ -1007,6 +1568,13 @@ export function SettingsPanel({
                 : 'No changes'}
         </button>
       </div>
+      {orbStyleOpen && (
+        <OrbStyleDialog
+          agent={agent}
+          agents={agents}
+          onClose={() => setOrbStyleOpen(false)}
+        />
+      )}
     </div>
   );
 }

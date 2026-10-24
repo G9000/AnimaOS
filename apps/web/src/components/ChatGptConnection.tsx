@@ -1,8 +1,9 @@
+import { ownerFetch } from '../lib/owner-fetch';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createDaemonClient, type ChatGptStatus } from '@animaos/sdk';
 import { useLatest } from '../hooks/useLatest';
 
-const client = createDaemonClient({ baseUrl: '' }).chatgpt;
+const client = createDaemonClient({ baseUrl: '', fetch: ownerFetch }).chatgpt;
 const verificationUrl = 'https://auth.openai.com/codex/device';
 const buttonClass =
   'rounded-xl border border-line px-3 py-2 text-sm text-ink disabled:opacity-50';

@@ -127,6 +127,11 @@ pub fn tool_not_configured_error(tool_name: &str) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentConfigUpdate {
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    /// Whether successful helper results are copied into the owner's main chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_in_main_chat: Option<bool>,
     pub model: Option<String>,
     pub provider: Option<String>,
     pub system: Option<String>,

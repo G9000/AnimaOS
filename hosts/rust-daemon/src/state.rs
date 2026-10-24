@@ -1712,6 +1712,8 @@ pub(crate) struct DaemonState {
     pub(crate) schedule_fires: crate::schedules::FireLog,
     /// The owner's price overrides (spec §11.1); saved in the control plane.
     pub(crate) pricing_overrides: Vec<crate::usage::PricingOverride>,
+    /// Optional monthly spend cap; new model runs pause at 90% of this amount.
+    pub(crate) monthly_spend_limit_micros: Option<u64>,
     /// The owner's time zone as their web console last reported it; saved in
     /// the control plane so Telegram and scheduled runs use it too.
     pub(crate) owner_time_zone: crate::clock::OwnerTimeZone,
@@ -2467,6 +2469,7 @@ impl DaemonState {
             skills: crate::skills::SkillRegistry::default(),
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
+            monthly_spend_limit_micros: None,
             owner_time_zone: crate::clock::OwnerTimeZone::default(),
             #[cfg(test)]
             test_evaluators: Vec::new(),
@@ -2792,6 +2795,7 @@ impl DaemonState {
         snapshot.clarifications = self.clarifications.snapshot();
         snapshot.automation_events = self.automation_events.snapshot();
         snapshot.pricing_overrides = self.pricing_overrides.clone();
+        snapshot.monthly_spend_limit_micros = self.monthly_spend_limit_micros;
         snapshot.owner_time_zone = self
             .owner_time_zone
             .get()
@@ -3130,6 +3134,7 @@ impl DaemonState {
                 .ok()
         });
         self.owner_time_zone.set(owner_zone);
+        self.monthly_spend_limit_micros = snapshot.monthly_spend_limit_micros;
         self.side_model = snapshot.side_model.clone();
 
         if relabelled_messages > 0 || relabelled_runs > 0 || mapped_runs > 0 {

@@ -461,6 +461,19 @@ impl AgentRuntime {
             self.state.name = name.clone();
             config.name = name;
         }
+        if let Some(bio) = patch.bio {
+            config.bio = (!bio.is_empty()).then_some(bio);
+        }
+        if let Some(show_in_main_chat) = patch.show_in_main_chat {
+            config
+                .settings
+                .get_or_insert_with(Default::default)
+                .additional
+                .insert(
+                    "showInMainChat".into(),
+                    crate::primitives::DataValue::Bool(show_in_main_chat),
+                );
+        }
         if let Some(model) = patch.model {
             config.model = model;
         }

@@ -1,6 +1,271 @@
 .personality-editor {
   min-width: 0;
 }
+.personality-profile {
+  gap: 0;
+}
+.personality-profile .personality-heading {
+  margin-bottom: 6px;
+}
+.personality-preset-group {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 3px;
+  margin: 14px 0 16px;
+  padding: 3px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+}
+.personality-preset-group label {
+  cursor: pointer;
+}
+.personality-preset-group input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.personality-preset-group label span {
+  display: block;
+  padding: 6px 13px;
+  border-radius: 6px;
+  color: var(--color-ink-3);
+  font-size: 12px;
+}
+.personality-preset-group label.is-selected span {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-ink);
+}
+.personality-preset-group input:focus-visible + span {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.personality-profile-actions {
+  display: grid;
+  gap: 10px;
+}
+.personality-soul-link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-line);
+  color: var(--color-ink);
+  text-align: left;
+}
+.personality-soul-link span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.personality-soul-link small {
+  color: var(--color-ink-3);
+  font-size: 11px;
+}
+.personality-soul-link > span:last-child {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+.personality-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-ink-3);
+  font-size: 12px;
+}
+.personality-back:hover {
+  color: var(--color-ink);
+}
+.personality-detail-editor {
+  width: 100%;
+}
+.personality-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.82fr);
+  align-items: start;
+  gap: 20px;
+}
+.personality-editor-main,
+.personality-editor-aside {
+  min-width: 0;
+}
+.personality-editor-aside {
+  display: grid;
+  gap: 18px;
+  padding-top: 2px;
+}
+.personality-file-bar {
+  align-items: center;
+}
+.personality-markdown-editor {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  min-width: 0;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: var(--color-abyss, #0b0c0e);
+}
+.personality-markdown-editor pre,
+.personality-markdown-editor textarea {
+  box-sizing: border-box;
+  height: 420px;
+  min-height: 260px;
+  margin: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 14px 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.65;
+  tab-size: 2;
+  white-space: pre;
+}
+.personality-markdown-editor pre {
+  color: var(--color-ink-3);
+  text-align: right;
+  user-select: none;
+}
+.personality-markdown-editor textarea {
+  resize: vertical;
+}
+.personality-preview {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-ink-3);
+}
+.personality-preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.personality-preview-head h4,
+.personality-versions h4 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.personality-preview-head span {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.personality-rendered-preview {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  padding: 12px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.personality-rendered-preview h1,
+.personality-rendered-preview h2,
+.personality-rendered-preview h3 {
+  margin: 0.8em 0 0.35em;
+  color: var(--color-ink);
+  font-size: 1.05em;
+}
+.personality-rendered-preview p,
+.personality-rendered-preview ul,
+.personality-rendered-preview ol {
+  margin: 0.45em 0;
+}
+.personality-rendered-preview ul,
+.personality-rendered-preview ol {
+  padding-left: 1.4em;
+}
+.personality-try-it {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border-top: 1px solid var(--color-line);
+  padding-top: 13px;
+}
+.personality-try-it form {
+  display: grid;
+  gap: 8px;
+}
+.personality-try-it textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.personality-try-it form button {
+  justify-self: end;
+}
+.personality-try-result {
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  padding: 11px 12px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.personality-try-result strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--color-accent);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.personality-try-result p {
+  margin: 0;
+}
+.personality-try-result p + p {
+  margin-top: 7px;
+}
+.personality-try-result ul,
+.personality-try-result ol {
+  padding-left: 1.4em;
+}
+.personality-versions {
+  display: grid;
+  gap: 7px;
+}
+.personality-versions h4 {
+  margin-bottom: 2px;
+}
+.personality-versions button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--color-line);
+  padding: 9px 0;
+  text-align: left;
+}
+.personality-versions button > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+.personality-versions strong {
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+.personality-versions small,
+.personality-versions button > span:last-child {
+  color: var(--color-ink-3);
+  font-size: 10px;
+}
+.personality-versions button > span:last-child {
+  color: var(--color-accent);
+}
 .personality-heading {
   display: flex;
   align-items: center;
@@ -145,6 +410,13 @@
   margin-top: 12px;
 }
 @media (max-width: 640px) {
+  .personality-editor-layout {
+    grid-template-columns: 1fr;
+  }
+  .personality-markdown-editor pre,
+  .personality-markdown-editor textarea {
+    height: 320px;
+  }
   .personality-fields {
     grid-template-columns: 1fr;
   }

@@ -26,6 +26,8 @@ export interface AgentDetail {
   id: string;
   name: string;
   bio?: string | null;
+  /** Whether helper results are copied into the owner's main chat. */
+  showInMainChat?: boolean;
   provider: string;
   model: string;
   toolNames: string[];
