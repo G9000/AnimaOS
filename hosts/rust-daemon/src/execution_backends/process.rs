@@ -1,6 +1,6 @@
 //! Owned children run on a service runtime and are always retired before settlement.
 use anima_core::CancelSignal;
-use anima_process::{Containment, Custody};
+use anima_process::Custody;
 use process_wrap::tokio::CommandWrap;
 use std::{
     path::{Path, PathBuf},
@@ -106,6 +106,56 @@ pub(super) async fn run(
     call: &CancelSignal,
     require_strong: bool,
 ) -> Result<ProcessOutput, String> {
+    run_with_binding(
+        executable,
+        args,
+        cwd,
+        input,
+        timeout,
+        cancel,
+        call,
+        require_strong,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn run_bound(
+    executable: &Path,
+    args: Vec<String>,
+    cwd: Option<&Path>,
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+    cancel: Option<&CancelSignal>,
+    call: &CancelSignal,
+    require_strong: bool,
+    binding: &crate::tools::command_binding::CommandBinding,
+) -> Result<ProcessOutput, String> {
+    run_with_binding(
+        executable,
+        args,
+        cwd,
+        input,
+        timeout,
+        cancel,
+        call,
+        require_strong,
+        Some(binding),
+    )
+    .await
+}
+
+async fn run_with_binding(
+    executable: &Path,
+    args: Vec<String>,
+    cwd: Option<&Path>,
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+    cancel: Option<&CancelSignal>,
+    call: &CancelSignal,
+    require_strong: bool,
+    binding: Option<&crate::tools::command_binding::CommandBinding>,
+) -> Result<ProcessOutput, String> {
     if call.is_cancelled() || cancel.is_some_and(CancelSignal::is_cancelled) {
         return Ok(ProcessOutput {
             exit_code: None,
@@ -116,13 +166,10 @@ pub(super) async fn run(
         });
     }
     let (mut custody, mut native) = prepare_command(executable, args);
-    if require_strong
-        && !matches!(
-            custody.containment(),
-            Containment::JobObject | Containment::Cgroup
-        )
-    {
-        return Err("Execution worker requires Job Object or delegated cgroup v2 custody".into());
+    if require_strong {
+        custody
+            .require_strong()
+            .map_err(|error| error.to_string())?;
     }
     native
         .stdin(if input.is_some() {
@@ -138,6 +185,9 @@ pub(super) async fn run(
     clean_environment(&mut native);
     let mut wrapped = CommandWrap::from(native);
     custody.wrap(&mut wrapped);
+    if let Some(binding) = binding {
+        binding.revalidate()?;
+    }
     let mut child = match wrapped.spawn() {
         Ok(child) => child,
         Err(error) => {

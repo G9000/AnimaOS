@@ -45,6 +45,10 @@ type RequestBody = NonNullable<RequestInit['body']>;
 export interface DaemonClientOptions {
   /** Daemon origin or path prefix. Use an empty string for same-origin browser requests. */
   baseUrl?: string;
+  /** Local owner authorization for native clients. Never infer this from Origin. */
+  ownerToken?: string;
+  /** Optional global API key, kept separate from local owner authorization. */
+  apiKey?: string;
   fetch?: FetchLike;
 }
 
@@ -106,9 +110,13 @@ export class DaemonClient {
 
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
+  private readonly ownerToken: string | undefined;
+  private readonly apiKey: string | undefined;
 
   constructor(options: DaemonClientOptions = {}) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
+    this.ownerToken = options.ownerToken;
+    this.apiKey = options.apiKey;
     const fetchImpl = options.fetch ?? globalThis.fetch?.bind(globalThis);
 
     if (!fetchImpl) {
@@ -411,7 +419,17 @@ export class DaemonClient {
     init: RequestInit,
   ): Promise<Response> {
     try {
-      return await this.fetchImpl(this.url(path), init);
+      if (!this.ownerToken && !this.apiKey) {
+        return await this.fetchImpl(this.url(path), init);
+      }
+      const headers = new Headers(init.headers);
+      if (this.ownerToken && !headers.has('authorization')) {
+        headers.set('authorization', `Bearer ${this.ownerToken}`);
+      }
+      if (this.apiKey && !headers.has('x-api-key')) {
+        headers.set('x-api-key', this.apiKey);
+      }
+      return await this.fetchImpl(this.url(path), { ...init, headers });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw error;

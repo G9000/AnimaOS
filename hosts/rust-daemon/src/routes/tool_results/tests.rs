@@ -52,12 +52,14 @@ async fn owner_routes_retrieve_exact_payload_without_cross_agent_or_unauthorized
         .unwrap();
     assert_eq!(unauthenticated.status(), StatusCode::FORBIDDEN);
     let request = |uri: String| {
-        Request::builder()
-            .uri(uri)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .body(Body::empty())
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .uri(uri)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200"),
+        )
+        .body(Body::empty())
+        .unwrap()
     };
     let page = app
         .clone()

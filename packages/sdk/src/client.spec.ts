@@ -201,6 +201,34 @@ describe('m68_explicit_empty_bounded_downloads', () => {
 });
 
 describe('daemon binary responses', () => {
+  it('adds native owner and separate global API credentials to requests', async () => {
+    const fetch = vi.fn(async () => new Response('{}'));
+    const client = createDaemonClient({
+      ownerToken: 'local-owner-secret',
+      apiKey: 'global-api-secret',
+      fetch,
+    });
+
+    await client.requestJson('/api/agents');
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer local-owner-secret');
+    expect(headers.get('x-api-key')).toBe('global-api-secret');
+  });
+
+  it('does not add native credentials by default', async () => {
+    const fetch = vi.fn(async () => new Response('{}'));
+    const client = createDaemonClient({ fetch });
+
+    await client.requestJson('/api/agents');
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.has('authorization')).toBe(false);
+    expect(headers.has('x-api-key')).toBe(false);
+  });
+
   it('retains caller headers and request options without credentials in the URL', async () => {
     const fetch = vi.fn(
       async () =>

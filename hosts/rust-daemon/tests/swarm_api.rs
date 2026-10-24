@@ -413,7 +413,7 @@ async fn swarm_event_stream_emits_live_agent_activity_and_lifecycle_events() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())
@@ -494,7 +494,7 @@ async fn swarm_event_stream_emits_swarm_messaging_tool_results() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())
@@ -591,7 +591,7 @@ async fn swarm_event_stream_emits_tool_results() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())
@@ -671,7 +671,7 @@ async fn swarm_event_stream_emits_todo_tool_results() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())
@@ -760,7 +760,7 @@ async fn swarm_event_stream_emits_write_file_tool_results() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())
@@ -860,7 +860,7 @@ async fn second_run_running_event_clears_stale_token_usage() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("GET")
                 .uri(format!("/api/swarms/{swarm_id}/events"))
                 .body(Body::empty())

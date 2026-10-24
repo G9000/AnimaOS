@@ -1,4 +1,35 @@
 use super::{Containment, Custody};
+
+#[test]
+fn hardening_only_supported_custody_claims_complete_descendant_ownership() {
+    assert!(Containment::JobObject.is_strong());
+    assert!(!Containment::Cgroup.is_strong());
+    assert!(!Containment::ProcessGroup.is_strong());
+    assert!(!Containment::ProcessTree.is_strong());
+}
+
+#[cfg(windows)]
+#[test]
+fn hardening_contained_conpty_refuses_before_any_child_effect() {
+    use crate::session::{AppSession, AppSessionConfig};
+    let root = tempfile::tempdir().unwrap();
+    let marker = root.path().join("must-not-exist");
+    let config = AppSessionConfig::new(
+        "cmd.exe",
+        vec![
+            "/d".into(),
+            "/c".into(),
+            "echo escaped>must-not-exist".into(),
+        ],
+        root.path(),
+    );
+    let error = match AppSession::start_contained(config) {
+        Ok(_) => panic!("ConPTY cannot promise complete custody"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(!marker.exists());
+}
 use process_wrap::tokio::{ChildWrapper, CommandWrap};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 

@@ -58,14 +58,16 @@ async fn fp05_origin_runtime_http_review_binds_exact_displayed_output_pair() {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(&uri)
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("content-type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&uri)
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200"),
+                )
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -147,14 +149,16 @@ async fn job_supervision_http_requires_owner_revision_and_persists_decisions() {
     let app = router(state.clone(), DaemonConfig::default());
     let base = format!("/api/agents/{agent}/jobs");
     let request = |uri: &str, value: serde_json::Value| {
-        Request::builder()
-            .method("POST")
-            .uri(uri)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .header("content-type", "application/json")
-            .body(Body::from(value.to_string()))
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200"),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(value.to_string()))
+        .unwrap()
     };
     let response = app
         .clone()
@@ -263,14 +267,16 @@ async fn job_http_contract_persists_deduplicates_and_checks_revisions() {
     let app = router(Arc::new(RwLock::new(daemon)), DaemonConfig::default());
     let base = format!("/api/agents/{agent}/jobs");
     let request = |method: &str, uri: &str, body: serde_json::Value| {
-        Request::builder()
-            .method(method)
-            .uri(uri)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200"),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
     };
     let payload = serde_json::json!({"title":"Brief", "prompt":"Write brief", "requestKey":"one"});
     let response = app
@@ -373,9 +379,10 @@ async fn job_queue_requires_persistence_and_does_not_invoke_an_agent() {
     let agent = daemon.create_agent(test_config("job-owner")).unwrap();
     let state = Arc::new(RwLock::new(daemon));
     let app = router(state.clone(), DaemonConfig::default());
-    let response = app.oneshot(Request::builder().method("POST")
+    let response = app.oneshot(crate::routes::owner_test_support::authenticate(Request::builder().method("POST")
         .uri(format!("/api/agents/{}/jobs", agent.state.id))
         .header("host", "127.0.0.1:8080").header("origin", "http://localhost:4200")
+    )
         .header("content-type", "application/json")
         .body(Body::from(r#"{"title":"First brief","prompt":"Prepare a product brief","requestKey":"first-brief"}"#)).unwrap())
         .await.unwrap();

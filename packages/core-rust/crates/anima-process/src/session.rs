@@ -167,6 +167,28 @@ pub struct AppSession {
 
 impl AppSession {
     pub fn start(config: AppSessionConfig) -> std::io::Result<Self> {
+        Self::start_with_requirement(config, false)
+    }
+
+    /// Start only when detached descendants can also be retired by Stop.
+    /// ConPTY does not currently expose suspended Job assignment through the
+    /// safe portable-pty API, so Windows refuses this mode before spawning.
+    pub fn start_contained(config: AppSessionConfig) -> std::io::Result<Self> {
+        Self::start_with_requirement(config, true)
+    }
+
+    fn start_with_requirement(
+        config: AppSessionConfig,
+        require_strong: bool,
+    ) -> std::io::Result<Self> {
+        let (mut custody, wrapper) = Custody::prepare(&config.program, config.args.clone());
+        if require_strong {
+            if cfg!(windows) {
+                return Err(std::io::Error::new(std::io::ErrorKind::Unsupported,
+                    "Strong ConPTY containment is unavailable; use a contained background process or isolated execution target"));
+            }
+            custody.require_strong()?;
+        }
         let size = PtySize {
             rows: config.rows.max(2),
             cols: config.cols.max(10),
@@ -176,7 +198,6 @@ impl AppSession {
         let pair = portable_pty::native_pty_system()
             .openpty(size)
             .map_err(other)?;
-        let (mut custody, wrapper) = Custody::prepare(&config.program, config.args.clone());
         let wrapper = wrapper.as_std();
         let mut command = CommandBuilder::new(wrapper.get_program());
         command.args(wrapper.get_args());

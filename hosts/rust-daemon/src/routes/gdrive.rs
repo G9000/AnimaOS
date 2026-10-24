@@ -219,7 +219,8 @@ mod owner_boundary_tests {
     async fn owner_guards_precede_body_and_state_and_callback_errors_are_static_no_store() {
         let shared =
             std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
-        let app = crate::app::app_with_state(shared, crate::app::DaemonConfig::default());
+        let app =
+            crate::app::app_with_state_for_owner_test(shared, crate::app::DaemonConfig::default());
         for (method, path, origin, status) in [
             (
                 "GET",
@@ -252,6 +253,9 @@ mod owner_boundary_tests {
                 .header("host", "127.0.0.1:8080");
             if !origin.is_empty() {
                 request = request.header("origin", origin);
+                if origin == "http://localhost:4200" {
+                    request = crate::routes::owner_test_support::authenticate(request);
+                }
             }
             let response = app
                 .clone()

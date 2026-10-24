@@ -1,5 +1,5 @@
-//! Console sessions: what lets the web console use Anima's lifecycle
-//! controls (`/api/system/actions/*`, drain and shutdown).
+//! Console sessions authenticate owner reads, approvals and mutations across
+//! the daemon API, including lifecycle controls, drain and shutdown.
 //!
 //! An Origin header proves nothing on its own: any local process, an
 //! agent's shell included, can send one. So only the owner can start a
@@ -10,7 +10,7 @@
 //! 2. The console trades the code at `POST /api/system/session` for a
 //!    session in two halves: an `HttpOnly` cookie, and a token it keeps in
 //!    its origin's storage and sends as `x-anima-console-session`.
-//! 3. A lifecycle request that carries an Origin needs both halves.
+//! 3. Every owner request from the browser needs both halves.
 //!
 //! Each half covers a different leak. Cookies are scoped to a host, not a
 //! port, so a page an agent serves on another loopback port receives the

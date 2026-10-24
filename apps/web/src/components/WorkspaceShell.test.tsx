@@ -111,6 +111,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe('WorkspaceShell', () => {
@@ -741,6 +742,16 @@ describe('WorkspaceShell', () => {
   it('keeps workspace avatar controls in Profile while the sidebar follows the design', async () => {
     const user = userEvent.setup();
     const onChangeWorkspaceAvatar = vi.fn().mockResolvedValue(undefined);
+    localStorage.clear();
+    localStorage.setItem('anima.consoleSession', 'signed-header');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () =>
+        new Response(new Uint8Array([1]), {
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
     Object.defineProperties(URL, {
       createObjectURL: {
         configurable: true,
@@ -759,11 +770,13 @@ describe('WorkspaceShell', () => {
     expect(within(sidebar).queryByText('Northwind Research')).toBeNull();
     await user.click(screen.getByText('Workspace identity', { exact: true }));
     expect(screen.getByText('Northwind Research')).toBeVisible();
-    expect(
-      screen
-        .getByRole('button', { name: 'Change workspace avatar' })
-        .querySelector('img'),
-    ).toHaveAttribute('src', '/api/workspace/avatar?v=0');
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('button', { name: 'Change workspace avatar' })
+          .querySelector('img'),
+      ).toHaveAttribute('src', 'blob:workspace-avatar-preview'),
+    );
     const file = new File(['avatar'], 'avatar.png', { type: 'image/png' });
     await user.upload(
       screen.getByLabelText('Workspace avatar image file'),

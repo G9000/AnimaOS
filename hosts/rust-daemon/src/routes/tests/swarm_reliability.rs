@@ -74,12 +74,14 @@ async fn swarm_owner_execution_limits_bound_actual_dispatches_across_members() {
         let created = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/swarms")
-                    .header("content-type", "application/json")
-                    .body(Body::from(config.to_string()))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/swarms")
+                        .header("content-type", "application/json"),
+                )
+                .body(Body::from(config.to_string()))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -88,14 +90,16 @@ async fn swarm_owner_execution_limits_bound_actual_dispatches_across_members() {
         let response = tokio::time::timeout(
             Duration::from_secs(5),
             app.oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/api/swarms/{swarm_id}/run"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"text":"finish within the owner's ceiling"}"#,
-                    ))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/swarms/{swarm_id}/run"))
+                        .header("content-type", "application/json"),
+                )
+                .body(Body::from(
+                    r#"{"text":"finish within the owner's ceiling"}"#,
+                ))
+                .unwrap(),
             ),
         )
         .await
@@ -164,12 +168,14 @@ impl Fixture {
     }
 
     fn request(&self) -> Request<Body> {
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/swarms/{}/run", self.swarm_id))
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"text":"finish owned work"}"#))
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/swarms/{}/run", self.swarm_id))
+                .header("content-type", "application/json"),
+        )
+        .body(Body::from(r#"{"text":"finish owned work"}"#))
+        .unwrap()
     }
 
     fn start(&self) -> tokio::task::JoinHandle<axum::response::Response> {

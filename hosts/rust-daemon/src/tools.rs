@@ -10,12 +10,16 @@ mod chat_controls;
 mod chat_results;
 mod checkpoints;
 mod clarify;
+pub(crate) mod command_binding;
 pub(crate) mod completion;
 mod conversations;
+mod credential_paths;
 mod discord;
 mod doctor;
 mod drive;
 mod execution;
+#[cfg(test)]
+mod execution_policy_tests;
 mod filesystem;
 mod helper_batch;
 mod mail;
@@ -26,6 +30,7 @@ pub(crate) mod mcp_refresh;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
+mod output_safety;
 pub(crate) mod process;
 mod skills;
 mod standing_intents;
@@ -98,6 +103,7 @@ pub(crate) struct ToolExecutionContext {
     pub(super) tool_catalog: Option<Arc<catalog::RunToolCatalog>>,
     pub(super) tool_refresh: Option<Arc<mcp_refresh::McpToolRefresh>>,
     pub(super) execution: Arc<crate::execution_backends::ExecutionService>,
+    pub(super) command_binding: Option<Arc<command_binding::CommandBinding>>,
     pub(super) mcp_stamp: Option<crate::mcp::McpDispatchStamp>,
     pub(super) browser: Option<crate::browser::BrowserService>,
     pub(super) browser_stamp: Option<crate::browser::BrowserDispatchStamp>,
@@ -215,6 +221,7 @@ impl ToolExecutionContext {
             tool_catalog: None,
             tool_refresh: None,
             execution: Arc::new(crate::execution_backends::ExecutionService::default()),
+            command_binding: None,
             mcp_stamp: None,
             browser: None,
             browser_stamp: None,
@@ -444,6 +451,55 @@ impl ToolExecutionContext {
         self
     }
 
+    fn capture_execution_binding(
+        &self,
+        call: &ToolCall,
+    ) -> Result<Option<command_binding::CommandBinding>, String> {
+        use command_binding::CommandBinding;
+        if matches!(
+            call.name.as_str(),
+            "bash" | "bg_start" | "app_start" | "acp_start"
+        ) {
+            let Some(DataValue::String(command)) = call.args.get("command") else {
+                return Err("Execution command must be a string".into());
+            };
+            let root = workspace_root_path(&call.name, self.workspace_root.as_deref())?;
+            let cwd = match call.args.get("cwd") {
+                Some(DataValue::String(value)) if !value.trim().is_empty() => value.trim(),
+                None | Some(DataValue::String(_)) => ".",
+                _ => return Err("Execution cwd must be a string".into()),
+            };
+            let cwd = workspace::resolve_workspace_search_root(
+                &canonical_workspace_root(&root, &call.name)?,
+                cwd,
+                &call.name,
+            )?;
+            let (shell, flags) = process::shell::resolve_shell_launcher()?;
+            return CommandBinding::capture_shell(&shell, &flags, command.trim(), &cwd).map(Some);
+        }
+        if call.name == "execute_code" {
+            let Some(interpreter) = self.tool_rpc_service.interpreter() else {
+                return Ok(None);
+            };
+            let Some(DataValue::String(code)) = call.args.get("code") else {
+                return Err("Python source must be a string".into());
+            };
+            let root = workspace_root_path(&call.name, self.workspace_root.as_deref())?;
+            let cwd = canonical_workspace_root(&root, &call.name)?;
+            return CommandBinding::capture_program(
+                &interpreter.to_string_lossy(),
+                &["-I".into(), "-c".into(), code.clone()],
+                &cwd,
+            )
+            .map(Some);
+        }
+        if call.name == "execution_run" {
+            let request = execution::parse_request(call.args.clone())?;
+            return self.execution.approval_binding(&request).map(Some);
+        }
+        Ok(None)
+    }
+
     pub(crate) fn with_tool_catalog(
         mut self,
         catalog: Option<Arc<catalog::RunToolCatalog>>,
@@ -534,7 +590,7 @@ impl ToolExecutionContext {
         let handler_started = Arc::new(AtomicBool::new(false));
         let work = self.execute_tool_inner(agent, user_message, tool_call, handler_started.clone());
         futures::pin_mut!(work);
-        let result = if let Some(budget) = &budget {
+        let mut result = if let Some(budget) = &budget {
             match budget.check_live() {
                 Err(error) => pre_effect_error(error),
                 Ok(()) => match budget.observe(async { Ok(work.as_mut().await) }).await {
@@ -558,6 +614,7 @@ impl ToolExecutionContext {
                 ))
                 .await;
         }
+        output_safety::sanitize_result(&mut result);
         // execute_tool_inner acknowledges the action journal before returning.
         // An actual effect with an uncertain outcome save is an error here and
         // cannot be converted into successful completion evidence.
@@ -590,6 +647,45 @@ impl ToolExecutionContext {
         let Some(handler) = self.tool_registry.lookup(&tool_call.name) else {
             return TaskResult::error(format!("Unknown tool: {}", tool_call.name), 0);
         };
+        if matches!(
+            tool_call.name.as_str(),
+            "bash"
+                | "bg_start"
+                | "execute_code"
+                | "app_start"
+                | "app_send"
+                | "acp_start"
+                | "acp_prompt"
+        ) && !self.execution.allows_host_execution()
+        {
+            return TaskResult::error("Host code execution is disabled. Use an isolated execution_run target. An operator may explicitly enable host execution with ANIMAOS_ALLOW_HOST_EXECUTION=1; ordinary grants and approvals still apply.", 0);
+        }
+        if matches!(
+            tool_call.name.as_str(),
+            "read_file"
+                | "read_document"
+                | "write_file"
+                | "edit_file"
+                | "multi_edit"
+                | "grep"
+                | "glob"
+        ) {
+            let field = if matches!(tool_call.name.as_str(), "grep" | "glob") {
+                "path"
+            } else {
+                "file_path"
+            };
+            if let Some(DataValue::String(input)) = tool_call.args.get(field) {
+                let root =
+                    match workspace_root_path(&tool_call.name, self.workspace_root.as_deref()) {
+                        Ok(root) => root,
+                        Err(error) => return TaskResult::error(error, 0),
+                    };
+                if let Err(error) = credential_paths::check_path(&root, input) {
+                    return TaskResult::error(error, 0);
+                }
+            }
+        }
         if tool_call.name == mcp_management::NAME {
             if let Err(error) = mcp_management::preflight(&tool_call) {
                 return TaskResult::error(error, 0);
@@ -646,6 +742,10 @@ impl ToolExecutionContext {
                 Err(error) => return TaskResult::error(error.to_string(), 0),
             };
         }
+        self.command_binding = match self.capture_execution_binding(&tool_call) {
+            Ok(binding) => binding.map(Arc::new),
+            Err(error) => return TaskResult::error(error, 0),
+        };
         let protected = match crate::agent_files::write_policy::capture(
             self.workspace_root.as_deref(),
             &tool_call,
@@ -770,6 +870,22 @@ impl ToolExecutionContext {
                 return TaskResult::error(error, 0);
             }
         }
+        if let Some(binding) = &self.command_binding {
+            if let Err(error) = binding.revalidate().and_then(|_| {
+                let current = self
+                    .capture_execution_binding(&tool_call)?
+                    .ok_or_else(|| "Execution binding disappeared".to_string())?;
+                binding.ensure_unchanged(&current)
+            }) {
+                let refused = TaskResult::error(error, 0);
+                if let Some(journal) = &journal {
+                    if let Err(error) = journal.finish(&tool_call, &refused, 0).await {
+                        return TaskResult::error(error, 0);
+                    }
+                }
+                return refused;
+            }
+        }
         let call = tool_call.clone();
         let browser_cleanup = if is_browser_tool(&call.name) {
             self.browser.clone().zip(self.run_link.clone())
@@ -789,7 +905,10 @@ impl ToolExecutionContext {
         self.action_approved = approved;
         self.protected_write = protected;
         handler_started.store(true, Ordering::Release);
-        let result = handler(self, agent, user_message, tool_call).await;
+        let mut result = handler(self, agent, user_message, tool_call).await;
+        // Sanitize before durable action receipts, spill projections, observers
+        // or subsequent model context can see the handler's output.
+        output_safety::sanitize_result(&mut result);
         if let Some(journal) = journal {
             let duration = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             if let Err(error) = journal.finish(&call, &result, duration).await {

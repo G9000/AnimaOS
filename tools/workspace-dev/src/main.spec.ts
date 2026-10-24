@@ -117,4 +117,10 @@ describe('workspace-dev orchestration', () => {
       ],
     });
   });
+  it('passes owner credentials only to the daemon process', () => {
+    const plan = buildWorkspaceDevPlan('rust', { env: {}, homeDir: '/home/dev', ownerEnv: { ANIMA_LOCAL_ADMIN_TOKEN_FILE: '/private/token' } });
+    expect(plan.processes[0]?.env?.ANIMA_LOCAL_ADMIN_TOKEN_FILE).toBe('/private/token');
+    for (const process of plan.processes.slice(1)) expect(process.env?.ANIMA_LOCAL_ADMIN_TOKEN_FILE).toBeUndefined();
+  });
+
 });

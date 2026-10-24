@@ -28,7 +28,7 @@ it('verifies a submitted key before granting memory-only owner transport', async
   fireEvent.change(await screen.findByLabelText('Owner API key'), { target: { value: 'owner-secret' } });
   fireEvent.click(screen.getByRole('button', { name: 'Unlock owner console' }));
   expect(ownerApiKeyHeaders()).toEqual({});
-  expect(fetch.mock.calls[1][1].headers).toMatchObject({ 'x-api-key': 'owner-secret' });
+  await waitFor(() => expect(fetch.mock.calls[1]?.[1].headers).toMatchObject({ 'x-api-key': 'owner-secret' }));
   resolve(Response.json({}));
   expect(await screen.findByText('Owner workspace')).toBeInTheDocument();
   expect(ownerApiKeyHeaders()).toEqual({ 'x-api-key': 'owner-secret' });
@@ -52,4 +52,17 @@ it('cannot restore owner authority from a late login after unmount', async () =>
   unmount();
   resolve(Response.json({}));
   await waitFor(() => expect(ownerApiKeyHeaders()).toEqual({}));
+});
+
+it('waits for the signed session exchange before probing private access', async () => {
+  let complete!: () => void;
+  const claim = new Promise<void>((resolve) => { complete = resolve; });
+  const fetch = vi.fn().mockResolvedValue(Response.json({})); vi.stubGlobal('fetch', fetch);
+  localStorage.setItem('anima.consoleSession', 'signed-header');
+  render(<OwnerApiKeyGate sessionClaim={claim}><p>Owner workspace</p></OwnerApiKeyGate>);
+  expect(fetch).not.toHaveBeenCalled();
+  complete();
+  expect(await screen.findByText('Owner workspace')).toBeInTheDocument();
+  expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'x-anima-console-session': 'signed-header' });
+  localStorage.clear();
 });

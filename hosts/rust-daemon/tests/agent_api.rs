@@ -7,8 +7,8 @@ use axum::Router;
 use serde_json::Value;
 use std::sync::OnceLock;
 use support::{
-    extract_json_string_field, send_empty_request, send_json_request, send_request, test_app,
-    use_temp_workspace_root,
+    extract_json_string_field, owner_request, send_empty_request, send_json_request, send_request,
+    test_app, use_temp_workspace_root,
 };
 
 async fn create_agent(app: &Router, body: &str) -> (StatusCode, String) {
@@ -26,11 +26,9 @@ async fn update_agent(app: &Router, agent_id: &str, body: &str) -> (StatusCode, 
 async fn delete_agent(app: &Router, agent_id: &str) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        owner_request(Request::builder())
             .method("DELETE")
             .uri(format!("/api/agents/{agent_id}"))
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
             .body(Body::empty())
             .expect("request builds"),
     )
@@ -174,7 +172,7 @@ async fn control_plane_store_recovers_agents_and_swarms_after_restart() {
             .build()
             .expect("first app runtime should start");
         let restored_ids = runtime.block_on(async {
-            let first_app = app_with_configured_persistence(DaemonConfig::default())
+            let first_app = support::configured_loopback_test_app(DaemonConfig::default())
                 .await
                 .expect("first app should configure persistence");
             let (_, create_agent_response) = create_agent(
@@ -212,7 +210,7 @@ async fn control_plane_store_recovers_agents_and_swarms_after_restart() {
     .await
     .expect("first app runtime should fully shut down");
 
-    let second_app = app_with_configured_persistence(DaemonConfig::default())
+    let second_app = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .expect("second app should configure persistence");
     let (agent_status, agent_response) =
@@ -753,31 +751,66 @@ async fn delete_unknown_agent_retains_not_found_semantics() {
 }
 
 #[tokio::test]
-async fn configured_persistence_helper_is_untrusted_for_local_owner_mutations() {
+async fn configured_persistence_helper_is_untrusted_even_with_valid_owner_bearer() {
     let _env_lock = env_lock().lock().await;
     let _host = EnvVarGuard::set("ANIMAOS_RS_HOST", "127.0.0.1");
     let app = app_with_configured_persistence(DaemonConfig::default())
         .await
         .expect("configured persistence app builds");
-    let (_, create_response) =
+    let (create_status, _) =
         create_agent(&app, r#"{"name":"helper-owner","model":"gpt-5.4"}"#).await;
-    let agent_id = extract_json_string_field(&create_response, "id");
-
     let (delete_status, _) = send_request(
         &app,
         Request::builder()
             .method("DELETE")
-            .uri(format!("/api/agents/{agent_id}"))
+            .uri("/api/agents/agent-missing")
             .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
+            .header(
+                "authorization",
+                format!("Bearer {}", support::test_owner_token()),
+            )
             .body(Body::empty())
             .expect("request builds"),
     )
     .await;
-    let (get_status, _) = send_empty_request(&app, "GET", &format!("/api/agents/{agent_id}")).await;
+    let (raw_status, _) = send_request(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/agents")
+            .body(Body::empty())
+            .expect("request builds"),
+    )
+    .await;
 
+    assert_eq!(create_status, StatusCode::FORBIDDEN);
     assert_eq!(delete_status, StatusCode::FORBIDDEN);
-    assert_eq!(get_status, StatusCode::OK);
+    assert_eq!(raw_status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn configured_persistence_with_loopback_listener_requires_owner_bearer() {
+    let _env_lock = env_lock().lock().await;
+    let workspace = use_temp_workspace_root("configured-loopback-owner");
+    let control_plane_path = workspace.path().join("control-plane.json");
+    let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
+    let app = support::configured_loopback_test_app(DaemonConfig::default())
+        .await
+        .expect("configured loopback app builds");
+
+    let (raw_status, _) = send_request(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/agents")
+            .body(Body::empty())
+            .expect("request builds"),
+    )
+    .await;
+    let (owner_status, _) = send_empty_request(&app, "GET", "/api/agents").await;
+
+    assert_eq!(raw_status, StatusCode::FORBIDDEN);
+    assert_eq!(owner_status, StatusCode::OK);
 }
 
 #[tokio::test]

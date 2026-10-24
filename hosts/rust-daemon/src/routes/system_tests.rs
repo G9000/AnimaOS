@@ -184,7 +184,7 @@ async fn open_console(app: &axum::Router) -> Console {
         .to_str()
         .unwrap()
         .to_string();
-    for attribute in ["HttpOnly", "SameSite=Strict", "Path=/api/system"] {
+    for attribute in ["HttpOnly", "SameSite=Strict", "Path=/api;"] {
         assert!(set_cookie.contains(attribute), "{set_cookie}");
     }
     // A browser-session cookie: none of it is meant to reach the disk.
@@ -229,8 +229,8 @@ async fn drain_routes_require_local_owner() {
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path} {auth:?}");
         }
     }
-    // An approved Origin alone, which any local process can send, may read
-    // but not act.
+    // An approved Origin alone, which any local process can send, grants
+    // neither private reads nor lifecycle actions.
     for (method, path) in [
         ("POST", "/api/system/drain"),
         ("DELETE", "/api/system/drain"),
@@ -240,11 +240,13 @@ async fn drain_routes_require_local_owner() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
         assert_eq!(body["code"], "console_session_required", "{method} {path}");
     }
-    let (_, body) = send(&app, "GET", "/api/system/drain", &origin).await;
-    assert_eq!(body["draining"], false, "a refused begin changes nothing");
+    let (status, _) = send(&app, "GET", "/api/system/drain", &origin).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     let console = open_console(&app).await;
     let session = console.headers();
+    let (_, body) = send(&app, "GET", "/api/system/drain", &session).await;
+    assert_eq!(body["draining"], false, "a refused begin changes nothing");
     let (status, body) = send(&app, "POST", "/api/system/drain", &session).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
@@ -252,7 +254,7 @@ async fn drain_routes_require_local_owner() {
         serde_json::json!({"draining": true, "inFlight": idle()})
     );
 
-    let (status, body) = send(&app, "GET", "/api/system/drain", &origin).await;
+    let (status, body) = send(&app, "GET", "/api/system/drain", &session).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body,
@@ -261,7 +263,7 @@ async fn drain_routes_require_local_owner() {
 
     let (status, _) = send(&app, "DELETE", "/api/system/drain", &session).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, body) = send(&app, "GET", "/api/system/drain", &origin).await;
+    let (_, body) = send(&app, "GET", "/api/system/drain", &session).await;
     assert_eq!(body["draining"], false);
 }
 
@@ -300,14 +302,15 @@ async fn a_drain_refuses_new_work_with_503() {
             r#"{"title":"t","objective":"o","requestKey":"k","maxAttempts":1}"#,
         ),
     ] {
-        let request = Request::builder()
+        let mut builder = Request::builder()
             .method("POST")
             .uri(path)
             .header("host", "127.0.0.1:8787")
-            .header("origin", OWNER_ORIGIN)
-            .header("content-type", "application/json")
-            .body(Body::from(body))
-            .unwrap();
+            .header("content-type", "application/json");
+        for (name, value) in console.headers() {
+            builder = builder.header(name, value);
+        }
+        let request = builder.body(Body::from(body)).unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -345,13 +348,12 @@ async fn a_drain_refuses_run_now_with_503() {
         )
         .await
         .unwrap();
-    let origin = [("origin", OWNER_ORIGIN)];
     let console = open_console(&app).await;
     let (status, _) = send(&app, "POST", "/api/system/drain", &console.headers()).await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
     let path = format!("/api/agents/{agent_id}/schedules/{}/run", schedule.id);
-    let (status, body) = send(&app, "POST", &path, &origin).await;
+    let (status, body) = send(&app, "POST", &path, &console.headers()).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["code"], "schedule_draining");
     assert_eq!(
@@ -363,15 +365,12 @@ async fn a_drain_refuses_run_now_with_503() {
 
 #[tokio::test]
 async fn shutdown_route_stops_server() {
-    // This server's policy comes from the environment. A token no other test
-    // presents leaves their policies' answers as they were.
-    let token = format!("shutdown-test-{}", uuid::Uuid::new_v4());
-    std::env::set_var("ANIMA_LOCAL_ADMIN_TOKEN", &token);
+    let token = crate::routes::owner_test_support::ADMIN_TOKEN;
     let state = Arc::new(RwLock::new(DaemonState::new()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     // No signal ever arrives: only the route can stop this server.
-    let server = tokio::spawn(crate::app::serve_with_state(
+    let server = tokio::spawn(crate::app::serve_with_state_for_owner_test(
         listener,
         state,
         DaemonConfig::default(),
@@ -395,7 +394,6 @@ async fn shutdown_route_stops_server() {
     let received = post(format!("Origin: {OWNER_ORIGIN}")).await;
     assert!(received.starts_with("HTTP/1.1 403"), "{received}");
     let received = post(format!("Authorization: Bearer {token}")).await;
-    std::env::remove_var("ANIMA_LOCAL_ADMIN_TOKEN");
     assert!(received.starts_with("HTTP/1.1 202"), "{received}");
 
     tokio::time::timeout(crate::app::lifecycle::SHUTDOWN_BUDGET, server)
@@ -492,7 +490,8 @@ async fn status_proxies_with_bearer() {
     let (url, seen) = fake_supervisor().await;
     // A trailing slash on the configured URL is harmless.
     let app = supervised(&format!("{url}/"));
-    let (status, body) = send(&app, "GET", "/api/system", &[("origin", OWNER_ORIGIN)]).await;
+    let console = open_console(&app).await;
+    let (status, body) = send(&app, "GET", "/api/system", &console.headers()).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body,
@@ -519,20 +518,16 @@ async fn status_proxies_with_bearer() {
 #[tokio::test]
 async fn status_unsupervised_reports_version() {
     let app = app();
-    let (status, body) = send(&app, "GET", "/api/system", &[("origin", OWNER_ORIGIN)]).await;
+    let console = open_console(&app).await;
+    let owner = console.headers();
+    let (status, body) = send(&app, "GET", "/api/system", &owner).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body,
         serde_json::json!({"supervised": false, "version": env!("CARGO_PKG_VERSION")})
     );
     // The exact path does not shadow the drain routes.
-    let (status, body) = send(
-        &app,
-        "GET",
-        "/api/system/drain",
-        &[("origin", OWNER_ORIGIN)],
-    )
-    .await;
+    let (status, body) = send(&app, "GET", "/api/system/drain", &owner).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["draining"], false);
 }
@@ -692,21 +687,15 @@ async fn supervisor_down_502() {
     let url = format!("http://{}", listener.local_addr().unwrap());
     drop(listener);
     let app = supervised(&url);
-    let origin = [("origin", OWNER_ORIGIN)];
+    let console = open_console(&app).await;
+    let owner = console.headers();
     let expected = serde_json::json!({"error": "The Anima supervisor is not responding"});
 
-    let (status, body) = send(&app, "GET", "/api/system", &origin).await;
+    let (status, body) = send(&app, "GET", "/api/system", &owner).await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body, expected);
 
-    let console = open_console(&app).await;
-    let (status, body) = send(
-        &app,
-        "POST",
-        "/api/system/actions/restart",
-        &console.headers(),
-    )
-    .await;
+    let (status, body) = send(&app, "POST", "/api/system/actions/restart", &owner).await;
     assert_eq!(status, StatusCode::BAD_GATEWAY);
     assert_eq!(body, expected);
 }
@@ -841,13 +830,7 @@ async fn forged_lifecycle_requests_are_refused() {
         assert!(!status.is_success(), "{path} {status}");
     }
     assert!(seen.lock().unwrap().is_empty(), "nothing was relayed");
-    let (_, body) = send(
-        &app,
-        "GET",
-        "/api/system/drain",
-        &[("origin", OWNER_ORIGIN)],
-    )
-    .await;
+    let (_, body) = send(&app, "GET", "/api/system/drain", &console.headers()).await;
     assert_eq!(body["draining"], false, "nothing drained");
 
     // The console itself still acts.

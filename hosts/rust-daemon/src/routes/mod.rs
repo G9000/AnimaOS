@@ -40,6 +40,8 @@ mod memory_edits;
 mod memory_export;
 mod memory_maintenance;
 mod multipart;
+#[cfg(test)]
+pub(crate) mod owner_test_support;
 mod paired_devices;
 mod queue_controls;
 mod standing_intents;
@@ -530,7 +532,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[allow(dead_code)] // Compatibility constructor used by focused route tests.
+#[cfg(test)] // Compatibility constructor used by focused route tests.
 pub(crate) fn router_with_services(
     state: SharedDaemonState,
     config: DaemonConfig,
@@ -551,7 +553,7 @@ pub(crate) fn router_with_services(
 }
 
 /// `router_with_services` over a chosen log buffer.
-#[allow(dead_code)]
+#[cfg(test)]
 fn router_with_services_and_logs(
     state: SharedDaemonState,
     config: DaemonConfig,
@@ -582,7 +584,7 @@ fn router_with_services_and_logs(
         oauth_apps.clone(),
     );
     let jobs = crate::jobs::JobService::new(Arc::clone(&state), agent_runs.clone());
-    router_with_all_services(
+    router_with_services_with_policies(
         state,
         config,
         run_limiter,
@@ -595,10 +597,13 @@ fn router_with_services_and_logs(
         jobs,
         crate::history::HistoryWorkerOwner::new(),
         logs,
-        bind_is_loopback,
+        owner_test_support::policy(bind_is_loopback),
+        self::http::ApiKeyPolicy::for_test(None),
+        crate::system::SupervisorRelay::new(None),
     )
 }
 
+#[cfg(test)]
 pub(crate) fn router_with_all_services(
     state: SharedDaemonState,
     config: DaemonConfig,
@@ -636,6 +641,7 @@ pub(crate) fn router_with_all_services(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn router_with_all_services_and_discord(
     state: SharedDaemonState,
     config: DaemonConfig,
@@ -663,7 +669,7 @@ pub(crate) fn router_with_all_services_and_discord(
         jobs.clone(),
         scheduler.clone(),
     );
-    router_with_all_integrations(
+    router_with_all_integrations_for_owner_test(
         state,
         config,
         run_limiter,
@@ -726,6 +732,52 @@ pub(crate) fn router_with_all_integrations(
         speech,
         drain,
         crate::system::SupervisorRelay::from_env(),
+    )
+}
+
+/// Explicit authenticated fixture boundary; production builders still read operator policy.
+#[cfg(test)]
+pub(crate) fn router_with_all_integrations_for_owner_test(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    run_limiter: Arc<Semaphore>,
+    agent_runs: AgentRunCoordinator,
+    connector_manager: ConnectorManager,
+    calendar: crate::connectors::gcalendar::CalendarManager,
+    mail: crate::connectors::mail::MailManager,
+    oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
+    scheduler: SchedulerService,
+    jobs: crate::jobs::JobService,
+    history_owner: crate::history::HistoryWorkerOwner,
+    logs: Arc<crate::logs::LogBuffer>,
+    bind_is_loopback: bool,
+    discord: crate::connectors::discord::DiscordManager,
+    drive: crate::connectors::drive::DriveManager,
+    voice: crate::voice::VoiceService,
+    speech: crate::speech::SpeechService,
+    drain: crate::system::DrainController,
+) -> Router {
+    router_with_services_with_policies_and_integrations(
+        state,
+        config,
+        run_limiter,
+        agent_runs,
+        connector_manager,
+        calendar,
+        mail,
+        oauth_apps,
+        scheduler,
+        jobs,
+        history_owner,
+        logs,
+        owner_test_support::policy(bind_is_loopback),
+        self::http::ApiKeyPolicy::for_test(None),
+        discord,
+        drive,
+        voice,
+        speech,
+        drain,
+        crate::system::SupervisorRelay::new(None),
     )
 }
 
@@ -911,6 +963,7 @@ fn router_with_services_with_policies_and_integrations(
         started_at_ms: anima_core::primitives::now_millis(),
         _history_owner: history_owner,
     };
+    let owner_policy = app_state.local_owner.clone();
     let request_middleware = ServiceBuilder::new()
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(PropagateRequestIdLayer::x_request_id())
@@ -1634,6 +1687,10 @@ fn router_with_services_with_policies_and_integrations(
         .layer(axum::middleware::from_fn_with_state(
             api_key,
             self::http::enforce_api_key,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            owner_policy,
+            self::http::enforce_owner,
         ))
         .layer(axum::middleware::from_fn(
             conversation_shares::reject_viewer_credentials,
@@ -3361,7 +3418,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri("/api/swarms")
                     .header("content-type", "application/json")
@@ -3405,7 +3462,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .uri("/api/workspace")
                     .body(Body::empty())
                     .unwrap(),
@@ -3421,7 +3478,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("PUT")
                     .uri("/api/workspace/avatar")
                     .header("content-type", "image/png")
@@ -3435,7 +3492,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .uri("/api/workspace/avatar")
                     .body(Body::empty())
                     .unwrap(),
@@ -3450,7 +3507,7 @@ mod tests {
 
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .uri("/api/workspace")
                     .body(Body::empty())
                     .unwrap(),
@@ -3471,7 +3528,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("PUT")
                     .uri("/api/workspace/avatar")
                     .header("content-type", "image/png")
@@ -3485,7 +3542,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("PUT")
                     .uri("/api/workspace/avatar")
                     .header("content-type", "image/png")
@@ -3504,7 +3561,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .uri("/api/workspace/avatar")
                     .body(Body::empty())
                     .unwrap(),
@@ -3518,7 +3575,7 @@ mod tests {
         workspace.write_avatar(&oversized);
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .uri("/api/workspace/avatar")
                     .body(Body::empty())
                     .unwrap(),
@@ -3534,7 +3591,7 @@ mod tests {
         let app = router(state, DaemonConfig::default());
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("PUT")
                     .uri("/api/workspace/avatar")
                     .header("content-type", "image/png")
@@ -3554,13 +3611,13 @@ mod tests {
         let state = Arc::new(RwLock::new(daemon));
         let app = router(state.clone(), DaemonConfig::default());
         for text in ["first direct message", "second direct message"] {
-            let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/agents/{recipient}/run")).header("content-type", "application/json").body(Body::from(serde_json::json!({"text": text, "roomId": format!("direct:{recipient}")}).to_string())).unwrap()).await.unwrap();
+            let response = app.clone().oneshot(crate::routes::owner_test_support::authenticate(Request::builder()).method("POST").uri(format!("/api/agents/{recipient}/run")).header("content-type", "application/json").body(Body::from(serde_json::json!({"text": text, "roomId": format!("direct:{recipient}")}).to_string())).unwrap()).await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
         }
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{sender}/messages"))
                     .header("content-type", "application/json")
@@ -3589,7 +3646,7 @@ mod tests {
             .any(|message| message.room_id == format!("peer:{sender}:{recipient}")));
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{sender}/messages"))
                     .header("content-type", "application/json")
@@ -3879,7 +3936,7 @@ mod tests {
             jobs,
             crate::history::HistoryWorkerOwner::new(),
             crate::logs::global(),
-            LocalOwnerPolicy::for_test(true, Some("local-admin")),
+            LocalOwnerPolicy::for_test(true, Some(crate::routes::owner_test_support::ADMIN_TOKEN)),
             ApiKeyPolicy::for_test(Some("global-api")),
             crate::system::SupervisorRelay::unsupervised(),
         );
@@ -3942,6 +3999,9 @@ mod tests {
             }
             if let Some(origin) = origin {
                 request = request.header("origin", origin);
+            }
+            if agent_id != &agent_ids[1] {
+                request = crate::routes::owner_test_support::authenticate(request);
             }
             let response = app
                 .clone()
@@ -4032,15 +4092,17 @@ mod tests {
         );
         let uri = format!("/api/agents/{agent_id}/connectors/{connector_id}/messages");
         let request = || {
-            Request::builder()
-                .method("POST")
-                .uri(&uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("idempotency-key", "timeout-owner-key")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"text":"timeout owner turn"}"#))
-                .unwrap()
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method("POST")
+                    .uri(&uri)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200")
+                    .header("idempotency-key", "timeout-owner-key")
+                    .header("content-type", "application/json"),
+            )
+            .body(Body::from(r#"{"text":"timeout owner turn"}"#))
+            .unwrap()
         };
 
         let first = {
@@ -4138,7 +4200,7 @@ mod tests {
             );
             let response = app
                 .oneshot(
-                    Request::builder()
+                    crate::routes::owner_test_support::authenticate(Request::builder())
                         .method("POST")
                         .uri(format!("/api/agents/{agent_id}/connectors/telegram"))
                         .header("host", "127.0.0.1:8080")
@@ -4191,7 +4253,7 @@ mod tests {
         );
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{agent_id}/connectors/telegram"))
                     .header("host", "127.0.0.1:8080")
@@ -4239,7 +4301,7 @@ mod tests {
 
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/swarms/{swarm_id}/run"))
                     .header("content-type", "application/json")
@@ -4283,7 +4345,7 @@ mod tests {
         let running = tokio::spawn(async move {
             running_app
                 .oneshot(
-                    Request::builder()
+                    crate::routes::owner_test_support::authenticate(Request::builder())
                         .method("POST")
                         .uri(format!("/api/swarms/{swarm_id}/run"))
                         .header("content-type", "application/json")
@@ -4298,7 +4360,7 @@ mod tests {
         let publisher = tokio::time::timeout(
             Duration::from_millis(100),
             app.oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri("/api/agents")
                     .header("content-type", "application/json")
@@ -4347,7 +4409,7 @@ mod tests {
         );
         let response = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{id}/run"))
                     .header("content-type", "application/json")
@@ -4362,15 +4424,27 @@ mod tests {
     #[tokio::test]
     async fn workspace_file_reads_authorize_owner_before_query_and_workspace_access() {
         for route in ["/api/workspace/files", "/api/workspace/file?path=%FF"] {
-            for (origin, fetch, expected) in [
-                (None, false, StatusCode::FORBIDDEN),
+            for (origin, fetch, authenticate_owner, expected) in [
+                (None, false, false, StatusCode::FORBIDDEN),
                 (
                     Some("https://hostile.example"),
                     false,
+                    false,
                     StatusCode::FORBIDDEN,
                 ),
-                (Some("http://localhost:4200"), false, StatusCode::CONFLICT),
-                (None, true, StatusCode::CONFLICT),
+                (
+                    Some("http://localhost:4200"),
+                    false,
+                    false,
+                    StatusCode::FORBIDDEN,
+                ),
+                (None, true, false, StatusCode::FORBIDDEN),
+                (
+                    Some("http://localhost:4200"),
+                    false,
+                    true,
+                    StatusCode::CONFLICT,
+                ),
             ] {
                 let app = router(
                     Arc::new(RwLock::new(DaemonState::new())),
@@ -4386,6 +4460,9 @@ mod tests {
                     request = request
                         .header("sec-fetch-site", "same-origin")
                         .header("referer", "http://localhost:4200/");
+                }
+                if authenticate_owner {
+                    request = crate::routes::owner_test_support::authenticate(request);
                 }
                 let response = app
                     .oneshot(request.body(Body::empty()).unwrap())
@@ -4432,7 +4509,7 @@ mod tests {
             );
             let response = app
                 .oneshot(
-                    Request::builder()
+                    crate::routes::owner_test_support::authenticate(Request::builder())
                         .method("POST")
                         .uri("/api/agencies/generate")
                         .header("content-type", "application/json")
@@ -4486,7 +4563,7 @@ mod tests {
         let running = tokio::spawn(async move {
             running_app
                 .oneshot(
-                    Request::builder()
+                    crate::routes::owner_test_support::authenticate(Request::builder())
                         .method("POST")
                         .uri(run_uri)
                         .header("content-type", "application/json")
@@ -4530,7 +4607,7 @@ mod tests {
 
         let retry = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{agent_id}/run"))
                     .header("content-type", "application/json")
@@ -4574,13 +4651,13 @@ mod tests {
             },
         );
 
-        let first_request = Request::builder()
+        let first_request = crate::routes::owner_test_support::authenticate(Request::builder())
             .method("POST")
             .uri(format!("/api/agents/{first_agent_id}/run"))
             .header("content-type", "application/json")
             .body(Body::from(r#"{"text":"first task"}"#))
             .expect("first request builds");
-        let second_request = Request::builder()
+        let second_request = crate::routes::owner_test_support::authenticate(Request::builder())
             .method("POST")
             .uri(format!("/api/agents/{second_agent_id}/run"))
             .header("content-type", "application/json")
@@ -4659,14 +4736,16 @@ mod tests {
     }
 
     fn legacy_run_request(agent_id: &str, room_id: &str, text: &str) -> Request<Body> {
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/agents/{agent_id}/run"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::json!({ "text": text, "roomId": room_id }).to_string(),
-            ))
-            .expect("run request builds")
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/agents/{agent_id}/run"))
+                .header("content-type", "application/json"),
+        )
+        .body(Body::from(
+            serde_json::json!({ "text": text, "roomId": room_id }).to_string(),
+        ))
+        .expect("run request builds")
     }
 
     async fn error_message(response: axum::response::Response) -> String {
@@ -4861,7 +4940,7 @@ mod tests {
         let malformed = app
             .clone()
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{agent_id}/run"))
                     .header("content-type", "application/json")
@@ -4874,7 +4953,7 @@ mod tests {
 
         let valid = app
             .oneshot(
-                Request::builder()
+                crate::routes::owner_test_support::authenticate(Request::builder())
                     .method("POST")
                     .uri(format!("/api/agents/{agent_id}/run"))
                     .header("content-type", "application/json")
@@ -4925,7 +5004,7 @@ mod tests {
         })
         .to_string();
         let put = |body: String| {
-            Request::builder()
+            crate::routes::owner_test_support::authenticate(Request::builder())
                 .method("PUT")
                 .uri(format!("/api/agents/{agent_id}/tasks"))
                 .header("content-type", "application/json")

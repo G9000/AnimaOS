@@ -15,7 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDaemonClient } from '../src/index.js';
-import { daemonTestEnvironment } from './daemon-environment.js';
+import {
+  DAEMON_TEST_OWNER_TOKEN,
+  daemonTestEnvironment,
+} from './daemon-environment.js';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const target = resolve(
@@ -41,8 +44,8 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
     let daemon: ChildProcess | undefined;
     let output = '';
     let port: number;
-    const ownerToken = 'isolated-personality-test-owner-token';
-    let client = createDaemonClient();
+    const ownerToken = DAEMON_TEST_OWNER_TOKEN;
+    let client = createDaemonClient({ ownerToken });
     const requests: { messages?: { role: string; content: unknown }[] }[] = [];
     const model = createServer(async (request, response) => {
       if (request.url !== '/v1/chat/completions') {
@@ -164,11 +167,7 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
       });
       client = createDaemonClient({
         baseUrl: `http://127.0.0.1:${port}`,
-        fetch: (input, init) => {
-          const headers = new Headers(init?.headers);
-          headers.set('authorization', `Bearer ${ownerToken}`);
-          return fetch(input, { ...init, headers });
-        },
+        ownerToken,
       });
       await startDaemon();
     }, 360000);

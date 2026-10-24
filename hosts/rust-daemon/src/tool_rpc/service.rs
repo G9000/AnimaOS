@@ -27,6 +27,9 @@ pub(crate) struct ToolRpcService {
     cells: Arc<CellLeases>,
 }
 impl ToolRpcService {
+    pub(crate) fn interpreter(&self) -> Option<&std::path::Path> {
+        self.config.interpreter.as_deref()
+    }
     pub(crate) fn configuration_status(&self) -> &'static str {
         if !cfg!(windows) {
             "unsupported"
@@ -81,6 +84,12 @@ impl ToolRpcService {
             .rpc_deadline()
             .unwrap_or_else(|| Instant::now() + Duration::from_secs(300))
             .min(Instant::now() + Duration::from_secs(300));
+        let Some(binding) = context.command_binding.clone() else {
+            return TaskResult::error(
+                "Tool RPC requires a captured interpreter approval identity",
+                0,
+            );
+        };
         let journal = journal.clone();
         let broker = match Broker::capture(context, agent, input, outer).await {
             Ok(broker) => broker,
@@ -106,7 +115,7 @@ impl ToolRpcService {
         // this independent owner. Caller drop signals cancellation, never aborts it.
         self.cells.keep(tokio::spawn(async move {
             execute_owned(
-                service, lease, broker, request, workspace, cancel, deadline, response,
+                service, lease, broker, request, workspace, cancel, deadline, response, binding,
             )
             .await;
         }));
@@ -186,6 +195,7 @@ async fn execute_owned(
     cancel: CancelSignal,
     deadline: Instant,
     mut response: OwnerResponse,
+    binding: Arc<crate::tools::command_binding::CommandBinding>,
 ) {
     let credentials = broker.credentials();
     let descriptors = broker.captured_descriptors().into_iter().map(|descriptor| {
@@ -212,10 +222,9 @@ async fn execute_owned(
         }
     };
     let endpoint = transport.endpoint;
-    let launcher = Arc::new(super::windows::CellLauncher::new(CellResources {
-        lease,
-        transport,
-    }));
+    let launcher = Arc::new(
+        super::windows::CellLauncher::new(CellResources { lease, transport }).with_binding(binding),
+    );
     let result = service
         .runtime
         .run_with_descriptors(

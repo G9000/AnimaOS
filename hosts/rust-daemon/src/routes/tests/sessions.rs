@@ -261,13 +261,15 @@ fn pending_adapter() -> (Arc<dyn ModelAdapter>, Arc<Semaphore>, Arc<Semaphore>) 
 }
 
 fn get(uri: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 async fn json(response: axum::response::Response) -> serde_json::Value {
@@ -1270,14 +1272,16 @@ fn the_openapi_document_lists_the_session_read_routes() {
 }
 
 fn send(method: &str, uri: &str, origin: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .header("content-type", "application/json")
+    .body(Body::from(body.to_string()))
+    .unwrap()
 }
 
 /// A path a JSON control-plane save cannot write to: a directory where the
@@ -1594,13 +1598,15 @@ async fn main_chat_requires_owner_and_empty_contract_and_preserves_legacy_main_i
         assert_eq!(response.status(), expected);
         assert_eq!(response.headers()["cache-control"], "no-store");
     }
-    let empty = Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/main-chat"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER_ORIGIN)
-        .body(Body::empty())
-        .unwrap();
+    let empty = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/main-chat"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN),
+    )
+    .body(Body::empty())
+    .unwrap();
     assert_eq!(
         app.clone().oneshot(empty).await.unwrap().status(),
         StatusCode::OK
@@ -1893,13 +1899,15 @@ async fn creating_a_chat_saves_it_returns_201_and_is_rate_limited() {
         .set_control_plane_store(Some(store.clone()));
     let create = format!("/api/agents/{agent}/sessions");
 
-    let empty = Request::builder()
-        .method("POST")
-        .uri(&create)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER_ORIGIN)
-        .body(Body::empty())
-        .unwrap();
+    let empty = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(&create)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN),
+    )
+    .body(Body::empty())
+    .unwrap();
     let response = app.clone().oneshot(empty).await.unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
     assert_eq!(response.headers()["cache-control"], "no-store");

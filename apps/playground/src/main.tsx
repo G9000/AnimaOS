@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
-import { Playground } from './playground';
+import { PlaygroundEntry } from './PlaygroundEntry';
 import './styles.css';
 
 const root = ReactDOM.createRoot(
@@ -9,6 +9,6 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <StrictMode>
-    <Playground />
+    <PlaygroundEntry />
   </StrictMode>
 );

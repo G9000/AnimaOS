@@ -1,4 +1,19 @@
 use super::*;
+
+#[test]
+fn hardening_host_execution_requires_explicit_operator_opt_in() {
+    assert!(!ExecutionService::default().allows_host_execution());
+    assert!(
+        !ExecutionService::from_json(r#"{"version":1,"targets":[]}"#)
+            .unwrap()
+            .allows_host_execution()
+    );
+    assert!(
+        ExecutionService::from_json(r#"{"version":1,"allowHostExecution":true,"targets":[]}"#)
+            .unwrap()
+            .allows_host_execution()
+    );
+}
 use serde_json::json;
 
 fn local(root: &std::path::Path) -> serde_json::Value {
@@ -117,7 +132,8 @@ async fn execution_authority_revoked_while_waiting_admits_no_transport() {
     let root = tempfile::tempdir().unwrap();
     let service = Arc::new(
         ExecutionService::from_json(
-            &json!({"version":1,"targets":[shell_profile(root.path())]}).to_string(),
+            &json!({"version":1,"allowHostExecution":true,"targets":[shell_profile(root.path())]})
+                .to_string(),
         )
         .unwrap(),
     );
@@ -179,7 +195,8 @@ async fn execution_shutdown_cancels_admitted_work_and_refuses_new_work() {
     let root = tempfile::tempdir().unwrap();
     let service = Arc::new(
         ExecutionService::from_json(
-            &json!({"version":1,"targets":[shell_profile(root.path())]}).to_string(),
+            &json!({"version":1,"allowHostExecution":true,"targets":[shell_profile(root.path())]})
+                .to_string(),
         )
         .unwrap(),
     );
@@ -254,7 +271,8 @@ fn shell_profile(root: &std::path::Path) -> serde_json::Value {
 async fn execution_local_timeout_retires_custody_before_reusing_target() {
     let temp = tempfile::tempdir().unwrap();
     let service = ExecutionService::from_json(
-        &json!({"version":1,"targets":[shell_profile(temp.path())]}).to_string(),
+        &json!({"version":1,"allowHostExecution":true,"targets":[shell_profile(temp.path())]})
+            .to_string(),
     )
     .unwrap();
     let result = service
@@ -293,7 +311,8 @@ async fn execution_local_cancel_and_cwd_escape_are_fail_closed() {
     let temp = tempfile::tempdir().unwrap();
     let service = std::sync::Arc::new(
         ExecutionService::from_json(
-            &json!({"version":1,"targets":[shell_profile(temp.path())]}).to_string(),
+            &json!({"version":1,"allowHostExecution":true,"targets":[shell_profile(temp.path())]})
+                .to_string(),
         )
         .unwrap(),
     );
@@ -397,6 +416,291 @@ fn docker_service() -> ExecutionService {
         "Cargo test must build the execution_backend_peer example"
     );
     ExecutionService::from_json(&json!({"version":1,"targets":[{"id":"container","label":"Controlled Docker peer","maxTimeoutMs":2000,"backend":{"kind":"docker","executable":executable,"image":format!("example.invalid/worker@sha256:{}","b".repeat(64))}}]}).to_string()).unwrap()
+}
+
+fn bound_transport_copy(root: &std::path::Path) -> std::path::PathBuf {
+    let executable = root.join(format!("bound-peer{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(peer(), &executable).unwrap();
+    executable
+}
+
+fn alter_transport(executable: &std::path::Path) {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(executable)
+        .unwrap()
+        .write_all(b"changed after the awaited authority/probe boundary")
+        .unwrap();
+}
+
+fn transport_binding(
+    executable: &std::path::Path,
+) -> std::sync::Arc<crate::tools::command_binding::CommandBinding> {
+    std::sync::Arc::new(
+        crate::tools::command_binding::CommandBinding::capture_image(
+            &executable.to_string_lossy(),
+            &[],
+            &std::env::current_dir().unwrap(),
+        )
+        .unwrap(),
+    )
+}
+
+fn docker_profile(executable: std::path::PathBuf) -> DockerProfile {
+    DockerProfile {
+        executable,
+        image: format!("example.invalid/worker@sha256:{}", "b".repeat(64)),
+        memory_mb: 256,
+        cpus: 1,
+        pids: 64,
+    }
+}
+
+fn transport_request() -> ExecutionRequest {
+    ExecutionRequest {
+        target_id: "bound-transport".into(),
+        command: "ignored fixture command".into(),
+        cwd: ".".into(),
+        timeout_ms: 1000,
+    }
+}
+
+#[tokio::test]
+async fn hardening_docker_revalidates_transport_after_awaited_probe() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let _lock = fake_environment_lock().lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let _environment = FakeEnvironment::new(root.path());
+    let executable = bound_transport_copy(root.path());
+    let binding = transport_binding(&executable);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let scope = ExecutionScope {
+        agent_id: "owner".into(),
+        authority: Arc::new(move || {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            let executable = executable.clone();
+            Box::pin(async move {
+                // The first ps has fully retired; the next transport launch
+                // awaits authority while its executable can still change.
+                if call == 1 {
+                    tokio::task::yield_now().await;
+                    alter_transport(&executable);
+                }
+                Ok(())
+            })
+        }),
+    };
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        docker::run(
+            docker_profile(
+                root.path()
+                    .join(format!("bound-peer{}", std::env::consts::EXE_SUFFIX)),
+            ),
+            &transport_request(),
+            &uuid::Uuid::new_v4().to_string(),
+            None,
+            &anima_core::CancelSignal::new(),
+            &scope,
+            binding,
+        ),
+    )
+    .await
+    .expect("probe replacement regression is bounded");
+    assert!(matches!(result, Err(error) if error.contains("identity changed")));
+    let calls = std::fs::read_to_string(root.path().join("calls.jsonl")).unwrap();
+    let calls: Vec<Vec<String>> = calls
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        calls.len(),
+        1,
+        "a changed image cannot perform the next probe"
+    );
+    assert_eq!(calls[0][0], "ps");
+}
+
+#[tokio::test]
+async fn hardening_docker_cleanup_retains_original_transport_witness() {
+    let _lock = fake_environment_lock().lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let _environment = FakeEnvironment::new(root.path());
+    let executable = bound_transport_copy(root.path());
+    let approved_bytes = std::fs::read(&executable).unwrap();
+    let binding = transport_binding(&executable);
+    let scope = ExecutionScope {
+        agent_id: "owner".into(),
+        authority: std::sync::Arc::new(|| Box::pin(async { Ok(()) })),
+    };
+    let mut owner = docker::run(
+        docker_profile(executable.clone()),
+        &transport_request(),
+        &uuid::Uuid::new_v4().to_string(),
+        None,
+        &anima_core::CancelSignal::new(),
+        &scope,
+        binding,
+    )
+    .await
+    .unwrap();
+    let before = std::fs::read(root.path().join("calls.jsonl")).unwrap();
+    alter_transport(&executable);
+    assert!(
+        !owner.retire().await,
+        "changed cleanup transport leaves custody unknown"
+    );
+    assert_eq!(
+        std::fs::read(root.path().join("calls.jsonl")).unwrap(),
+        before
+    );
+    std::fs::write(&executable, approved_bytes).unwrap();
+    assert!(
+        owner.retire().await,
+        "restoring the exact approved image permits reconciliation"
+    );
+    assert!(!root.path().join("exists").exists());
+}
+
+#[tokio::test]
+async fn hardening_docker_post_create_revocation_still_allows_independent_cleanup() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let _lock = fake_environment_lock().lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let _environment = FakeEnvironment::new(root.path());
+    let executable = bound_transport_copy(root.path());
+    let binding = transport_binding(&executable);
+    let checks = Arc::new(AtomicUsize::new(0));
+    let observed_checks = checks.clone();
+    let scope = ExecutionScope {
+        agent_id: "owner".into(),
+        authority: Arc::new(move || {
+            let check = checks.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                tokio::task::yield_now().await;
+                if check >= 3 {
+                    Err("owner revoked after container creation".into())
+                } else {
+                    Ok(())
+                }
+            })
+        }),
+    };
+    let mut owner = docker::run(
+        docker_profile(executable),
+        &transport_request(),
+        &uuid::Uuid::new_v4().to_string(),
+        None,
+        &anima_core::CancelSignal::new(),
+        &scope,
+        binding,
+    )
+    .await
+    .unwrap();
+    assert!(root.path().join("exists").exists());
+    assert!(owner.receipt.message.contains("owner revoked"));
+    let checks_before_cleanup = observed_checks.load(Ordering::SeqCst);
+    assert!(
+        owner.retire().await,
+        "a prelaunch refusal is not unknown process custody"
+    );
+    assert_eq!(
+        observed_checks.load(Ordering::SeqCst),
+        checks_before_cleanup,
+        "physical cleanup never requires the revoked run authority"
+    );
+    assert!(!root.path().join("exists").exists());
+}
+
+fn ssh_profile(executable: std::path::PathBuf, root: &std::path::Path) -> SshProfile {
+    let key = root.join("key");
+    let pins = root.join("pins");
+    std::fs::write(&key, "controlled key fixture").unwrap();
+    std::fs::write(&pins, "controlled pin fixture").unwrap();
+    SshProfile {
+        executable,
+        host: "peer.invalid".into(),
+        user: "worker".into(),
+        port: 22,
+        identity_file: key,
+        known_hosts_file: pins,
+        worker_entrypoint: "/opt/anima".into(),
+    }
+}
+
+#[tokio::test]
+async fn hardening_ssh_authority_wait_precedes_transport_launch() {
+    let _lock = fake_environment_lock().lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let _environment = FakeEnvironment::new(root.path());
+    let executable = bound_transport_copy(root.path());
+    let binding = transport_binding(&executable);
+    let profile = ssh_profile(executable.clone(), root.path());
+    let scope = ExecutionScope {
+        agent_id: "owner".into(),
+        authority: std::sync::Arc::new(move || {
+            let executable = executable.clone();
+            Box::pin(async move {
+                tokio::task::yield_now().await;
+                alter_transport(&executable);
+                Ok(())
+            })
+        }),
+    };
+    let pending = ssh::run(
+        profile,
+        &transport_request(),
+        &uuid::Uuid::new_v4().to_string(),
+        None,
+        &anima_core::CancelSignal::new(),
+        &scope,
+        binding,
+    )
+    .await;
+    assert!(pending.receipt.cleanup_confirmed);
+    assert_eq!(pending.receipt.status, ExecutionStatus::Failed);
+    assert!(pending.receipt.message.contains("identity changed"));
+    assert!(!root.path().join("calls.jsonl").exists());
+}
+
+#[tokio::test]
+async fn hardening_ssh_reconciliation_retains_original_transport_witness() {
+    let _lock = fake_environment_lock().lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let _environment = FakeEnvironment::new(root.path());
+    let executable = bound_transport_copy(root.path());
+    let approved_bytes = std::fs::read(&executable).unwrap();
+    let binding = transport_binding(&executable);
+    let scope = ExecutionScope {
+        agent_id: "owner".into(),
+        authority: std::sync::Arc::new(|| Box::pin(async { Ok(()) })),
+    };
+    let mut pending = ssh::run(
+        ssh_profile(executable.clone(), root.path()),
+        &transport_request(),
+        &uuid::Uuid::new_v4().to_string(),
+        None,
+        &anima_core::CancelSignal::new(),
+        &scope,
+        binding,
+    )
+    .await;
+    let before = std::fs::read(root.path().join("calls.jsonl")).unwrap();
+    alter_transport(&executable);
+    assert!(pending.reconcile().await.is_none());
+    assert_eq!(
+        std::fs::read(root.path().join("calls.jsonl")).unwrap(),
+        before
+    );
+    std::fs::write(&executable, approved_bytes).unwrap();
+    std::fs::write(root.path().join("allow-status"), b"").unwrap();
+    assert!(
+        pending.reconcile().await.is_some(),
+        "exact restored SSH transport can reconcile"
+    );
 }
 
 #[tokio::test]

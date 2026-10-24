@@ -1,3 +1,4 @@
+import { consoleSessionHeaders } from '../lib/console-session';
 import {
   useCallback,
   useEffect,
@@ -23,6 +24,7 @@ async function ownerAccessStatus(
     referrerPolicy: 'origin',
     headers: {
       accept: 'application/json',
+      ...consoleSessionHeaders(),
       ...(suppliedKey === undefined
         ? ownerApiKeyHeaders()
         : { 'x-api-key': suppliedKey }),
@@ -34,7 +36,7 @@ async function ownerAccessStatus(
 }
 
 /** Owner bootstrap and console launch-code exchange must live inside this gate. */
-export function OwnerApiKeyGate({ children }: { children: ReactNode }) {
+export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNode; sessionClaim?: Promise<unknown> }) {
   const [phase, setPhase] = useState<
     'checking' | 'ready' | 'login' | 'unavailable'
   >('checking');
@@ -49,7 +51,7 @@ export function OwnerApiKeyGate({ children }: { children: ReactNode }) {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    return ownerAccessStatus(suppliedKey, controller.signal)
+    return Promise.resolve(sessionClaim).then(() => ownerAccessStatus(suppliedKey, controller.signal))
       .then((status) => {
         if (current !== version.current || controller.signal.aborted) return;
         if (status === 200) {
@@ -84,7 +86,7 @@ export function OwnerApiKeyGate({ children }: { children: ReactNode }) {
       .finally(() => {
         if (current === version.current) setBusy(false);
       });
-  }, []);
+  }, [sessionClaim]);
 
   const startVerify = (suppliedKey?: string) => {
     setBusy(true);

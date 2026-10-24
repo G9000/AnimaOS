@@ -45,6 +45,7 @@ impl Drop for PhysicalPermit {
 }
 #[derive(Clone, Default)]
 pub(crate) struct ExecutionService {
+    host_execution_allowed: bool,
     targets: Arc<BTreeMap<String, Arc<Target>>>,
     receipts: Arc<Mutex<BTreeMap<String, OwnedReceipt>>>,
     active: Arc<Mutex<BTreeMap<String, CancelSignal>>>,
@@ -104,8 +105,17 @@ impl ExecutionService {
         }
     }
     pub(crate) fn from_environment(workspace_root: Option<&Path>) -> Result<Self, String> {
+        let host_opt_in = match std::env::var("ANIMAOS_ALLOW_HOST_EXECUTION") {
+            Err(std::env::VarError::NotPresent) => false,
+            Ok(value) if value == "1" => true,
+            Ok(value) if value == "0" => false,
+            _ => return Err("ANIMAOS_ALLOW_HOST_EXECUTION must be 0 or 1".into()),
+        };
         let Some(path) = std::env::var_os(config::CONFIG_ENV) else {
-            return Ok(Self::default());
+            return Ok(Self {
+                host_execution_allowed: host_opt_in,
+                ..Self::default()
+            });
         };
         let path = std::path::PathBuf::from(path);
         if !config::absolute_file(&path) {
@@ -125,10 +135,11 @@ impl ExecutionService {
         if std::fs::metadata(&canonical).map_or(true, |m| m.len() > 65_536) {
             return Err("Execution profiles exceed 64 KiB".into());
         }
-        let service = Self::from_json(
+        let mut service = Self::from_json(
             &std::fs::read_to_string(&canonical)
                 .map_err(|_| "Execution profiles cannot be read")?,
         )?;
+        service.host_execution_allowed |= host_opt_in;
         if let Some(root) = workspace_root.and_then(|r| std::fs::canonicalize(r).ok()) {
             for target in service.targets.values() {
                 let paths: Vec<&Path> = match &target.profile.backend {
@@ -172,12 +183,60 @@ impl ExecutionService {
             }
         }
         Ok(Self {
+            host_execution_allowed: config.allow_host_execution,
             targets: Arc::new(targets),
             ..Self::default()
         })
     }
     pub(crate) fn targets(&self) -> Vec<TargetSummary> {
         self.targets.values().map(|t| t.profile.summary()).collect()
+    }
+    pub(crate) fn allows_host_execution(&self) -> bool {
+        self.host_execution_allowed
+    }
+    pub(crate) fn approval_binding(
+        &self,
+        request: &ExecutionRequest,
+    ) -> Result<crate::tools::command_binding::CommandBinding, String> {
+        use crate::tools::command_binding::CommandBinding;
+        let target = self
+            .targets
+            .get(&request.target_id)
+            .ok_or("Execution target is not configured; no fallback is permitted")?;
+        match &target.profile.backend {
+            Backend::Local(profile) => {
+                if !self.host_execution_allowed {
+                    return Err("Host execution requires explicit operator opt-in".into());
+                }
+                let cwd = process::local_cwd(&profile.workspace_root, &request.cwd)?;
+                let mut args = profile.arguments.clone();
+                args.push(request.command.clone());
+                CommandBinding::capture_program(&profile.executable.to_string_lossy(), &args, &cwd)
+            }
+            Backend::Docker(profile) => CommandBinding::capture_image(
+                &profile.executable.to_string_lossy(),
+                &[
+                    request.target_id.clone(),
+                    request.command.clone(),
+                    request.cwd.clone(),
+                ],
+                &std::env::current_dir().map_err(|_| "Execution directory unavailable")?,
+            ),
+            Backend::Ssh(profile) => CommandBinding::capture_image(
+                &profile.executable.to_string_lossy(),
+                &[
+                    request.target_id.clone(),
+                    request.command.clone(),
+                    request.cwd.clone(),
+                ],
+                &std::env::current_dir().map_err(|_| "Execution directory unavailable")?,
+            ),
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn with_host_execution_for_test(mut self) -> Self {
+        self.host_execution_allowed = true;
+        self
     }
     #[cfg(test)]
     pub(crate) fn target(&self, id: &str) -> Result<TargetSummary, String> {
@@ -232,6 +291,32 @@ impl ExecutionService {
         cancel: Option<CancelSignal>,
         scope: ExecutionScope,
     ) -> Result<ExecutionReceipt, String> {
+        let binding = Arc::new(self.approval_binding(&request)?);
+        self.execute_scoped_bound(request, cancel, scope, binding)
+            .await
+    }
+
+    pub(crate) async fn execute_scoped_bound(
+        &self,
+        request: ExecutionRequest,
+        cancel: Option<CancelSignal>,
+        scope: ExecutionScope,
+        binding: Arc<crate::tools::command_binding::CommandBinding>,
+    ) -> Result<ExecutionReceipt, String> {
+        binding.ensure_unchanged(&self.approval_binding(&request)?)?;
+        let authority = scope.authority.clone();
+        let scope_binding = binding.clone();
+        let scope = ExecutionScope {
+            agent_id: scope.agent_id,
+            authority: Arc::new(move || {
+                let authority = authority.clone();
+                let binding = scope_binding.clone();
+                Box::pin(async move {
+                    authority().await?;
+                    binding.revalidate()
+                })
+            }),
+        };
         if self.shutting_down.load(Ordering::SeqCst) {
             return Err("Execution service is shutting down".into());
         }
@@ -253,6 +338,12 @@ impl ExecutionService {
             );
         }
         if let Backend::Local(profile) = &target.profile.backend {
+            if !self.host_execution_allowed {
+                return Err(
+                    "Host execution requires explicit operator opt-in; no command was dispatched"
+                        .into(),
+                );
+            }
             process::local_cwd(&profile.workspace_root, &request.cwd)?;
         }
         let permit = target
@@ -305,7 +396,7 @@ impl ExecutionService {
                         let mut args = profile.arguments;
                         args.push(request.command);
                         scope.revalidate().await?;
-                        let result = process::run(
+                        let result = process::run_bound(
                             &profile.executable,
                             args,
                             Some(&cwd),
@@ -314,6 +405,7 @@ impl ExecutionService {
                             cancel.as_ref(),
                             &owner_cancel,
                             true,
+                            &binding,
                         )
                         .await?;
                         let mut receipt = ExecutionReceipt::unknown(
@@ -357,6 +449,7 @@ impl ExecutionService {
                         cancel.as_ref(),
                         &owner_cancel,
                         &scope,
+                        binding.clone(),
                     )
                     .await
                     {
@@ -397,6 +490,7 @@ impl ExecutionService {
                         cancel.as_ref(),
                         &owner_cancel,
                         &scope,
+                        binding.clone(),
                     )
                     .await;
                     if pending.receipt.cleanup_confirmed {

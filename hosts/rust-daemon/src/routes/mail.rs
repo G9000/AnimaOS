@@ -410,7 +410,10 @@ mod generic_email_tests {
             jobs,
             crate::history::HistoryWorkerOwner::new(),
             crate::logs::global(),
-            crate::routes::http::LocalOwnerPolicy::for_test(true, Some("local-admin")),
+            crate::routes::http::LocalOwnerPolicy::for_test(
+                true,
+                Some(crate::routes::owner_test_support::ADMIN_TOKEN),
+            ),
             crate::routes::http::ApiKeyPolicy::for_test(None),
             crate::system::SupervisorRelay::unsupervised(),
         )
@@ -462,13 +465,15 @@ mod generic_email_tests {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/agents/other-agent/connectors/mail/email")
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .body(Body::from(setup_json(false).to_string()))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/agents/other-agent/connectors/mail/email")
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200"),
+                )
+                .body(Body::from(setup_json(false).to_string()))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -476,14 +481,16 @@ mod generic_email_tests {
         assert_eq!(fake.verifies.load(Ordering::SeqCst), 0);
         let response = app
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(&uri)
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("authorization", "Bearer local-admin")
-                    .body(Body::from(setup_json(false).to_string()))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&uri)
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200")
+                        .header("authorization", "Bearer local-admin"),
+                )
+                .body(Body::from(setup_json(false).to_string()))
+                .unwrap(),
             )
             .await
             .unwrap();

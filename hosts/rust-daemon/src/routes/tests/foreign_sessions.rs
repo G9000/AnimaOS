@@ -6,13 +6,15 @@ use crate::history::{HistoryService, SqliteHistoryStore};
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
 fn request(method: &str, uri: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 async fn json(response: axum::response::Response) -> serde_json::Value {

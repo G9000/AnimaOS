@@ -552,7 +552,10 @@ async fn list_get_are_vault_free_and_missing_or_unreadable_credentials_never_dis
             fixture.credentials.fail_load.store(true, Ordering::SeqCst);
         }
         let reads = fixture.credentials.reads.load(Ordering::SeqCst);
-        let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+        let app = crate::app::app_with_state_for_owner_test(
+            fixture.state.clone(),
+            crate::DaemonConfig::default(),
+        );
         for uri in [
             format!("/api/agents/{}/mcp-connections", fixture.agent),
             format!(
@@ -1141,18 +1144,19 @@ async fn credential_request(
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::util::ServiceExt;
+    let mut request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "127.0.0.1:8080")
+        .header("origin", origin)
+        .header("content-type", "application/json");
+    if origin == "http://localhost:4200" {
+        request = crate::routes::owner_test_support::authenticate(request);
+    }
     let response = timeout(
         Duration::from_secs(5),
-        app.clone().oneshot(
-            Request::builder()
-                .method(method)
-                .uri(uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", origin)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap(),
-        ),
+        app.clone()
+            .oneshot(request.body(Body::from(body.to_string())).unwrap()),
     )
     .await
     .expect("bounded owner request")
@@ -1181,7 +1185,10 @@ fn credential_uri(fixture: &Fixture, id: &str) -> String {
 async fn unconfigured_public_view_has_false_marker_without_private_reference() {
     let fixture = Fixture::new().await;
     let view = https_connection(&fixture).await;
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let uri = format!(
         "/api/agents/{}/mcp-connections/{}",
         fixture.agent, view.record.id
@@ -1201,7 +1208,10 @@ async fn owner_credential_set_replace_clear_is_versioned_secret_free_and_quiet()
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
     let view = https_connection(&fixture).await;
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let uri = credential_uri(&fixture, &view.record.id);
     for (expected, token) in [
         (1, "bearer-fixture-secret-one"),
@@ -1276,7 +1286,10 @@ async fn clear_absent_credential_is_a_checked_noop() {
     use axum::http::StatusCode;
     let fixture = Fixture::new().await;
     let view = https_connection(&fixture).await;
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let uri = credential_uri(&fixture, &view.record.id);
     let before = std::fs::read(fixture.folder.join("control.json")).unwrap();
     let (status, cache, body) = credential_request(
@@ -1320,7 +1333,10 @@ async fn credential_route_rejects_foreign_owner_invalid_body_and_oversize() {
         .unwrap()
         .state
         .id;
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let uri = credential_uri(&fixture, &view.record.id);
     let valid = json!({"expectedVersion": 1, "bearerToken": "bearer-fixture-secret"});
     let (status, _, _) =
@@ -1397,7 +1413,10 @@ async fn bearer_set_refuses_stdio_without_transport_dispatch() {
         )
         .await
         .unwrap();
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     for view in [stdio] {
         let (status, cache, _) = credential_request(
             &app,
@@ -1437,7 +1456,10 @@ async fn local_http_bearer_saves_restores_and_connects_with_bound_credentials() 
         .await
         .unwrap();
     assert_eq!(view.record.endpoint, "http://localhost:5173/mcp");
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let (status, cache, body) = credential_request(
         &app,
         "PUT",
@@ -1506,24 +1528,29 @@ async fn actual_owner_router_grants_one_exact_reviewed_alias() {
         .tools
         .is_none());
     fixture.state.write().await.mcp_manager = Some(fixture.manager.clone());
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let response = app
         .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri(format!(
-                    "/api/agents/{}/mcp-connections/{}/grants/{}",
-                    fixture.agent, reviewed.record.id, tool.alias
-                ))
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"expectedVersion":reviewed.record.version,
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/agents/{}/mcp-connections/{}/grants/{}",
+                        fixture.agent, reviewed.record.id, tool.alias
+                    ))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200")
+                    .header("content-type", "application/json"),
+            )
+            .body(Body::from(
+                json!({"expectedVersion":reviewed.record.version,
             "descriptorDigest":tool.descriptor.descriptor_digest,"granted":true})
-                    .to_string(),
-                ))
-                .unwrap(),
+                .to_string(),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -1662,6 +1689,9 @@ async fn grant_request(
         .header("content-type", "application/json");
     if let Some(origin) = origin {
         request = request.header("origin", origin);
+        if origin == "http://localhost:4200" {
+            request = crate::routes::owner_test_support::authenticate(request);
+        }
     }
     let response = app
         .clone()
@@ -1706,7 +1736,10 @@ async fn grant_http_rejects_unauthorized_stale_foreign_helper_and_non_strict_inp
         state.mcp_manager = Some(fixture.manager.clone());
         (foreign, helper)
     };
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let path = format!(
         "/api/agents/{}/mcp-connections/{}/grants/{}",
         fixture.agent, view.record.id, tool.alias
@@ -2157,7 +2190,10 @@ async fn current_version_generic_settings_revoke_remains_authoritative() {
     let first = fixture.grant(&first, true).await.unwrap().connection;
     let second = fixture.grant(&second, true).await.unwrap().connection;
     fixture.state.write().await.mcp_manager = Some(fixture.manager.clone());
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     assert_eq!(
         grant_request(
             &app,

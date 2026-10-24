@@ -21,12 +21,8 @@ export function AppEntry() {
     const id = /^#\/shared\/(share-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/.exec(hash)?.[1];
     return id ? <SharedConversation key={id} shareId={id} /> : <main><p>This shared conversation link is invalid.</p></main>;
   }
-  return <OwnerApiKeyGate><OwnerWorkspace /></OwnerApiKeyGate>;
-}
-
-function OwnerWorkspace() {
   ownerClaim ??= claimConsoleSession(window, (url, init) => globalThis.fetch(url, {
     ...init, headers: { ...ownerApiKeyHeaders(), ...Object.fromEntries(new Headers(init?.headers).entries()) },
   }));
-  return <App consoleClaim={ownerClaim} />;
+  return <OwnerApiKeyGate sessionClaim={ownerClaim}><App consoleClaim={ownerClaim} /></OwnerApiKeyGate>;
 }

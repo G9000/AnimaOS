@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
-import { daemonTestEnvironment } from './daemon-environment.js';
+import {
+  DAEMON_TEST_OWNER_TOKEN,
+  daemonTestEnvironment,
+} from './daemon-environment.js';
 
 it('isolates the daemon from inherited persistence, credentials, and network settings', () => {
   const source = {
@@ -26,6 +29,8 @@ it('isolates the daemon from inherited persistence, credentials, and network set
     ANIMAOS_WORKSPACE_ROOT: '/fixture',
     ANIMAOS_RS_PERSISTENCE_MODE: 'memory',
     ANIMAOS_RS_MEMORY_EMBEDDINGS: 'local',
+    ANIMA_LOCAL_ADMIN_TOKEN: DAEMON_TEST_OWNER_TOKEN,
   });
   expect(source.OPENAI_API_KEY).toBe('real-provider-key');
+  expect(source.ANIMA_LOCAL_ADMIN_TOKEN).toBe('real-owner-key');
 });

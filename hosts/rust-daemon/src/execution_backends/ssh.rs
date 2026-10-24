@@ -4,10 +4,11 @@ use super::{
     worker::{self, WorkerRequest, WorkerResponse},
     ExecutionReceipt, ExecutionRequest,
 };
+use crate::tools::command_binding::CommandBinding;
 use anima_core::CancelSignal;
 use anima_process::Custody;
 use process_wrap::tokio::CommandWrap;
-use std::{process::Stdio, time::Duration};
+use std::{process::Stdio, sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub(super) fn arguments(profile: &SshProfile) -> Vec<String> {
@@ -70,7 +71,26 @@ async fn exchange(
     call: &CancelSignal,
     timeout_ms: u64,
     scope: Option<&super::ExecutionScope>,
+    binding: &CommandBinding,
 ) -> Result<WorkerResponse, (String, bool, bool)> {
+    let mut request_bytes = Vec::new();
+    worker::write_frame(&mut request_bytes, request)
+        .map_err(|_| ("SSH request is too large".into(), true, false))?;
+    // Normal work requires current run authority before even starting SSH.
+    // Reconciliation has no revocable scope, but retains the approved image.
+    if let Some(scope) = scope {
+        scope
+            .revalidate()
+            .await
+            .map_err(|error| (error, true, false))?;
+    }
+    if call.is_cancelled() || cancel.is_some_and(CancelSignal::is_cancelled) {
+        return Err((
+            "Execution stopped before SSH transport launch".into(),
+            true,
+            false,
+        ));
+    }
     let (mut custody, mut native) = Custody::prepare(&profile.executable, arguments(profile));
     native
         .stdin(Stdio::piped())
@@ -79,6 +99,7 @@ async fn exchange(
     process::clean_environment(&mut native);
     let mut wrapped = CommandWrap::from(native);
     custody.wrap(&mut wrapped);
+    binding.revalidate().map_err(|error| (error, true, false))?;
     let mut child = wrapped.spawn().map_err(|_| {
         (
             "Configured SSH transport could not start".into(),
@@ -100,11 +121,8 @@ async fn exchange(
         .stderr()
         .take()
         .map(|stderr| tokio::spawn(process::capture(stderr)));
-    let mut request_bytes = Vec::new();
-    worker::write_frame(&mut request_bytes, request)
-        .map_err(|_| ("SSH request is too large".into(), false, false))?;
     if let Some(scope) = scope {
-        if let Err(error) = scope.revalidate().await {
+        if let Err(error) = scope.revalidate().await.and_then(|_| binding.revalidate()) {
             drop(stdin);
             let cleanup = custody.retire(&mut child).await;
             return Err((error, cleanup, false));
@@ -167,6 +185,7 @@ async fn exchange(
 }
 pub(super) struct PendingSsh {
     profile: SshProfile,
+    binding: Arc<CommandBinding>,
     key: String,
     transport_cleanup_confirmed: bool,
     pub receipt: ExecutionReceipt,
@@ -200,6 +219,7 @@ impl PendingSsh {
             &CancelSignal::new(),
             10_000,
             None,
+            &self.binding,
         )
         .await
         {
@@ -219,6 +239,7 @@ pub(super) async fn run(
     cancel: Option<&CancelSignal>,
     call: &CancelSignal,
     scope: &super::ExecutionScope,
+    binding: Arc<CommandBinding>,
 ) -> PendingSsh {
     let key = format!(
         "{}{}",
@@ -236,6 +257,7 @@ pub(super) async fn run(
     };
     let mut pending = PendingSsh {
         profile,
+        binding,
         key,
         transport_cleanup_confirmed: true,
         receipt: ExecutionReceipt::unknown(
@@ -252,6 +274,7 @@ pub(super) async fn run(
         call,
         request.timeout_ms.saturating_add(10_000),
         Some(scope),
+        &pending.binding,
     )
     .await
     {

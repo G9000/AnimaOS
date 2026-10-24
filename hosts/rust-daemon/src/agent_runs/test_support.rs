@@ -358,7 +358,13 @@ pub(crate) fn lead_config(name: &str) -> AgentConfig {
 pub(crate) async fn coordinator_with(
     model: Arc<dyn ModelAdapter>,
 ) -> (AgentRunCoordinator, String) {
-    let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(model)));
+    let mut fixture = DaemonState::with_model_adapter(model);
+    // This deterministic fixture explicitly exercises host execution. Production
+    // defaults remain isolated-only; security refusal tests construct their own state.
+    fixture.execution = Arc::new(
+        crate::execution_backends::ExecutionService::default().with_host_execution_for_test(),
+    );
+    let state = Arc::new(RwLock::new(fixture));
     let agent_id = state
         .write()
         .await
@@ -521,7 +527,11 @@ pub(crate) async fn approving_coordinator(
     policy: ApprovalPolicy,
     timeouts: ApprovalTimeouts,
 ) -> (AgentRunCoordinator, String) {
-    let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(model)));
+    let mut fixture = DaemonState::with_model_adapter(model);
+    fixture.execution = Arc::new(
+        crate::execution_backends::ExecutionService::default().with_host_execution_for_test(),
+    );
+    let state = Arc::new(RwLock::new(fixture));
     let agent_id = {
         let mut guard = state.write().await;
         let mut config = companion_config("companion");

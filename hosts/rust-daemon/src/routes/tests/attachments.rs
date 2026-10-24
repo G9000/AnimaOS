@@ -77,7 +77,7 @@ fn upload(path: &str, body: Vec<u8>, owner: bool) -> Request<Body> {
         .header("host", "127.0.0.1:8080")
         .header("content-type", "multipart/form-data; boundary=m9");
     if owner {
-        builder = builder.header("origin", OWNER);
+        builder = crate::routes::owner_test_support::authenticate(builder.header("origin", OWNER));
     }
     builder.body(Body::from(body)).unwrap()
 }
@@ -86,7 +86,7 @@ fn get(path: &str, owner: bool) -> Request<Body> {
         .uri(path)
         .header("host", "127.0.0.1:8080");
     if owner {
-        builder = builder.header("origin", OWNER);
+        builder = crate::routes::owner_test_support::authenticate(builder.header("origin", OWNER));
     }
     builder.body(Body::empty()).unwrap()
 }
@@ -192,21 +192,23 @@ async fn docx_selected_text_reaches_model_m54() {
         .unwrap()
         .to_owned();
 
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER)
-        .header("content-type", "application/json")
-        .header("idempotency-key", "m54-selected-docx")
-        .body(Body::from(
-            json!({
-                "text": "Read the selected document",
-                "attachmentIds": [selected_id],
-            })
-            .to_string(),
-        ))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER),
+    )
+    .header("content-type", "application/json")
+    .header("idempotency-key", "m54-selected-docx")
+    .body(Body::from(
+        json!({
+            "text": "Read the selected document",
+            "attachmentIds": [selected_id],
+        })
+        .to_string(),
+    ))
+    .unwrap();
     let accepted = app.clone().oneshot(request).await.unwrap();
     assert_eq!(accepted.status(), StatusCode::ACCEPTED);
     let run_id = json_body(accepted).await["run"]["id"]
@@ -332,21 +334,23 @@ async fn pdf_selected_text_reaches_model_m55() {
         .unwrap()
         .to_owned();
 
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER)
-        .header("content-type", "application/json")
-        .header("idempotency-key", "m55-selected-pdf")
-        .body(Body::from(
-            json!({
-                "text": "Read the selected PDF",
-                "attachmentIds": [selected_id],
-            })
-            .to_string(),
-        ))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER),
+    )
+    .header("content-type", "application/json")
+    .header("idempotency-key", "m55-selected-pdf")
+    .body(Body::from(
+        json!({
+            "text": "Read the selected PDF",
+            "attachmentIds": [selected_id],
+        })
+        .to_string(),
+    ))
+    .unwrap();
     let accepted = app.clone().oneshot(request).await.unwrap();
     assert_eq!(accepted.status(), StatusCode::ACCEPTED);
     let run_id = json_body(accepted).await["run"]["id"]
@@ -906,13 +910,15 @@ async fn attachment_upload_serializes_with_session_deletion_without_resurrection
         true,
     )));
     store.entered.acquire().await.unwrap().forget();
-    let delete = Request::builder()
-        .method("DELETE")
-        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER)
-        .body(Body::empty())
-        .unwrap();
+    let delete = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER),
+    )
+    .body(Body::empty())
+    .unwrap();
     let deleting = app.clone().oneshot(delete);
     tokio::pin!(deleting);
     assert!(futures::poll!(deleting.as_mut()).is_pending());

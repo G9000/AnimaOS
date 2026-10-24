@@ -709,14 +709,18 @@ async fn owner_routes_reject_cross_site_changes_and_unknown_fields() {
     let app = crate::routes::router(f.service.state.clone(), crate::app::DaemonConfig::default());
     let uri = format!("/api/agents/{}/memory-maintenance/policy", f.agent);
     let request = |origin: &str, body: &str| {
-        Request::builder()
+        let builder = Request::builder()
             .method("PATCH")
             .uri(&uri)
             .header("host", "127.0.0.1:8080")
             .header("origin", origin)
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_owned()))
-            .unwrap()
+            .header("content-type", "application/json");
+        let builder = if origin == "http://localhost:4200" {
+            crate::routes::owner_test_support::authenticate(builder)
+        } else {
+            builder
+        };
+        builder.body(Body::from(body.to_owned())).unwrap()
     };
     let denied = app
         .clone()

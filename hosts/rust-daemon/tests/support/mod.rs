@@ -18,6 +18,32 @@ pub(crate) fn test_app() -> Router {
     daemon_app()
 }
 
+pub(crate) async fn configured_loopback_test_app(
+    config: anima_daemon::DaemonConfig,
+) -> std::io::Result<Router> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    anima_daemon::app_with_configured_persistence_for_listener(config, &listener).await
+}
+
+/// Read the deterministic owner credential supplied by the Rust test runner.
+pub(crate) fn test_owner_token() -> String {
+    let token = std::env::var("ANIMAOS_TEST_OWNER_TOKEN")
+        .unwrap_or_else(|_| panic!("test runner must set ANIMAOS_TEST_OWNER_TOKEN"));
+    assert!(
+        !token.is_empty(),
+        "test runner must set a non-empty ANIMAOS_TEST_OWNER_TOKEN"
+    );
+    token
+}
+
+/// Attach owner credentials explicitly so raw requests still test rejection paths.
+pub(crate) fn owner_request(builder: axum::http::request::Builder) -> axum::http::request::Builder {
+    let token = test_owner_token();
+    builder
+        .header("host", "127.0.0.1:8080")
+        .header("authorization", format!("Bearer {token}"))
+}
+
 pub(crate) struct WorkspaceRootGuard {
     previous: Option<OsString>,
     path: PathBuf,
@@ -84,7 +110,7 @@ pub(crate) async fn send_json_request(
 ) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        owner_request(Request::builder())
             .method(method)
             .uri(uri)
             .header("content-type", "application/json")
@@ -101,7 +127,7 @@ pub(crate) async fn send_empty_request(
 ) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        owner_request(Request::builder())
             .method(method)
             .uri(uri)
             .body(Body::empty())

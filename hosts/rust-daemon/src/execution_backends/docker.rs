@@ -1,6 +1,7 @@
 use super::{config::DockerProfile, process, ExecutionReceipt, ExecutionRequest, ExecutionStatus};
+use crate::tools::command_binding::CommandBinding;
 use anima_core::CancelSignal;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 const OWNER_LABEL: &str = "anima.execution.owner";
 pub(super) fn create_arguments(
@@ -65,8 +66,13 @@ pub(super) async fn cli(
     timeout: Duration,
     cancel: Option<&CancelSignal>,
     call: &CancelSignal,
+    binding: &CommandBinding,
+    scope: Option<&super::ExecutionScope>,
 ) -> Result<process::ProcessOutput, String> {
-    process::run(
+    if let Some(scope) = scope {
+        scope.revalidate().await?;
+    }
+    process::run_bound(
         &profile.executable,
         args,
         None,
@@ -75,11 +81,13 @@ pub(super) async fn cli(
         cancel,
         call,
         false,
+        binding,
     )
     .await
 }
 pub(super) struct DockerOwnership {
     pub profile: DockerProfile,
+    binding: Arc<CommandBinding>,
     pub name: String,
     pub token: String,
     pub id: Option<String>,
@@ -108,6 +116,8 @@ impl DockerOwnership {
                 Duration::from_secs(10),
                 None,
                 &call,
+                &self.binding,
+                None,
             )
             .await;
             let Ok(found) = found else { return false };
@@ -136,24 +146,30 @@ impl DockerOwnership {
             Duration::from_secs(10),
             None,
             &call,
+            &self.binding,
+            None,
         )
         .await;
-        if let Ok(inspection) = inspect {
-            self.transport_cleanup_confirmed &= inspection.cleanup;
-            if inspection.exit_code == Some(0) && inspection.cleanup {
-                if inspection.stdout.trim() != self.token {
-                    return false;
-                }
-                let removal = cli(
-                    &self.profile,
-                    vec!["rm".into(), "--force".into(), id.clone()],
-                    Duration::from_secs(10),
-                    None,
-                    &call,
-                )
-                .await;
-                self.transport_cleanup_confirmed &= removal.as_ref().is_ok_and(|r| r.cleanup);
+        let Ok(inspection) = inspect else {
+            return false;
+        };
+        self.transport_cleanup_confirmed &= inspection.cleanup;
+        if inspection.exit_code == Some(0) && inspection.cleanup {
+            if inspection.stdout.trim() != self.token {
+                return false;
             }
+            let removal = cli(
+                &self.profile,
+                vec!["rm".into(), "--force".into(), id.clone()],
+                Duration::from_secs(10),
+                None,
+                &call,
+                &self.binding,
+                None,
+            )
+            .await;
+            let Ok(removal) = removal else { return false };
+            self.transport_cleanup_confirmed &= removal.cleanup;
         }
         let listed = cli(
             &self.profile,
@@ -168,11 +184,16 @@ impl DockerOwnership {
             Duration::from_secs(10),
             None,
             &call,
+            &self.binding,
+            None,
         )
         .await;
-        self.transport_cleanup_confirmed &= listed.as_ref().is_ok_and(|r| r.cleanup);
+        let Ok(listed) = listed else { return false };
+        self.transport_cleanup_confirmed &= listed.cleanup;
         self.transport_cleanup_confirmed
-            && matches!(listed,Ok(found) if found.exit_code==Some(0)&&found.cleanup&&found.stdout.trim().is_empty())
+            && listed.exit_code == Some(0)
+            && listed.cleanup
+            && listed.stdout.trim().is_empty()
     }
 }
 pub(super) async fn run(
@@ -182,6 +203,7 @@ pub(super) async fn run(
     cancel: Option<&CancelSignal>,
     call: &CancelSignal,
     scope: &super::ExecutionScope,
+    binding: Arc<CommandBinding>,
 ) -> Result<DockerOwnership, String> {
     let token = uuid::Uuid::new_v4().to_string();
     let name = format!("anima-execution-{id}");
@@ -200,11 +222,14 @@ pub(super) async fn run(
         Duration::from_secs(10),
         None,
         call,
+        &binding,
+        Some(scope),
     )
     .await?;
     if !existing.cleanup {
         return Ok(DockerOwnership {
             profile,
+            binding: binding.clone(),
             name,
             token,
             id: None,
@@ -235,11 +260,14 @@ pub(super) async fn run(
         Duration::from_secs(10),
         None,
         call,
+        &binding,
+        Some(scope),
     )
     .await?;
     if !image.cleanup {
         return Ok(DockerOwnership {
             profile,
+            binding: binding.clone(),
             name,
             token,
             id: None,
@@ -260,10 +288,19 @@ pub(super) async fn run(
     {
         return Err("Docker target requires an installed image without declared volumes; no command was dispatched".into());
     }
-    scope.revalidate().await?;
-    let created = cli(&profile, args, Duration::from_secs(20), cancel, call).await;
+    let created = cli(
+        &profile,
+        args,
+        Duration::from_secs(20),
+        cancel,
+        call,
+        &binding,
+        Some(scope),
+    )
+    .await;
     let mut owner = DockerOwnership {
         profile,
+        binding: binding.clone(),
         name,
         token,
         id: None,
@@ -290,9 +327,9 @@ pub(super) async fn run(
             return Ok(owner);
         }
         Err(error) => {
-            owner.transport_cleanup_confirmed = false;
-            owner.receipt.message = error;
-            return Ok(owner);
+            // The common launch boundary returns Err only before spawning.
+            // No container was created, so there is no unknown effect to adopt.
+            return Err(error);
         }
     }
     // Inspect label custody before starting exactly the ID returned by create.
@@ -308,15 +345,24 @@ pub(super) async fn run(
         Duration::from_secs(10),
         None,
         call,
+        &binding,
+        Some(scope),
     )
     .await;
-    owner.transport_cleanup_confirmed &= inspected.as_ref().is_ok_and(|r| r.cleanup);
-    if !matches!(inspected,Ok(ref p) if p.exit_code==Some(0)&&p.cleanup&&p.stdout.trim()==owner.token)
+    let inspected = match inspected {
+        Ok(inspected) => inspected,
+        Err(error) => {
+            // A refused launch created no additional process custody. Keep
+            // the earlier proof so independent cleanup can still reconcile.
+            owner.receipt.message = error;
+            return Ok(owner);
+        }
+    };
+    owner.transport_cleanup_confirmed &= inspected.cleanup;
+    if inspected.exit_code != Some(0)
+        || !inspected.cleanup
+        || inspected.stdout.trim() != owner.token
     {
-        return Ok(owner);
-    }
-    if let Err(error) = scope.revalidate().await {
-        owner.receipt.message = error;
         return Ok(owner);
     }
     let started = cli(
@@ -325,6 +371,8 @@ pub(super) async fn run(
         Duration::from_millis(request.timeout_ms),
         cancel,
         call,
+        &binding,
+        Some(scope),
     )
     .await;
     match started {
@@ -343,6 +391,8 @@ pub(super) async fn run(
                     Duration::from_secs(10),
                     None,
                     &CancelSignal::new(),
+                    &owner.binding,
+                    None,
                 )
                 .await;
                 if let Ok(waited) = waited {

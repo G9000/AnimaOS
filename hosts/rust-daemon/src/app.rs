@@ -173,6 +173,38 @@ pub(crate) fn app_with_state(state: SharedDaemonState, config: DaemonConfig) -> 
     app_with_runtime(state, config, runtime)
 }
 
+/// Builds the regular middleware with a known owner key for authenticated tests.
+#[cfg(test)]
+pub(crate) fn app_for_owner_test() -> Router {
+    app_with_config_for_owner_test(DaemonConfig::default())
+}
+
+#[cfg(test)]
+pub(crate) fn app_with_config_for_owner_test(config: DaemonConfig) -> Router {
+    let state = Arc::new(RwLock::new(configured_state(
+        &config,
+        Arc::new(DeterministicModelAdapter),
+    )));
+    app_with_state_for_owner_test(state, config)
+}
+
+#[cfg(test)]
+pub(crate) fn app_with_database_for_owner_test(db: Arc<dyn DatabaseAdapter>) -> Router {
+    let config = DaemonConfig::default();
+    let mut daemon = configured_state(&config, Arc::new(DeterministicModelAdapter));
+    daemon.set_database(db);
+    app_with_state_for_owner_test(Arc::new(RwLock::new(daemon)), config)
+}
+
+#[cfg(test)]
+pub(crate) fn app_with_state_for_owner_test(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+) -> Router {
+    let runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
+    app_with_runtime_for_owner_test(state, config, runtime)
+}
+
 #[cfg(test)]
 pub(crate) fn app_with_state_and_voice(
     state: SharedDaemonState,
@@ -181,7 +213,7 @@ pub(crate) fn app_with_state_and_voice(
 ) -> Router {
     let mut runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
     runtime.voice = voice;
-    app_with_runtime(state, config, runtime)
+    app_with_runtime_for_owner_test(state, config, runtime)
 }
 
 #[cfg(test)]
@@ -192,7 +224,7 @@ pub(crate) fn app_with_state_and_speech(
 ) -> Router {
     let mut runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
     runtime.speech = speech;
-    app_with_runtime(state, config, runtime)
+    app_with_runtime_for_owner_test(state, config, runtime)
 }
 
 /// The router `app_with_state` builds, over a prepared runtime.
@@ -215,7 +247,47 @@ fn app_with_runtime(
     )
 }
 
+/// Explicit owner key fixture; it shares production middleware and runtime services.
+#[cfg(test)]
+fn app_with_runtime_for_owner_test(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    runtime: DaemonRuntime,
+) -> Router {
+    // Construction-time state is uncontended, so this always succeeds in
+    // practice; calendar tools simply report "unconfigured" otherwise.
+    if let Ok(mut guard) = state.try_write() {
+        guard.set_calendar_manager(Some(runtime.calendar.clone()));
+        guard.drive_manager = Some(runtime.drive.weak());
+    }
+    router_with_runtime_for_owner_test(state, config, runtime, true)
+}
+
+/// Builds the deterministic embedding router with persistence and no trusted bind.
+/// Private owner routes remain unavailable because no listener proves locality.
+/// Use [`app_with_configured_persistence_for_listener`] when serving a bound listener.
 pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result<Router> {
+    app_with_configured_persistence_for_bind(config, false).await
+}
+
+/// Builds the persistent deterministic embedding router for an actual listener.
+///
+/// Owner locality comes from the listener's bound address. Private requests still
+/// require configured owner credentials and the usual host, origin, and CSRF checks.
+/// The caller must serve the returned router only on `listener`; serving it on a
+/// different listener would discard the binding evidence used by authorization.
+pub async fn app_with_configured_persistence_for_listener(
+    config: DaemonConfig,
+    listener: &TcpListener,
+) -> io::Result<Router> {
+    let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
+    app_with_configured_persistence_for_bind(config, bind_is_loopback).await
+}
+
+async fn app_with_configured_persistence_for_bind(
+    config: DaemonConfig,
+    bind_is_loopback: bool,
+) -> io::Result<Router> {
     let preflight = prepare_persistence(&config)?;
     let state = Arc::new(RwLock::new(configured_state(
         &config,
@@ -244,7 +316,7 @@ pub async fn app_with_configured_persistence(config: DaemonConfig) -> io::Result
     let drive = runtime.drive.clone();
     let scheduler = runtime.scheduler.clone();
     // Install synchronous services before any producer can contend for state.
-    let router = router_with_runtime(state, config, runtime, false);
+    let router = router_with_runtime(state, config, runtime, bind_is_loopback);
     turn_recovery
         .recover_main_chat_clears()
         .await
@@ -352,6 +424,7 @@ pub async fn serve_with(
         crate::runtime_model::transcription_service_from_env(),
         crate::runtime_model::speech_service_from_env(),
         ui,
+        router_with_runtime,
     ))
     .await
 }
@@ -374,6 +447,29 @@ pub(crate) async fn serve_with_state(
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
         None,
+        router_with_runtime,
+    )
+    .await
+}
+
+/// Signed browser fixtures explicitly choose the shared owner-test key.
+#[cfg(test)]
+pub(crate) async fn serve_with_state_for_owner_test(
+    listener: TcpListener,
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<()> {
+    serve_with_state_and_voice(
+        listener,
+        state,
+        config,
+        shutdown,
+        None,
+        crate::voice::VoiceService::disabled(),
+        crate::speech::SpeechService::disabled(),
+        None,
+        router_with_runtime_for_owner_test,
     )
     .await
 }
@@ -390,6 +486,7 @@ async fn serve_with_state_and_voice(
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     ui: Option<Router>,
+    build_router: fn(SharedDaemonState, DaemonConfig, DaemonRuntime, bool) -> Router,
 ) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
@@ -427,7 +524,7 @@ async fn serve_with_state_and_voice(
     let skills = crate::skills::SkillScanner::new(runtime.agent_runs.skills());
     let live = state.read().await.live.clone();
     let browser_state = state.clone();
-    let router = router_with_runtime(state, config, runtime, bind_is_loopback);
+    let router = build_router(state, config, runtime, bind_is_loopback);
     // Added last, so every daemon route wins over the host's UI.
     let router = match ui {
         Some(ui) => router.fallback_service(ui),
@@ -785,6 +882,41 @@ fn router_with_runtime(
     router
 }
 
+#[cfg(test)]
+fn router_with_runtime_for_owner_test(
+    state: SharedDaemonState,
+    config: DaemonConfig,
+    runtime: DaemonRuntime,
+    bind_is_loopback: bool,
+) -> Router {
+    let history = runtime.history;
+    let history_owner = crate::history::HistoryWorkerOwner::new();
+    let router = routes::router_with_all_integrations_for_owner_test(
+        state,
+        config,
+        runtime.run_limiter,
+        runtime.agent_runs,
+        runtime.connectors,
+        runtime.calendar,
+        runtime.mail,
+        runtime.oauth_apps,
+        runtime.scheduler,
+        runtime.jobs,
+        history_owner.clone(),
+        crate::logs::global(),
+        bind_is_loopback,
+        runtime.discord,
+        runtime.drive,
+        runtime.voice,
+        runtime.speech,
+        runtime.drain,
+    );
+    if tokio::runtime::Handle::try_current().is_ok() {
+        history.start(&history_owner);
+    }
+    router
+}
+
 /// Deterministic Telegram boundary paired with the deterministic model in the
 /// public test/embedding router helpers. Production `serve` always uses the
 /// fixed-origin `TelegramClient` and OS credential vault.
@@ -967,6 +1099,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_owner_fixture_preserves_the_authentication_boundary() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::util::ServiceExt;
+
+        let router = app_for_owner_test();
+        let forged = Request::builder()
+            .uri("/api/agents")
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            router.clone().oneshot(forged).await.unwrap().status(),
+            StatusCode::FORBIDDEN,
+        );
+        let signed =
+            crate::routes::owner_test_support::authenticate(Request::builder().uri("/api/agents"))
+                .body(Body::empty())
+                .unwrap();
+        assert_eq!(
+            router.oneshot(signed).await.unwrap().status(),
+            StatusCode::OK,
+        );
+    }
+
+    #[tokio::test]
     async fn deterministic_runtime_routes_mail_through_its_injected_boundary() {
         let state = Arc::new(RwLock::new(DaemonState::new()));
         let agent_id = state
@@ -1074,17 +1233,19 @@ mod tests {
             .state
             .id;
         let state = Arc::new(RwLock::new(daemon));
-        let router = app_with_state(Arc::clone(&state), DaemonConfig::default());
+        let router = app_with_state_for_owner_test(Arc::clone(&state), DaemonConfig::default());
 
         let response = router
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/api/agents/{agent_id}/run"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"text":"hello"}"#))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/agents/{agent_id}/run"))
+                        .header("content-type", "application/json"),
+                )
+                .body(Body::from(r#"{"text":"hello"}"#))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -1260,7 +1421,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (trigger, triggered) = tokio::sync::oneshot::channel::<()>();
-        let server = tokio::spawn(serve_with_state(
+        let server = tokio::spawn(serve_with_state_for_owner_test(
             listener,
             state,
             DaemonConfig::default(),
@@ -1270,8 +1431,20 @@ mod tests {
         ));
 
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let signed = crate::routes::owner_test_support::authenticate(
+            axum::http::Request::builder().header("host", address.to_string()),
+        )
+        .body(())
+        .unwrap();
+        let cookie = signed.headers().get("cookie").unwrap().to_str().unwrap();
+        let token = signed
+            .headers()
+            .get(crate::console_session::SESSION_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap();
         let request = format!(
-            "GET /api/agents/{agent_id}/events HTTP/1.1\r\nHost: {address}\r\nOrigin: http://localhost:4200\r\n\r\n"
+            "GET /api/agents/{agent_id}/events HTTP/1.1\r\nHost: {address}\r\nOrigin: http://localhost:4200\r\nCookie: {cookie}\r\nX-Anima-Console-Session: {token}\r\n\r\n"
         );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut received = String::new();

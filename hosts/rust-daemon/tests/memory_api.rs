@@ -1,3 +1,5 @@
+mod support;
+
 use anima_daemon::{app as daemon_app, app_with_config, DaemonConfig};
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
@@ -31,7 +33,7 @@ async fn send_json_request(
 ) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        support::owner_request(Request::builder())
             .method(method)
             .uri(uri)
             .header("content-type", "application/json")
@@ -44,7 +46,7 @@ async fn send_json_request(
 async fn send_empty_request(app: &Router, method: &str, uri: &str) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        support::owner_request(Request::builder())
             .method(method)
             .uri(uri)
             .body(Body::empty())

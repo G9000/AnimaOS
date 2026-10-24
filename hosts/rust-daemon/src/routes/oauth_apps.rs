@@ -379,7 +379,7 @@ mod tests {
             jobs,
             crate::history::HistoryWorkerOwner::new(),
             crate::logs::global(),
-            LocalOwnerPolicy::for_test(true, None),
+            LocalOwnerPolicy::for_test(true, Some(crate::routes::owner_test_support::ADMIN_TOKEN)),
             ApiKeyPolicy::for_test(None),
             crate::system::SupervisorRelay::unsupervised(),
         )
@@ -388,9 +388,11 @@ mod tests {
     fn request(method: &str, uri: &str, body: Body, authorized: bool) -> Request<Body> {
         let mut builder = Request::builder().method(method).uri(uri);
         if authorized {
-            builder = builder
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200");
+            builder = crate::routes::owner_test_support::authenticate(
+                builder
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            );
         }
         builder.body(body).unwrap()
     }
@@ -549,8 +551,8 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::FORBIDDEN);
             assert_eq!(
-                json(response).await["code"],
-                "connector_local_admin_required"
+                json(response).await["error"],
+                "local owner authorization required"
             );
         }
     }

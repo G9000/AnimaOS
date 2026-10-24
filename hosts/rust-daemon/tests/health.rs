@@ -11,7 +11,7 @@ use axum::http::{Request, StatusCode};
 use tokio::net::TcpListener;
 use tower::util::ServiceExt;
 
-use support::use_temp_workspace_root;
+use support::{test_owner_token, use_temp_workspace_root};
 
 struct EnvVarGuard {
     key: &'static str,
@@ -318,10 +318,11 @@ async fn serve_exposes_health_and_error_paths_over_real_http() {
         addr,
         b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
     );
-    let malformed_response = send_raw_http(
-        addr,
-        b"GET /api/memories/search?q=%GG HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    let owner_token = test_owner_token();
+    let malformed_request = format!(
+        "GET /api/memories/search?q=%GG HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {owner_token}\r\nConnection: close\r\n\r\n"
     );
+    let malformed_response = send_raw_http(addr, malformed_request.as_bytes());
 
     server.abort();
     let _ = server.await;

@@ -1255,6 +1255,14 @@ async fn m47_coding_unproven_effects_keep_started_and_block_later_dispatch() {
 #[tokio::test]
 async fn execution_current_journal_refuses_revoke_and_stop_after_waiting_for_authority_lock() {
     use crate::execution_backends::{ExecutionRequest, ExecutionScope, ExecutionService};
+    const COMMAND: &str =
+        "require('node:fs').writeFileSync('execution-authority.txt','should-never-run')";
+    let output = std::process::Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .expect("the controlled local fixture requires installed Node");
+    assert!(output.status.success(), "Node path discovery failed");
+    let executable = String::from_utf8(output.stdout).unwrap().trim().to_string();
     for stopped in [false, true] {
         let f = ActionFixture::new("execution-current-authority", true).await;
         {
@@ -1280,10 +1288,7 @@ async fn execution_current_journal_refuses_revoke_and_stop_after_waiting_for_aut
                     "targetId".into(),
                     DataValue::String("selected-local".into()),
                 ),
-                (
-                    "command".into(),
-                    DataValue::String("echo should-never-run>execution-authority.txt".into()),
-                ),
+                ("command".into(), DataValue::String(COMMAND.into())),
             ]),
         };
         f.journal.begin(&call).await.unwrap();
@@ -1302,31 +1307,55 @@ async fn execution_current_journal_refuses_revoke_and_stop_after_waiting_for_aut
                 })
             }),
         };
-        let executable = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-            .join("System32")
-            .join("cmd.exe");
-        let service=ExecutionService::from_json(&serde_json::json!({"version":1,"targets":[{"id":"selected-local","label":"Controlled local authority witness","backend":{"kind":"local","executable":executable,"arguments":["/d","/s","/c"],"workspaceRoot":f.root}}]}).to_string()).unwrap();
+        let service = ExecutionService::from_json(
+            &serde_json::json!({
+                "version": 1,
+                "allowHostExecution": true,
+                "targets": [{
+                    "id": "selected-local",
+                    "label": "Controlled local authority witness",
+                    "backend": {
+                        "kind": "local",
+                        "executable": executable,
+                        "arguments": ["-e"],
+                        "workspaceRoot": f.root,
+                    },
+                }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let request = ExecutionRequest {
+            target_id: "selected-local".into(),
+            command: COMMAND.into(),
+            cwd: ".".into(),
+            timeout_ms: 1000,
+        };
+        // Production captures identity before entering awaited authority checks.
+        // Keep that potentially large image read outside this lock-race fixture.
+        let binding = Arc::new(service.approval_binding(&request).unwrap());
         let mut guard = f.coordinator.state.write().await;
         let runner = service.clone();
-        let pending = tokio::spawn(async move {
+        let mut pending = tokio::spawn(async move {
             runner
-                .execute_scoped(
-                    ExecutionRequest {
-                        target_id: "selected-local".into(),
-                        command: "echo should-never-run>execution-authority.txt".into(),
-                        cwd: ".".into(),
-                        timeout_ms: 1000,
-                    },
-                    None,
-                    scope,
-                )
+                .execute_scoped_bound(request, None, scope, binding)
                 .await
         });
-        tokio::time::timeout(Duration::from_secs(2), entered.acquire())
-            .await
-            .unwrap()
-            .unwrap()
-            .forget();
+        // A fresh pre-dispatch image check precedes the callback. Debug builds
+        // hash installed Node images large enough to exceed the old two seconds.
+        tokio::select! {
+            permit = entered.acquire() => permit.unwrap().forget(),
+            result = &mut pending => panic!(
+                "execution finished before reaching the real awaited authority callback: {result:?}"
+            ),
+            _ = tokio::time::sleep(Duration::from_secs(30)) => panic!(
+                "execution did not reach the real awaited authority callback after bounded image verification"
+            ),
+        }
+        assert!(
+            !pending.is_finished(),
+            "the held state lock must keep execution awaiting current authority"
+        );
         if stopped {
             guard.runs.get_mut(&f.run.run_id).unwrap().stop =
                 Some(crate::runs::RunStopRequest { requested_at_ms: 1 });

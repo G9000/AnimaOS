@@ -10,11 +10,14 @@ use process_wrap::tokio::{ChildWrapper, CommandWrap};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::{oneshot, watch};
 
+use super::super::command_binding::CommandBinding;
 use super::super::workspace::{
     canonical_workspace_root, resolve_workspace_search_root, workspace_root_path,
 };
 use super::process_runtime;
-use super::shell::{resolve_shell_launcher, shell_env, truncate_shell_output};
+use super::shell::{
+    resolve_shell_launcher, revalidate_shell_launch, shell_env, truncate_shell_output,
+};
 
 const MAX_PROCESS_OUTPUT_LINES: usize = 2_000;
 pub(crate) const DEFAULT_MAX_BACKGROUND_PROCESSES: usize = 8;
@@ -218,6 +221,7 @@ pub(super) fn start_background_process(
     exit_notifier: Option<ExitNotifier>,
     watch: Option<(ExitNotifier, Vec<(String, WaitUntil)>)>,
     profile_owner: Option<crate::profile_owner::ProfileOwner>,
+    binding: Arc<CommandBinding>,
 ) -> Result<String, String> {
     let workspace_root = workspace_root_path("bg_start", configured_root)?;
     start_background_process_watching(
@@ -228,6 +232,8 @@ pub(super) fn start_background_process(
         exit_notifier,
         watch,
         profile_owner,
+        true,
+        Some(binding),
     )
 }
 
@@ -257,6 +263,8 @@ fn start_background_process_with_notifier(
         notifier,
         None,
         None,
+        false,
+        None,
     )
 }
 
@@ -268,6 +276,8 @@ fn start_background_process_watching(
     notifier: Option<ExitNotifier>,
     watch: Option<(ExitNotifier, Vec<(String, WaitUntil)>)>,
     profile_owner: Option<crate::profile_owner::ProfileOwner>,
+    require_strong: bool,
+    binding: Option<Arc<CommandBinding>>,
 ) -> Result<String, String> {
     if let Some(owner) = &profile_owner {
         owner.ensure_owned().map_err(|error| error.to_string())?;
@@ -289,9 +299,15 @@ fn start_background_process_watching(
         ));
     }
 
-    let (executable, mut args) = resolve_shell_launcher()?;
+    let (executable, flags) = resolve_shell_launcher()?;
+    let mut args = flags.clone();
     args.push(command.to_string());
     let (mut custody, mut native) = Custody::prepare(Path::new(&executable), args);
+    if require_strong {
+        custody
+            .require_strong()
+            .map_err(|error| error.to_string())?;
+    }
     native
         .current_dir(&cwd_path)
         .stdin(Stdio::null())
@@ -306,6 +322,7 @@ fn start_background_process_watching(
     let runtime = process_runtime();
     let mut child = {
         let _entered = runtime.enter();
+        revalidate_shell_launch(binding.as_deref(), &executable, &flags, command, &cwd_path)?;
         wrapped
             .spawn()
             .map_err(|error| format!("bg_start failed to start command: {error}"))?
@@ -535,15 +552,17 @@ pub(in super::super) fn match_note_text(
     line: &str,
     patterns: &[String],
 ) -> String {
+    let command = super::super::output_safety::sanitize_text(command);
+    let line = super::super::output_safety::sanitize_text(line);
     let patterns = patterns
         .iter()
-        .map(|pattern| format!("`{pattern}`"))
+        .map(|pattern| format!("`{}`", super::super::output_safety::sanitize_text(pattern)))
         .collect::<Vec<_>>()
         .join(", ");
     format!(
         "Background job {id} `{}` printed a line matching {patterns}, and is still running:\n{}\nUse bg_output(id: \"{id}\") to read its output.",
-        shorten(command, EXIT_NOTE_COMMAND_CHARS),
-        shorten(line, MATCH_NOTE_LINE_CHARS),
+        shorten(&command, EXIT_NOTE_COMMAND_CHARS),
+        shorten(&line, MATCH_NOTE_LINE_CHARS),
     )
 }
 
@@ -553,6 +572,7 @@ pub(in super::super) fn exit_note_text(
     exit_code: i32,
     elapsed: Duration,
 ) -> String {
+    let command = super::super::output_safety::sanitize_text(command);
     let command = if command.chars().count() > EXIT_NOTE_COMMAND_CHARS {
         let mut shortened = command
             .chars()
@@ -561,7 +581,7 @@ pub(in super::super) fn exit_note_text(
         shortened.push('…');
         shortened
     } else {
-        command.to_string()
+        command
     };
     format!(
         "Background job {id} `{command}` exited {exit_code} after {}. Use bg_output(id: \"{id}\") to read its output.",
@@ -1062,6 +1082,8 @@ mod tests {
                 ],
             )),
             None,
+            false,
+            None,
         )
         .unwrap();
         let note = tokio::time::timeout(Duration::from_secs(10), notes.recv())
@@ -1074,6 +1096,33 @@ mod tests {
         tokio::time::sleep(EXIT_NOTE_GRACE + Duration::from_millis(300)).await;
         assert!(notes.try_recv().is_err(), "a pattern fires once");
         stop_background_process(&manager, "bg-1").unwrap();
+    }
+
+    #[tokio::test]
+    async fn output_watch_notifier_receives_redacted_ready_output() {
+        let shared = Arc::new(ProcessShared::new());
+        let line = "READY api_key=synthetic-ready-secret";
+        shared.lock().unwrap().push(line.to_string());
+        let (sender, mut notes) = tokio::sync::mpsc::unbounded_channel();
+        *shared.watch.lock().unwrap() = Some(Watch {
+            id: "bg-fixture".into(),
+            command: "worker --token=synthetic-command-secret".into(),
+            notifier: Arc::new(move |note| {
+                let _ = sender.send(note);
+            }),
+            patterns: vec![("READY".into(), WaitUntil::Literal("READY".into()), false)],
+        });
+
+        watch_line(&shared, line, 0);
+
+        let note = tokio::time::timeout(Duration::from_secs(2), notes.recv())
+            .await
+            .expect("watch notification arrives")
+            .expect("notifier stays connected");
+        assert!(note.contains("READY"), "{note}");
+        assert!(note.contains("[redacted]"), "{note}");
+        assert!(!note.contains("synthetic-ready-secret"), "{note}");
+        assert!(!note.contains("synthetic-command-secret"), "{note}");
     }
 
     #[tokio::test]
@@ -1093,6 +1142,8 @@ mod tests {
                 }),
                 vec![("ready".to_string(), WaitUntil::Literal("ready".into()))],
             )),
+            None,
+            false,
             None,
         )
         .unwrap();
@@ -1118,6 +1169,32 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_secs(3725)), "1h2m5s");
     }
 
+    #[test]
+    fn notification_notes_redact_credentials_before_shortening_raw_output_and_commands() {
+        let credential = "sk-proj-AbCdEfGh12345678";
+        let match_note = match_note_text(
+            "bg-4",
+            "echo api_key=synthetic-command-secret",
+            &format!("process emitted {credential}"),
+            &["ready".into()],
+        );
+        assert!(!match_note.contains(credential), "{match_note}");
+        assert!(
+            !match_note.contains("synthetic-command-secret"),
+            "{match_note}"
+        );
+        assert!(match_note.contains("[redacted]"), "{match_note}");
+
+        let exit_note = exit_note_text(
+            "bg-5",
+            &format!("echo {credential}"),
+            0,
+            Duration::from_secs(1),
+        );
+        assert!(!exit_note.contains(credential), "{exit_note}");
+        assert!(exit_note.contains("[redacted]"), "{exit_note}");
+    }
+
     #[tokio::test]
     async fn profile_owner_background_supervisor_retains_lease_until_process_retirement() {
         let root = workspace();
@@ -1132,6 +1209,8 @@ mod tests {
             None,
             None,
             Some(owner.clone()),
+            false,
+            None,
         )
         .unwrap();
         drop(owner);

@@ -73,6 +73,9 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("alpha.json"), b"{\"value\":7}").unwrap();
         let mut state = with_workspace(DaemonState::new(), root.path());
+        state.execution = Arc::new(
+            crate::execution_backends::ExecutionService::default().with_host_execution_for_test(),
+        );
         let mut config = companion_config("RPC owner");
         config.tools = Some(
             ToolRegistry::new()

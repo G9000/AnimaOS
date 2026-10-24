@@ -8,12 +8,21 @@ use std::sync::Mutex;
 
 pub(super) struct CellLauncher {
     pending: Mutex<Option<CellResources>>,
+    binding: Option<std::sync::Arc<crate::tools::command_binding::CommandBinding>>,
 }
 impl CellLauncher {
     pub(super) fn new(cell: CellResources) -> Self {
         Self {
             pending: Mutex::new(Some(cell)),
+            binding: None,
         }
+    }
+    pub(super) fn with_binding(
+        mut self,
+        binding: std::sync::Arc<crate::tools::command_binding::CommandBinding>,
+    ) -> Self {
+        self.binding = Some(binding);
+        self
     }
     pub(super) fn retire_pending(&self) -> Option<CellResources> {
         self.pending
@@ -24,7 +33,9 @@ impl CellLauncher {
     #[cfg(windows)]
     fn prepare_windows(&self, spec: LaunchSpec) -> Result<physical::WindowsWorker, WorkerFailure> {
         let cell = self.retire_pending().ok_or(WorkerFailure::Unavailable)?;
-        Ok(physical::WindowsWorker::new(spec, cell))
+        let mut worker = physical::WindowsWorker::new(spec, cell);
+        worker.binding = self.binding.clone();
+        Ok(worker)
     }
 }
 impl Drop for CellLauncher {
@@ -62,6 +73,7 @@ mod physical {
     use tokio::process::Command;
 
     pub(super) struct WindowsWorker {
+        pub(super) binding: Option<std::sync::Arc<crate::tools::command_binding::CommandBinding>>,
         command: Option<CommandWrap>,
         child: Option<Box<dyn ChildWrapper>>,
         cell: CellResources,
@@ -92,6 +104,7 @@ mod physical {
             flags.0 .0 = 0x08000000; // CREATE_NO_WINDOW; JobObject adds suspended assignment.
             command.wrap(flags).wrap(JobObject);
             Self {
+                binding: None,
                 command: Some(command),
                 child: None,
                 cell,
@@ -102,6 +115,9 @@ mod physical {
     #[async_trait]
     impl OwnedWorker for WindowsWorker {
         async fn start(&mut self) -> Result<(), WorkerFailure> {
+            if let Some(binding) = &self.binding {
+                binding.revalidate().map_err(|_| WorkerFailure::Launch)?;
+            }
             let mut command = self.command.take().ok_or(WorkerFailure::Launch)?;
             self.child = Some(command.spawn().map_err(|_| WorkerFailure::Launch)?);
             let child = self.child.as_ref().unwrap();

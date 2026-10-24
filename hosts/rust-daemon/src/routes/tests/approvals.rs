@@ -20,11 +20,13 @@ const OWNER_ORIGIN: &str = "http://localhost:4200";
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
-    let builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     match body {
         Some(body) => builder
             .header("content-type", "application/json")
@@ -103,6 +105,45 @@ fn ids(body: &Value) -> Vec<String> {
         .iter()
         .map(|approval| approval["id"].as_str().unwrap().to_string())
         .collect()
+}
+
+#[tokio::test]
+async fn forged_allowed_origin_cannot_control_owner_approvals() {
+    let (state, agent) = daemon();
+    let app = router(state, DaemonConfig::default());
+    for (method, uri, body) in [
+        ("GET", "/api/agents".to_string(), None),
+        (
+            "POST",
+            "/api/agents".to_string(),
+            Some(json!({"name":"forged","model":"gpt-5.4"})),
+        ),
+        ("GET", "/api/approvals".to_string(), None),
+        (
+            "POST",
+            "/api/approvals/apr_1/decision".to_string(),
+            Some(json!({"decision":"allow_once","revision":1})),
+        ),
+        (
+            "PUT",
+            format!("/api/agents/{agent}/approval-policy"),
+            Some(json!({"write":"allow","exec":"allow","network":"allow","delegate":"allow"})),
+        ),
+    ] {
+        let request = Request::builder()
+            .method(method)
+            .uri(&uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN)
+            .header("content-type", "application/json")
+            .body(
+                body.map(|v| Body::from(v.to_string()))
+                    .unwrap_or_else(Body::empty),
+            )
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+    }
 }
 
 #[tokio::test]

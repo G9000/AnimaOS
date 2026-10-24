@@ -6,17 +6,25 @@ import { useDaemonImage } from './useDaemonImage';
 const createObjectURL = vi.fn(() => 'blob:daemon-avatar');
 const revokeObjectURL = vi.fn();
 beforeEach(() => {
-  clearOwnerApiKey(); createObjectURL.mockClear(); revokeObjectURL.mockClear();
+  localStorage.clear(); clearOwnerApiKey(); createObjectURL.mockClear(); revokeObjectURL.mockClear();
   Object.defineProperties(URL, { createObjectURL: { configurable: true, value: createObjectURL }, revokeObjectURL: { configurable: true, value: revokeObjectURL } });
 });
 afterEach(() => { clearOwnerApiKey(); vi.unstubAllGlobals(); });
 
 describe('daemon image authentication', () => {
-  it('preserves the direct URL and starts no fetch without an owner key', () => {
+  it('does not expose an unauthenticated private image URL', () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const { result } = renderHook(() => useDaemonImage('/api/workspace/avatar?v=0'));
-    expect(result.current.src).toBe('/api/workspace/avatar?v=0');
+    expect(result.current.src).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it('loads a private image with the signed console session header', async () => {
+    localStorage.setItem('anima.consoleSession', 'signed-header');
+    const fetch = vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetch);
+    const { result } = renderHook(() => useDaemonImage('/api/workspace/avatar'));
+    await waitFor(() => expect(result.current.src).toBe('blob:daemon-avatar'));
+    expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { 'x-anima-console-session': 'signed-header' }, credentials: 'same-origin', referrerPolicy: 'origin' });
   });
   it('loads a bounded image with header authentication and revokes it on unmount', async () => {
     setOwnerApiKey('owner-secret');

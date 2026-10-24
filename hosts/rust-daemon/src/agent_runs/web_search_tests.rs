@@ -243,12 +243,14 @@ async fn owner_messages_result(
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         app.oneshot(
-            Request::builder()
-                .uri(format!("/api/agents/{agent}/sessions/chat%3Am83/messages"))
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri(format!("/api/agents/{agent}/sessions/chat%3Am83/messages"))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         ),
     )
     .await

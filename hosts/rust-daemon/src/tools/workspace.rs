@@ -104,6 +104,9 @@ where
             Err(_) => continue,
         };
         let path = entry.path();
+        if super::credential_paths::sensitive(&path) {
+            continue;
+        }
 
         if file_type.is_dir() {
             walk_search_tree(&path, on_file)?;
@@ -154,6 +157,7 @@ pub(crate) fn resolve_workspace_write_path(
     tool_name: &str,
 ) -> Result<PathBuf, String> {
     reject_disallowed_components(file_path, tool_name)?;
+    super::credential_paths::check_path(workspace_root, file_path)?;
     let canonical_root = canonical_workspace_root(workspace_root, tool_name)?;
     let resolved = resolve_input_path(&canonical_root, file_path);
     reject_workspace_root_target(&canonical_root, &resolved, tool_name, file_path)?;

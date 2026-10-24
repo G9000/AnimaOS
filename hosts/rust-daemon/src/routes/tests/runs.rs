@@ -56,17 +56,19 @@ async fn learning_review_of_a_completed_own_task_is_admitted() {
         DataValue::String(run.id.clone()),
     )]));
     history.store().upsert_messages(&[reply]).await.unwrap();
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!(
-            "/api/agents/{agent}/runs/{}/learning-review",
-            run.id
-        ))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER_ORIGIN)
-        .header("content-type", "application/json")
-        .body(Body::from("{}"))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/agents/{agent}/runs/{}/learning-review",
+                run.id
+            ))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN),
+    )
+    .header("content-type", "application/json")
+    .body(Body::from("{}"))
+    .unwrap();
     let response = app.oneshot(request).await.unwrap();
     let status = response.status();
     let _ = std::fs::remove_file(path);
@@ -86,15 +88,17 @@ fn start_request(
     key: Option<&str>,
     body: serde_json::Value,
 ) -> Request<Body> {
-    let mut builder = Request::builder()
-        .method("POST")
-        .uri(format!(
-            "/api/agents/{agent}/sessions/{}/runs",
-            session.replace(':', "%3A")
-        ))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER_ORIGIN)
-        .header("content-type", "application/json");
+    let mut builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/agents/{agent}/sessions/{}/runs",
+                session.replace(':', "%3A")
+            ))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN),
+    )
+    .header("content-type", "application/json");
     if let Some(key) = key {
         builder = builder.header("idempotency-key", key);
     }
@@ -102,13 +106,15 @@ fn start_request(
 }
 
 fn get_request(uri: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 async fn json_body(response: axum::response::Response) -> serde_json::Value {
@@ -1528,13 +1534,15 @@ fn the_openapi_document_lists_the_session_run_routes_under_runs() {
 }
 
 fn stop_request(agent: &str, run_id: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/runs/{run_id}/stop"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/runs/{run_id}/stop"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 async fn accept_message(app: &axum::Router, agent: &str, key: &str) -> String {
@@ -2089,16 +2097,18 @@ async fn a_run_carries_its_idempotency_key() {
 }
 
 fn compact_request(agent: &str, session: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(format!(
-            "/api/agents/{agent}/sessions/{}/compact",
-            session.replace(':', "%3A")
-        ))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/agents/{agent}/sessions/{}/compact",
+                session.replace(':', "%3A")
+            ))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 /// Appends the user/assistant turns `turns` (`u<n>`, `a<n>`) to `room`'s
@@ -2374,13 +2384,15 @@ async fn a_manual_compaction_past_its_deadline_is_recorded_and_frees_the_session
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(format!("/api/agents/{agent}/sessions/chat%3Aplans"))
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", OWNER_ORIGIN)
-                    .body(Body::empty())
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri(format!("/api/agents/{agent}/sessions/chat%3Aplans"))
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", OWNER_ORIGIN),
+                )
+                .body(Body::empty())
+                .unwrap(),
             )
             .await
             .unwrap();

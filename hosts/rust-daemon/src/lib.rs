@@ -72,7 +72,8 @@ pub use runtime_model::provider_env_key_names;
 pub use app::entry::{bind_addr_from_env, config_from_env, run_from_env, ServeOptions};
 pub use app::persistence::runtime_memory_store_label;
 pub use app::{
-    app, app_with_config, app_with_configured_persistence, app_with_database, serve, serve_with,
+    app, app_with_config, app_with_configured_persistence,
+    app_with_configured_persistence_for_listener, app_with_database, serve, serve_with,
     DaemonConfig, PersistenceMode,
 };
 mod chatgpt_auth;

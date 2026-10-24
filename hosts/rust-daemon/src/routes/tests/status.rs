@@ -25,7 +25,7 @@ fn get(uri: &str, origin: Option<&str>) -> Request<Body> {
         .uri(uri)
         .header("host", "127.0.0.1:8080");
     if let Some(origin) = origin {
-        builder = builder.header("origin", origin);
+        builder = crate::routes::owner_test_support::authenticate(builder.header("origin", origin));
     }
     builder.body(Body::empty()).unwrap()
 }

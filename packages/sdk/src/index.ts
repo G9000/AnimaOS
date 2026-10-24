@@ -559,3 +559,5 @@ export * from './chat-capabilities.js';
 export * from './chat-models.js';
 export * from './results.js';
 export * from './conversation-shares.js';
+
+export * from './console-session.js';

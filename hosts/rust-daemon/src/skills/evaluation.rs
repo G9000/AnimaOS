@@ -1144,16 +1144,23 @@ mod tests {
         use axum::{body::Body, http::Request};
         use tower::ServiceExt;
         let (state, skills, model, agent, _) = evaluated_daemon("evaluation-routes").await;
-        let app = crate::app::app_with_state(state.clone(), crate::app::DaemonConfig::default());
+        let app = crate::app::app_with_state_for_owner_test(
+            state.clone(),
+            crate::app::DaemonConfig::default(),
+        );
         let request = |method: &str, path: &str, origin: &str, body: serde_json::Value| {
-            Request::builder()
+            let builder = Request::builder()
                 .method(method)
                 .uri(path)
                 .header("host", "127.0.0.1:8080")
                 .header("origin", origin)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap()
+                .header("content-type", "application/json");
+            let builder = if origin == "http://localhost:4200" {
+                crate::routes::owner_test_support::authenticate(builder)
+            } else {
+                builder
+            };
+            builder.body(Body::from(body.to_string())).unwrap()
         };
         for (method, path) in [
             ("GET", "/api/skills/notes/evaluation-suite"),

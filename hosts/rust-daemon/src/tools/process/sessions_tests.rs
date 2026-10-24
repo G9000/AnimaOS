@@ -46,7 +46,10 @@ fn harness(agent_id: &str) -> Harness {
         new_shared_process_manager_with_limit(DEFAULT_MAX_BACKGROUND_PROCESSES),
         Some(root.path().to_path_buf()),
         None,
-    );
+    )
+    .with_execution_service(Arc::new(
+        crate::execution_backends::ExecutionService::default().with_host_execution_for_test(),
+    ));
     let mut config = crate::agent_runs::test_support::companion_config("sessions");
     config.tools = Some(ToolRegistry::new().resolve_descriptors(TOOLS).unwrap());
     let agent = AgentState {
@@ -111,98 +114,65 @@ fn data(value: Value) -> DataValue {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_app_is_typed_into_read_and_stopped_by_its_own_agent_only() {
-    let owner = harness("sessions-app-owner");
-    let started = owner
-        .call(
-            "app_start",
-            json!({"command": "printf 'name? '; read name; echo \"hello $name\"; sleep 30"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(started["kind"], "app_session");
-    assert_eq!(started["status"], "running");
-    let id = started["id"].as_str().unwrap().to_string();
-    let typed = owner
-        .call(
-            "app_send",
-            json!({"id": id, "text": "anima", "keys": ["Enter"]}),
-        )
-        .await
-        .unwrap();
-    let screen = typed["screen"]["rows"].to_string();
-    assert!(screen.contains("hello anima"), "{screen}");
-    let read = owner
-        .call(
-            "app_read",
-            json!({"id": id, "until": "/hel+o anima/", "wait_ms": 5000}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(read["outcome"], "matched");
-
-    let stranger = harness("sessions-app-stranger");
-    let refused = stranger
-        .call("app_read", json!({"id": id}))
-        .await
-        .unwrap_err();
-    assert!(refused.contains("no open app"), "{refused}");
-    assert!(
-        stranger.call("app_list", json!({})).await.unwrap()["sessions"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-
-    let stopped = owner.call("app_stop", json!({"id": id})).await.unwrap();
-    assert_eq!(stopped["status"], "stopped");
-    assert_eq!(stopped["treeGone"], true);
-    let sessions = owner.call("app_list", json!({})).await.unwrap();
-    assert_eq!(sessions["sessions"][0]["status"], "stopped");
+fn assert_unsupported_containment(error: &str) {
+    assert!(error.contains("containment is unavailable"), "{error}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_agent_has_at_most_four_open_sessions() {
-    let owner = harness("sessions-capacity");
-    let mut ids = Vec::new();
-    for _ in 0..4 {
-        let started = owner
-            .call("app_start", json!({"command": "sleep 30"}))
-            .await
-            .unwrap();
-        ids.push(started["id"].as_str().unwrap().to_string());
-    }
+async fn app_start_refuses_unsupported_containment_before_launching() {
+    let owner = harness("sessions-app-owner");
+    let marker = owner._root.path().join("app-started");
+    std::fs::write(
+        owner._root.path().join("launch.js"),
+        "require('fs').writeFileSync('app-started', 'launched');",
+    )
+    .unwrap();
     let refused = owner
-        .call("app_start", json!({"command": "sleep 30"}))
+        .call("app_start", json!({"command": "node launch.js"}))
         .await
         .unwrap_err();
-    assert!(refused.contains("at most 4"), "{refused}");
-    owner.call("app_stop", json!({"id": ids[0]})).await.unwrap();
-    let again = owner
-        .call("app_start", json!({"command": "sleep 30"}))
-        .await
-        .unwrap();
-    ids.push(again["id"].as_str().unwrap().to_string());
-    for id in &ids[1..] {
-        owner.call("app_stop", json!({"id": id})).await.unwrap();
+    assert_unsupported_containment(&refused);
+    assert!(!marker.exists(), "the command must not run before refusal");
+    assert!(owner.call("app_list", json!({})).await.unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_app_containment_does_not_consume_session_capacity() {
+    let owner = harness("sessions-capacity");
+    std::fs::write(
+        owner._root.path().join("launch.js"),
+        "require('fs').writeFileSync('app-started', 'launched');",
+    )
+    .unwrap();
+    for _ in 0..5 {
+        let refused = owner
+            .call("app_start", json!({"command": "node launch.js"}))
+            .await
+            .unwrap_err();
+        assert_unsupported_containment(&refused);
     }
+    assert!(owner.call("app_list", json!({})).await.unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!owner._root.path().join("app-started").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unknown_keys_are_refused_with_the_names_that_work() {
     let owner = harness("sessions-keys");
-    let started = owner
-        .call("app_start", json!({"command": "cat"}))
-        .await
-        .unwrap();
-    let id = started["id"].as_str().unwrap();
     let refused = owner
-        .call("app_send", json!({"id": id, "keys": ["F13"]}))
+        .call("app_send", json!({"id": "missing-app", "keys": ["F13"]}))
         .await
         .unwrap_err();
     assert!(refused.contains("Ctrl+C"), "{refused}");
-    owner.call("app_stop", json!({"id": id})).await.unwrap();
+    assert!(owner.call("app_list", json!({})).await.unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 /// A minimal ACP agent: it asks to edit a file, writes it only when allowed,
@@ -245,7 +215,7 @@ async fn a_coding_agents_edit_request_is_judged_and_never_allowed_always() {
     if std::process::Command::new("python3")
         .arg("--version")
         .output()
-        .is_err()
+        .map_or(true, |output| !output.status.success())
     {
         return;
     }
@@ -254,8 +224,18 @@ async fn a_coding_agents_edit_request_is_judged_and_never_allowed_always() {
     std::fs::write(&script, FAKE_ACP).unwrap();
     let started = owner
         .call("acp_start", json!({"command": "python3 fake_acp.py"}))
-        .await
-        .unwrap();
+        .await;
+    if cfg!(unix) {
+        let refused = started.unwrap_err();
+        assert_unsupported_containment(&refused);
+        assert!(!owner._root.path().join("notes.txt").exists());
+        assert!(owner.call("acp_list", json!({})).await.unwrap()["sessions"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        return;
+    }
+    let started = started.unwrap();
     assert_eq!(started["kind"], "acp_session");
     assert_eq!(started["agent"]["name"], "Fake Coder");
     assert_eq!(started["status"], "idle");

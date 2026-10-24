@@ -3,7 +3,9 @@
 //! tree is gone:
 //! - Windows: a Job Object; no descendant can leave it.
 //! - Linux with a delegated cgroup v2: a fresh process group inside a private
-//!   leaf cgroup; `cgroup.kill` also reaches descendants that left the group.
+//!   leaf cgroup; `cgroup.kill` reaches descendants that left the process group.
+//!   The current same-identity setup permits cgroup migration, so hardened
+//!   launches refuse it; it remains useful for cooperative embedding callers.
 //! - Other Unix (macOS, Linux without delegation): a fresh process group. A
 //!   descendant that calls `setsid` leaves it and is not contained.
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
@@ -16,8 +18,8 @@ use std::time::Duration;
 #[cfg(unix)]
 const RETIRE_LIMIT: Duration = Duration::from_secs(60);
 
-/// How a launched program's tree is contained. Only a Job Object or cgroup
-/// also covers descendants that leave their process group.
+/// How a launched program's tree is contained. Use `is_strong` before claiming
+/// complete custody: the current same-identity cgroup can be escaped by migration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Containment {
@@ -29,6 +31,16 @@ pub enum Containment {
     ProcessTree,
 }
 
+impl Containment {
+    /// Whether descendants remain owned after detaching from their parent or
+    /// process group. This is process lifetime custody, not OS access isolation.
+    pub fn is_strong(self) -> bool {
+        // Same-identity delegated cgroups allow a child to migrate to a writable
+        // parent cgroup.procs. They provide cooperative custody, not this proof.
+        matches!(self, Self::JobObject)
+    }
+}
+
 pub struct Custody {
     #[cfg(unix)]
     pgid: Option<nix::unistd::Pid>,
@@ -37,6 +49,15 @@ pub struct Custody {
 }
 
 impl Custody {
+    /// Fail before launch if this host cannot keep detached descendants owned.
+    pub fn require_strong(&self) -> std::io::Result<()> {
+        if self.containment().is_strong() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::Unsupported,
+                "Complete process containment is unavailable; the current host requires a Windows Job Object. Use an isolated execution target; no program was started"))
+        }
+    }
     /// Builds the containment and the command that runs `executable` inside it.
     /// Callers add cwd, environment and stdio, then [`Custody::wrap`] it.
     pub fn prepare(executable: &Path, args: Vec<String>) -> (Self, tokio::process::Command) {

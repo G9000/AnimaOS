@@ -96,9 +96,12 @@ fn run(
             }),
         };
         let request:ExecutionRequest=match parse_request(call.args){Ok(request)=>request,Err(_)=>return TaskResult::error("execution_run accepts only targetId, command, cwd and timeoutMs with their declared types",0)};
+        let Some(binding) = context.command_binding.clone() else {
+            return TaskResult::error("Execution requires a captured approval identity", 0);
+        };
         match context
             .execution
-            .execute_scoped(request, context.cancel.clone(), scope)
+            .execute_scoped_bound(request, context.cancel.clone(), scope, binding)
             .await
         {
             Ok(receipt) => {
@@ -118,7 +121,7 @@ fn run(
         }
     })
 }
-fn parse_request(args: BTreeMap<String, DataValue>) -> Result<ExecutionRequest, String> {
+pub(super) fn parse_request(args: BTreeMap<String, DataValue>) -> Result<ExecutionRequest, String> {
     let timeout = match args.get("timeoutMs") {
         Some(DataValue::Number(value))
             if value.is_finite()

@@ -8,11 +8,13 @@ use serde_json::{json, Value};
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
-    let builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     match body {
         Some(body) => builder
             .header("content-type", "application/json")

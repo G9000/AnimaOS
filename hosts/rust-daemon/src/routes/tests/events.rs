@@ -8,13 +8,15 @@ use http_body_util::BodyExt;
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
 fn events_request(agent_id: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(format!("/api/agents/{agent_id}/events"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/agents/{agent_id}/events"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 /// One parsed SSE block.
@@ -545,11 +547,13 @@ async fn a_lagging_stream_is_told_to_resync_and_keeps_going() {
 }
 
 fn owner_request(method: &str, uri: &str, body: Option<serde_json::Value>) -> Request<Body> {
-    let builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", OWNER_ORIGIN);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", OWNER_ORIGIN),
+    );
     match body {
         Some(body) => builder
             .header("content-type", "application/json")

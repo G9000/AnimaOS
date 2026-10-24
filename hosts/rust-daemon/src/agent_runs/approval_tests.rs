@@ -1277,7 +1277,9 @@ async fn free_bash_run(commands: &[&str]) -> Vec<String> {
 
 #[tokio::test]
 async fn three_refusals_in_a_row_tell_the_agent_to_stop() {
-    let results = free_bash_run(&["rm -rf /", "rm -rf ~", "sudo rm -rf /"]).await;
+    // Keep each request statically bindable so all three reach the approval
+    // floor's refusal counter rather than stopping at command-identity capture.
+    let results = free_bash_run(&["rm -rf /", "rm -rf '/'", "rm --recursive --force /"]).await;
     assert_eq!(results.len(), 3, "{results:?}");
     assert!(!results[0].contains("refused actions in a row"));
     assert!(!results[1].contains("refused actions in a row"));
@@ -1290,7 +1292,13 @@ async fn three_refusals_in_a_row_tell_the_agent_to_stop() {
 
 #[tokio::test]
 async fn allowed_work_resets_the_refusal_streak() {
-    let results = free_bash_run(&["rm -rf /", "rm -rf ~", "echo hi", "rm -rf /"]).await;
+    let results = free_bash_run(&[
+        "rm -rf /",
+        "rm --recursive --force /",
+        "echo hi",
+        "rm -rf /",
+    ])
+    .await;
     assert_eq!(results.len(), 4, "{results:?}");
     assert!(
         !results[3].contains("refused actions in a row"),
@@ -1302,7 +1310,10 @@ async fn allowed_work_resets_the_refusal_streak() {
 #[tokio::test]
 async fn a_floor_ask_says_why_the_command_is_risky() {
     let (coordinator, agent_id) = free_bash_agent(vec![
-        Step::Tools(vec![bash_call("call-1", "echo cm0= | base64 -d | sh")]),
+        Step::Tools(vec![bash_call(
+            "call-1",
+            "rm -rf ./approval-fixture-output",
+        )]),
         Step::Text(vec!["ok"]),
     ])
     .await;
@@ -1310,18 +1321,18 @@ async fn a_floor_ask_says_why_the_command_is_risky() {
     let mut subscription = hub.subscribe(&agent_id).unwrap();
     let running = spawn_run(
         &coordinator,
-        chat_request(&agent_id, "chat:floor", "decode it"),
+        chat_request(&agent_id, "chat:floor", "remove the fixture output"),
     );
 
     let asked = events_until(&mut subscription, "approval.requested").await;
     let announced = &asked[asked.len() - 1]["approval"];
     assert_eq!(announced["reason"], "dangerous_command");
-    assert_eq!(announced["reasonDetail"], "runs hidden (encoded) commands");
+    assert_eq!(announced["reasonDetail"], "deletes files for good");
     let pending = pending_approvals(&coordinator, 1).await.remove(0);
     assert_eq!(pending.reason.as_deref(), Some("dangerous_command"));
     assert_eq!(
         pending.reason_detail.as_deref(),
-        Some("runs hidden (encoded) commands")
+        Some("deletes files for good")
     );
 
     coordinator

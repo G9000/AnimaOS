@@ -410,11 +410,13 @@ impl Drop for Fixture {
 }
 
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
-    let builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     match body {
         Some(body) => builder
             .header("content-type", "application/json")
@@ -835,7 +837,7 @@ async fn owner_cancellation_and_strict_empty_body_leave_the_source_task_unchange
 }
 
 #[tokio::test]
-async fn read_only_referrer_authorization_never_authorizes_learning_mutations() {
+async fn referrer_metadata_never_authenticates_learning_reads_or_mutations() {
     let fixture = Fixture::new(true, None).await;
     let originless = |method: &str, uri: &str, body: Value| {
         Request::builder()
@@ -877,12 +879,29 @@ async fn read_only_referrer_authorization_never_authorizes_learning_mutations() 
         .oneshot(originless("GET", &fixture.policy_uri(), json!({})))
         .await
         .unwrap();
-    assert_eq!(
-        read.status(),
-        StatusCode::OK,
-        "the read-only shortcut remains usable"
-    );
-    assert_eq!(json_body(read).await["autoEnabled"], false);
+    assert_eq!(read.status(), StatusCode::FORBIDDEN);
+
+    let mut authenticated_read = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("GET")
+            .uri(fixture.policy_uri())
+            .header("host", "127.0.0.1:8080")
+            .header("referer", format!("{OWNER_ORIGIN}/settings"))
+            .header("sec-fetch-site", "same-origin"),
+    )
+    .body(Body::empty())
+    .unwrap();
+    authenticated_read
+        .headers_mut()
+        .remove(axum::http::header::ORIGIN);
+    let authenticated_read = fixture
+        .app
+        .clone()
+        .oneshot(authenticated_read)
+        .await
+        .unwrap();
+    assert_eq!(authenticated_read.status(), StatusCode::OK);
+    assert_eq!(json_body(authenticated_read).await["autoEnabled"], false);
     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
 }
 

@@ -9,14 +9,16 @@ async fn call(
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(path)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("content-type", "application/json")
-                .body(Body::from(value.to_string()))
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(value.to_string()))
+            .unwrap(),
         )
         .await
         .unwrap();

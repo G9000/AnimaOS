@@ -186,18 +186,19 @@ async fn doctor_owner_routes_reject_cross_origin_requests_and_share_the_report()
     };
     use tower::util::ServiceExt;
     let f = Fixture::new().await;
-    let app = crate::app::app_with_state(f.state.clone(), crate::DaemonConfig::default());
+    let app =
+        crate::app::app_with_state_for_owner_test(f.state.clone(), crate::DaemonConfig::default());
     for origin in ["https://attacker.invalid", "http://localhost:4200"] {
+        let mut request = Request::builder()
+            .uri("/api/doctor")
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin);
+        if origin == "http://localhost:4200" {
+            request = crate::routes::owner_test_support::authenticate(request);
+        }
         let response = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/doctor")
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", origin)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
         if origin.starts_with("https") {

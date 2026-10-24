@@ -397,7 +397,8 @@ mod read_owner_guard_tests {
     #[tokio::test]
     async fn calendar_status_and_writes_authorize_read_before_missing_agent_or_connector_lookup() {
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
-        let app = crate::app::app_with_state(state, crate::app::DaemonConfig::default());
+        let app =
+            crate::app::app_with_state_for_owner_test(state, crate::app::DaemonConfig::default());
         for path in [
             "/api/agents/missing/connectors/gcalendar",
             "/api/agents/missing/connectors/gcalendar/missing/writes",

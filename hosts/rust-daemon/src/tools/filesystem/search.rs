@@ -25,6 +25,7 @@ pub(in super::super) fn read_workspace_file_from_root(
     offset: usize,
     limit: usize,
 ) -> Result<String, String> {
+    super::super::credential_paths::check_path(workspace_root, file_path)?;
     let canonical_root = canonical_workspace_root(workspace_root, "read_file")?;
     let resolved = resolve_input_path(&canonical_root, file_path);
     if !resolved.exists() {
@@ -211,6 +212,11 @@ fn grep_single_file(
     include_matcher: Option<&Regex>,
     matches: &mut Vec<String>,
 ) -> Result<(), String> {
+    if super::super::credential_paths::check_path(workspace_root, &file_path.to_string_lossy())
+        .is_err()
+    {
+        return Ok(());
+    }
     let relative_path = normalized_relative_path(workspace_root, file_path)?;
     if !include_pattern.is_empty()
         && !path_matches_glob(include_pattern, include_matcher, &relative_path)

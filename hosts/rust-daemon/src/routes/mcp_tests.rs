@@ -22,11 +22,13 @@ async fn owner_json_from(
     uri: &str,
     body: Option<Value>,
 ) -> (StatusCode, String, Value) {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let mut request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     if body.is_some() {
         request = request.header("content-type", "application/json");
     }
@@ -83,7 +85,7 @@ fn daemon_app() -> (Router, SyntheticSnapshot) {
     ));
     let state = std::sync::Arc::new(tokio::sync::RwLock::new(daemon));
     (
-        crate::app::app_with_state(state, crate::DaemonConfig::default()),
+        crate::app::app_with_state_for_owner_test(state, crate::DaemonConfig::default()),
         SyntheticSnapshot(path),
     )
 }

@@ -19,7 +19,7 @@ use self::background::{
     stop_background_process, wait_background_process, ExitNotifier, WaitUntil,
 };
 #[cfg(not(windows))]
-use self::shell::execute_bash_command;
+use self::shell::execute_bash_command_bound;
 use super::{ctx_workspace_root, ToolExecutionContext};
 
 const BG_WAIT_DEFAULT_MS: u64 = 30_000;
@@ -121,6 +121,12 @@ pub(super) fn execute_bash(
             return TaskResult::error(error, 0);
         }
         let configured_root = ctx_workspace_root(&context).map(Path::to_path_buf);
+        let Some(command_binding) = context.command_binding.clone() else {
+            return TaskResult::error(
+                "Execution identity binding is missing; the command did not run",
+                0,
+            );
+        };
         let cancel = context.cancel.clone();
         let profile_owner = context.profile_owner.clone();
         #[cfg(windows)]
@@ -145,17 +151,19 @@ pub(super) fn execute_bash(
                     cancel,
                     worker_cancel,
                     profile_owner,
+                    command_binding,
                 )
             }
             #[cfg(not(windows))]
             {
                 let _profile_owner = profile_owner;
-                execute_bash_command(
+                execute_bash_command_bound(
                     configured_root.as_deref(),
                     &command,
                     timeout_ms,
                     &cwd,
                     cancel.as_ref(),
+                    command_binding,
                 )
             }
         })
@@ -255,6 +263,13 @@ pub(super) fn execute_bg_start(
             .map(|notifier| (notifier, notify_on));
         let notifier = notifier.filter(|_| notify_on_exit);
 
+        let Some(command_binding) = context.command_binding.clone() else {
+            return TaskResult::error(
+                "Execution identity binding is missing; the command did not run",
+                0,
+            );
+        };
+
         match start_background_process(
             &context.process_manager,
             ctx_workspace_root(&context),
@@ -263,6 +278,7 @@ pub(super) fn execute_bg_start(
             notifier,
             watch,
             context.profile_owner.clone(),
+            command_binding,
         ) {
             Ok(text) => TaskResult::success(
                 Content {
@@ -377,7 +393,7 @@ fn exit_notifier(context: &ToolExecutionContext) -> Option<ExitNotifier> {
         let request = crate::agent_runs::AgentRunRequest {
             agent_id: link.agent_id.clone(),
             content: Content {
-                text: note,
+                text: super::output_safety::sanitize_text(&note),
                 attachments: None,
                 metadata: None,
             },

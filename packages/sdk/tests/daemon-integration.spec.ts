@@ -13,7 +13,10 @@ import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { agent, createDaemonClient, swarm } from '../src/index.js';
-import { daemonTestEnvironment } from './daemon-environment.js';
+import {
+  DAEMON_TEST_OWNER_TOKEN,
+  daemonTestEnvironment,
+} from './daemon-environment.js';
 
 const workspaceRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -98,7 +101,7 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
         daemonOutput += chunk.toString();
       });
 
-      client = createDaemonClient({ baseUrl });
+      client = createDaemonClient({ baseUrl, ownerToken: DAEMON_TEST_OWNER_TOKEN });
       await waitForDaemonHealthy(client, spawnedProcess, () => daemonOutput);
     }, 360_000);
 

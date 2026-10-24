@@ -1,12 +1,14 @@
 use super::*;
 
 fn owner_get(path: &str) -> Request<Body> {
-    Request::builder()
-        .uri(path)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .uri(path)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200"),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 #[tokio::test]

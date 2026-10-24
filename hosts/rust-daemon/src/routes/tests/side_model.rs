@@ -13,11 +13,13 @@ async fn send_from(
     method: &str,
     body: Option<Value>,
 ) -> (StatusCode, Option<String>, Value) {
-    let builder = Request::builder()
-        .method(method)
-        .uri(PATH)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(PATH)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     let request = match body {
         Some(body) => builder
             .header("content-type", "application/json")

@@ -14,13 +14,15 @@ use crate::routes::logs::{
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
 fn get(uri: &str, origin: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .body(Body::empty())
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .body(Body::empty())
+    .unwrap()
 }
 
 fn app_with(buffer: &Arc<LogBuffer>) -> axum::Router {

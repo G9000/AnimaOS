@@ -1,3 +1,5 @@
+mod support;
+
 use anima_daemon::app;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -12,7 +14,7 @@ async fn create_agent(router: &axum::Router) -> String {
     let response = router
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("POST")
                 .uri("/api/agents")
                 .header("content-type", "application/json")
@@ -37,9 +39,8 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
         .body(Body::from(r#"{"prompt":"Check status","trigger":{"type":"interval","intervalMs":60000},"target":{"type":"workspace"}}"#)).unwrap()).await.unwrap();
     assert_eq!(unguarded.status(), StatusCode::FORBIDDEN);
 
-    let created = router.clone().oneshot(Request::builder()
+    let created = router.clone().oneshot(support::owner_request(Request::builder())
         .method("POST").uri(&create_uri)
-        .header("host", "127.0.0.1:8080").header("origin", "http://localhost:4200")
         .header("content-type", "application/json")
         .body(Body::from(r#"{"prompt":"Check status","trigger":{"type":"interval","intervalMs":60000},"target":{"type":"workspace"}}"#)).unwrap()).await.unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
@@ -70,10 +71,8 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
     let listed = router
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .uri(&create_uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -86,11 +85,9 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
     let updated = router
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("PATCH")
                 .uri(&item_uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"prompt":"Check health"}"#))
                 .unwrap(),
@@ -105,11 +102,9 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
     let disabled = router
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("PATCH")
                 .uri(&item_uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"enabled":false}"#))
                 .unwrap(),
@@ -122,11 +117,9 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
     let enabled = router
         .clone()
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("PATCH")
                 .uri(&item_uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"enabled":true}"#))
                 .unwrap(),
@@ -142,11 +135,9 @@ async fn schedule_crud_is_agent_scoped_and_mutations_require_local_owner() {
 
     let deleted = router
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .method("DELETE")
                 .uri(&item_uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -161,8 +152,7 @@ async fn legacy_import_is_idempotent_and_preserves_browser_due_time() {
     let agent_id = create_agent(&router).await;
     let uri = format!("/api/agents/{agent_id}/schedules/import");
     let request = || {
-        Request::builder().method("POST").uri(&uri)
-        .header("host", "127.0.0.1:8080").header("origin", "http://localhost:4200")
+        support::owner_request(Request::builder()).method("POST").uri(&uri)
         .header("content-type", "application/json")
         .body(Body::from(r#"{"schedules":[{"id":"legacy-one","prompt":"Check inbox","intervalSecs":60,"createdAtMs":1000,"lastRunAtMs":9000}]}"#)).unwrap()
     };
@@ -179,10 +169,8 @@ async fn legacy_import_is_idempotent_and_preserves_browser_due_time() {
 
     let list = router
         .oneshot(
-            Request::builder()
+            support::owner_request(Request::builder())
                 .uri(format!("/api/agents/{agent_id}/schedules"))
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
                 .body(Body::empty())
                 .unwrap(),
         )

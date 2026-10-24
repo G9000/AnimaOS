@@ -415,14 +415,16 @@ impl ExecutorFixture {
 }
 
 fn owner_request(method: &str, path: String, body: Value) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::builder()
-        .method(method)
-        .uri(path)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from(body.to_string()))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json"),
+    )
+    .body(axum::body::Body::from(body.to_string()))
+    .unwrap()
 }
 
 #[tokio::test]
@@ -435,7 +437,10 @@ async fn m46_owner_grant_remove_restore_invalidates_pending_approval_without_ope
         json!({"routeId":"page"}),
     ));
     pending_approvals(&f.coordinator, 1).await;
-    let app = crate::app::app_with_state(f.base.state.clone(), crate::DaemonConfig::default());
+    let app = crate::app::app_with_state_for_owner_test(
+        f.base.state.clone(),
+        crate::DaemonConfig::default(),
+    );
     let names = f
         .agent
         .config
@@ -616,8 +621,10 @@ async fn m46_delayed_output_cannot_publish_after_acknowledged_stop_or_history_de
         let history = f.base.state.read().await.history.clone();
         let store = history.store();
         if delete_history {
-            let app =
-                crate::app::app_with_state(f.base.state.clone(), crate::DaemonConfig::default());
+            let app = crate::app::app_with_state_for_owner_test(
+                f.base.state.clone(),
+                crate::DaemonConfig::default(),
+            );
             let response = app
                 .oneshot(owner_request(
                     "DELETE",

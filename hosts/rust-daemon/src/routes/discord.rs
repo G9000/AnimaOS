@@ -551,17 +551,20 @@ mod tests {
         .to_string();
         assert!(payload.len() > 8192 && payload.len() < 16 * 1024);
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
-        let app = crate::app::app_with_state(state, crate::app::DaemonConfig::default());
+        let app =
+            crate::app::app_with_state_for_owner_test(state, crate::app::DaemonConfig::default());
         let response = app
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/agents/missing/connectors/discord")
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("content-type", "application/json")
-                    .body(Body::from(payload))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/agents/missing/connectors/discord")
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200")
+                        .header("content-type", "application/json"),
+                )
+                .body(Body::from(payload))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -637,65 +640,76 @@ mod tests {
     async fn authorization_precedes_body_and_unknown_owner_scope_and_every_native_response_is_no_store(
     ) {
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
-        let app = crate::app::app_with_state(state, crate::app::DaemonConfig::default());
-        for (method, path, origin, expected) in [
+        let app =
+            crate::app::app_with_state_for_owner_test(state, crate::app::DaemonConfig::default());
+        for (method, path, origin, authenticate_owner, expected) in [
             (
                 "GET",
                 "/api/agents/missing/connectors/discord",
                 "https://evil.example",
+                false,
                 StatusCode::FORBIDDEN,
             ),
             (
                 "POST",
                 "/api/agents/missing/connectors/discord",
                 "https://evil.example",
+                false,
                 StatusCode::FORBIDDEN,
             ),
             (
                 "POST",
                 "/api/agents/missing/connectors/discord/check",
                 "https://evil.example",
+                false,
                 StatusCode::FORBIDDEN,
             ),
             (
                 "PUT",
                 "/api/agents/missing/connectors/discord/c/settings",
                 "https://evil.example",
+                false,
                 StatusCode::FORBIDDEN,
             ),
             (
                 "POST",
                 "/api/agents/missing/connectors/discord/check",
                 "http://localhost:4200",
+                true,
                 StatusCode::NOT_FOUND,
             ),
             (
                 "PUT",
                 "/api/agents/missing/connectors/discord/c/settings",
                 "http://localhost:4200",
+                true,
                 StatusCode::NOT_FOUND,
             ),
             (
                 "GET",
                 "/api/agents/missing/connectors/discord",
                 "http://localhost:4200",
+                true,
                 StatusCode::NOT_FOUND,
             ),
             (
                 "POST",
                 "/api/agents/missing/connectors/discord/c/outbound/suppress",
                 "http://localhost:4200",
+                true,
                 StatusCode::NOT_FOUND,
             ),
         ] {
-            let request = Request::builder()
+            let mut request = Request::builder()
                 .method(method)
                 .uri(path)
                 .header("host", "127.0.0.1:8080")
                 .header("origin", origin)
-                .header("content-type", "application/json")
-                .body(Body::from("invalid body"))
-                .unwrap();
+                .header("content-type", "application/json");
+            if authenticate_owner {
+                request = crate::routes::owner_test_support::authenticate(request);
+            }
+            let request = request.body(Body::from("invalid body")).unwrap();
             let response = app.clone().oneshot(request).await.unwrap();
             assert_eq!(response.status(), expected);
             assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");

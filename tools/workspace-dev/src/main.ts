@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { consoleLaunchUrl, prepareOwnerCredentials } from './owner-console.js';
 import {
   getHostDefinition,
   hostProcessEnv,
@@ -18,6 +20,7 @@ export interface WorkspaceDevPlanOptions {
   reuseExistingHost?: boolean;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
+  ownerEnv?: Record<string, string>;
 }
 
 export function parseHostArg(argv: string[]): HostKey {
@@ -44,7 +47,10 @@ export function buildWorkspaceDevPlan(
       name: host.projectName,
       command: 'bun',
       args: ['run', '--filter', host.projectName, 'dev'],
-      env: hostProcessEnv(host, options.env, options.homeDir),
+      env: {
+        ...hostProcessEnv(host, options.env, options.homeDir),
+        ...options.ownerEnv,
+      },
     });
   }
 
@@ -90,16 +96,125 @@ export async function run(argv: string[]): Promise<void> {
   const hostName = parseHostArg(argv);
   const host = getHostDefinition(hostName);
   const reuseExistingHost = await isHostReachable(host.baseUrl);
+  const consoleOnly = argv.includes('--console');
+  if (consoleOnly && !reuseExistingHost)
+    throw new Error(
+      'Start bun dev before requesting a fresh owner console link.',
+    );
+  let owner: ReturnType<typeof prepareOwnerCredentials>;
+  try {
+    owner = prepareOwnerCredentials(process.env, homedir(), !reuseExistingHost);
+  } catch (error) {
+    if (!reuseExistingHost) throw error;
+    throw new Error(
+      `A daemon is already running at ${host.baseUrl}, but bun dev cannot load its owner credentials. ` +
+        'Stop the running daemon with its launcher, then run bun dev again; or set ANIMA_LOCAL_ADMIN_TOKEN_FILE to the token file it uses.',
+    );
+  }
+  if (
+    reuseExistingHost &&
+    !(await acceptsOwnerCredentials(
+      host.baseUrl,
+      owner.token,
+      process.env.ANIMAOS_RS_API_KEY,
+    ))
+  ) {
+    throw new Error(
+      `The daemon at ${host.baseUrl} does not accept the configured owner credentials. ` +
+        'Set ANIMA_LOCAL_ADMIN_TOKEN_FILE to its matching token file, or stop the running daemon with its launcher before starting bun dev.',
+    );
+  }
+  const consoleOrigin = argv.includes('--playground')
+    ? 'http://localhost:4201'
+    : 'http://localhost:4200';
+  const showConsole = () => {
+    console.log(
+      'Owner console link (expires in 15 seconds; refresh with bun dev --console):',
+    );
+    console.log(consoleLaunchUrl(consoleOrigin, owner.token));
+  };
+  if (consoleOnly) {
+    showConsole();
+    return;
+  }
   const plan = buildWorkspaceDevPlan(hostName, {
     reuseExistingHost,
+    ownerEnv: owner.daemonEnv,
   });
-  await runManagedProcesses(plan.processes);
+  const stopAnnouncement = new AbortController();
+  const announcement = announceWhenReady(
+    consoleOrigin,
+    stopAnnouncement.signal,
+    showConsole,
+  );
+  try {
+    await runManagedProcesses(plan.processes);
+  } finally {
+    stopAnnouncement.abort();
+    await announcement;
+  }
+}
+
+async function announceWhenReady(
+  origin: string,
+  signal: AbortSignal,
+  announce: () => void,
+): Promise<void> {
+  // The launch TTL starts only after Vite and its daemon proxy are ready.
+  while (!signal.aborted) {
+    if (await isHostReachable(origin)) {
+      if (!signal.aborted) announce();
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, 250);
+      signal.addEventListener('abort', finish, { once: true });
+      if (signal.aborted) finish();
+    });
+  }
 }
 
 async function isHostReachable(baseUrl: string): Promise<boolean> {
   try {
-    const response = await fetch(`${baseUrl}/api/health`);
+    const response = await fetch(`${baseUrl}/api/health`, {
+      signal: AbortSignal.timeout(2_000),
+    });
     return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function acceptsOwnerCredentials(
+  baseUrl: string,
+  token: string,
+  apiKey?: string,
+): Promise<boolean> {
+  try {
+    const headers = new Headers({ authorization: `Bearer ${token}` });
+    if (apiKey) headers.set('x-api-key', apiKey);
+    const response = await fetch(`${baseUrl}/api/system/drain`, {
+      headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) return false;
+    const body: unknown = await response.json();
+    return (
+      typeof body === 'object' &&
+      body !== null &&
+      'draining' in body &&
+      typeof body.draining === 'boolean' &&
+      'inFlight' in body &&
+      typeof body.inFlight === 'object' &&
+      body.inFlight !== null &&
+      !Array.isArray(body.inFlight)
+    );
   } catch {
     return false;
   }

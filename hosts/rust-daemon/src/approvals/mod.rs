@@ -8,7 +8,7 @@ mod detection;
 pub(crate) mod gate;
 pub(crate) mod policy;
 pub(crate) mod registry;
-mod shell_lex;
+pub(crate) mod shell_lex;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

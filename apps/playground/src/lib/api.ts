@@ -1,3 +1,4 @@
+import { ownerFetch, ownerClient } from './owner-session';
 export interface HealthResponse {
   status: string;
   version?: string;
@@ -481,7 +482,7 @@ async function request<T>(
     body = JSON.stringify(init.json);
   }
 
-  const res = await fetch(path, { ...init, headers, body });
+  const res = await ownerFetch(path, { ...init, headers, body });
   const text = await res.text();
   const data = text ? (JSON.parse(text) as unknown) : undefined;
 
@@ -570,33 +571,20 @@ export const swarms = {
     onEvent: (event: SwarmStreamEvent) => void,
     onError?: () => void
   ) => {
-    const source = new EventSource(`/api/swarms/${id}/events`);
-    const handlers = swarmStreamEventNames.map((eventName) => {
-      const handler = (event: Event) => {
-        const message = event as MessageEvent<string>;
-        try {
-          onEvent({
-            event: eventName,
-            data: JSON.parse(message.data) as SwarmStreamEventPayload,
-          });
-        } catch {
-          // Ignore malformed stream frames and keep the live connection open.
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const event of ownerClient.subscribe<SwarmStreamEventPayload>(
+          '/api/swarms/' + encodeURIComponent(id) + '/events', { signal: controller.signal },
+        )) {
+          if (swarmStreamEventNames.includes(event.event as SwarmStreamEventName))
+            onEvent({ event: event.event as SwarmStreamEventName, data: event.data });
         }
-      };
-      source.addEventListener(eventName, handler);
-      return [eventName, handler] as const;
-    });
-    source.onerror = () => {
-      onError?.();
-      source.close();
-    };
-
-    return () => {
-      for (const [eventName, handler] of handlers) {
-        source.removeEventListener(eventName, handler);
+      } catch {
+        if (!controller.signal.aborted) onError?.();
       }
-      source.close();
-    };
+    })();
+    return () => controller.abort();
   },
 };
 

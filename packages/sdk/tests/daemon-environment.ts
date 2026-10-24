@@ -11,6 +11,8 @@ const systemVariables = new Set([
   'DYLD_LIBRARY_PATH',
 ]);
 
+export const DAEMON_TEST_OWNER_TOKEN = 'sdk-isolated-test-owner-token';
+
 export function daemonTestEnvironment(
   source: NodeJS.ProcessEnv,
   workspace: string,
@@ -28,5 +30,6 @@ export function daemonTestEnvironment(
     ANIMAOS_WORKSPACE_ROOT: workspace,
     ANIMAOS_RS_PERSISTENCE_MODE: 'memory',
     ANIMAOS_RS_MEMORY_EMBEDDINGS: 'local',
+    ANIMA_LOCAL_ADMIN_TOKEN: DAEMON_TEST_OWNER_TOKEN,
   };
 }

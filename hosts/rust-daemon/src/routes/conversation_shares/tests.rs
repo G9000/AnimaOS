@@ -71,7 +71,7 @@ fn router_with_coordinator(
         jobs,
         crate::history::HistoryWorkerOwner::new(),
         crate::logs::global(),
-        LocalOwnerPolicy::for_test(true, Some("local-admin")),
+        LocalOwnerPolicy::for_test(true, Some(crate::routes::owner_test_support::ADMIN_TOKEN)),
         ApiKeyPolicy::for_test(keyed.then_some("owner-api-key")),
         crate::system::SupervisorRelay::unsupervised(),
     );
@@ -170,15 +170,17 @@ fn fixture() -> (
 }
 
 fn owner(method: &str, uri: &str, body: serde_json::Value) -> HttpRequest<Body> {
-    HttpRequest::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("x-api-key", "owner-api-key")
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        HttpRequest::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("x-api-key", "owner-api-key")
+            .header("content-type", "application/json"),
+    )
+    .body(Body::from(body.to_string()))
+    .unwrap()
 }
 
 fn viewer(uri: &str, created: &serde_json::Value) -> HttpRequest<Body> {
@@ -370,7 +372,7 @@ async fn viewer_credentials_cannot_reach_owner_reads_or_writes_even_with_approve
             .unwrap();
         assert_eq!(
             app.clone().oneshot(no_credential).await.unwrap().status(),
-            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
             "{method} {path}"
         );
     }

@@ -70,15 +70,17 @@ async fn fixture(
     (temp, runs, agent, rows)
 }
 fn request(agent: &str, key: &str, value: Value) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .header("idempotency-key", key)
-        .body(Body::from(value.to_string()))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/chat%3Afiles/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json")
+            .header("idempotency-key", key),
+    )
+    .body(Body::from(value.to_string()))
+    .unwrap()
 }
 async fn answer(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()

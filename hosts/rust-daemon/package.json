@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/workspace-dev/src/rust-daemon-dev.ts",
     "build": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/workspace-dev/src/rust-daemon-dev.ts --build-only",
-    "test": "bun run --filter core-rust test && cargo build --manifest-path ../../Cargo.toml -p anima-daemon --example mcp_stdio_peer --example execution_backend_peer --example paired_node_peer && bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo test -p anima-daemon",
+    "test": "bun run --filter core-rust test && cargo build --manifest-path ../../Cargo.toml -p anima-daemon --example mcp_stdio_peer --example execution_backend_peer --example paired_node_peer && bun ../../tools/workspace-dev/scripts/run-rust-daemon-tests.ts",
     "memory-locomo-agent": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/memory-eval/run-locomo-agent.mjs",
     "lint": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo fmt --all --check"
   }

@@ -147,20 +147,22 @@ async fn quality_change_bound_completion_owner_plain_json_contracts_survive_rout
     let state = Arc::new(RwLock::new(daemon));
     let app = crate::routes::router(state.clone(), DaemonConfig::default());
     let contracts = json!([contract("a", "verify-a", "a")]);
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/agents")
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .body(Body::from(
-            json!({
-                "name":"Contract roundtrip", "model":"offline",
-                "settings":{"completionReview":true,"completionVerificationContracts":contracts},
-            })
-            .to_string(),
-        ))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri("/api/agents")
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json"),
+    )
+    .body(Body::from(
+        json!({
+            "name":"Contract roundtrip", "model":"offline",
+            "settings":{"completionReview":true,"completionVerificationContracts":contracts},
+        })
+        .to_string(),
+    ))
+    .unwrap();
     let created = app.clone().oneshot(request).await.unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
     let created: Value =
@@ -173,12 +175,14 @@ async fn quality_change_bound_completion_owner_plain_json_contracts_survive_rout
     let id = created["agent"]["state"]["id"].as_str().unwrap();
     let loaded = app
         .oneshot(
-            Request::builder()
-                .uri(format!("/api/agents/{id}"))
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri(format!("/api/agents/{id}"))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();

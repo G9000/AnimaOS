@@ -84,6 +84,22 @@ impl AcpSession {
     /// Runs the agent under custody, then `initialize` and `session/new` (or
     /// `session/load` for a resume id). Any failure retires the process.
     pub async fn start(launch: AcpLaunch, host: Arc<dyn AcpClientHost>) -> Result<Self, AcpError> {
+        Self::start_with_requirement(launch, host, false).await
+    }
+
+    /// Host-facing execution with complete descendant custody required.
+    pub async fn start_contained(
+        launch: AcpLaunch,
+        host: Arc<dyn AcpClientHost>,
+    ) -> Result<Self, AcpError> {
+        Self::start_with_requirement(launch, host, true).await
+    }
+
+    async fn start_with_requirement(
+        launch: AcpLaunch,
+        host: Arc<dyn AcpClientHost>,
+        require_strong: bool,
+    ) -> Result<Self, AcpError> {
         if !launch.cwd.is_absolute() {
             return Err(AcpError::Spawn(format!(
                 "cwd {} is not absolute",
@@ -97,6 +113,11 @@ impl AcpSession {
                 AcpError::Spawn(format!("cwd {} is not a directory", launch.cwd.display()))
             })?;
         let (mut custody, mut native) = Custody::prepare(&launch.program, launch.args.clone());
+        if require_strong {
+            custody
+                .require_strong()
+                .map_err(|error| AcpError::Spawn(error.to_string()))?;
+        }
         native
             .current_dir(&root)
             .stdin(Stdio::piped())

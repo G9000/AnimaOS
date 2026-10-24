@@ -9,6 +9,9 @@ const createObjectURL = vi.fn(() => 'blob:workspace-avatar');
 const revokeObjectURL = vi.fn();
 
 beforeEach(() => {
+  localStorage.clear();
+  localStorage.setItem('anima.consoleSession', 'signed-header');
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/png' } })));
   clearOwnerApiKey();
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
@@ -17,7 +20,7 @@ beforeEach(() => {
     revokeObjectURL: { configurable: true, value: revokeObjectURL },
   });
 });
-afterEach(() => { clearOwnerApiKey(); vi.unstubAllGlobals(); });
+afterEach(() => { localStorage.clear(); clearOwnerApiKey(); vi.unstubAllGlobals(); });
 
 describe('WorkspaceAvatar', () => {
   it('loads the workspace image through owner headers when authentication is configured', async () => {
@@ -48,7 +51,7 @@ describe('WorkspaceAvatar', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 
-  it('renders the stored avatar as a decorative cover image', () => {
+  it('renders the stored avatar as a decorative authenticated blob image', async () => {
     const { container } = render(
       <WorkspaceAvatar
         placement="sidebar"
@@ -57,9 +60,10 @@ describe('WorkspaceAvatar', () => {
       />,
     );
 
+    await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', 'blob:workspace-avatar'));
     const image = container.querySelector('img');
     expect(image).toHaveAttribute('alt', '');
-    expect(image).toHaveAttribute('src', '/api/workspace/avatar?v=0');
+    expect(image).toHaveAttribute('src', 'blob:workspace-avatar');
     expect(image).toHaveClass('object-cover');
   });
 
@@ -157,7 +161,7 @@ describe('WorkspaceAvatar', () => {
     await waitFor(() =>
       expect(container.querySelector('img')).toHaveAttribute(
         'src',
-        '/api/workspace/avatar?v=1',
+        'blob:workspace-avatar',
       ),
     );
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:workspace-avatar');
@@ -188,7 +192,7 @@ describe('WorkspaceAvatar', () => {
     );
     expect(container.querySelector('img')).toHaveAttribute(
       'src',
-      '/api/workspace/avatar?v=0',
+      'blob:workspace-avatar',
     );
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:workspace-avatar');
   });
@@ -204,6 +208,7 @@ describe('WorkspaceAvatar', () => {
       />,
     );
 
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
     fireEvent.error(container.querySelector('img') as HTMLImageElement);
     expect(container.querySelector('.agent-orb-core')).not.toBeNull();
 
@@ -214,7 +219,7 @@ describe('WorkspaceAvatar', () => {
     await waitFor(() =>
       expect(container.querySelector('img')).toHaveAttribute(
         'src',
-        '/api/workspace/avatar?v=1',
+        'blob:workspace-avatar',
       ),
     );
   });

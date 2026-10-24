@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ownerApiKeyHeaders } from '../lib/owner-api-key';
+import { consoleSessionToken, consoleSessionHeaders } from '../lib/console-session';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -56,14 +57,15 @@ export function useDaemonImage(source: string | null): {
   failed: boolean;
 } {
   const ownerKey = ownerApiKeyHeaders()['x-api-key'];
-  const scope = useMemo(() => ({ source, ownerKey }), [source, ownerKey]);
+  const sessionToken = consoleSessionToken();
+  const scope = useMemo(() => ({ source, ownerKey, sessionToken }), [source, ownerKey, sessionToken]);
   const [loaded, setLoaded] = useState<{
     scope: object;
     src: string | null;
     failed: boolean;
   } | null>(null);
   useEffect(() => {
-    if (!source || !ownerKey) return;
+    if (!source || (!ownerKey && !sessionToken)) return;
     let live = true;
     let objectUrl: string | null = null;
     const controller = new AbortController();
@@ -80,12 +82,13 @@ export function useDaemonImage(source: string | null): {
         const response = await fetch(source, {
           headers: {
             accept: 'image/png,image/jpeg,image/webp',
-            'x-api-key': ownerKey,
+            ...ownerApiKeyHeaders(),
+            ...consoleSessionHeaders(),
           },
           credentials: 'same-origin',
           cache: 'no-store',
           redirect: 'error',
-          referrerPolicy: 'no-referrer',
+          referrerPolicy: 'origin',
           signal: controller.signal,
         });
         const blob = await boundedImage(response, controller.signal);
@@ -102,7 +105,7 @@ export function useDaemonImage(source: string | null): {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [source, ownerKey, scope]);
-  if (!ownerKey) return { src: source, failed: false };
+  }, [source, ownerKey, sessionToken, scope]);
+  if (!ownerKey && !sessionToken) return { src: null, failed: false };
   return loaded?.scope === scope ? loaded : { src: null, failed: false };
 }

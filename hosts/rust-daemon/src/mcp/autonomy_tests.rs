@@ -363,14 +363,16 @@ async fn put(
     use tower::ServiceExt;
     app.clone()
         .oneshot(
-            axum::http::Request::builder()
-                .method("PUT")
-                .uri(format!("/api/agents/{}/{route}", f.agent))
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body.to_string()))
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                axum::http::Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/agents/{}/{route}", f.agent))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200")
+                    .header("content-type", "application/json"),
+            )
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap(),
         )
         .await
         .unwrap()

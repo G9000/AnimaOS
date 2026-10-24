@@ -85,6 +85,7 @@
       "name": "@animaos/playground",
       "version": "0.0.1",
       "dependencies": {
+        "@animaos/sdk": "workspace:*",
         "@animaos/ui": "workspace:*",
       },
     },

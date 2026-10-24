@@ -18,7 +18,7 @@ use super::live::{
     acp_snapshot, app_snapshot, judge_until, live_sessions, AcpLive, AppLive, DaemonAcpHost, Live,
     LiveKind, PermissionQueue,
 };
-use super::shell::{resolve_shell_launcher, shell_env};
+use super::shell::{resolve_shell_launcher, revalidate_shell_launch, shell_env};
 
 const WAIT_MAX_MS: u64 = 120_000;
 const ACP_WAIT_DEFAULT_MS: u64 = 30_000;
@@ -179,14 +179,20 @@ async fn app_start(
     let cwd = session_cwd(context, call)?;
     let agent_id = agent.id.to_string();
     live_sessions().check_capacity(&agent_id)?;
-    let (shell, mut args) = resolve_shell_launcher()?;
+    let (shell, flags) = resolve_shell_launcher()?;
+    let mut args = flags.clone();
     args.push(command.clone());
-    let mut config = AppSessionConfig::new(shell, args, &cwd);
+    let mut config = AppSessionConfig::new(shell.clone(), args, &cwd);
     config.env = session_env(&agent_id, true);
     config.cols = cols;
     config.rows = rows;
+    let binding = context.command_binding.as_deref().ok_or_else(|| {
+        "Execution identity binding is missing; the app did not start".to_string()
+    })?;
+    revalidate_shell_launch(Some(binding), &shell, &flags, &command, &cwd)?;
     let session = Arc::new(
-        AppSession::start(config).map_err(|error| format!("app_start failed to start: {error}"))?,
+        AppSession::start_contained(config)
+            .map_err(|error| format!("app_start failed to start: {error}"))?,
     );
     let id = live_sessions().insert(
         "app",
@@ -456,14 +462,15 @@ async fn acp_start(
     let cwd = session_cwd(context, call)?;
     let agent_id = agent.id.to_string();
     live_sessions().check_capacity(&agent_id)?;
-    let (shell, mut args) = resolve_shell_launcher()?;
+    let (shell, flags) = resolve_shell_launcher()?;
+    let mut args = flags.clone();
     args.push(command.clone());
     let queue = PermissionQueue::new();
     let host = Arc::new(DaemonAcpHost {
         queue: Arc::clone(&queue),
     });
     let launch = AcpLaunch {
-        program: PathBuf::from(shell),
+        program: PathBuf::from(&shell),
         args,
         cwd: cwd.clone(),
         env: session_env(&agent_id, false),
@@ -473,8 +480,12 @@ async fn acp_start(
         // commands reach the owner's approvals (Claude Code: `default`).
         ask_modes: vec!["default".to_string()],
     };
+    let binding = context.command_binding.as_deref().ok_or_else(|| {
+        "Execution identity binding is missing; the coding agent did not start".to_string()
+    })?;
+    revalidate_shell_launch(Some(binding), &shell, &flags, &command, &cwd)?;
     let session = Arc::new(
-        AcpSession::start(launch, host)
+        AcpSession::start_contained(launch, host)
             .await
             .map_err(|error| acp_error(&command, error))?,
     );

@@ -515,7 +515,9 @@ async fn owner_routes_validate_consent_closed_body_scope_and_expose_only_safe_ca
             .header("host", "127.0.0.1:8080")
             .header("content-type", "application/json");
         let builder = if owner {
-            builder.header("origin", "http://localhost:4200")
+            crate::routes::owner_test_support::authenticate(
+                builder.header("origin", "http://localhost:4200"),
+            )
         } else {
             builder
         };
@@ -619,31 +621,35 @@ async fn upload_and_ordinary_chat_with_audio_make_zero_transcription_calls() {
     let mut form = b"--voice\r\nContent-Disposition: form-data; name=\"file\"; filename=\"another.WAV\"\r\nContent-Type: application/octet-stream\r\n\r\n".to_vec();
     form.extend_from_slice(WAV);
     form.extend_from_slice(b"\r\n--voice--\r\n");
-    let upload = Request::builder()
-        .method("POST")
-        .uri(format!(
-            "/api/agents/{agent}/sessions/chat%3Avoice/attachments"
-        ))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "multipart/form-data; boundary=voice")
-        .body(Body::from(form))
-        .unwrap();
+    let upload = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/agents/{agent}/sessions/chat%3Avoice/attachments"
+            ))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "multipart/form-data; boundary=voice"),
+    )
+    .body(Body::from(form))
+    .unwrap();
     assert_eq!(
         app.clone().oneshot(upload).await.unwrap().status(),
         StatusCode::CREATED
     );
-    let chat = Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/sessions/chat%3Avoice/runs"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .header("idempotency-key", "voice-ordinary-chat")
-        .body(Body::from(
-            r#"{"text":"hello","attachmentIds":["att-voice"]}"#,
-        ))
-        .unwrap();
+    let chat = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/chat%3Avoice/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json")
+            .header("idempotency-key", "voice-ordinary-chat"),
+    )
+    .body(Body::from(
+        r#"{"text":"hello","attachmentIds":["att-voice"]}"#,
+    ))
+    .unwrap();
     assert_eq!(
         app.oneshot(chat).await.unwrap().status(),
         StatusCode::ACCEPTED
@@ -745,14 +751,16 @@ async fn voice_route_outlives_ordinary_request_timeout_and_delete_fences_late_re
     let op = uuid::Uuid::new_v4();
     let prefix = format!("/api/agents/{agent}/sessions/chat%3Avoice/voice/transcriptions");
     let request = |method: &str, path: String, body: String| {
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .header("content-type", "application/json")
-            .body(Body::from(body))
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200")
+                .header("content-type", "application/json"),
+        )
+        .body(Body::from(body))
+        .unwrap()
     };
     let post = request("POST", prefix.clone(), serde_json::json!({"operationId":op.to_string(),"attachmentId":"att-voice","provider":"openai","consent":true}).to_string());
     let pending = {
@@ -798,18 +806,20 @@ async fn m56_review_regression_authenticated_pending_body_has_finite_outer_timeo
     let inspect = service.clone();
     let app =
         crate::app::app_with_state_and_voice(state, crate::app::DaemonConfig::default(), service);
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!(
-            "/api/agents/{agent}/sessions/chat%3Avoice/voice/transcriptions"
-        ))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .body(Body::from_stream(futures::stream::pending::<
-            Result<Bytes, std::io::Error>,
-        >()))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/agents/{agent}/sessions/chat%3Avoice/voice/transcriptions"
+            ))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json"),
+    )
+    .body(Body::from_stream(futures::stream::pending::<
+        Result<Bytes, std::io::Error>,
+    >()))
+    .unwrap();
     let response = tokio::time::timeout(Duration::from_secs(2), app.oneshot(request))
         .await
         .expect("authenticated pending body must have a finite voice route boundary")
@@ -872,16 +882,18 @@ async fn m56_review_regression_fresh_wav_uploads_preserve_closed_validation_stat
         let mut form = format!("--review\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").into_bytes();
         form.extend_from_slice(&bytes);
         form.extend_from_slice(b"\r\n--review--\r\n");
-        let request = Request::builder()
-            .method("POST")
-            .uri(format!(
-                "/api/agents/{agent}/sessions/chat%3Avoice/attachments"
-            ))
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .header("content-type", "multipart/form-data; boundary=review")
-            .body(Body::from(form))
-            .unwrap();
+        let request = crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/agents/{agent}/sessions/chat%3Avoice/attachments"
+                ))
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200")
+                .header("content-type", "multipart/form-data; boundary=review"),
+        )
+        .body(Body::from(form))
+        .unwrap();
         assert_eq!(
             app.clone().oneshot(request).await.unwrap().status(),
             expected,

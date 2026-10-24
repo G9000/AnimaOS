@@ -1,10 +1,10 @@
 #[allow(dead_code)]
 mod support;
 
-use anima_daemon::{app_with_configured_persistence, DaemonConfig};
+use anima_daemon::DaemonConfig;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use support::{send_empty_request, send_json_request, send_request, test_app};
+use support::{owner_request, send_empty_request, send_json_request, send_request, test_app};
 
 #[tokio::test]
 async fn get_workspace_reports_unconfigured_with_default_root() {
@@ -761,11 +761,9 @@ async fn resume_workspace(app: &axum::Router, root: &std::path::Path) -> (Status
 async fn delete_agent(app: &axum::Router, agent_id: &str) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        owner_request(Request::builder())
             .method("DELETE")
             .uri(format!("/api/agents/{agent_id}"))
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
             .body(Body::empty())
             .expect("request builds"),
     )
@@ -1001,7 +999,7 @@ async fn resume_rolls_back_when_persist_fails() {
     let adopt_root = workspace.path().join("adopt");
     std::fs::create_dir_all(&adopt_root).expect("adopt root created");
     std::fs::write(adopt_root.join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
-    let app = app_with_configured_persistence(DaemonConfig::default())
+    let app = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .expect("app configures persistence");
 
@@ -1079,7 +1077,7 @@ async fn resumed_agents_survive_restart() {
 
     let first_root = workspace.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
-        let first_app = app_with_configured_persistence(DaemonConfig::default())
+        let first_app = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .expect("first app should configure persistence");
         let (status, body) = resume_workspace(&first_app, &first_root).await;
@@ -1090,7 +1088,7 @@ async fn resumed_agents_survive_restart() {
 
     // Respawn against the same control-plane file (mirrors
     // control_plane_store_recovers_agents_and_swarms_after_restart).
-    let second_app = app_with_configured_persistence(DaemonConfig::default())
+    let second_app = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .expect("second app should configure persistence");
     let (_, agents) = send_empty_request(&second_app, "GET", "/api/agents").await;
@@ -1129,11 +1127,9 @@ async fn send_workspace_files_request(
 ) -> (StatusCode, String) {
     send_request(
         app,
-        Request::builder()
+        owner_request(Request::builder())
             .method(method)
             .uri(uri)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
             .body(Body::empty())
             .unwrap(),
     )
@@ -1356,7 +1352,7 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
     assert_eq!(inspected["workers"][0]["model"], "worker-model");
     let first_root = root.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
-        let fresh = app_with_configured_persistence(DaemonConfig::default())
+        let fresh = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .unwrap();
         let (status, body) = resume_workspace(&fresh, &first_root).await;
@@ -1366,7 +1362,7 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
     })
     .await;
 
-    let restarted = app_with_configured_persistence(DaemonConfig::default())
+    let restarted = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .unwrap();
     assert_team_model_overrides(&restarted).await;
@@ -1401,7 +1397,7 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
     std::fs::write(&yaml_path, serde_yaml::to_string(&original).unwrap()).unwrap();
     let first_root = root.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
-        let app = app_with_configured_persistence(DaemonConfig::default())
+        let app = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .unwrap();
         let (status, body) = resume_workspace(&app, &first_root).await;
@@ -1465,7 +1461,7 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
     })
     .await;
 
-    let restarted = app_with_configured_persistence(DaemonConfig::default())
+    let restarted = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .unwrap();
     let fresh = test_app();
@@ -1495,7 +1491,7 @@ async fn settings_yaml_and_persistence_failures_leave_runtime_unchanged() {
     let root = support::use_temp_workspace_root("settings-yaml-failure");
     let control_plane_path = root.path().join("control-plane.json");
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
-    let app = app_with_configured_persistence(DaemonConfig::default())
+    let app = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .unwrap();
     let (status, body) = send_json_request(
@@ -1754,7 +1750,7 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     let first_root = root.clone();
     let first_control_plane = control_plane_path.clone();
     support::run_in_joined_runtime(move || async move {
-        let app = app_with_configured_persistence(DaemonConfig::default())
+        let app = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .unwrap();
         std::fs::remove_file(&first_control_plane).unwrap();
@@ -1783,7 +1779,7 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     std::fs::remove_dir(&control_plane_path).unwrap();
     let bootstrap_root = root.clone();
     support::run_in_joined_runtime(move || async move {
-        let fresh = app_with_configured_persistence(DaemonConfig::default())
+        let fresh = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .unwrap();
         let (status, body) = send_json_request(
@@ -1798,7 +1794,7 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     })
     .await;
 
-    let restored = app_with_configured_persistence(DaemonConfig::default())
+    let restored = support::configured_loopback_test_app(DaemonConfig::default())
         .await
         .unwrap();
     let (_, agents) = send_empty_request(&restored, "GET", "/api/agents").await;

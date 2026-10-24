@@ -9,14 +9,16 @@ use tower::ServiceExt;
 
 async fn call(app: Router, method: &str, path: &str, body: Value) -> Response {
     app.oneshot(
-        HttpRequest::builder()
-            .method(method)
-            .uri(path)
-            .header("host", "127.0.0.1:8080")
-            .header("origin", "http://localhost:4200")
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap(),
+        crate::routes::owner_test_support::authenticate(
+            HttpRequest::builder()
+                .method(method)
+                .uri(path)
+                .header("host", "127.0.0.1:8080")
+                .header("origin", "http://localhost:4200"),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap(),
     )
     .await
     .unwrap()

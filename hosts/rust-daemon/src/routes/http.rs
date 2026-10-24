@@ -62,8 +62,8 @@ pub(super) struct OpenedConsoleSession {
 }
 
 impl LocalOwnerPolicy {
-    /// Read-only browser fetches may omit Origin. Fetch Metadata plus an
-    /// approved referrer allows these without relaxing the mutation policy.
+    /// Browser metadata only selects the CSRF checks; it never proves identity.
+    /// Reads without Origin still require both signed session halves.
     pub(super) fn authorize_read(
         &self,
         headers: &axum::http::HeaderMap,
@@ -71,28 +71,21 @@ impl LocalOwnerPolicy {
         if headers.contains_key(header::ORIGIN) {
             return self.authorize(headers);
         }
-        let approved_referrer = headers
-            .get(header::REFERER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| reqwest::Url::parse(value).ok())
-            .map(|url| {
-                self.allowed_origins
-                    .contains(&url.origin().ascii_serialization())
-            })
-            .unwrap_or(false);
-        if self.bind_is_loopback
-            && request_host_is_loopback(headers)
-            && !has_forwarding_headers(headers)
-            && headers
-                .get("sec-fetch-site")
-                .and_then(|value| value.to_str().ok())
-                == Some("same-origin")
-            && approved_referrer
-        {
+        self.local_request(headers)?;
+        if self.admin_bearer(headers).is_ok() {
             return Ok(());
         }
-        self.authorize(headers)
+        if headers
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+            != Some("same-origin")
+        {
+            return Err(LocalOwnerRejection::OriginRejected);
+        }
+        self.approved_referrer(headers)?;
+        self.console_session(headers)
     }
+
     pub(super) fn from_env(bind_is_loopback: bool) -> Self {
         let supervised = std::env::var("ANIMA_SUPERVISOR_URL").is_ok_and(|url| !url.is_empty());
         let allowed_origins = allowed_origins(
@@ -130,27 +123,33 @@ impl LocalOwnerPolicy {
     ) -> Result<(), LocalOwnerRejection> {
         self.local_request(headers)?;
         if headers.contains_key(header::ORIGIN) {
-            return self.approved_origin(headers);
+            self.approved_origin(headers)?;
+            self.browser_metadata(headers)?;
+            return self.console_session(headers);
         }
         self.admin_bearer(headers)
     }
 
-    /// Stopping, updating or draining Anima. A browser needs a console
-    /// session as well as an approved Origin, which any local process can
-    /// send; anything else needs the admin token.
+    /// Lifecycle operations use exactly the same owner identity as approvals,
+    /// credentials, private reads and ordinary owner mutations.
     pub(super) fn authorize_lifecycle(
         &self,
         headers: &axum::http::HeaderMap,
     ) -> Result<(), LifecycleRejection> {
         self.local_request(headers)
             .map_err(|_| LifecycleRejection::Denied)?;
-        if !headers.contains_key(header::ORIGIN) {
-            return self
-                .admin_bearer(headers)
-                .map_err(|_| LifecycleRejection::Denied);
+        match self.authorize(headers) {
+            Ok(()) => Ok(()),
+            Err(LocalOwnerRejection::LocalAdminRequired)
+                if headers.contains_key(header::ORIGIN) =>
+            {
+                Err(LifecycleRejection::ConsoleSessionRequired)
+            }
+            Err(_) => Err(LifecycleRejection::Denied),
         }
-        self.approved_origin(headers)
-            .map_err(|_| LifecycleRejection::Denied)?;
+    }
+
+    fn console_session(&self, headers: &axum::http::HeaderMap) -> Result<(), LocalOwnerRejection> {
         let session = self
             .admin_token
             .as_deref()
@@ -166,8 +165,38 @@ impl LocalOwnerPolicy {
             {
                 Ok(())
             }
-            _ => Err(LifecycleRejection::ConsoleSessionRequired),
+            _ => Err(LocalOwnerRejection::LocalAdminRequired),
         }
+    }
+
+    fn approved_referrer(
+        &self,
+        headers: &axum::http::HeaderMap,
+    ) -> Result<(), LocalOwnerRejection> {
+        headers
+            .get(header::REFERER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| reqwest::Url::parse(value).ok())
+            .filter(|url| {
+                self.allowed_origins
+                    .contains(&url.origin().ascii_serialization())
+            })
+            .map(|_| ())
+            .ok_or(LocalOwnerRejection::OriginRejected)
+    }
+
+    fn browser_metadata(&self, headers: &axum::http::HeaderMap) -> Result<(), LocalOwnerRejection> {
+        if headers
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|site| site == "cross-site")
+        {
+            return Err(LocalOwnerRejection::OriginRejected);
+        }
+        if headers.contains_key(header::REFERER) {
+            self.approved_referrer(headers)?;
+        }
+        Ok(())
     }
 
     /// Trades a launch code from an approved browser origin for a console
@@ -191,7 +220,7 @@ impl LocalOwnerPolicy {
         // usually keep on disk. `Strict` keeps it off cross-site requests;
         // the path keeps it off every other route.
         let set_cookie = format!(
-            "{}={}; Path=/api/system; HttpOnly; SameSite=Strict",
+            "{}={}; Path=/api; HttpOnly; SameSite=Strict",
             console_cookie_name(headers),
             opened.cookie
         );
@@ -415,6 +444,61 @@ fn constant_time_local_admin_eq(presented: &[u8], expected: &[u8]) -> bool {
     diff == 0
 }
 
+/// Every private API route uses the owner credential boundary, including legacy
+/// agent/configuration endpoints that do not have an additional route-specific gate.
+pub(super) async fn enforce_owner(
+    State(policy): State<LocalOwnerPolicy>,
+    request: AxumRequest,
+    next: Next,
+) -> Result<AxumResponse, AxumResponse> {
+    let path = request.uri().path();
+    let method = request.method();
+    let public = matches!(
+        path,
+        "/health"
+            | "/api/health"
+            | "/ready"
+            | "/api/ready"
+            | "/metrics"
+            | "/openapi.json"
+            | "/docs"
+            | "/docs/"
+    ) || super::conversation_shares::is_shared_read_request(&request)
+        || (*method == axum::http::Method::POST && path == "/api/system/session")
+        || (*method == axum::http::Method::GET
+            && matches!(
+                path,
+                "/api/connectors/gdrive/callback"
+                    | "/api/connectors/gcalendar/callback"
+                    | "/api/connectors/mail/gmail/callback"
+                    | "/api/connectors/mail/outlook/callback"
+            ));
+    if public || !path.starts_with("/api/") {
+        return Ok(next.run(request).await);
+    }
+    let authorized = if matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD) {
+        policy.authorize_read(request.headers())
+    } else {
+        policy.authorize(request.headers())
+    };
+    if authorized.is_ok() {
+        Ok(next.run(request).await)
+    } else {
+        let missing_session = matches!(authorized, Err(LocalOwnerRejection::LocalAdminRequired))
+            && request.headers().contains_key(header::ORIGIN);
+        let body = if missing_session {
+            serde_json::json!({ "error": "local owner authorization required", "code": "console_session_required" })
+        } else {
+            serde_json::json!({ "error": "local owner authorization required" })
+        };
+        let mut response = json_response(StatusCode::FORBIDDEN, &body);
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        Err(response)
+    }
+}
+
 /// Optional API-key gate. The immutable policy is computed once while the
 /// router is built.
 ///
@@ -434,6 +518,12 @@ pub(super) async fn enforce_api_key(
         return Ok(next.run(request).await);
     }
     let path = request.uri().path();
+    // This exact endpoint authenticates with a signed, expiring, single-use
+    // launch code. Requiring the optional API key first would prevent a locked
+    // browser from establishing its owner session.
+    if request.method() == axum::http::Method::POST && path == "/api/system/session" {
+        return Ok(next.run(request).await);
+    }
     // OAuth redirects cannot carry the API key. These exact GET callbacks
     // authenticate using their expiring, single-use OAuth state instead.
     if request.method() == axum::http::Method::GET
@@ -644,14 +734,61 @@ mod owner_read_tests {
     }
 
     #[test]
-    fn same_origin_browser_reads_do_not_relax_mutations() {
-        let policy = LocalOwnerPolicy::for_test(true, None);
-        let headers = browser_headers();
-        assert!(policy.authorize_read(&headers).is_ok());
-        assert!(policy.authorize(&headers).is_err());
-        assert!(LocalOwnerPolicy::for_test(false, None)
-            .authorize_read(&headers)
-            .is_err());
+    fn browser_metadata_never_authenticates_the_owner() {
+        for policy in [
+            LocalOwnerPolicy::for_test(true, None),
+            LocalOwnerPolicy::for_test(true, Some("admin")),
+        ] {
+            let headers = browser_headers();
+            assert!(policy.authorize_read(&headers).is_err());
+            assert!(policy.authorize(&headers).is_err());
+            let mut forged = headers;
+            forged.insert(
+                header::ORIGIN,
+                HeaderValue::from_static("http://localhost:4200"),
+            );
+            assert!(policy.authorize_read(&forged).is_err());
+            assert!(policy.authorize(&forged).is_err());
+        }
+    }
+
+    fn session_headers(policy: &LocalOwnerPolicy, key: &str) -> HeaderMap {
+        let mut headers = browser_headers();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://localhost:4200"),
+        );
+        let opened = policy
+            .open_console_session(&headers, &console_session::launch_code(key))
+            .unwrap();
+        assert!(opened.set_cookie.contains("Path=/api;"));
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(opened.set_cookie.split(';').next().unwrap()).unwrap(),
+        );
+        headers.insert(
+            SESSION_HEADER,
+            HeaderValue::from_str(&opened.token).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn owner_reads_and_writes_require_matching_session_halves() {
+        let policy = LocalOwnerPolicy::for_test(true, Some("admin"));
+        let valid = session_headers(&policy, "admin");
+        assert!(policy.authorize(&valid).is_ok());
+        assert!(policy.authorize_read(&valid).is_ok());
+        let mut read_without_origin = valid.clone();
+        read_without_origin.remove(header::ORIGIN);
+        assert!(policy.authorize_read(&read_without_origin).is_ok());
+        assert!(policy.authorize(&read_without_origin).is_err());
+        for missing in [header::COOKIE.as_str(), SESSION_HEADER] {
+            let mut headers = valid.clone();
+            headers.remove(missing);
+            assert!(policy.authorize_read(&headers).is_err(), "{missing}");
+            assert!(policy.authorize(&headers).is_err(), "{missing}");
+        }
         for (name, value) in [
             ("sec-fetch-site", "cross-site"),
             ("referer", "https://untrusted.example/"),
@@ -659,13 +796,34 @@ mod owner_read_tests {
             ("x-forwarded-for", "127.0.0.1"),
             ("origin", "https://untrusted.example"),
         ] {
-            let mut headers = browser_headers();
+            let mut headers = valid.clone();
             headers.insert(
                 axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
                 HeaderValue::from_str(value).unwrap(),
             );
             assert!(policy.authorize_read(&headers).is_err(), "{name}");
         }
+        let mut mixed = valid;
+        mixed.insert(
+            SESSION_HEADER,
+            session_headers(&policy, "admin")[SESSION_HEADER].clone(),
+        );
+        assert!(policy.authorize_read(&mixed).is_err());
+        assert!(policy.authorize(&mixed).is_err());
+    }
+
+    #[test]
+    fn native_owner_bearer_authenticates_without_browser_metadata() {
+        let policy = LocalOwnerPolicy::for_test(true, Some("admin"));
+        let headers = HeaderMap::from_iter([
+            (header::HOST, HeaderValue::from_static("127.0.0.1:8080")),
+            (
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer admin"),
+            ),
+        ]);
+        assert!(policy.authorize_read(&headers).is_ok());
+        assert!(policy.authorize(&headers).is_ok());
     }
 
     #[test]

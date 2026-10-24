@@ -6,6 +6,14 @@ This package builds the local `animaos` binary used for single-agent scaffolding
 
 `launch` is the primary TUI workflow. Use `--no-tui` only for automation, CI, or plain-text runs.
 
+For daemon owner routes, the CLI reads `ANIMA_LOCAL_ADMIN_TOKEN_FILE` or
+`ANIMA_LOCAL_ADMIN_TOKEN`. On loopback only, it can also discover the dev token
+next to `ANIMAOS_RS_CONTROL_PLANE_FILE` (with `.admin-token` appended), or the
+packaged `$ANIMA_HOME/.animaos-swarm/admin-token`. Without either setting, it uses
+`~/.animaos-swarm/data/control-plane.json.admin-token`. Discovered tokens are not
+sent to remote daemon URLs. The optional global `ANIMAOS_RS_API_KEY` is sent
+separately as `x-api-key`.
+
 Plain-text launch supports both one-shot and interactive flows. In interactive `--no-tui` mode, the prompt supports `exit`, `/help`, and `/health`, and it prints daemon warning or recovery lines when connectivity changes.
 
 Current CLI coverage includes:

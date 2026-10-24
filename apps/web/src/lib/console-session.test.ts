@@ -32,6 +32,9 @@ describe('console session', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'same-origin',
+      redirect: 'error',
+      cache: 'no-store',
+      referrerPolicy: 'origin',
       body: JSON.stringify({ code: '1.abc.def' }),
     });
     expect(consoleSessionHeaders()).toEqual({

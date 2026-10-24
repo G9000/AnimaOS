@@ -651,7 +651,7 @@ fn routed_models(service: ChatGptAuth) -> axum::Router {
         crate::agent_runs::test_support::ScriptedModel::new(vec![]),
     );
     daemon.chatgpt_auth = service;
-    crate::app::app_with_state(
+    crate::app::app_with_state_for_owner_test(
         Arc::new(tokio::sync::RwLock::new(daemon)),
         crate::app::DaemonConfig::default(),
     )
@@ -666,14 +666,16 @@ async fn request_models(
     } else {
         "/api/providers/chatgpt/models/refresh"
     };
-    let request = axum::http::Request::builder()
-        .method(method)
-        .uri(path)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from("{}"))
-        .unwrap();
+    let request = crate::routes::owner_test_support::authenticate(
+        axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200")
+            .header("content-type", "application/json"),
+    )
+    .body(axum::body::Body::from("{}"))
+    .unwrap();
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.headers()["cache-control"], "no-store");
     let status = response.status();

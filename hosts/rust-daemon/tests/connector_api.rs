@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+mod support;
+
 use anima_daemon::app as daemon_app;
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
@@ -48,6 +50,12 @@ async fn app_with_owner_env(
     app
 }
 
+async fn owner_app(host: &str, allowed_origins: Option<&str>) -> Router {
+    let token = std::env::var("ANIMAOS_TEST_OWNER_TOKEN")
+        .expect("test runner must set ANIMAOS_TEST_OWNER_TOKEN");
+    app_with_owner_env(host, allowed_origins, Some(&token)).await
+}
+
 fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
     match previous {
         Some(value) => std::env::set_var(name, value),
@@ -78,6 +86,18 @@ fn request(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
 }
 
 fn owner_request(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
+    let mut builder = support::owner_request(Request::builder())
+        .method(method)
+        .uri(uri);
+    if body.is_some() {
+        builder = builder.header("content-type", "application/json");
+    }
+    builder
+        .body(body.map_or_else(Body::empty, |value| Body::from(value.to_string())))
+        .expect("owner request builds")
+}
+
+fn raw_browser_request(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
     let mut request = request(method, uri, body);
     request
         .headers_mut()
@@ -99,6 +119,12 @@ fn owner_message_request(uri: &str, body: Value, idempotency_key: &str) -> Reque
 
 fn apply_owner_guard_attack(request: &mut Request<Body>, attack: &str) {
     match attack {
+        "origin" => {
+            request.headers_mut().remove("authorization");
+            request
+                .headers_mut()
+                .insert("origin", APPROVED_ORIGIN.parse().unwrap());
+        }
         "evil-origin" => {
             request.headers_mut().insert(
                 "origin",
@@ -121,6 +147,7 @@ fn apply_owner_guard_attack(request: &mut Request<Body>, attack: &str) {
         }
         "originless" => {
             request.headers_mut().remove("origin");
+            request.headers_mut().remove("authorization");
         }
         "wrong-token" => {
             request.headers_mut().remove("origin");
@@ -135,7 +162,7 @@ fn apply_owner_guard_attack(request: &mut Request<Body>, attack: &str) {
 async fn create_agent(app: &Router, name: &str) -> String {
     let (status, _, body, _) = send(
         app,
-        request(
+        owner_request(
             "POST",
             "/api/agents",
             Some(json!({"name": name, "model": "gpt-5.4"})),
@@ -164,7 +191,7 @@ async fn create_connector(app: &Router, agent_id: &str) -> (StatusCode, HeaderMa
 async fn get_connectors(app: &Router, agent_id: &str) -> (StatusCode, HeaderMap, Value, String) {
     send(
         app,
-        request("GET", &format!("/api/agents/{agent_id}/connectors"), None),
+        owner_request("GET", &format!("/api/agents/{agent_id}/connectors"), None),
     )
     .await
 }
@@ -202,7 +229,7 @@ fn assert_secret_absent(texts: impl IntoIterator<Item = String>) {
 
 #[tokio::test]
 async fn connector_routes_cover_create_list_replace_pair_restart_and_delete() {
-    let app = app_with_owner_env("127.0.0.1", None, None).await;
+    let app = owner_app("127.0.0.1", None).await;
     let agent_id = create_agent(&app, "operator").await;
     let (create_status, create_headers, created, create_text) =
         create_connector(&app, &agent_id).await;
@@ -313,7 +340,7 @@ async fn connector_routes_cover_create_list_replace_pair_restart_and_delete() {
 
 #[tokio::test]
 async fn connector_routes_enforce_agent_ownership_and_not_found_without_secret_leaks() {
-    let app = app_with_owner_env("127.0.0.1", None, None).await;
+    let app = owner_app("127.0.0.1", None).await;
     let owner_id = create_agent(&app, "owner").await;
     let other_id = create_agent(&app, "other").await;
     let (status, _, created, create_text) = create_connector(&app, &owner_id).await;
@@ -335,11 +362,7 @@ async fn connector_routes_enforce_agent_ownership_and_not_found_without_secret_l
         ("send", "POST", "/messages", Some(json!({"text": "hello"}))),
     ] {
         let uri = format!("/api/agents/{other_id}/connectors/{connector_id}{suffix}");
-        let mut request = if method == "GET" {
-            request(method, &uri, body)
-        } else {
-            owner_request(method, &uri, body)
-        };
+        let mut request = owner_request(method, &uri, body);
         if name == "send" {
             request
                 .headers_mut()
@@ -369,7 +392,7 @@ async fn connector_routes_enforce_agent_ownership_and_not_found_without_secret_l
 
 #[tokio::test]
 async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
-    let app = app_with_owner_env("127.0.0.1", None, None).await;
+    let app = owner_app("127.0.0.1", None).await;
     let agent_id = create_agent(&app, "threader").await;
     let (_, _, created, _) = create_connector(&app, &agent_id).await;
     let connector_id = created["connector"]["id"].as_str().unwrap();
@@ -432,7 +455,7 @@ async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
 
     let (_, _, ordinary_run, _) = send(
         &app,
-        request(
+        owner_request(
             "POST",
             &format!("/api/agents/{agent_id}/run"),
             Some(json!({"text": "ordinary web room"})),
@@ -473,7 +496,7 @@ async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
 
     let uri = format!("/api/agents/{agent_id}/connectors/{connector_id}/messages?limit=2");
     let (first_status, first_headers, first_page, first_text) =
-        send(&app, request("GET", &uri, None)).await;
+        send(&app, owner_request("GET", &uri, None)).await;
     assert_eq!(first_status, StatusCode::OK);
     assert_no_store(&first_headers);
     assert_eq!(first_page["messages"].as_array().unwrap().len(), 2);
@@ -481,7 +504,8 @@ async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
     let uri = format!(
         "/api/agents/{agent_id}/connectors/{connector_id}/messages?limit=2&before={before}"
     );
-    let (second_status, _, second_page, second_text) = send(&app, request("GET", &uri, None)).await;
+    let (second_status, _, second_page, second_text) =
+        send(&app, owner_request("GET", &uri, None)).await;
     assert_eq!(second_status, StatusCode::OK);
     assert_eq!(second_page["messages"].as_array().unwrap().len(), 2);
     assert!(first_page["messages"]
@@ -507,7 +531,7 @@ async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
     ] {
         let (status, _, body, _) = send(
             &app,
-            request(
+            owner_request(
                 "GET",
                 &format!("/api/agents/{agent_id}/connectors/{connector_id}/messages?{invalid}"),
                 None,
@@ -521,7 +545,7 @@ async fn connector_thread_is_dedicated_bounded_and_stably_paginated() {
 
 #[tokio::test]
 async fn connector_inputs_are_bounded_before_mutation() {
-    let app = app_with_owner_env("127.0.0.1", None, None).await;
+    let app = owner_app("127.0.0.1", None).await;
     let agent_id = create_agent(&app, "bounded").await;
     let (missing_status, _, missing_body, _) = send(
         &app,
@@ -581,7 +605,7 @@ async fn connector_inputs_are_bounded_before_mutation() {
     }
     let (_, _, messages, _) = send(
         &app,
-        request(
+        owner_request(
             "GET",
             &format!("/api/agents/{agent_id}/connectors/{connector_id}/messages"),
             None,
@@ -593,7 +617,7 @@ async fn connector_inputs_are_bounded_before_mutation() {
 
 #[tokio::test]
 async fn connector_thread_requires_a_bounded_idempotency_key() {
-    let app = app_with_owner_env("127.0.0.1", None, None).await;
+    let app = owner_app("127.0.0.1", None).await;
     let agent_id = create_agent(&app, "idempotency-key-validation").await;
     let (_, _, created, _) = create_connector(&app, &agent_id).await;
     let connector_id = created["connector"]["id"].as_str().unwrap();
@@ -624,73 +648,38 @@ async fn connector_thread_requires_a_bounded_idempotency_key() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "connector_idempotency_key_invalid");
 
-    let (_, _, messages, _) = send(&app, request("GET", &uri, None)).await;
+    let (_, _, messages, _) = send(&app, owner_request("GET", &uri, None)).await;
     assert_eq!(messages["messages"], json!([]));
 }
 
 #[tokio::test]
 async fn local_owner_guard_fails_before_connector_side_effects() {
-    for (name, host, origins, admin, mutate, expected_code) in [
-        (
-            "remote bind",
-            "0.0.0.0",
-            None,
-            None,
-            "origin",
-            "connector_local_admin_required",
-        ),
-        (
-            "unapproved origin",
-            "127.0.0.1",
-            None,
-            None,
-            "evil-origin",
-            "connector_origin_rejected",
-        ),
+    for (name, host, origins, admin, mutate) in [
+        ("remote bind", "0.0.0.0", None, None, "origin"),
+        ("unapproved origin", "127.0.0.1", None, None, "evil-origin"),
         (
             "malformed origin",
             "127.0.0.1",
             None,
             None,
             "malformed-origin",
-            "connector_origin_rejected",
         ),
-        (
-            "forwarded",
-            "127.0.0.1",
-            None,
-            None,
-            "forwarded",
-            "connector_local_admin_required",
-        ),
-        (
-            "missing host",
-            "127.0.0.1",
-            None,
-            None,
-            "missing-host",
-            "connector_local_admin_required",
-        ),
-        (
-            "originless",
-            "127.0.0.1",
-            None,
-            None,
-            "originless",
-            "connector_local_admin_required",
-        ),
+        ("forwarded", "127.0.0.1", None, None, "forwarded"),
+        ("missing host", "127.0.0.1", None, None, "missing-host"),
+        ("originless", "127.0.0.1", None, None, "originless"),
         (
             "wrong bearer",
             "127.0.0.1",
             None,
             Some("right-token"),
             "wrong-token",
-            "connector_local_admin_required",
         ),
     ] {
         let app = app_with_owner_env(host, origins, admin).await;
-        let agent_id = create_agent(&app, name).await;
-        let mut blocked = owner_request(
+        // These cases must be rejected before agent lookup. A remote-bound or
+        // unconfigured owner router must not be seeded through its own API.
+        let agent_id = "missing-agent";
+        let mut blocked = raw_browser_request(
             "POST",
             &format!("/api/agents/{agent_id}/connectors/telegram"),
             Some(json!({"botToken": SECRET_SENTINEL})),
@@ -699,13 +688,11 @@ async fn local_owner_guard_fails_before_connector_side_effects() {
         let (status, headers, body, text) = send(&app, blocked).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{name}: {text}");
         assert_no_store(&headers);
-        assert_eq!(body["code"], expected_code);
+        assert_eq!(body["error"], "local owner authorization required");
         assert_secret_absent([text]);
-        let (list_status, _, listed, _) = get_connectors(&app, &agent_id).await;
-        assert_eq!(list_status, StatusCode::OK);
-        assert_eq!(listed, json!({"connectors": []}), "{name}");
 
-        let mut blocked_delete = owner_request("DELETE", &format!("/api/agents/{agent_id}"), None);
+        let mut blocked_delete =
+            raw_browser_request("DELETE", &format!("/api/agents/{agent_id}"), None);
         apply_owner_guard_attack(&mut blocked_delete, mutate);
         let (delete_status, _, _, delete_text) = send(&app, blocked_delete).await;
         assert_eq!(
@@ -713,55 +700,43 @@ async fn local_owner_guard_fails_before_connector_side_effects() {
             StatusCode::FORBIDDEN,
             "agent deletion guard {name}: {delete_text}"
         );
-        let (list_status, _, listed, _) = get_connectors(&app, &agent_id).await;
-        assert_eq!(list_status, StatusCode::OK, "agent must remain: {name}");
-        assert_eq!(listed, json!({"connectors": []}), "{name}");
-    }
-
-    let forwarded_app = app_with_owner_env("127.0.0.1", None, None).await;
-    let forwarded_agent_id = create_agent(&forwarded_app, "forwarding-headers").await;
-    for header in [
-        "forwarded",
-        "via",
-        "x-forwarded-for",
-        "x-forwarded-host",
-        "x-forwarded-proto",
-        "x-forwarded-port",
-        "x-real-ip",
-    ] {
-        let mut blocked = owner_request(
-            "POST",
-            &format!("/api/agents/{forwarded_agent_id}/connectors/telegram"),
-            Some(json!({"botToken": SECRET_SENTINEL})),
+        let (list_status, list_headers, _, _) = send(
+            &app,
+            raw_browser_request("GET", &format!("/api/agents/{agent_id}/connectors"), None),
+        )
+        .await;
+        assert_eq!(
+            list_status,
+            StatusCode::FORBIDDEN,
+            "private reads are guarded"
         );
-        blocked
-            .headers_mut()
-            .insert(header, "malicious-forward".parse().unwrap());
-        let (status, _, body, _) = send(&forwarded_app, blocked).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{header}");
-        assert_eq!(body["code"], "connector_local_admin_required");
+        assert_no_store(&list_headers);
     }
-    let (_, _, forwarded_list, _) = get_connectors(&forwarded_app, &forwarded_agent_id).await;
-    assert_eq!(forwarded_list, json!({"connectors": []}));
 
-    let app = app_with_owner_env(
-        "127.0.0.1",
-        Some("https://custom-ui.example"),
-        Some("right-token"),
+    let app = owner_app("127.0.0.1", None).await;
+    let agent_id = create_agent(&app, "authenticated-owner-reaches-handler").await;
+    let (status, _, created, _) = create_connector(&app, &agent_id).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["connector"]["agentId"], agent_id);
+    let (missing_owner_status, missing_owner_headers, _, _) = send(
+        &app,
+        raw_browser_request(
+            "POST",
+            &format!("/api/agents/{agent_id}/connectors/telegram"),
+            Some(json!({"botToken": SECRET_SENTINEL})),
+        ),
     )
     .await;
+    assert_eq!(missing_owner_status, StatusCode::FORBIDDEN);
+    assert_no_store(&missing_owner_headers);
+
+    let app = owner_app("127.0.0.1", Some("https://custom-ui.example")).await;
     let agent_id = create_agent(&app, "allowed").await;
-    let mut originless = request(
+    let originless = owner_request(
         "POST",
         &format!("/api/agents/{agent_id}/connectors/telegram"),
         Some(json!({"botToken": SECRET_SENTINEL})),
     );
-    originless
-        .headers_mut()
-        .insert("host", "localhost:8080".parse().unwrap());
-    originless
-        .headers_mut()
-        .insert("authorization", "Bearer right-token".parse().unwrap());
     let (token_status, _, _, _) = send(&app, originless).await;
     assert_eq!(token_status, StatusCode::CREATED);
 
@@ -774,8 +749,9 @@ async fn local_owner_guard_fails_before_connector_side_effects() {
     custom_origin
         .headers_mut()
         .insert("origin", "https://custom-ui.example".parse().unwrap());
-    let (custom_status, _, _, _) = send(&app, custom_origin).await;
-    assert_eq!(custom_status, StatusCode::CREATED);
+    let (custom_status, custom_headers, _, _) = send(&app, custom_origin).await;
+    assert_eq!(custom_status, StatusCode::FORBIDDEN);
+    assert_no_store(&custom_headers);
 
     let default_agent_id = create_agent(&app, "default-origin-remains").await;
     let (default_status, _, _, _) = create_connector(&app, &default_agent_id).await;
@@ -795,13 +771,7 @@ async fn local_owner_guard_fails_before_connector_side_effects() {
     assert_eq!(origin_delete["deleted"], true);
 
     let token_delete_agent = create_agent(&app, "token-delete").await;
-    let mut token_delete = request("DELETE", &format!("/api/agents/{token_delete_agent}"), None);
-    token_delete
-        .headers_mut()
-        .insert("host", "localhost:8080".parse().unwrap());
-    token_delete
-        .headers_mut()
-        .insert("authorization", "Bearer right-token".parse().unwrap());
+    let token_delete = owner_request("DELETE", &format!("/api/agents/{token_delete_agent}"), None);
     let (token_delete_status, _, token_delete, _) = send(&app, token_delete).await;
     assert_eq!(token_delete_status, StatusCode::OK);
     assert_eq!(token_delete["deleted"], true);

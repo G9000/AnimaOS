@@ -1,8 +1,9 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 #[cfg(windows)]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 #[cfg(windows)]
 use std::thread;
 use std::time::Duration;
@@ -10,6 +11,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anima_core::CancelSignal;
+
+use super::super::command_binding::CommandBinding;
 
 use super::super::workspace::{
     canonical_workspace_root, resolve_workspace_search_root, workspace_root_path,
@@ -99,6 +102,46 @@ pub(in super::super) struct BashCommandResult {
     pub(in super::super) output: String,
 }
 
+struct BoundShellLaunch {
+    binding: Arc<CommandBinding>,
+    executable: String,
+    flags: Vec<String>,
+    command: String,
+    cwd: PathBuf,
+}
+
+impl BoundShellLaunch {
+    fn revalidate(&self) -> Result<(), String> {
+        revalidate_shell_launch(
+            Some(&self.binding),
+            &self.executable,
+            &self.flags,
+            &self.command,
+            &self.cwd,
+        )
+    }
+}
+
+/// Runs synchronously at the final spawn boundary, after any queue or async wait.
+/// `None` is reserved for explicitly trusted raw embedding helpers and tests.
+pub(super) fn revalidate_shell_launch(
+    binding: Option<&CommandBinding>,
+    executable: &str,
+    flags: &[String],
+    command: &str,
+    cwd: &Path,
+) -> Result<(), String> {
+    let Some(binding) = binding else {
+        return Ok(());
+    };
+    let (selected, selected_flags) = resolve_shell_launcher()?;
+    if selected != executable || selected_flags != flags {
+        return Err("Execution launcher changed while approval was pending; request approval again; the command did not run".into());
+    }
+    let current = CommandBinding::capture_shell(executable, flags, command, cwd)?;
+    binding.ensure_unchanged(&current)
+}
+
 pub(super) fn execute_bash_command(
     configured_root: Option<&Path>,
     command: &str,
@@ -107,7 +150,54 @@ pub(super) fn execute_bash_command(
     cancel: Option<&CancelSignal>,
 ) -> Result<BashCommandResult, String> {
     let workspace_root = workspace_root_path("bash", configured_root)?;
-    execute_bash_command_from_root(&workspace_root, command, timeout_ms, cwd, cancel)
+    execute_bash_command_with_requirement(
+        &workspace_root,
+        command,
+        timeout_ms,
+        cwd,
+        cancel,
+        true,
+        None,
+    )
+}
+
+pub(super) fn execute_bash_command_bound(
+    configured_root: Option<&Path>,
+    command: &str,
+    timeout_ms: u64,
+    cwd: &str,
+    cancel: Option<&CancelSignal>,
+    binding: Arc<CommandBinding>,
+) -> Result<BashCommandResult, String> {
+    let root = workspace_root_path("bash", configured_root)?;
+    execute_bash_command_with_requirement(
+        &root,
+        command,
+        timeout_ms,
+        cwd,
+        cancel,
+        true,
+        Some(binding),
+    )
+}
+
+pub(in super::super) fn execute_bash_command_from_root_bound(
+    workspace_root: &Path,
+    command: &str,
+    timeout_ms: u64,
+    cwd: &str,
+    cancel: Option<&CancelSignal>,
+    binding: Arc<CommandBinding>,
+) -> Result<BashCommandResult, String> {
+    execute_bash_command_with_requirement(
+        workspace_root,
+        command,
+        timeout_ms,
+        cwd,
+        cancel,
+        true,
+        Some(binding),
+    )
 }
 
 pub(in super::super) fn execute_bash_command_from_root(
@@ -117,8 +207,29 @@ pub(in super::super) fn execute_bash_command_from_root(
     cwd: &str,
     cancel: Option<&CancelSignal>,
 ) -> Result<BashCommandResult, String> {
+    execute_bash_command_with_requirement(
+        workspace_root,
+        command,
+        timeout_ms,
+        cwd,
+        cancel,
+        false,
+        None,
+    )
+}
+
+fn execute_bash_command_with_requirement(
+    workspace_root: &Path,
+    command: &str,
+    timeout_ms: u64,
+    cwd: &str,
+    cancel: Option<&CancelSignal>,
+    require_strong: bool,
+    binding: Option<Arc<CommandBinding>>,
+) -> Result<BashCommandResult, String> {
     #[cfg(windows)]
     {
+        let _ = require_strong; // Windows always assigns a Job before resume.
         return execute_windows_from_root(
             workspace_root,
             command,
@@ -126,6 +237,7 @@ pub(in super::super) fn execute_bash_command_from_root(
             cwd,
             cancel.cloned(),
             None,
+            binding,
         );
     }
     #[cfg(not(windows))]
@@ -139,8 +251,49 @@ pub(in super::super) fn execute_bash_command_from_root(
         args.push(command.to_string());
         let cancel = cancel.cloned();
         let timeout = Duration::from_millis(timeout_ms);
-        super::run_on_process_runtime(run_unix_shell(executable, args, cwd, timeout, cancel))
-            .unwrap_or_else(|| Err("bash worker stopped unexpectedly".to_string()))
+        super::run_on_process_runtime(run_unix_shell(
+            executable,
+            args,
+            cwd,
+            timeout,
+            cancel,
+            require_strong,
+            binding,
+        ))
+        .unwrap_or_else(|| Err("bash worker stopped unexpectedly".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    #[test]
+    fn queued_shell_worker_refuses_a_changed_entry_script_before_spawn() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("entry.sh");
+        std::fs::write(&script, "echo approved\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let (shell, flags) = resolve_shell_launcher().unwrap();
+        let binding =
+            CommandBinding::capture_shell(&shell, &flags, "./entry.sh", root.path()).unwrap();
+        std::fs::write(&script, "echo changed > should-not-exist\n").unwrap();
+        let error = execute_bash_command_with_requirement(
+            root.path(),
+            "./entry.sh",
+            1_000,
+            ".",
+            None,
+            false,
+            Some(Arc::new(binding)),
+        )
+        .unwrap_err();
+        assert!(error.contains("identity changed"), "{error}");
+        assert!(!root.path().join("should-not-exist").exists());
     }
 }
 
@@ -153,6 +306,8 @@ async fn run_unix_shell(
     cwd: std::path::PathBuf,
     timeout: Duration,
     cancel: Option<CancelSignal>,
+    require_strong: bool,
+    binding: Option<Arc<CommandBinding>>,
 ) -> Result<BashCommandResult, String> {
     use process_wrap::tokio::CommandWrap;
 
@@ -166,7 +321,19 @@ async fn run_unix_shell(
     };
     let is_cancelled = || cancel.as_ref().is_some_and(CancelSignal::is_cancelled);
 
+    let identity = binding.map(|binding| BoundShellLaunch {
+        binding,
+        executable: executable.clone(),
+        flags: args[..args.len().saturating_sub(1)].to_vec(),
+        command: args.last().cloned().unwrap_or_default(),
+        cwd: cwd.clone(),
+    });
     let (mut custody, mut native) = anima_process::Custody::prepare(Path::new(&executable), args);
+    if require_strong {
+        custody
+            .require_strong()
+            .map_err(|error| error.to_string())?;
+    }
     native
         .current_dir(&cwd)
         .stdin(Stdio::null())
@@ -176,6 +343,9 @@ async fn run_unix_shell(
         .envs(shell_env());
     let mut wrapped = CommandWrap::from(native);
     custody.wrap(&mut wrapped);
+    if let Some(identity) = &identity {
+        identity.revalidate()?;
+    }
     let mut child = wrapped
         .spawn()
         .map_err(|error| format!("bash failed to start command: {error}"))?;
@@ -276,6 +446,7 @@ pub(super) fn execute_bash_command_owned(
     run_cancel: Option<CancelSignal>,
     call_cancel: CancelSignal,
     profile_owner: Option<crate::profile_owner::ProfileOwner>,
+    binding: Arc<CommandBinding>,
 ) -> Result<BashCommandResult, String> {
     let root = workspace_root_path("bash", configured_root)?;
     execute_windows_from_root_owned(
@@ -286,6 +457,7 @@ pub(super) fn execute_bash_command_owned(
         run_cancel,
         Some(call_cancel),
         profile_owner,
+        Some(binding),
     )
 }
 
@@ -356,6 +528,7 @@ struct WindowsShellOwner {
     stdout: Arc<Mutex<String>>,
     stderr: Arc<Mutex<String>>,
     wait_started: bool,
+    identity: Option<BoundShellLaunch>,
 }
 #[cfg(windows)]
 enum WindowsWait {
@@ -372,6 +545,7 @@ fn execute_windows_from_root(
     cwd: &str,
     run_cancel: Option<CancelSignal>,
     call_cancel: Option<CancelSignal>,
+    binding: Option<Arc<CommandBinding>>,
 ) -> ShellResult {
     execute_windows_from_root_owned(
         root,
@@ -381,6 +555,7 @@ fn execute_windows_from_root(
         run_cancel,
         call_cancel,
         None,
+        binding,
     )
 }
 
@@ -393,6 +568,7 @@ fn execute_windows_from_root_owned(
     run_cancel: Option<CancelSignal>,
     call_cancel: Option<CancelSignal>,
     profile_owner: Option<crate::profile_owner::ProfileOwner>,
+    binding: Option<Arc<CommandBinding>>,
 ) -> ShellResult {
     let fuse = cleanup_fuse();
     if fuse.load(std::sync::atomic::Ordering::SeqCst) {
@@ -410,6 +586,13 @@ fn execute_windows_from_root_owned(
     }
     let cwd = resolve_workspace_search_root(&canonical_workspace_root(root, "bash")?, cwd, "bash")?;
     let (executable, flags) = resolve_shell_launcher()?;
+    let identity = binding.map(|binding| BoundShellLaunch {
+        binding,
+        executable: executable.clone(),
+        flags: flags.clone(),
+        command: command.to_string(),
+        cwd: cwd.clone(),
+    });
     let mut builder = Command::new(&executable);
     builder
         .args(flags)
@@ -442,6 +625,7 @@ fn execute_windows_from_root_owned(
             stdout: Arc::new(Mutex::new(String::new())),
             stderr: Arc::new(Mutex::new(String::new())),
             wait_started: false,
+            identity,
         };
         // Keep the owner outside unwinding so even a panic cannot silently
         // drop a launched Job/readers and turn missing proof into completion.
@@ -492,6 +676,11 @@ impl WindowsShellOwner {
                 status: "error",
                 output: BASH_STOPPED.into(),
             }));
+        }
+        if let Some(identity) = &self.identity {
+            if let Err(error) = identity.revalidate() {
+                return Ok(Err(error));
+            }
         }
         self.child = match self.command.spawn() {
             Ok(child) => Some(child),

@@ -1,16 +1,19 @@
 use std::collections::BTreeMap;
-use std::net::IpAddr;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use anima_core::{AgentState, Content, DataValue, Message, TaskResult, ToolCall};
 use futures::future::BoxFuture;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
-use reqwest::redirect;
 use reqwest::Url;
 use serde_json::{json, Value};
 
 use super::ToolExecutionContext;
+
+mod ssrf;
+#[cfg(test)]
+use ssrf::reject_ip as reject_ssrf_ip;
+use ssrf::reject_url as reject_ssrf_url;
 
 /// Hard cap on bytes streamed from a `web_fetch` response. Independent of the
 /// caller's `max_length`, which only governs character-count truncation of
@@ -27,17 +30,8 @@ fn web_fetch_client() -> Result<&'static reqwest::Client, String> {
     if let Some(client) = WEB_FETCH_CLIENT.get() {
         return Ok(client);
     }
-    let client = reqwest::Client::builder()
+    let client = ssrf::client_builder()
         .timeout(Duration::from_secs(15))
-        .redirect(redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() > 10 {
-                return attempt.error("too many redirects");
-            }
-            match reject_ssrf_url(attempt.url()) {
-                Ok(()) => attempt.follow(),
-                Err(reason) => attempt.error(reason),
-            }
-        }))
         .build()
         .map_err(|error| format!("web_fetch client init failed: {error}"))?;
     let _ = WEB_FETCH_CLIENT.set(client);
@@ -56,81 +50,6 @@ fn exa_client() -> Result<&'static reqwest::Client, String> {
         .map_err(|error| format!("exa_search client init failed: {error}"))?;
     let _ = EXA_CLIENT.set(client);
     Ok(EXA_CLIENT.get().expect("exa client just installed"))
-}
-
-/// Rejects URLs that would let the LLM-driven `web_fetch` tool reach into the
-/// daemon's network neighborhood: loopback, link-local cloud-metadata,
-/// RFC1918 private space, and similar. Only `http`/`https` are permitted.
-fn reject_ssrf_url(url: &Url) -> Result<(), String> {
-    let scheme = url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(format!("web_fetch only supports http/https (got {scheme})"));
-    }
-    let Some(host) = url.host_str() else {
-        return Err("web_fetch URL has no host".into());
-    };
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return reject_ssrf_ip(ip);
-    }
-    // IPv6 literals come wrapped in `[...]` from `host_str` — try unwrapping
-    // and re-parsing.
-    if let Some(stripped) = host.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-        if let Ok(ip) = stripped.parse::<IpAddr>() {
-            return reject_ssrf_ip(ip);
-        }
-    }
-    // Block obvious local names. Full DNS-resolution-based blocking is
-    // intentionally not done here — it adds latency and a DNS-rebinding
-    // window. Operators relying on this for hostile-LLM safety should also
-    // restrict outbound traffic at the network layer.
-    let lowered = host.to_ascii_lowercase();
-    if lowered == "localhost"
-        || lowered.ends_with(".localhost")
-        || lowered.ends_with(".local")
-        || lowered.ends_with(".internal")
-    {
-        return Err(format!("web_fetch refuses local hostname: {host}"));
-    }
-    Ok(())
-}
-
-fn reject_ssrf_ip(ip: IpAddr) -> Result<(), String> {
-    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
-        return Err(format!("web_fetch refuses non-routable address: {ip}"));
-    }
-    match ip {
-        IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            // RFC1918 private
-            let private = matches!(octets[0], 10)
-                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-                || (octets[0] == 192 && octets[1] == 168);
-            // Link-local + cloud metadata (169.254.0.0/16)
-            let link_local = octets[0] == 169 && octets[1] == 254;
-            // Carrier-grade NAT (100.64.0.0/10)
-            let cgnat = octets[0] == 100 && (64..=127).contains(&octets[1]);
-            if private || link_local || cgnat {
-                return Err(format!("web_fetch refuses private address: {v4}"));
-            }
-            Ok(())
-        }
-        IpAddr::V6(v6) => {
-            let segments = v6.segments();
-            // Unique local fc00::/7
-            if segments[0] & 0xfe00 == 0xfc00 {
-                return Err(format!("web_fetch refuses private address: {v6}"));
-            }
-            // Link-local fe80::/10
-            if segments[0] & 0xffc0 == 0xfe80 {
-                return Err(format!("web_fetch refuses link-local address: {v6}"));
-            }
-            // IPv4-mapped IPv6 — re-check via the v4 form
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return reject_ssrf_ip(IpAddr::V4(v4));
-            }
-            Ok(())
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -554,4 +473,30 @@ fn strip_html_block(input: &str, tag_name: &str) -> String {
 
     output.push_str(&input[cursor..]);
     output
+}
+
+#[cfg(test)]
+mod ssrf_hardening_regressions {
+    use super::*;
+
+    #[test]
+    fn ssrf_hardening_rejects_special_purpose_addresses() {
+        for address in [
+            "0.1.2.3",
+            "192.0.2.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "240.0.0.1",
+            "168.63.129.16",
+            "2001:db8::1",
+            "64:ff9b::7f00:1",
+            "2002:7f00:1::",
+        ] {
+            assert!(
+                reject_ssrf_ip(address.parse().unwrap()).is_err(),
+                "{address} must never be a web-fetch destination"
+            );
+        }
+    }
 }

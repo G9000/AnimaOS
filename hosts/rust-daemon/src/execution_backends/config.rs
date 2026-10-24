@@ -7,6 +7,8 @@ pub(crate) const CONFIG_ENV: &str = "ANIMAOS_EXECUTION_PROFILES_FILE";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Configuration {
     pub version: u32,
+    #[serde(default)]
+    pub allow_host_execution: bool,
     pub targets: Vec<ExecutionProfile>,
 }
 #[derive(Clone, Debug, Deserialize)]

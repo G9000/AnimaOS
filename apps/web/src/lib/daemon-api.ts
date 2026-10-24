@@ -79,6 +79,7 @@ import {
 } from '@animaos/sdk';
 import { consoleSessionHeaders } from './console-session';
 import { ownerApiKeyHeaders } from './owner-api-key';
+import { ownerFetch } from './owner-fetch';
 
 export type {
   AddProviderKeyInput,
@@ -116,13 +117,7 @@ export function daemonRequestHeaders(): Record<string, string> {
 
 const setupClient = createDaemonClient({
   baseUrl: '',
-  fetch: (url, init) => {
-    const headers = daemonRequestHeaders();
-    new Headers(init?.headers).forEach((value, name) => {
-      headers[name] = value;
-    });
-    return globalThis.fetch(url, { ...init, headers });
-  },
+  fetch: ownerFetch,
 });
 
 /** The Anima app's lifecycle (`/api/system`), with the owner transport. */

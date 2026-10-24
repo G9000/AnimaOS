@@ -153,14 +153,16 @@ mod tests {
 
     async fn request(app: Router, method: &str, uri: &str, input: serde_json::Value) -> Response {
         app.oneshot(
-            HttpRequest::builder()
-                .method(method)
-                .uri(uri)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("content-type", "application/json")
-                .body(Body::from(input.to_string()))
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                HttpRequest::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(input.to_string()))
+            .unwrap(),
         )
         .await
         .unwrap()
@@ -270,14 +272,16 @@ mod tests {
         let malformed = app
             .clone()
             .oneshot(
-                HttpRequest::builder()
-                    .method("POST")
-                    .uri(&uri)
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("content-type", "application/json")
-                    .body(Body::from("not json"))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    HttpRequest::builder()
+                        .method("POST")
+                        .uri(&uri)
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200"),
+                )
+                .header("content-type", "application/json")
+                .body(Body::from("not json"))
+                .unwrap(),
             )
             .await
             .unwrap();

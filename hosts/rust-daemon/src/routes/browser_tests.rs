@@ -76,21 +76,24 @@ async fn m46_owner_scope_save_for_live_ordinary_run_starts_no_worker() {
         .action_receipts
         .clone();
     let approvals = state.read().await.approvals.pending().len();
-    let app = crate::app::app_with_state(state.clone(), crate::DaemonConfig::default());
+    let app =
+        crate::app::app_with_state_for_owner_test(state.clone(), crate::DaemonConfig::default());
     let path = format!("/api/agents/{agent_id}/runs/{}/browser-scope", run.run_id);
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri(&path)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"policyId":policy_id,"selectedInputIds":[],"enabled":false}).to_string(),
-                ))
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method("PUT")
+                    .uri(&path)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"policyId":policy_id,"selectedInputIds":[],"enabled":false}).to_string(),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -106,13 +109,15 @@ async fn m46_owner_scope_save_for_live_ordinary_run_starts_no_worker() {
     let response = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(&path)
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method("GET")
+                    .uri(&path)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -132,14 +137,16 @@ async fn m46_owner_scope_save_for_live_ordinary_run_starts_no_worker() {
         let response = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(&path)
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("content-type", "application/json")
-                    .body(Body::from(invalid))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(&path)
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200"),
+                )
+                .header("content-type", "application/json")
+                .body(Body::from(invalid))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -205,14 +212,31 @@ async fn m46_owner_chat_selection_is_bound_before_first_model_step() {
         .config()
         .tools
         .clone();
-    let app = crate::app::app_with_state(fixture.state.clone(), crate::DaemonConfig::default());
-    let response=app.oneshot(Request::builder().method("POST")
-        .uri(format!("/api/agents/{agent_id}/sessions/{session_id}/runs"))
-        .header("host","127.0.0.1:8080").header("origin","http://localhost:4200")
-        .header("content-type","application/json").header("idempotency-key","m46-browser-opt-in")
-        .body(Body::from(json!({"text":"Inspect the controlled page", "mode":"queue", "browserSelection":{
-            "policyId":"controlled-operator-policy", "selectedInputIds":[]
-        }}).to_string())).unwrap()).await.unwrap();
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
+    let response = app
+        .oneshot(
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/agents/{agent_id}/sessions/{session_id}/runs"))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .header("content-type", "application/json")
+            .header("idempotency-key", "m46-browser-opt-in")
+            .body(Body::from(
+                json!({"text":"Inspect the controlled page", "mode":"queue", "browserSelection":{
+                    "policyId":"controlled-operator-policy", "selectedInputIds":[]
+                }})
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         response.status(),
         StatusCode::ACCEPTED,
@@ -278,15 +302,17 @@ async fn m46_owner_chat_selection_is_bound_before_first_model_step() {
 }
 
 fn chat_request(agent: &str, session: &str, key: &str, body: Value) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(format!("/api/agents/{agent}/sessions/{session}/runs"))
-        .header("host", "127.0.0.1:8080")
-        .header("origin", "http://localhost:4200")
-        .header("content-type", "application/json")
-        .header("idempotency-key", key)
-        .body(Body::from(body.to_string()))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/{session}/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("origin", "http://localhost:4200"),
+    )
+    .header("content-type", "application/json")
+    .header("idempotency-key", key)
+    .body(Body::from(body.to_string()))
+    .unwrap()
 }
 
 #[tokio::test]
@@ -305,7 +331,8 @@ async fn m46_chat_selection_busy_race_replay_and_omission_preserve_authority() {
     let agent = &f.run.agent_id;
     let session = "chat:m46-opt-in-race";
     add_chat(&f.coordinator, agent, session).await;
-    let app = crate::app::app_with_state(f.state.clone(), crate::DaemonConfig::default());
+    let app =
+        crate::app::app_with_state_for_owner_test(f.state.clone(), crate::DaemonConfig::default());
     let body = json!({"text":"same criteria task","mode":"queue","browserSelection":{"policyId":"controlled-operator-policy","selectedInputIds":[]}});
     let (one, two) = tokio::join!(
         app.clone()

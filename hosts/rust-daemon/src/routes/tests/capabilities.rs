@@ -7,12 +7,14 @@ async fn m83_capabilities_explain_anonymous_search_without_granting_it() {
     let app = router(state.clone(), DaemonConfig::default());
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/capabilities")
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri("/api/capabilities")
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -42,12 +44,14 @@ async fn capability_inventory_matches_registered_tools_without_granting_access()
     let app = router(state.clone(), DaemonConfig::default());
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/capabilities")
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri("/api/capabilities")
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -97,12 +101,14 @@ async fn m75_capability_inventory_reports_supported_partial_slices_without_activ
     assert_eq!(before["runs"], serde_json::json!([]));
     let response = app
         .oneshot(
-            Request::builder()
-                .uri("/api/capabilities")
-                .header("host", "127.0.0.1:8080")
-                .header("origin", "http://localhost:4200")
-                .body(Body::empty())
-                .unwrap(),
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri("/api/capabilities")
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();

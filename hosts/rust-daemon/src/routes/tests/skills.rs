@@ -11,11 +11,13 @@ use crate::skills::{
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
 fn request(method: &str, uri: &str, origin: &str, body: Option<Value>) -> Request<Body> {
-    let builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin);
+    let builder = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    );
     match body {
         Some(body) => builder
             .header("content-type", "application/json")
@@ -400,17 +402,19 @@ fn proposal(name: &str) -> crate::skills::Proposal {
 }
 
 fn import_request(origin: &str, boundary: &str, body: Vec<u8>) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri("/api/skills/import")
-        .header("host", "127.0.0.1:8080")
-        .header("origin", origin)
-        .header(
-            "content-type",
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .body(Body::from(body))
-        .unwrap()
+    crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri("/api/skills/import")
+            .header("host", "127.0.0.1:8080")
+            .header("origin", origin),
+    )
+    .header(
+        "content-type",
+        format!("multipart/form-data; boundary={boundary}"),
+    )
+    .body(Body::from(body))
+    .unwrap()
 }
 
 #[tokio::test]
@@ -775,18 +779,20 @@ async fn a_session_message_can_carry_an_enabled_skill() {
     )
     .await;
     let start = |session: &str, key: &str, body: Value| {
-        Request::builder()
-            .method("POST")
-            .uri(format!(
-                "/api/agents/{agent}/sessions/{}/runs",
-                session.replace(':', "%3A")
-            ))
-            .header("host", "127.0.0.1:8080")
-            .header("origin", OWNER_ORIGIN)
-            .header("content-type", "application/json")
-            .header("idempotency-key", key)
-            .body(Body::from(body.to_string()))
-            .unwrap()
+        crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/agents/{agent}/sessions/{}/runs",
+                    session.replace(':', "%3A")
+                ))
+                .header("host", "127.0.0.1:8080")
+                .header("origin", OWNER_ORIGIN),
+        )
+        .header("content-type", "application/json")
+        .header("idempotency-key", key)
+        .body(Body::from(body.to_string()))
+        .unwrap()
     };
 
     let accepted = app

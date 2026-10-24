@@ -136,18 +136,20 @@ mod tests {
     async fn m49_chatgpt_models_cached_get_returns_canonical_disconnected_no_store() {
         // The ordinary deterministic app owns isolated in-memory auth. Reading
         // cached metadata must not require a vault, remote catalog or generation.
-        let app = crate::app();
+        let app = crate::app::app_for_owner_test();
         for _ in 0..2 {
             let response = app
                 .clone()
                 .oneshot(
-                    Request::builder()
-                        .method("GET")
-                        .uri("/api/providers/chatgpt/models")
-                        .header("host", "127.0.0.1:8080")
-                        .header("origin", "http://localhost:4200")
-                        .body(Body::empty())
-                        .unwrap(),
+                    crate::routes::owner_test_support::authenticate(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/api/providers/chatgpt/models")
+                            .header("host", "127.0.0.1:8080")
+                            .header("origin", "http://localhost:4200"),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -172,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn m49_chatgpt_models_routes_reject_foreign_origin_before_work() {
-        let app = crate::app();
+        let app = crate::app::app_for_owner_test();
         for (method, path) in [
             ("GET", "/api/providers/chatgpt/models"),
             ("POST", "/api/providers/chatgpt/models/refresh"),
@@ -197,7 +199,7 @@ mod tests {
             let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(
                 error,
-                serde_json::json!({"error":"Local owner authorization required"})
+                serde_json::json!({"error":"local owner authorization required"})
             );
         }
     }
@@ -217,7 +219,10 @@ mod tests {
             .id;
         let original = daemon.get_agent(&agent).unwrap().state.config;
         let state = Arc::new(RwLock::new(daemon));
-        let app = crate::app::app_with_state(state.clone(), crate::app::DaemonConfig::default());
+        let app = crate::app::app_with_state_for_owner_test(
+            state.clone(),
+            crate::app::DaemonConfig::default(),
+        );
         for body in [
             "",
             "null",
@@ -230,14 +235,16 @@ mod tests {
             let response = app
                 .clone()
                 .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .uri("/api/providers/chatgpt/models/refresh")
-                        .header("host", "127.0.0.1:8080")
-                        .header("origin", "http://localhost:4200")
-                        .header("content-type", "application/json")
-                        .body(Body::from(body))
-                        .unwrap(),
+                    crate::routes::owner_test_support::authenticate(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/api/providers/chatgpt/models/refresh")
+                            .header("host", "127.0.0.1:8080")
+                            .header("origin", "http://localhost:4200")
+                            .header("content-type", "application/json"),
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -246,14 +253,16 @@ mod tests {
         }
         let response = app
             .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/providers/chatgpt/models/refresh")
-                    .header("host", "127.0.0.1:8080")
-                    .header("origin", "http://localhost:4200")
-                    .header("content-type", "application/json")
-                    .body(Body::from("{}"))
-                    .unwrap(),
+                crate::routes::owner_test_support::authenticate(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/providers/chatgpt/models/refresh")
+                        .header("host", "127.0.0.1:8080")
+                        .header("origin", "http://localhost:4200")
+                        .header("content-type", "application/json"),
+                )
+                .body(Body::from("{}"))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -298,7 +307,7 @@ mod tests {
     }
     #[tokio::test]
     async fn deterministic_account_status_and_login_are_isolated() {
-        let app = crate::app();
+        let app = crate::app::app_for_owner_test();
         for (method, path, expected) in [
             ("GET", "/api/providers/chatgpt/status", StatusCode::OK),
             (
@@ -311,13 +320,15 @@ mod tests {
             let response = app
                 .clone()
                 .oneshot(
-                    Request::builder()
-                        .method(method)
-                        .uri(path)
-                        .header("host", "127.0.0.1:8080")
-                        .header("origin", "http://localhost:4200")
-                        .body(Body::empty())
-                        .unwrap(),
+                    crate::routes::owner_test_support::authenticate(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .header("host", "127.0.0.1:8080")
+                            .header("origin", "http://localhost:4200"),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -332,8 +343,8 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn browser_same_origin_read_uses_referrer_without_origin() {
-        let response = crate::app()
+    async fn browser_same_origin_read_requires_owner_session_without_origin() {
+        let response = crate::app::app_for_owner_test()
             .oneshot(
                 Request::builder()
                     .uri("/api/providers/chatgpt/status")
@@ -343,6 +354,22 @@ mod tests {
                     .body(Body::empty())
                     .unwrap(),
             )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let mut request = crate::routes::owner_test_support::authenticate(
+            Request::builder()
+                .uri("/api/providers/chatgpt/status")
+                .header("host", "127.0.0.1:8080")
+                .header("sec-fetch-site", "same-origin")
+                .header("referer", "http://localhost:4200/settings"),
+        )
+        .body(Body::empty())
+        .unwrap();
+        request.headers_mut().remove(axum::http::header::ORIGIN);
+        let response = crate::app::app_for_owner_test()
+            .oneshot(request)
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

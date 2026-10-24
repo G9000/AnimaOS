@@ -479,7 +479,9 @@ fn request(
         .header("host", "127.0.0.1:8080")
         .header("content-type", "application/json");
     let builder = if owner {
-        builder.header("origin", "http://localhost:4200")
+        crate::routes::owner_test_support::authenticate(
+            builder.header("origin", "http://localhost:4200"),
+        )
     } else {
         builder
     };
