@@ -1,0 +1,7 @@
+/node_modules/
+**/node_modules/
+/web/dist/
+/target/
+/.anima-village/
+/test-output/
+/.tmp/
