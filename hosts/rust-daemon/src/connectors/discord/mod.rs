@@ -14,6 +14,7 @@ pub(crate) mod sender;
 pub(crate) mod text;
 #[cfg(test)]
 mod text_tests;
+mod titles;
 mod typing;
 use crate::agent_runs::AgentRunCoordinator;
 use crate::app::SharedDaemonState;
@@ -106,12 +107,14 @@ impl std::error::Error for DiscordManagerError {}
 struct Authority {
     epoch: u64,
     claimed: bool,
+    title_claims: usize,
 }
 struct Claim {
     authorities: Arc<StdMutex<HashMap<String, Authority>>>,
     notify: Arc<Notify>,
     id: String,
     epoch: u64,
+    title: bool,
 }
 impl Drop for Claim {
     fn drop(&mut self) {
@@ -121,7 +124,11 @@ impl Drop for Claim {
             .unwrap_or_else(|e| e.into_inner())
             .get_mut(&self.id)
         {
-            a.claimed = false;
+            if self.title {
+                a.title_claims = a.title_claims.saturating_sub(1);
+            } else {
+                a.claimed = false;
+            }
         }
         self.notify.notify_waiters();
     }
@@ -295,6 +302,26 @@ impl DiscordManager {
             notify: self.notify.clone(),
             id: id.into(),
             epoch,
+            title: false,
+        })
+    }
+    /// Lifecycle fence for title effects, independent of message delivery's slot.
+    fn claim_title(&self, id: &str, epoch: u64) -> Option<Claim> {
+        if !self.authority_current(id, epoch) {
+            return None;
+        }
+        let mut authorities = self.authorities.lock().unwrap_or_else(|e| e.into_inner());
+        let a = authorities.entry(id.into()).or_default();
+        if a.epoch != epoch {
+            return None;
+        }
+        a.title_claims += 1;
+        Some(Claim {
+            authorities: self.authorities.clone(),
+            notify: self.notify.clone(),
+            id: id.into(),
+            epoch,
+            title: true,
         })
     }
     async fn drain(&self, id: &str) {
@@ -305,7 +332,7 @@ impl DiscordManager {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get(id)
-                .is_some_and(|a| a.claimed);
+                .is_some_and(|a| a.claimed || a.title_claims != 0);
             if !busy {
                 return;
             }
@@ -645,6 +672,11 @@ pub(crate) fn validate_snapshot(
                         != format!("discord:{}:{}", c.id, conversation.channel.id))
                 || !crate::sessions::is_valid_session_id(&conversation.room_id)
                 || DiscordSnowflake::cursor(&conversation.cursor).is_none()
+                || conversation.auto_title.as_ref().is_some_and(|title| {
+                    conversation.channel.kind != DiscordChannelKind::GuildThread
+                        || title.initial_name.is_empty()
+                        || title.initial_name.encode_utf16().count() > 100
+                })
                 || c.guild_scope
                     .as_ref()
                     .is_some_and(|guild| guild != &conversation.channel.guild_id)

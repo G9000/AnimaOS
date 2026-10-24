@@ -280,8 +280,10 @@ impl DiscordManager {
         let delta = Arc::new(StdMutex::new((
             None::<DiscordInboundRecord>,
             None::<DiscordOutboundRecord>,
+            None::<(String, String, String)>,
         )));
         let commit_delta = delta.clone();
+        let title_delta = delta.clone();
         let mut metadata = BTreeMap::from([
             (
                 "source".into(),
@@ -307,6 +309,9 @@ impl DiscordManager {
                 DataValue::String(inbound.sender.id.clone()),
             );
         }
+        let title_input = inbound
+            .as_ref()
+            .map_or_else(|| text.clone(), |r| r.text.clone());
         let text = inbound.as_ref().map_or(text, sender::attributed_text);
         let request = AgentRunRequest {
             agent_id: c.agent_id.clone(),
@@ -403,6 +408,28 @@ impl DiscordManager {
                     .insert(record.id.clone(), record.clone());
                 delta.1 = Some(record);
             }
+            // Consume naming eligibility in the same durable commit as the first
+            // completed reply. A restart cannot let a later reply claim the title.
+            if outcome.status == RunStatus::Completed && !stopped {
+                if let Some(title) = state
+                    .discord_connectors
+                    .get_mut(&commit_c.id)
+                    .and_then(|c| {
+                        c.conversations
+                            .iter_mut()
+                            .find(|v| v.room_id == commit_c.room_id)
+                    })
+                    .and_then(|v| v.auto_title.as_mut())
+                    .filter(|v| !v.attempted)
+                {
+                    title.attempted = true;
+                    delta.2 = Some((
+                        commit_c.id.clone(),
+                        commit_c.room_id.clone(),
+                        title.initial_name.clone(),
+                    ));
+                }
+            }
             Ok(())
         };
         let rollback = move |state: &mut DaemonState| {
@@ -418,6 +445,17 @@ impl DiscordManager {
             if let Some(inserted) = &delta.1 {
                 if state.discord_outbound.get(&inserted.id) == Some(inserted) {
                     state.discord_outbound.remove(&inserted.id);
+                }
+            }
+            if let Some((connector, room, initial_name)) = &delta.2 {
+                if let Some(title) = state
+                    .discord_connectors
+                    .get_mut(connector)
+                    .and_then(|c| c.conversations.iter_mut().find(|v| &v.room_id == room))
+                    .and_then(|v| v.auto_title.as_mut())
+                    .filter(|v| &v.initial_name == initial_name)
+                {
+                    title.attempted = false;
                 }
             }
             Ok(())
@@ -436,7 +474,26 @@ impl DiscordManager {
             });
         drop(typing);
         self.stop_typing_run(&c.id, &run_id).await;
-        result?;
+        let result = result?;
+        let initial_name = title_delta
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .2
+            .clone();
+        if let (Some(reply), Some((_, _, initial_name))) = (result.result.data, initial_name) {
+            if !reply.text.trim().is_empty() {
+                if let Err(error) = self.schedule_thread_title(
+                    &c,
+                    &run_id,
+                    title_input,
+                    reply.text,
+                    initial_name,
+                    epoch,
+                ) {
+                    tracing::warn!(connector_id = %c.id, error = %error, "could not schedule Discord thread title");
+                }
+            }
+        }
         Ok(())
     }
 }

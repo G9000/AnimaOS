@@ -103,7 +103,7 @@ impl AgentRunCoordinator {
         first: String,
         reply: String,
     ) {
-        let (adapter, config) = {
+        {
             let guard = self.state.read().await;
             if !guard.generated_titles {
                 return;
@@ -130,59 +130,12 @@ impl AgentRunCoordinator {
             if earlier_reply {
                 return;
             }
-            (guard.profile_model_adapter(), runtime.config().clone())
-        };
-        // The call's tokens count whether or not its title is usable (spec
-        // §11); a timed-out call was dropped and records nothing.
-        let execution = match crate::execution_budgets::context_for_run(
-            &self.state,
-            self.control_plane_transactions(),
-            &run_id,
-            anima_core::CancelSignal::new(),
-        )
-        .await
-        {
-            Ok(execution) => execution,
-            Err(error) => {
-                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "chat title execution budget is unavailable");
-                return;
-            }
-        };
-        let (meter, model) =
-            crate::controlled_model::metered(adapter, execution, format!("title:{run_id}"));
-        let deadline = tokio::time::Instant::now() + self.title_timeout;
-        let generated = tokio::time::timeout_at(
-            deadline,
-            side_call(&self.state, &config, deadline, |config| {
-                let (model, first, reply) = (&model, &first, &reply);
-                async move { generate_title(model.as_ref(), &config, first, reply).await }
-            }),
-        )
-        .await;
-        if generated.is_ok() {
-            let call = SecondaryCall::for_config(
-                &agent_id,
-                Some(&session_id),
-                UsageSource::Title,
-                &config,
-            );
-            if let Err(error) =
-                record_secondary(&self.state, self.control_plane_transactions(), &meter, call).await
-            {
-                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "could not save the title call's usage");
-                return;
-            }
         }
-        let title = match generated {
-            Ok(Ok(title)) => title,
-            Ok(Err(error)) => {
-                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "could not title the chat");
-                return;
-            }
-            Err(_) => {
-                warn!(agent_id = %agent_id, session_id = %session_id, "the title call timed out");
-                return;
-            }
+        let Some(title) = self
+            .generate_conversation_title(&agent_id, &session_id, &run_id, &first, &reply)
+            .await
+        else {
+            return;
         };
         let transaction = self.control_plane_transaction().await;
         let (previous, persist) = {
@@ -213,5 +166,76 @@ impl AgentRunCoordinator {
             &session_id,
             LiveEventBody::SessionUpdated,
         );
+    }
+    /// Shared bounded, budgeted and metered title call for web chats and Discord.
+    pub(crate) async fn generate_conversation_title(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        run_id: &str,
+        first: &str,
+        reply: &str,
+    ) -> Option<String> {
+        let (adapter, config) = {
+            let guard = self.state.read().await;
+            let runtime = guard.agents.get(agent_id)?;
+            if !guard.generated_titles || !auto_title_enabled(runtime.config()) {
+                return None;
+            }
+            (guard.profile_model_adapter(), runtime.config().clone())
+        };
+        // The call's tokens count whether or not its title is usable (spec
+        // §11); a timed-out call was dropped and records nothing.
+        let execution = match crate::execution_budgets::context_for_run(
+            &self.state,
+            self.control_plane_transactions(),
+            &run_id,
+            anima_core::CancelSignal::new(),
+        )
+        .await
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "chat title execution budget is unavailable");
+                return None;
+            }
+        };
+        let (meter, model) =
+            crate::controlled_model::metered(adapter, execution, format!("title:{run_id}"));
+        let deadline = tokio::time::Instant::now() + self.title_timeout;
+        let generated = tokio::time::timeout_at(
+            deadline,
+            side_call(&self.state, &config, deadline, |config| {
+                let (model, first, reply) = (&model, &first, &reply);
+                async move { generate_title(model.as_ref(), &config, first, reply).await }
+            }),
+        )
+        .await;
+        if generated.is_ok() {
+            let call = SecondaryCall::for_config(
+                &agent_id,
+                Some(&session_id),
+                UsageSource::Title,
+                &config,
+            );
+            if let Err(error) =
+                record_secondary(&self.state, self.control_plane_transactions(), &meter, call).await
+            {
+                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "could not save the title call's usage");
+                return None;
+            }
+        }
+        let title = match generated {
+            Ok(Ok(title)) => title,
+            Ok(Err(error)) => {
+                warn!(agent_id = %agent_id, session_id = %session_id, error = %error, "could not title the chat");
+                return None;
+            }
+            Err(_) => {
+                warn!(agent_id = %agent_id, session_id = %session_id, "the title call timed out");
+                return None;
+            }
+        };
+        Some(title)
     }
 }

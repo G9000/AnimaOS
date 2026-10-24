@@ -2,6 +2,16 @@ Hermes Agent attribution for agent_files/{disk,selection,scan}.rs, tools/memory.
 tools.rs memory descriptions and components/providers.rs memory curation guidance
 Source: https://github.com/NousResearch/hermes-agent
 
+Discord two-stage thread titles are behaviorally adapted from public Hermes
+revision bac34e9e9946c9c6a9ce7ce64efadd47f8fa375b:
+plugins/platforms/discord/adapter.py::_derive_auto_thread_name / rename_thread
+and gateway/run_topics.py::_rename_discord_auto_thread_for_session_title.
+Anima independently implements mention stripping, UTF-16-bounded placeholders,
+one-shot persisted conversation claims, its existing metered title generator,
+and a current-name guard before the native name-only PATCH. No Python runtime,
+relay, or retry framework is imported. Discord's GET/PATCH guard is best effort,
+not an atomic compare-and-set against simultaneous manual edits.
+
 M83 tools/web_search.rs uses the labelled Exa response-field behavior from
 plugins/web/keyless_mcp.py::_parse_exa_search_text at public revision
 1fd18277267152893a8a24792b79213e7ca3f899. The Rust parser is independently

@@ -8,6 +8,7 @@ Use the invite to install the bot in your server, then save and activate the con
 
 - Server-channel messages require a mention by default. A mention selects the bot to answer; the sender must still be authorized.
 - Automatic threads give a new request its own conversation. Once the bot participates in a thread, authorized people can follow up without mentioning it again. Enable **Require mentions in threads** when that fits your server.
+- New automatic thread names omit raw user, role, and channel mentions. After the first successful reply, Anima attempts an AI-generated title in the background, respecting the agent's `autoTitle` setting. It checks Discord's current name before renaming and preserves a manually changed name. If generation or renaming fails, the temporary title stays; later replies and restarts do not repeat the attempt. Existing threads are left alone.
 - Free-response channels answer authorized messages without a mention and reply inline.
 - Allowed-channel restrictions include threads under the allowed parent channel. Each channel or thread keeps its own conversation history and replies return to that destination.
 - If creating a thread fails, the request does not silently move into a parent-channel conversation. Inspect the connector warning before retrying.

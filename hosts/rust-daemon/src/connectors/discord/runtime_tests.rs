@@ -78,9 +78,14 @@ use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
     channels: StdMutex<HashMap<String, DiscordChannelMetadata>>,
+    title_lookup_gate: AtomicBool,
+    title_lookup_entered: SemaphoreHolder,
+    title_lookup_release: SemaphoreHolder,
     channel_errors: StdMutex<VecDeque<DiscordTransportError>>,
     member_roles: StdMutex<HashMap<String, Vec<String>>>,
     thread_calls: AtomicUsize,
+    rename_calls: AtomicUsize,
+    rename_error: StdMutex<Option<DiscordTransportError>>,
     thread_error: StdMutex<Option<DiscordTransportError>>,
     sent_chunks: StdMutex<Vec<(String, String)>>,
     typing_calls: AtomicUsize,
@@ -138,7 +143,7 @@ impl DiscordTransport for FakeTransport {
         _: &DiscordBotToken,
         channel: &str,
         message: &str,
-        _: &str,
+        name: &str,
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
         self.thread_calls.fetch_add(1, Ordering::SeqCst);
         if let Some(error) = self.thread_error.lock().unwrap().take() {
@@ -147,7 +152,7 @@ impl DiscordTransport for FakeTransport {
         let thread = DiscordChannelMetadata {
             id: message.into(),
             guild_id: "33".into(),
-            name: Some(format!("thread {message}")),
+            name: Some(name.into()),
             kind: DiscordChannelKind::GuildThread,
             parent_channel_id: Some(channel.into()),
         };
@@ -156,6 +161,21 @@ impl DiscordTransport for FakeTransport {
             .unwrap()
             .insert(message.into(), thread.clone());
         Ok(thread)
+    }
+    async fn rename_thread(
+        &self,
+        _: &DiscordBotToken,
+        channel: &str,
+        name: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        self.rename_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.rename_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        let mut channels = self.channels.lock().unwrap();
+        let thread = channels.get_mut(channel).expect("created thread");
+        thread.name = Some(name.into());
+        Ok(thread.clone())
     }
     async fn send_typing(&self, _: &DiscordBotToken, _: &str) -> Result<(), DiscordTransportError> {
         struct InFlight<'a>(&'a AtomicUsize);
@@ -188,6 +208,15 @@ impl DiscordTransport for FakeTransport {
         _: &DiscordBotToken,
         channel: &str,
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        if channel == "101" && self.title_lookup_gate.load(Ordering::SeqCst) {
+            self.title_lookup_entered.0.add_permits(1);
+            self.title_lookup_release
+                .0
+                .acquire()
+                .await
+                .unwrap()
+                .forget();
+        }
         if let Some(error) = self.channel_errors.lock().unwrap().pop_front() {
             return Err(error);
         }

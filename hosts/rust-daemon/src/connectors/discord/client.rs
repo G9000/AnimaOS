@@ -106,6 +106,14 @@ pub(crate) trait DiscordTransport: Send + Sync {
     ) -> Result<(), DiscordTransportError> {
         Ok(())
     }
+    async fn rename_thread(
+        &self,
+        _token: &DiscordBotToken,
+        _channel: &str,
+        _name: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn get_me(
         &self,
         token: &DiscordBotToken,
@@ -595,12 +603,7 @@ impl DiscordTransport for DiscordClient {
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
         validate_id(channel)?;
         validate_id(message)?;
-        let name = name.trim().chars().take(80).collect::<String>();
-        let name = if name.is_empty() {
-            "Anima conversation".into()
-        } else {
-            name
-        };
+        let name = super::text::thread_title(name);
         let wire: WireChannel = self
             .request(
                 token,
@@ -615,6 +618,32 @@ impl DiscordTransport for DiscordClient {
         if result.kind != DiscordChannelKind::GuildThread
             || result.parent_channel_id.as_deref() != Some(channel)
         {
+            return Err(DiscordTransportError::Uncertain);
+        }
+        Ok(result)
+    }
+    async fn rename_thread(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        name: &str,
+    ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
+        validate_id(channel)?;
+        if name.is_empty() || name.encode_utf16().count() > 80 {
+            return Err(DiscordTransportError::InvalidInput);
+        }
+        let wire: WireChannel = self
+            .request(
+                token,
+                Method::PATCH,
+                &format!("channels/{channel}"),
+                Some(serde_json::json!({"name":name})),
+            )
+            .await?;
+        let result = wire
+            .normalize()
+            .map_err(|_| DiscordTransportError::Uncertain)?;
+        if result.id != channel || result.kind != DiscordChannelKind::GuildThread {
             return Err(DiscordTransportError::Uncertain);
         }
         Ok(result)

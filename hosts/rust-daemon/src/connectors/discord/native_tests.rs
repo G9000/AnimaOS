@@ -131,6 +131,75 @@ async fn native_application_check_uses_verified_bot_and_only_accepted_team_owner
 }
 
 #[tokio::test]
+async fn native_auto_thread_names_strip_mentions_and_bound_utf16() {
+    for (input, expected) in [
+        (
+            "<@11> review <@!44> <@&55> <#22>\n page".to_string(),
+            "review page".to_string(),
+        ),
+        ("<@11> <@&55>".to_string(), "Anima conversation".to_string()),
+        ("🦀".repeat(50), format!("{}...", "🦀".repeat(38))),
+        ("界".repeat(81), format!("{}...", "界".repeat(77))),
+    ] {
+        let (client, fixture, task) = fixture(vec![json(serde_json::json!({
+            "id":"101","guild_id":"33","type":11,"parent_id":"22","name":expected
+        }))])
+        .await;
+        client
+            .create_thread(
+                &DiscordBotToken::parse("title-fixture").unwrap(),
+                "22",
+                "101",
+                &input,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("thread name input {input:?}: {error:?}"));
+        assert_eq!(fixture.calls.lock().unwrap()[0].2["name"], expected);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_thread_rename_patches_only_name_and_validates_response_identity() {
+    let (client, fixture, task) = fixture(vec![
+        json(serde_json::json!({"id":"101","guild_id":"33","type":11,"parent_id":"22","name":"Landing Page Review"})),
+        json(serde_json::json!({"id":"999","guild_id":"33","type":11,"parent_id":"22","name":"Other Title"})),
+    ]).await;
+    let token = DiscordBotToken::parse("rename-fixture").unwrap();
+    assert_eq!(
+        client
+            .rename_thread(&token, "101", "Landing Page Review")
+            .await
+            .unwrap()
+            .name
+            .as_deref(),
+        Some("Landing Page Review")
+    );
+    assert_eq!(
+        client
+            .rename_thread(&token, "101", "Other Title")
+            .await
+            .unwrap_err(),
+        DiscordTransportError::Uncertain
+    );
+    assert_eq!(
+        client
+            .rename_thread(&token, "101", &"🦀".repeat(41))
+            .await
+            .unwrap_err(),
+        DiscordTransportError::InvalidInput
+    );
+    let calls = fixture.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, "/api/v10/channels/101");
+    assert_eq!(
+        calls[0].2,
+        serde_json::json!({"name":"Landing Page Review"})
+    );
+    task.abort();
+}
+
+#[tokio::test]
 async fn native_role_lookup_verifies_member_identity_and_thread_posts_verify_parent() {
     let (client, fixture, task) = fixture(vec![
         json(serde_json::json!({"user":{"id":"44"},"roles":["77"]})),

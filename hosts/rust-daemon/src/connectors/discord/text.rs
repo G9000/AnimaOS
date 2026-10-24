@@ -1,5 +1,34 @@
 //! Adapted eight-message cap from upstream DiscordAdapter._cap_split_chunks; see HERMES-NOTICE.
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
+
+/// Fast placeholder, matching Hermes's mention-free auto-thread naming.
+/// Keep room for an ellipsis and count UTF-16 units, including emoji pairs.
+pub(crate) fn thread_title(text: &str) -> String {
+    static MENTIONS: OnceLock<regex::Regex> = OnceLock::new();
+    let mentions = MENTIONS.get_or_init(|| {
+        regex::Regex::new(r"<@[!&]?[0-9]+>|<#[0-9]+>").expect("fixed mention pattern")
+    });
+    let stripped = mentions.replace_all(text, "");
+    let clean = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.is_empty() {
+        return "Anima conversation".into();
+    }
+    if clean.encode_utf16().count() <= 80 {
+        return clean;
+    }
+    let mut title = String::new();
+    let mut units = 0;
+    for ch in clean.chars() {
+        if units + ch.len_utf16() > 77 {
+            break;
+        }
+        title.push(ch);
+        units += ch.len_utf16();
+    }
+    format!("{}...", title.trim_end())
+}
+
 pub(crate) const DISCORD_MESSAGE_CHARACTER_LIMIT: usize = 2000;
 pub(crate) const MAX_SPLIT_MESSAGES: usize = 8;
 pub(crate) fn valid_chunk(text: &str) -> bool {

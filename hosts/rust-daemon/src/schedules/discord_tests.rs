@@ -66,6 +66,7 @@ async fn home_schedule_queues_and_restores(bot_wide: bool) {
                 room_id: "discord:discord-scheduled:42".into(),
                 cursor: "0".into(),
                 participating: false,
+                auto_title: None,
             });
         connector.channel.id.clear();
         connector.channel.guild_id.clear();

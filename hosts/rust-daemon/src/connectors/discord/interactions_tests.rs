@@ -1,6 +1,8 @@
 use super::*;
 use crate::agent_runs::test_support::{ScriptedModel, Step};
 use anima_core::MessageRole;
+#[path = "title_tests.rs"]
+mod title_tests;
 
 async fn bot_wide() -> (DiscordManager, Arc<FakeTransport>, DiscordConnectorRecord) {
     let (manager, transport, legacy) = setup().await;
@@ -94,6 +96,112 @@ async fn processed(manager: &DiscordManager, c: &DiscordConnectorRecord, id: &st
         }
     })
     .await;
+}
+
+#[tokio::test]
+async fn auto_thread_placeholder_strips_all_discord_mentions() {
+    let (manager, transport, c) = bot_wide().await;
+    let parent = discover(&manager, &c, "22", "101").await;
+    admit(
+        &manager,
+        &parent,
+        "101",
+        "<@11>  review <@!44> <@&55> in <#22>\n landing page",
+    )
+    .await;
+    assert_eq!(
+        transport.channels.lock().unwrap()["101"].name.as_deref(),
+        Some("review in landing page")
+    );
+}
+
+#[tokio::test]
+async fn auto_thread_gets_one_ai_title_after_its_first_completed_reply() {
+    let (manager, transport, c) = bot_wide().await;
+    let model = ScriptedModel::with_secondary(
+        vec![
+            Step::Text(vec!["I reviewed the page."]),
+            Step::Text(vec!["Done."]),
+        ],
+        vec![Step::Text(vec!["Landing Page Review"])],
+    );
+    {
+        let mut state = manager.state.write().await;
+        state.model_adapter = model.clone();
+        state.set_generated_titles(true);
+    }
+    let parent = discover(&manager, &c, "22", "101").await;
+    admit(&manager, &parent, "101", "<@11> review the landing page").await;
+    assert!(model.secondary_requests().is_empty());
+    processed(&manager, &c, "101").await;
+    within(async {
+        loop {
+            if transport.channels.lock().unwrap()["101"].name.as_deref()
+                == Some("Landing Page Review")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(manager.deliver_one(c.id.clone()).await.unwrap());
+    let current = manager.get(&c.agent_id, &c.id).await.unwrap();
+    let thread = current.destination_for_channel("101").unwrap();
+    admit(&manager, &thread, "201", "Thanks").await;
+    processed(&manager, &c, "201").await;
+    assert_eq!(model.secondary_requests().len(), 1);
+    let rows = manager.state.read().await.history.pending_usage();
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.source == crate::usage::UsageSource::Title)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn auto_thread_preserves_a_manual_name_changed_while_the_title_is_generated() {
+    let (manager, transport, c) = bot_wide().await;
+    let model = ScriptedModel::with_secondary(
+        vec![Step::Text(vec!["I reviewed the page."])],
+        vec![Step::Text(vec!["Landing Page Review"])],
+    );
+    {
+        let mut state = manager.state.write().await;
+        state.model_adapter = model.clone();
+        state.set_generated_titles(true);
+    }
+    let parent = discover(&manager, &c, "22", "101").await;
+    admit(&manager, &parent, "101", "<@11> review the landing page").await;
+    transport.title_lookup_gate.store(true, Ordering::SeqCst);
+    processed(&manager, &c, "101").await;
+    within(transport.title_lookup_entered.0.acquire())
+        .await
+        .unwrap()
+        .forget();
+    // Title work cannot delay the already committed reply's delivery.
+    assert!(manager.deliver_one(c.id.clone()).await.unwrap());
+    transport
+        .channels
+        .lock()
+        .unwrap()
+        .get_mut("101")
+        .unwrap()
+        .name = Some("My chosen title".into());
+    transport.title_lookup_gate.store(false, Ordering::SeqCst);
+    transport.title_lookup_release.0.add_permits(1);
+    within(async {
+        while manager.owned_count.load(Ordering::SeqCst) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert_eq!(
+        transport.channels.lock().unwrap()["101"].name.as_deref(),
+        Some("My chosen title")
+    );
+    manager.shutdown().await;
 }
 
 #[tokio::test]
@@ -505,6 +613,7 @@ async fn renaming_a_participating_selected_thread_keeps_its_room_and_restore_val
         room_id: c.room_id.clone(),
         cursor: c.cursor.clone(),
         participating: true,
+        auto_title: None,
     });
     manager
         .state

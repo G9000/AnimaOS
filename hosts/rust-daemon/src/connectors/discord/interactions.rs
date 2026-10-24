@@ -92,6 +92,7 @@ impl DiscordManager {
                     room_id: c.room_id.clone(),
                     cursor,
                     participating: true,
+                    auto_title: None,
                 });
             } else if participating {
                 if let Some(conversation) =
@@ -123,6 +124,7 @@ impl DiscordManager {
             room_id,
             cursor,
             participating,
+            auto_title: None,
         });
         Ok(())
     }
@@ -434,7 +436,12 @@ impl DiscordManager {
         let token = self.load_token(c).await?;
         let channel = match self
             .native()?
-            .create_thread(&token, &c.channel.id, &message.id, &message.text)
+            .create_thread(
+                &token,
+                &c.channel.id,
+                &message.id,
+                &text::thread_title(&message.text),
+            )
             .await
         {
             Ok(channel)
@@ -454,6 +461,18 @@ impl DiscordManager {
         let current = self.get(&c.agent_id, &c.id).await?;
         let mut next = current.clone();
         self.add_conversation(&mut next, channel.clone(), message.id.clone(), true)?;
+        if let Some(name) = &channel.name {
+            if let Some(conversation) = next
+                .conversations
+                .iter_mut()
+                .find(|v| v.channel.id == channel.id)
+            {
+                conversation.auto_title = Some(DiscordThreadTitle {
+                    initial_name: name.clone(),
+                    attempted: false,
+                });
+            }
+        }
         next.thread_starts.insert(
             message.id.clone(),
             DiscordThreadStart {

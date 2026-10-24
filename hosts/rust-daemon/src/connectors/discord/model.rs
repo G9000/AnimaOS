@@ -120,6 +120,16 @@ pub(crate) struct DiscordConversation {
     pub(crate) cursor: String,
     #[serde(default)]
     pub(crate) participating: bool,
+    /// Only set for threads this adapter auto-created. Older journals remain opt-out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_title: Option<DiscordThreadTitle>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiscordThreadTitle {
+    pub(crate) initial_name: String,
+    /// Saved before any model/rename effect; never replayed after restart.
+    pub(crate) attempted: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
