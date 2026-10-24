@@ -19,12 +19,12 @@
 
 ## Tasks
 
-- [ ] Stop only the separate game, verify main status/base, inspect existing manifests and current library documentation.
-- [ ] Move only tracked/nonignored game source files into PoC paths with checked absolute source/destination bounds. Preserve original bytes and ignored user data; leave unrelated caches alone.
-- [ ] Restore feature-only root workspace/lock/script/PRD edits after their game content is preserved inside PoC. Verify the final Git change is exclusively `poc/village/**`.
-- [ ] Add independent Cargo workspace metadata/profiles and fix both Rust path dependencies. Resolve a local PoC lockfile without updating versions unnecessarily.
-- [ ] Add independent Bun package, dependencies via Bun commands, Vite/Vitest/TypeScript configuration, launcher paths, root task wrappers and documented commands. No root package changes.
-- [ ] Test standalone package scope, frontend behavior/build/typecheck/lint, launcher configuration and 45 Rust game tests. Run the required repository Rust suites in the existing isolated validation output directory while the main daemon keeps running.
-- [ ] Run the migrated browser/full quest and fixed-MC checks against temporary separate ports and a test save DB; retain one current review image if useful. Review isolation and file/path correctness.
-- [ ] Record current commands/paths and validation, commit only the PoC, recheck main is clean, merge locally, and repeat the relevant checks on the merged result. No push.
-- [ ] Preserve the user's game save under main PoC, restart the separate game from main, remove exact scratch outputs after recording, and report main commit/path/start command. Keep the feature worktree until its saved user data is safely preserved.
+- [x] Stop only the separate game, verify main status/base, inspect existing manifests and current library documentation.
+- [x] Move only tracked/nonignored game source files into PoC paths with checked absolute source/destination bounds. Preserve original bytes and ignored user data; leave unrelated caches alone.
+- [x] Restore feature-only root workspace/lock/script/PRD edits after their game content is preserved inside PoC. Verify the final Git change is exclusively `poc/village/**`.
+- [x] Add independent Cargo workspace metadata/profiles and fix both Rust path dependencies. Resolve a local PoC lockfile without updating versions unnecessarily.
+- [x] Add independent Bun package, dependencies via Bun commands, Vite/Vitest/TypeScript configuration, launcher paths, root task wrappers and documented commands. No root package changes.
+- [x] Test standalone package scope, frontend behavior/build/typecheck/lint, launcher configuration and 45 Rust game tests. Run the required repository Rust suites in the existing isolated validation output directory while the main daemon keeps running.
+- [x] Run the migrated browser/full quest and fixed-MC checks against temporary separate ports and a test save DB; retain one current review image if useful. Review isolation and file/path correctness.
+- [x] Record current commands/paths and validation, commit only the PoC, recheck main is clean, merge locally, and repeat the relevant checks on the merged result. No push.
+- [x] Preserve the user's game save under main PoC, restart the separate game from main, remove exact scratch outputs after recording, and report main commit/path/start command. Keep the feature worktree until its saved user data is safely preserved.

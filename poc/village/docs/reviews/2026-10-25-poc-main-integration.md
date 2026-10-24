@@ -35,6 +35,10 @@ The game retains its existing prototype limitations, including qualified review 
 
 ## Local main handoff
 
-Pre-merge validation is complete. Local commit/merge, merged-tree checks, final save copy and main-checkout restart are recorded here after they finish. No push is authorized or performed.
+Source commit `f4d6ab19` was fast-forwarded locally into `main`. On the merged checkout, frozen offline install, all 36 frontend/tooling tests, all 45 game Rust tests, both builds, full PoC lint and the visual quest walkthrough passed. Only `poc/village/**` changed.
+
+The preserved save directory was copied into the main PoC with matching transfer hashes and passing SQLite integrity. All 13 saves and 33 receipts remained intact; every save was restored through the real main PoC API with matching inventory, coins and phase. Its snapshot digest still matches the value above.
+
+The game is running from the main PoC at <http://127.0.0.1:24302/> with API28192 and the existing live Anima connection. The main application server was left alone. Temporary verification files were removed; saves, dependencies and build caches were retained. No push was performed.
 
 Use the [PoC README](../../README.md) for current commands. Historical earlier reviews and plans describe the prior workspace locations; their banners identify that history.
