@@ -77,6 +77,14 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    downloads: StdMutex<HashMap<String, Vec<u8>>>,
+    download_calls: AtomicUsize,
+    download_error: StdMutex<Option<DiscordTransportError>>,
+    files: StdMutex<Vec<(String, String, Vec<u8>, String)>>,
+    file_error: StdMutex<Option<DiscordTransportError>>,
+    file_gate: AtomicBool,
+    file_entered: SemaphoreHolder,
+    file_release: SemaphoreHolder,
     channels: StdMutex<HashMap<String, DiscordChannelMetadata>>,
     title_lookup_gate: AtomicBool,
     title_lookup_entered: SemaphoreHolder,
@@ -86,6 +94,10 @@ struct FakeTransport {
     thread_calls: AtomicUsize,
     rename_calls: AtomicUsize,
     rename_error: StdMutex<Option<DiscordTransportError>>,
+    rename_gate: AtomicBool,
+    rename_entered: SemaphoreHolder,
+    rename_release: SemaphoreHolder,
+    rename_response: StdMutex<Option<DiscordChannelMetadata>>,
     thread_error: StdMutex<Option<DiscordTransportError>>,
     sent_chunks: StdMutex<Vec<(String, String)>>,
     typing_calls: AtomicUsize,
@@ -112,6 +124,52 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn download_attachment(
+        &self,
+        _: &str,
+        attachment: &DiscordAttachment,
+    ) -> Result<Vec<u8>, DiscordTransportError> {
+        self.download_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.download_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.downloads
+            .lock()
+            .unwrap()
+            .get(&attachment.id)
+            .cloned()
+            .ok_or(DiscordTransportError::Transport)
+    }
+    async fn send_file(
+        &self,
+        _: &DiscordBotToken,
+        channel: &str,
+        file: &DiscordFileUpload,
+        caption: &str,
+        _: &str,
+    ) -> Result<DiscordFileReceipt, DiscordTransportError> {
+        self.file_entered.0.add_permits(1);
+        if self.file_gate.load(Ordering::SeqCst) {
+            self.file_release.0.acquire().await.unwrap().forget();
+        }
+        if let Some(error) = self.file_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.files.lock().unwrap().push((
+            channel.into(),
+            file.filename.clone(),
+            file.bytes.clone(),
+            caption.into(),
+        ));
+        Ok(DiscordFileReceipt {
+            sent: true,
+            message_id: "901".into(),
+            channel_id: channel.into(),
+            attachment_id: "902".into(),
+            filename: file.filename.clone(),
+            size: file.bytes.len() as u64,
+        })
+    }
     async fn check_application(
         &self,
         _: &DiscordBotToken,
@@ -169,8 +227,15 @@ impl DiscordTransport for FakeTransport {
         name: &str,
     ) -> Result<DiscordChannelMetadata, DiscordTransportError> {
         self.rename_calls.fetch_add(1, Ordering::SeqCst);
+        self.rename_entered.0.add_permits(1);
+        if self.rename_gate.load(Ordering::SeqCst) {
+            self.rename_release.0.acquire().await.unwrap().forget();
+        }
         if let Some(error) = self.rename_error.lock().unwrap().take() {
             return Err(error);
+        }
+        if let Some(response) = self.rename_response.lock().unwrap().take() {
+            return Ok(response);
         }
         let mut channels = self.channels.lock().unwrap();
         let thread = channels.get_mut(channel).expect("created thread");
@@ -435,6 +500,7 @@ fn incoming(c: &DiscordConnectorRecord, id: &str) -> DiscordMessage {
             display_name: None,
         },
         text: "hello Anima".into(),
+        attachments: vec![],
         is_bot: false,
         webhook_id: None,
         message_type: 0,

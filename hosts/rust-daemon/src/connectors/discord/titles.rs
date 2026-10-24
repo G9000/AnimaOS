@@ -57,13 +57,22 @@ impl DiscordManager {
             return Ok(());
         };
         let title = text::thread_title(&title);
+        let title_lock = self.title_lock(c);
+        let _title = title_lock.lock().await;
         // A separate lifecycle claim lets reply delivery proceed during title I/O,
         // while credential changes still drain all in-flight native effects.
         let Some(_claim) = self.claim_title(&c.id, epoch) else {
             return Ok(());
         };
         let current = self.get(&c.agent_id, &c.id).await?;
-        if !current.matches_destination(c) {
+        if !current.matches_destination(c)
+            || !current.conversations.iter().any(|v| {
+                v.room_id == c.room_id
+                    && v.auto_title
+                        .as_ref()
+                        .is_some_and(|v| v.initial_name == initial_name)
+            })
+        {
             return Ok(());
         }
         let token = self.load_token(c).await?;

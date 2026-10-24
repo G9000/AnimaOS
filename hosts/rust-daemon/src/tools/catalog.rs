@@ -31,6 +31,7 @@ enum Origin {
     HostDerived,
     MainChatClear,
     OwnerChatControl,
+    DiscordThreadControl,
     Mcp(crate::mcp::McpDispatchStamp),
 }
 /// A captured ceiling over the final, filtered run descriptors. Its only
@@ -46,6 +47,7 @@ pub(crate) struct RunToolCatalog {
     discovery_enabled: bool,
     delegated_parent: Option<String>,
     peer_sources: Vec<String>,
+    discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
 }
 impl RunToolCatalog {
     pub(crate) fn new(
@@ -86,6 +88,13 @@ impl RunToolCatalog {
                     continue;
                 }
                 match explicit {
+                    _ if matches!(
+                        descriptor.name.as_str(),
+                        "rename_discord_thread" | "send_discord_file"
+                    ) =>
+                    {
+                        Origin::DiscordThreadControl
+                    }
                     _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
                     _ if matches!(
                         descriptor.name.as_str(),
@@ -154,6 +163,7 @@ impl RunToolCatalog {
                 == Some(&DataValue::Bool(true)),
             delegated_parent: None,
             peer_sources: Vec::new(),
+            discord_thread: None,
         }
     }
 
@@ -161,6 +171,13 @@ impl RunToolCatalog {
     pub(crate) fn with_origins(mut self, parent: Option<String>, peers: Vec<String>) -> Self {
         self.delegated_parent = parent;
         self.peer_sources = peers;
+        self
+    }
+    pub(crate) fn with_discord_thread(
+        mut self,
+        scope: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
+    ) -> Self {
+        self.discord_thread = scope;
         self
     }
 
@@ -257,6 +274,17 @@ impl RunToolCatalog {
                     || self.delegated_parent.is_some()
                     || crate::agent_runs::chat_controls::validate_owner_chat(state, &self.run)
                         .is_err()
+                {
+                    return Err(REFUSED);
+                }
+            }
+            Origin::DiscordThreadControl => {
+                if self.delegated_parent.is_some()
+                    || !self.peer_sources.is_empty()
+                    || !self
+                        .discord_thread
+                        .as_ref()
+                        .is_some_and(|scope| scope.valid_for(state, &self.run))
                 {
                     return Err(REFUSED);
                 }
@@ -523,6 +551,8 @@ impl ModelToolSelector for RunToolCatalog {
         }
         for name in [
             "rename_chat",
+            "rename_discord_thread",
+            "send_discord_file",
             "compact_chat",
             "export_chat",
             "manage_mcp",

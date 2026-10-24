@@ -96,9 +96,23 @@ async fn admit_with_reader(
         let Some(session) = guard.sessions.get(agent_id, session_id) else {
             return;
         };
-        if source != RunSource::Web
-            || session.kind != SessionKind::Chat
-            || session.origin != SessionOrigin::Web
+        let web = source == RunSource::Web
+            && session.kind == SessionKind::Chat
+            && session.origin == SessionOrigin::Web;
+        let discord = source == RunSource::Discord
+            && session.kind == SessionKind::Discord
+            && session.origin == SessionOrigin::Discord
+            && guard
+                .runs
+                .get(run_id)
+                .is_some_and(|run| run.source == RunSource::Discord)
+            && guard.discord_connectors.values().any(|c| {
+                c.agent_id == agent_id
+                    && c.is_active()
+                    && c.destination_for_room(session_id)
+                        .is_some_and(|destination| c.channel_allowed(&destination.channel))
+            });
+        if (!web && !discord)
             || crate::agent_runs::is_helper_config(config)
             || !guard.runs.get(run_id).is_some_and(|run| {
                 run.agent_id == agent_id

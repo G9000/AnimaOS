@@ -12,6 +12,7 @@ mod checkpoints;
 mod clarify;
 pub(crate) mod completion;
 mod conversations;
+mod discord;
 mod doctor;
 mod drive;
 mod execution;
@@ -133,6 +134,7 @@ pub(crate) struct ToolExecutionContext {
     pub(super) calendar: Option<CalendarManager>,
     pub(super) mail: Option<MailManager>,
     pub(super) drive: Option<crate::connectors::drive::DriveManager>,
+    pub(super) discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
     #[cfg(test)]
     pub(crate) web_search: Option<Arc<web_search::SearchExecutor>>,
     /// Host-owned task scope; ordinary contexts use the runtime agent ID.
@@ -244,6 +246,7 @@ impl ToolExecutionContext {
             calendar,
             mail: None,
             drive: None,
+            discord_thread: None,
             #[cfg(test)]
             web_search: None,
             todo_owner_id: None,
@@ -297,6 +300,13 @@ impl ToolExecutionContext {
 
     pub(crate) fn with_mail(mut self, mail: Option<MailManager>) -> Self {
         self.mail = mail;
+        self
+    }
+    pub(crate) fn with_discord_thread(
+        mut self,
+        scope: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
+    ) -> Self {
+        self.discord_thread = scope;
         self
     }
 
@@ -1009,6 +1019,7 @@ impl ToolRegistry {
         };
         clarify::register(&mut registry);
         chat_controls::register(&mut registry);
+        discord::register(&mut registry);
         chat_results::register(&mut registry);
         mcp_management::register(&mut registry);
         registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);

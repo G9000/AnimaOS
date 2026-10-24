@@ -47,6 +47,7 @@ pub(crate) struct Scope {
     pub peers: bool,
     pub owner_chat: bool,
     pub owner_main: bool,
+    pub discord_thread: bool,
     pub mcp_available: bool,
     pub automatic_mcp: bool,
 }
@@ -138,6 +139,8 @@ pub(crate) fn select(
         !matches!(
             tool.name.as_str(),
             "clear_main_chat"
+                | "rename_discord_thread"
+                | "send_discord_file"
                 | "rename_chat"
                 | "compact_chat"
                 | "export_chat"
@@ -162,6 +165,17 @@ pub(crate) fn select(
     }
     if scope.owner_main {
         tools.push(registry.descriptor("clear_main_chat").unwrap());
+    }
+    if scope.discord_thread
+        && !scope.reminder_verification
+        && !scope.helper_completion
+        && !scope.workflow_job
+        && !scope.delegated
+        && !scope.peers
+        && !super::is_helper_config(config)
+    {
+        tools.push(registry.descriptor("rename_discord_thread").unwrap());
+        tools.push(registry.descriptor("send_discord_file").unwrap());
     }
     tools
 }

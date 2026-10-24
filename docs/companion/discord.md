@@ -9,11 +9,24 @@ Use the invite to install the bot in your server, then save and activate the con
 - Server-channel messages require a mention by default. A mention selects the bot to answer; the sender must still be authorized.
 - Automatic threads give a new request its own conversation. Once the bot participates in a thread, authorized people can follow up without mentioning it again. Enable **Require mentions in threads** when that fits your server.
 - New automatic thread names omit raw user, role, and channel mentions. After the first successful reply, Anima attempts an AI-generated title in the background, respecting the agent's `autoTitle` setting. It checks Discord's current name before renaming and preserves a manually changed name. If generation or renaming fails, the temporary title stays; later replies and restarts do not repeat the attempt. Existing threads are left alone.
+- To change a title later, ask Anima inside that Discord thread. It can rename only the current thread and confirms the change after Discord accepts it and the daemon saves the result. An explicit rename can replace a manual title and prevents a pending automatic title from overwriting your choice. If the outcome is uncertain, inspect the title in Discord before retrying. The bot must be the thread creator or have Manage Threads permission.
 - Free-response channels answer authorized messages without a mention and reply inline.
 - Allowed-channel restrictions include threads under the allowed parent channel. Each channel or thread keeps its own conversation history and replies return to that destination.
 - If creating a thread fails, the request does not silently move into a parent-channel conversation. Inspect the connector warning before retrying.
 
 Bot messages and webhooks cannot trigger the assistant. Channel names, display names and message text are untrusted conversation content; they never grant permission.
+
+## Files and images
+
+Authorized participants can attach files to a mention in a server channel, or upload without a caption in a thread where Anima already participates (unless thread mentions are required). A configured workspace is required. Files are saved under `uploads/YYYY-MM-DD/` and bound to that conversation; saved inputs survive restart. Existing sender, role and channel restrictions apply before downloading.
+
+Supported inputs are PNG/JPEG/GIF/WebP images (10 MiB each), UTF-8 text/Markdown/CSV/JSON/YAML/XML and common source files (1 MiB each), and common PDF/Office documents (25 MiB each). A message admits up to ten files and 25 MiB in total. Unsupported, malformed or oversized inputs produce an explicit notice. Voice/audio and video processing are not included.
+
+Vision-capable models receive verified images through the existing attachment pipeline; other models receive an unavailable-image notice. Small text files (up to 16 KiB, within the message budget) are included as untrusted quoted data. Larger text files can be opened with `read_file` when the agent has that tool. Selected PDF/DOCX/XLSX documents use the existing bounded extraction limits; PDF excerpts cover the text layer only. Other saved Office formats are not automatically interpreted.
+
+Ask Anima in a Discord thread to create and send a report. It can write a workspace file and call `send_discord_file(path, caption?)`, for example `reports/summary.md`. The tool sends one supported file to the current thread, with a 10 MiB upload ceiling and the same per-type validation limits above. Absolute paths, traversal and linked files are refused. It is unavailable to web runs and delegated helpers. Anima confirms delivery only after Discord returns a matching message and attachment receipt. Failed or uncertain uploads do not confirm success and are not automatically retried; inspect Discord before retrying an uncertain upload. Existing run approval policies apply.
+
+The bot needs **Attach Files** permission to send uploads. New invite links request it; grant it in the server/channel for an existing installation. Console follow-ups to Discord sessions still accept text only. Native Discord file inputs are admitted by the connector.
 
 ## Home channel
 
@@ -23,7 +36,7 @@ Changing the home affects future output. Already prepared deliveries retain thei
 
 ## Permissions and recovery
 
-The invite requests View Channel, Send Messages, Read Message History, Create Public Threads and Send Messages in Threads. Enable Message Content intent in the Developer Portal. Private threads also require the bot to have access to that thread. This connector does not implement Discord slash commands or voice.
+The invite requests View Channel, Send Messages, Attach Files, Read Message History, Create Public Threads and Send Messages in Threads. Enable Message Content intent in the Developer Portal. Private threads also require the bot to have access to that thread. This connector does not implement Discord slash commands or voice.
 
 The daemon owns the persistent Gateway connection and reconciles messages through bounded history scans. Each discovered conversation has its own durable cursor. Very large backlogs and missing permissions can pause reconciliation and appear in status. Message edits or messages deleted before catch-up are not guaranteed to be observed.
 

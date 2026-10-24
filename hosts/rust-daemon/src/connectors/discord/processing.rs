@@ -5,7 +5,7 @@ use crate::agent_runs::{
 };
 use crate::routes::ApiError;
 use crate::runs::{RunOutcome, RunSource, RunStatus};
-use anima_core::{Content, DataValue, TaskStatus};
+use anima_core::{DataValue, TaskStatus};
 use futures::future::BoxFuture;
 use std::collections::BTreeMap;
 impl DiscordManager {
@@ -127,7 +127,7 @@ impl DiscordManager {
                     agent_id: agent,
                     session_id: session,
                     text: inbound.text.clone(),
-                    attachment_ids: Vec::new(),
+                    attachment_ids: inbound.attachment_ids.clone(),
                     idempotency_key: inbound.run_idempotency_key.clone(),
                     mode: SessionRunMode::Queue,
                     source: RunSource::Discord,
@@ -313,14 +313,34 @@ impl DiscordManager {
             .as_ref()
             .map_or_else(|| text.clone(), |r| r.text.clone());
         let text = inbound.as_ref().map_or(text, sender::attributed_text);
+        let attachment_ids = inbound
+            .as_ref()
+            .map(|r| r.attachment_ids.as_slice())
+            .unwrap_or_default();
+        let store = self.state.read().await.history.store();
+        let records = crate::agent_runs::attachments::resolve_run_attachments(
+            store.as_ref(),
+            &c.agent_id,
+            &c.room_id,
+            attachment_ids,
+        )
+        .await
+        .map_err(|_| DiscordManagerError::Persistence)?;
         let request = AgentRunRequest {
             agent_id: c.agent_id.clone(),
-            content: Content {
-                text,
-                metadata: Some(metadata),
-                attachments: None,
+            content: crate::agent_runs::attachments::attachment_content(
+                &text,
+                &records,
+                Some(metadata),
+            ),
+            room: if c.channel.kind == DiscordChannelKind::GuildThread {
+                RunRoom::DiscordThread {
+                    room_id: c.room_id.clone(),
+                    scope: self.thread_scope(&c, epoch),
+                }
+            } else {
+                RunRoom::Stable(c.room_id.clone())
             },
-            room: RunRoom::Stable(c.room_id.clone()),
             idempotency_key: Some(key),
             source: RunSource::Discord,
             source_ref: Some(if let Some(r) = &inbound {

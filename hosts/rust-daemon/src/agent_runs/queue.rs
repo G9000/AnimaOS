@@ -693,8 +693,10 @@ impl AgentRunCoordinator {
                 if !valid {
                     return Err(ApiError::conflict(SESSION_CANNOT_SEND));
                 }
-                if request.skill.is_some() || !request.attachment_ids.is_empty() {
-                    return Err(ApiError::bad_request_static("Discord sessions support text only; skills and attachments are unavailable"));
+                if request.skill.is_some() {
+                    return Err(ApiError::bad_request_static(
+                        "Discord sessions do not support skills",
+                    ));
                 }
             }
             if !capabilities.send {

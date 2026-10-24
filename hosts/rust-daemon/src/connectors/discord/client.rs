@@ -26,6 +26,9 @@ pub(crate) const MAX_SCAN_MESSAGES: usize = 1000;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 /// Application input bound; bot reply limits do not constrain user messages.
 pub(crate) const MAX_INBOUND_TEXT_CHARS: usize = 65_536;
+#[path = "client_attachments.rs"]
+mod attachments;
+pub(super) use attachments::valid_attachment_url;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DiscordTransportError {
@@ -76,6 +79,23 @@ impl fmt::Display for DiscordTransportError {
 impl std::error::Error for DiscordTransportError {}
 #[async_trait]
 pub(crate) trait DiscordTransport: Send + Sync {
+    async fn send_file(
+        &self,
+        _token: &DiscordBotToken,
+        _channel: &str,
+        _file: &DiscordFileUpload,
+        _caption: &str,
+        _attempt_id: &str,
+    ) -> Result<DiscordFileReceipt, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
+    async fn download_attachment(
+        &self,
+        _channel: &str,
+        _attachment: &DiscordAttachment,
+    ) -> Result<Vec<u8>, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn check_application(
         &self,
         _token: &DiscordBotToken,
@@ -221,6 +241,16 @@ impl DiscordClient {
         path: &str,
         body: Option<serde_json::Value>,
     ) -> Result<T, DiscordTransportError> {
+        self.request_body(token, method, path, body, None).await
+    }
+    async fn request_body<T: DeserializeOwned>(
+        &self,
+        token: &DiscordBotToken,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+        multipart: Option<(Vec<u8>, String)>,
+    ) -> Result<T, DiscordTransportError> {
         let sending = method == Method::POST;
         let key: [u8; 32] = Sha256::digest(token.expose().as_bytes()).into();
         self.pace(key).await?;
@@ -238,6 +268,11 @@ impl DiscordClient {
             .header(AUTHORIZATION, header);
         if let Some(body) = body {
             request = request.json(&body);
+        }
+        if let Some((bytes, content_type)) = multipart {
+            request = request
+                .header(reqwest::header::CONTENT_TYPE, content_type)
+                .body(bytes);
         }
         let response = request.send().await.map_err(|error| {
             tracing::warn!(
@@ -437,8 +472,9 @@ impl WireChannel {
 }
 
 pub(crate) fn invite_url(application: &str) -> String {
-    // Only text conversations/history and public thread creation are exercised.
-    let permissions = (1u64 << 10) | (1u64 << 11) | (1u64 << 16) | (1u64 << 35) | (1u64 << 38);
+    // Conversation history, public threads, and native file uploads.
+    let permissions =
+        (1u64 << 10) | (1u64 << 11) | (1u64 << 15) | (1u64 << 16) | (1u64 << 35) | (1u64 << 38);
     format!("https://discord.com/oauth2/authorize?client_id={application}&scope=bot&permissions={permissions}&integration_type=0")
 }
 #[derive(Deserialize)]
@@ -449,6 +485,8 @@ struct WireMessage {
     guild_id: Option<String>,
     author: WireUser,
     content: String,
+    #[serde(default)]
+    attachments: Vec<DiscordAttachment>,
     #[serde(default)]
     webhook_id: Option<String>,
     #[serde(rename = "type")]
@@ -485,6 +523,7 @@ impl WireMessage {
                 display_name: metadata(self.author.global_name, 128)?,
             },
             text: self.content,
+            attachments: self.attachments,
             is_bot: self.author.bot,
             webhook_id: self.webhook_id,
             message_type: self.message_type,
@@ -493,6 +532,24 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn download_attachment(
+        &self,
+        channel: &str,
+        attachment: &DiscordAttachment,
+    ) -> Result<Vec<u8>, DiscordTransportError> {
+        self.download_file(channel, attachment).await
+    }
+    async fn send_file(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        file: &DiscordFileUpload,
+        caption: &str,
+        attempt_id: &str,
+    ) -> Result<DiscordFileReceipt, DiscordTransportError> {
+        self.upload_file(token, channel, file, caption, attempt_id)
+            .await
+    }
     async fn check_application(
         &self,
         token: &DiscordBotToken,

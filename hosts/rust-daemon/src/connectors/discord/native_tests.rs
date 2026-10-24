@@ -14,6 +14,7 @@ struct Fixture {
     responses: StdMutex<VecDeque<(u16, String, Vec<(String, String)>)>>,
     calls: StdMutex<Vec<Call>>,
     user_agents: StdMutex<Vec<Option<String>>>,
+    raw_bodies: StdMutex<Vec<(String, Vec<u8>)>>,
 }
 async fn handler(State(fixture): State<Arc<Fixture>>, request: Request<Body>) -> Response {
     fixture.user_agents.lock().unwrap().push(
@@ -23,16 +24,26 @@ async fn handler(State(fixture): State<Arc<Fixture>>, request: Request<Body>) ->
             .map(|value| value.to_str().unwrap().to_owned()),
     );
     let uri = request.uri().to_string();
+    let content_type = request
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let auth = request
         .headers()
         .get(AUTHORIZATION)
-        .unwrap()
-        .to_str()
-        .unwrap()
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
         .to_owned();
     let body = to_bytes(request.into_body(), 2 * 1024 * 1024)
         .await
         .unwrap();
+    fixture
+        .raw_bodies
+        .lock()
+        .unwrap()
+        .push((content_type, body.to_vec()));
     fixture.calls.lock().unwrap().push((
         uri,
         auth,
@@ -57,6 +68,7 @@ async fn fixture(
         responses: StdMutex::new(responses.into()),
         calls: StdMutex::new(Vec::new()),
         user_agents: StdMutex::new(Vec::new()),
+        raw_bodies: StdMutex::new(Vec::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -77,6 +89,150 @@ fn json(value: serde_json::Value) -> (u16, String, Vec<(String, String)>) {
 }
 fn message(id: u64) -> serde_json::Value {
     serde_json::json!({"id":id.to_string(),"channel_id":"42","guild_id":"7","author":{"id":"9","bot":false},"content":"fixture","type":0})
+}
+
+#[test]
+fn native_discord_preserves_attachment_only_message_metadata() {
+    let mut value = message(101);
+    value["content"] = serde_json::json!("");
+    value["attachments"] = serde_json::json!([{
+        "id":"201", "filename":"report.md", "size":9,
+        "url":"https://cdn.discordapp.com/attachments/42/201/report.md?ex=ffff",
+        "content_type":"text/markdown"
+    }]);
+    let wire: WireMessage = serde_json::from_value(value).unwrap();
+    let normalized = serde_json::to_value(wire.normalize("42").unwrap()).unwrap();
+    assert_eq!(normalized["attachments"][0]["filename"], "report.md");
+    assert_eq!(normalized["attachments"][0]["size"], 9);
+}
+
+#[test]
+fn discord_attachment_tool_is_registered_for_generated_files() {
+    let tool = crate::tools::ToolRegistry::new().descriptor("send_discord_file");
+    assert!(
+        tool.is_some(),
+        "current-thread file sending must be registered"
+    );
+}
+
+#[test]
+fn discord_attachment_cdn_urls_are_bound_to_native_source_ids() {
+    let mut a = DiscordAttachment {
+        id: "201".into(),
+        filename: "report.md".into(),
+        size: 9,
+        url: "https://cdn.discordapp.com/attachments/42/201/report.md?ex=123&hm=signature".into(),
+    };
+    assert!(valid_attachment_url("42", &a).is_ok());
+    for url in [
+        "http://cdn.discordapp.com/attachments/42/201/report.md",
+        "https://evil.example/attachments/42/201/report.md",
+        "https://cdn.discordapp.com.evil.example/attachments/42/201/report.md",
+        "https://cdn.discordapp.com/attachments/43/201/report.md",
+        "https://cdn.discordapp.com/attachments/42/202/report.md",
+        "https://cdn.discordapp.com:444/attachments/42/201/report.md",
+        "https://user@cdn.discordapp.com/attachments/42/201/report.md",
+        "https://cdn.discordapp.com/attachments/42/201/report.md/extra",
+        "https://127.0.0.1/attachments/42/201/report.md",
+    ] {
+        a.url = url.into();
+        assert_eq!(
+            valid_attachment_url("42", &a),
+            Err(DiscordTransportError::InvalidInput),
+            "{url}"
+        );
+    }
+}
+
+fn upload() -> DiscordFileUpload {
+    DiscordFileUpload {
+        filename: "report.md".into(),
+        mime: "text/markdown".into(),
+        bytes: b"# report\n".to_vec(),
+    }
+}
+
+#[tokio::test]
+async fn discord_attachment_upload_is_native_multipart_and_proves_its_receipt() {
+    let (client, fixture, task) = fixture(vec![json(serde_json::json!({"id":"901","channel_id":"42","attachments":[{"id":"902","filename":"report.md","size":9}]}))]).await;
+    let receipt = client
+        .send_file(
+            &DiscordBotToken::parse("file-fixture").unwrap(),
+            "42",
+            &upload(),
+            "@everyone report",
+            "run:call",
+        )
+        .await
+        .unwrap();
+    assert_eq!(receipt.attachment_id, "902");
+    let raw = fixture.raw_bodies.lock().unwrap();
+    assert!(raw[0].0.starts_with("multipart/form-data; boundary="));
+    let body = String::from_utf8(raw[0].1.clone()).unwrap();
+    assert!(body.contains("name=\"files[0]\"; filename=\"report.md\""));
+    assert!(body.contains("# report\n"));
+    assert!(body.contains("\"parse\":[]"));
+    assert!(body.contains("\"replied_user\":false"));
+    assert!(body.contains("\"enforce_nonce\":true"));
+    assert!(body.contains(&stable_nonce("run:call")));
+    task.abort();
+}
+
+#[tokio::test]
+async fn discord_attachment_upload_never_confirms_missing_or_mismatched_files() {
+    for value in [
+        serde_json::json!({"id":"901","channel_id":"42","attachments":[]}),
+        serde_json::json!({"id":"901","channel_id":"43","attachments":[{"id":"902","filename":"report.md","size":9}]}),
+        serde_json::json!({"id":"901","channel_id":"42","attachments":[{"id":"902","filename":"other.md","size":9}]}),
+        serde_json::json!({"id":"901","channel_id":"42","attachments":[{"id":"902","filename":"report.md","size":8}]}),
+    ] {
+        let (client, _, task) = fixture(vec![json(value)]).await;
+        assert!(matches!(
+            client
+                .send_file(
+                    &DiscordBotToken::parse("file-receipt-fixture").unwrap(),
+                    "42",
+                    &upload(),
+                    "",
+                    "call"
+                )
+                .await,
+            Err(DiscordTransportError::Uncertain)
+        ));
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn discord_attachment_download_body_bounds_and_missing_status_are_distinct_from_transport() {
+    for (status, body, expected, error) in [
+        (200, "short", 9, DiscordTransportError::InvalidResponse),
+        (200, "oversize", 2, DiscordTransportError::ResponseTooLarge),
+        (
+            404,
+            "gone",
+            9,
+            DiscordTransportError::HttpStatus { status: 404 },
+        ),
+        (503, "retry", 9, DiscordTransportError::Transport),
+    ] {
+        let (client, fixture, task) = fixture(vec![(status, body.into(), vec![])]).await;
+        let response = client
+            .client
+            .get(client.base.join("fixture").unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            DiscordClient::download_response(response, expected).await,
+            Err(error)
+        );
+        assert!(
+            fixture.calls.lock().unwrap()[0].1.is_empty(),
+            "CDN reads carry no bot Authorization"
+        );
+        task.abort();
+    }
 }
 
 #[tokio::test]
@@ -119,7 +275,7 @@ async fn native_application_check_uses_verified_bot_and_only_accepted_team_owner
     assert_eq!(check.owner_user_ids, vec!["44"]);
     assert_eq!(check.bot.id, "11");
     assert!(check.message_content_enabled);
-    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237713920&integration_type=0");
+    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237746688&integration_type=0");
     assert!(!serde_json::to_string(&check)
         .unwrap()
         .contains("check-fixture"));

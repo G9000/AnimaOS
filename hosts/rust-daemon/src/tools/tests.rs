@@ -440,6 +440,8 @@ fn registry_defines_every_registered_tool_schema() {
         ("search_tools", &["query"][..], &["limit"][..]),
         ("describe_tool", &["name"][..], &[][..]),
         ("rename_chat", &["title"][..], &[][..]),
+        ("rename_discord_thread", &["title"][..], &[][..]),
+        ("send_discord_file", &["path"][..], &["caption"][..]),
         (
             "compact_chat",
             &[][..],

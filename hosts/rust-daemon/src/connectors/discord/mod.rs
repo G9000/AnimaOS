@@ -1,4 +1,5 @@
 //! Native Discord channel and thread runtime. Adapted behavior: see HERMES-NOTICE.
+mod attachments;
 pub(crate) mod client;
 pub(crate) mod credentials;
 mod delivery;
@@ -14,6 +15,7 @@ pub(crate) mod sender;
 pub(crate) mod text;
 #[cfg(test)]
 mod text_tests;
+pub(crate) mod thread_tools;
 mod titles;
 mod typing;
 use crate::agent_runs::AgentRunCoordinator;
@@ -155,6 +157,7 @@ pub(crate) struct DiscordManager {
     gateway: Option<Arc<dyn gateway::GatewayFactory>>,
     gateway_states: Arc<Mutex<HashMap<String, (u64, gateway::GatewayHealth)>>>,
     typing_workers: Arc<Mutex<HashMap<String, typing::TypingWorker>>>,
+    title_locks: Arc<StdMutex<HashMap<String, std::sync::Weak<Mutex<()>>>>>,
     intake: Arc<Mutex<()>>,
     discovered: Arc<Mutex<HashMap<String, Vec<(u64, String, String, Option<String>)>>>>,
     lifecycle: Arc<Mutex<()>>,
@@ -181,6 +184,7 @@ impl Clone for DiscordManager {
             gateway: self.gateway.clone(),
             gateway_states: self.gateway_states.clone(),
             typing_workers: self.typing_workers.clone(),
+            title_locks: self.title_locks.clone(),
             intake: self.intake.clone(),
             discovered: self.discovered.clone(),
             lifecycle: self.lifecycle.clone(),
@@ -216,6 +220,7 @@ impl DiscordManager {
             gateway: None,
             gateway_states: Arc::new(Mutex::new(HashMap::new())),
             typing_workers: Arc::new(Mutex::new(HashMap::new())),
+            title_locks: Arc::new(StdMutex::new(HashMap::new())),
             intake: Arc::new(Mutex::new(())),
             discovered: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: Arc::new(Mutex::new(())),

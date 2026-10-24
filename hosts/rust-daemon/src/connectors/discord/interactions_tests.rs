@@ -1,6 +1,10 @@
 use super::*;
 use crate::agent_runs::test_support::{ScriptedModel, Step};
 use anima_core::MessageRole;
+#[path = "attachment_tests.rs"]
+mod attachment_tests;
+#[path = "rename_tests.rs"]
+mod rename_tests;
 #[path = "title_tests.rs"]
 mod title_tests;
 

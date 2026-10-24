@@ -80,6 +80,7 @@ impl DiscordManager {
             }
         }
         let mut routed = HashMap::new();
+        let mut uploads = HashMap::new();
         for message in unique.values() {
             if DiscordSnowflake::parse(&message.id)
                 .expect("validated")
@@ -96,6 +97,10 @@ impl DiscordManager {
                 .destination_for_room(&c.room_id)
                 .ok_or(DiscordManagerError::Conflict)?;
             if let Some(destination) = self.admitted_destination(&fresh, epoch, message).await? {
+                uploads.insert(
+                    message.id.clone(),
+                    self.receive_attachments(&destination, message).await?,
+                );
                 routed.insert(message.id.clone(), destination);
             }
         }
@@ -126,7 +131,7 @@ impl DiscordManager {
                 if number <= lower {
                     continue;
                 }
-                if message.text.trim().is_empty() {
+                if message.text.trim().is_empty() && message.attachments.is_empty() {
                     content_missing |= c.approved_user_ids.contains(&message.sender.id)
                         && !message.is_bot
                         && message.webhook_id.is_none();
@@ -136,6 +141,8 @@ impl DiscordManager {
                     continue;
                 };
                 let key = (c.id.clone(), message.id.clone());
+                let (attachment_ids, input_text) =
+                    uploads.get(&message.id).expect("admitted input saved");
                 let record = DiscordInboundRecord {
                     connector_id: c.id.clone(),
                     message_id: message.id.clone(),
@@ -143,7 +150,8 @@ impl DiscordManager {
                     room_id: destination.room_id.clone(),
                     sender: message.sender.clone(),
                     channel_id: c.channel.id.clone(),
-                    text: message.text.clone(),
+                    text: input_text.clone(),
+                    attachment_ids: attachment_ids.clone(),
                     received_at_ms: now_ms(),
                     processing_state: DiscordProcessingState::Received,
                     run_idempotency_key: format!("discord:{}:message:{}", c.id, message.id),
@@ -152,6 +160,7 @@ impl DiscordManager {
                 if let Some(existing) = state.discord_inbound.get(&key) {
                     if !existing.processing_state.is_terminal()
                         && (existing.text != record.text
+                            || existing.attachment_ids != record.attachment_ids
                             || existing.sender != record.sender
                             || existing.channel_id != record.channel_id
                             || existing.room_id != record.room_id)
@@ -258,7 +267,7 @@ impl DiscordManager {
             return Err(DiscordManagerError::Persistence);
         }
         if content_missing {
-            self.set_status(&c.id,DiscordRuntimeStatus::Degraded,Some("Allowed-user message content was empty or unavailable; check Message Content intent. Attachments-only messages are unsupported.")).await;
+            self.set_status(&c.id,DiscordRuntimeStatus::Degraded,Some("Allowed-user message content was empty or unavailable; check Message Content intent.")).await;
         }
         Ok(())
     }

@@ -152,9 +152,18 @@ pub(crate) struct DiscordMessage {
     pub(crate) guild_id: Option<String>,
     pub(crate) sender: DiscordSenderMetadata,
     pub(crate) text: String,
+    #[serde(default)]
+    pub(crate) attachments: Vec<DiscordAttachment>,
     pub(crate) is_bot: bool,
     pub(crate) webhook_id: Option<String>,
     pub(crate) message_type: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DiscordAttachment {
+    pub(crate) id: String,
+    pub(crate) filename: String,
+    pub(crate) size: u64,
+    pub(crate) url: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiscordMessageBatch {
@@ -166,6 +175,21 @@ pub(crate) struct DiscordMessageBatch {
 pub(crate) struct DiscordSendReceipt {
     pub(crate) message_id: String,
     pub(crate) channel_id: String,
+}
+pub(crate) struct DiscordFileUpload {
+    pub(crate) filename: String,
+    pub(crate) mime: String,
+    pub(crate) bytes: Vec<u8>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DiscordFileReceipt {
+    pub(crate) sent: bool,
+    pub(crate) message_id: String,
+    pub(crate) channel_id: String,
+    pub(crate) attachment_id: String,
+    pub(crate) filename: String,
+    pub(crate) size: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +369,8 @@ pub(crate) struct DiscordInboundRecord {
     pub(crate) sender: DiscordSenderMetadata,
     pub(crate) channel_id: String,
     pub(crate) text: String,
+    #[serde(default)]
+    pub(crate) attachment_ids: Vec<String>,
     pub(crate) received_at_ms: u64,
     pub(crate) processing_state: DiscordProcessingState,
     pub(crate) run_idempotency_key: String,

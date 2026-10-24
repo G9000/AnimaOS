@@ -336,7 +336,7 @@ impl DiscordManager {
             || message.sender.id == c.bot.id
             || message.webhook_id.is_some()
             || !matches!(message.message_type, 0 | 19)
-            || message.text.trim().is_empty()
+            || (message.text.trim().is_empty() && message.attachments.is_empty())
         {
             return Ok(None);
         }

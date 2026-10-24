@@ -376,9 +376,21 @@ pub(crate) struct RoomReservation {
 pub(crate) enum RunRoom {
     Generated,
     Stable(String),
-    Delegated { parent_id: String },
-    DelegatedIn { parent_id: String, room_id: String },
-    Peer { route: AgentCommunicationRoute },
+    /// Native adapter capability; never constructed from user message metadata.
+    DiscordThread {
+        room_id: String,
+        scope: crate::connectors::discord::thread_tools::DiscordThreadScope,
+    },
+    Delegated {
+        parent_id: String,
+    },
+    DelegatedIn {
+        parent_id: String,
+        room_id: String,
+    },
+    Peer {
+        route: AgentCommunicationRoute,
+    },
 }
 
 impl RunRoom {
@@ -386,7 +398,9 @@ impl RunRoom {
     /// fresh id before the run starts so it can be locked and recorded first.
     pub(crate) fn resolve(&self, agent_id: &str) -> String {
         match self {
-            Self::Stable(room_id) | Self::DelegatedIn { room_id, .. } => room_id.clone(),
+            Self::Stable(room_id)
+            | Self::DelegatedIn { room_id, .. }
+            | Self::DiscordThread { room_id, .. } => room_id.clone(),
             Self::Peer { route } => {
                 let participants = route.participants();
                 format!("peer:{}:{}", participants[participants.len() - 2], agent_id)
@@ -1253,7 +1267,7 @@ impl AgentRunCoordinator {
     {
         // The run executes in the ticket's room; a stable request room must name it.
         debug_assert!(
-            !matches!(&request.room, RunRoom::Stable(room) | RunRoom::DelegatedIn { room_id: room, .. } if room.as_str() != ticket.room_id()),
+            !matches!(&request.room, RunRoom::Stable(room) | RunRoom::DelegatedIn { room_id: room, .. } | RunRoom::DiscordThread { room_id: room, .. } if room.as_str() != ticket.room_id()),
             "a ticketed run must use the room its ticket locked"
         );
         let coordinator = self.clone();
@@ -2350,6 +2364,25 @@ impl AgentRunCoordinator {
                 .sessions
                 .get(&agent_id, &session_id)
                 .is_some_and(|s| s.main_chat);
+        let discord_thread = match &room {
+            RunRoom::DiscordThread { scope, .. }
+                if source == RunSource::Discord
+                    && parent.is_none()
+                    && delegated_parent.is_none()
+                    && peer_sources.is_empty()
+                    && scope.valid_for(
+                        &*self.state.read().await,
+                        &crate::runs::RunLink {
+                            agent_id: agent_id.clone(),
+                            session_id: session_id.clone(),
+                            run_id: run_id.clone(),
+                        },
+                    ) =>
+            {
+                Some(scope.clone())
+            }
+            _ => None,
+        };
         let scope = tool_scope::Scope {
             can_delegate,
             helper_completion: is_helper_completion,
@@ -2359,6 +2392,7 @@ impl AgentRunCoordinator {
             peers: !peer_sources.is_empty(),
             owner_chat,
             owner_main,
+            discord_thread: discord_thread.is_some(),
             mcp_available: self.mcp.is_some(),
             automatic_mcp: self.mcp.as_ref().is_some_and(|manager| {
                 manager.tool_access(&agent_id) == crate::mcp::McpToolAccess::Automatic
@@ -2474,7 +2508,8 @@ impl AgentRunCoordinator {
                     &runtime.state(),
                     mcp_for_run.clone(),
                 )
-                .with_origins(delegated_parent.clone(), peer_sources.clone()),
+                .with_origins(delegated_parent.clone(), peer_sources.clone())
+                .with_discord_thread(discord_thread.clone()),
             )
         });
         let tool_refresh = owner_chat
@@ -2503,6 +2538,7 @@ impl AgentRunCoordinator {
             runtime.set_model_tool_selector(Some(catalog.clone()));
         }
         let tool_context = tool_context
+            .with_discord_thread(discord_thread)
             .with_standing_owner_turn(standing_admission.local_owner)
             .with_tool_catalog(tool_catalog)
             .with_tool_refresh(tool_refresh)
