@@ -7,6 +7,7 @@ pub(crate) mod checkpoint;
 pub(crate) mod compaction;
 pub(crate) mod context;
 pub(crate) mod history_read;
+pub(crate) mod interactions;
 mod list_snapshot;
 pub(crate) mod migration;
 pub(crate) mod pruning;

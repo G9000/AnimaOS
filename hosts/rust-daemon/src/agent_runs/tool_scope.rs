@@ -68,6 +68,18 @@ pub(crate) fn select(
 ) -> Vec<ToolDescriptor> {
     let registry = crate::tools::ToolRegistry::new();
     let mut tools = config.tools.clone().unwrap_or_default();
+    // Existing agents may retain older serialized history schemas. Refresh
+    // definitions only for names they already hold; this adds no grant.
+    for tool in &mut tools {
+        if matches!(
+            tool.name.as_str(),
+            "search_conversations" | "read_conversation_window"
+        ) {
+            if let Some(current) = registry.descriptor(&tool.name) {
+                *tool = current;
+            }
+        }
+    }
     if scope.automatic_mcp && !super::is_helper_config(config) && !scope.delegated && !scope.peers {
         for tool in ready_mcp {
             if !tools.contains(tool) {
@@ -287,6 +299,40 @@ impl super::AgentRunCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_schema_refresh_keeps_the_original_grants_and_updates_existing_agent_definitions() {
+        let mut config = crate::agent_runs::test_support::companion_config("Mom");
+        let mut stale = crate::tools::ToolRegistry::new()
+            .descriptor("search_conversations")
+            .unwrap();
+        stale.description = "old search definition".into();
+        stale.parameters_schema.clear();
+        config.tools = Some(vec![stale]);
+        let selected = select(
+            &config,
+            &[],
+            Scope {
+                owner_chat: true,
+                ..Scope::default()
+            },
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .find(|tool| tool.name == "search_conversations")
+                .unwrap(),
+            &crate::tools::ToolRegistry::new()
+                .descriptor("search_conversations")
+                .unwrap()
+        );
+        assert!(
+            !selected
+                .iter()
+                .any(|tool| tool.name == "read_conversation_window"),
+            "schema refresh cannot add a grant"
+        );
+    }
 
     async fn fixture() -> (super::super::AgentRunCoordinator, String) {
         let (coordinator, agent) = crate::agent_runs::test_support::coordinator_with(

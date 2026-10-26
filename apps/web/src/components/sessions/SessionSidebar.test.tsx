@@ -54,6 +54,36 @@ afterEach(() => {
 });
 
 describe('SessionSidebar', () => {
+  it('offers agent conversations in history and identifies both participants before opening the exchange', async () => {
+    const incoming = sessionFixture('room:mom-contact', {
+      kind: 'helper', origin: 'delegation', parentAgentId: 'anima',
+      title: 'Ask about Julio', lastActivityAtMs: NOW.getTime(), capabilities: readOnly,
+    });
+    const props = renderSidebar({
+      agents: [{ id: 'agent-main', name: 'Mom' }, { id: 'anima', name: 'Anima' }],
+      sessions: [sessionFixture('chat:other', { title: 'Another chat' }), incoming],
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Agent conversations' }));
+    expect(screen.queryByRole('button', { name: 'Another chat' })).not.toBeInTheDocument();
+    const exchange = screen.getByRole('button', { name: 'Ask about Julio, Anima → Mom' });
+    expect(within(exchange).getByText('Anima → Mom')).toBeVisible();
+    await userEvent.click(exchange);
+    expect(props.onOpen).toHaveBeenCalledWith(incoming);
+  });
+
+  it('keeps the agent conversations filter available when they are the only saved history', async () => {
+    const outgoing = sessionFixture('room:outgoing', {
+      agentId: 'anima', kind: 'helper', origin: 'peer', parentAgentId: 'agent-main',
+      title: 'A question for Anima', lastActivityAtMs: NOW.getTime(), capabilities: readOnly,
+    });
+    renderSidebar({
+      agents: [{ id: 'agent-main', name: 'Mom' }, { id: 'anima', name: 'Anima' }],
+      sessions: [outgoing],
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Agent conversations' }));
+    expect(screen.getByRole('button', { name: 'A question for Anima, Mom → Anima' })).toBeVisible();
+  });
+
   it('tags an imported conversation with the app it came from', () => {
     const imported = sessionFixture('chat:imported-1', {
       title: 'Imported · Fix flaky upload test',

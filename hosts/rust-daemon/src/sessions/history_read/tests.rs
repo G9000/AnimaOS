@@ -59,6 +59,208 @@ fn ids(value: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn incoming_agent_conversations_are_searchable_and_readable_with_sender_evidence() {
+    for origin in [SessionOrigin::Delegation, SessionOrigin::Peer] {
+        let mut daemon = DaemonState::new();
+        let sender = daemon.create_agent(agent_config("Anima")).unwrap().state.id;
+        let recipient = daemon.create_agent(agent_config("Mom")).unwrap().state.id;
+        let store = Arc::new(MemoryHistoryStore::new());
+        daemon.set_history(HistoryService::new(store.clone()));
+        let mut contact = session(
+            &recipient,
+            "room:contact",
+            SessionKind::Helper,
+            "Ask about Julio",
+        );
+        contact.origin = origin;
+        contact.parent_agent_id = Some(sender.clone());
+        contact.parent_session_id = Some("chat:private-sender".into());
+        contact.parent_run_id = Some("run:parent".into());
+        contact.archived = true;
+        daemon.sessions.insert(contact);
+        daemon.sessions.insert(session(
+            &sender,
+            "chat:private-sender",
+            SessionKind::Chat,
+            "Private",
+        ));
+        store
+            .upsert_messages(&[
+                history_message(
+                    &recipient,
+                    "room:contact",
+                    "request",
+                    MessageRole::User,
+                    "What do you know about Julio?",
+                    10,
+                ),
+                history_message(
+                    &sender,
+                    "chat:private-sender",
+                    "private",
+                    MessageRole::User,
+                    "Julio private sentinel",
+                    11,
+                ),
+            ])
+            .await
+            .unwrap();
+        seed_messages(
+            &mut daemon,
+            &recipient,
+            vec![message(
+                &recipient,
+                "reply",
+                "room:contact",
+                MessageRole::Assistant,
+                "Julio likes warm direct replies",
+                12,
+            )],
+        );
+        let state = Arc::new(RwLock::new(daemon));
+        let found = discover_conversations(
+            &state,
+            &recipient,
+            Some("chat:main"),
+            DiscoveryRequest {
+                query: "Julio".into(),
+                limit: 5,
+                kind: Some(SessionKind::Helper),
+                after_ms: None,
+                before_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(found["status"], "found");
+        assert_eq!(found["results"].as_array().unwrap().len(), 1);
+        assert_eq!(found["results"][0]["contact"]["fromAgentId"], sender);
+        assert_eq!(found["results"][0]["contact"]["fromAgentName"], "Anima");
+        // A peer's body need not contain its sender's name. Read the cold
+        // request by host-owned sender identity when its body lacks the name.
+        let by_sender = discover_conversations(
+            &state,
+            &recipient,
+            Some("chat:main"),
+            DiscoveryRequest {
+                query: "Anima".into(),
+                limit: 5,
+                kind: Some(SessionKind::Helper),
+                after_ms: None,
+                before_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_sender["results"][0]["sessionId"], "room:contact");
+        assert!(by_sender["results"][0]["matchMessageId"].is_string());
+        let exchange =
+            read_conversation_window(&state, &recipient, window("room:contact", "request", 0, 2))
+                .await
+                .unwrap();
+        assert_eq!(ids(&exchange), ["request", "reply"]);
+        assert_eq!(exchange["contact"]["fromAgentName"], "Anima");
+        assert!(!exchange.to_string().contains("private sentinel"));
+        assert_eq!(
+            read_conversation_window(
+                &state,
+                &recipient,
+                window("chat:private-sender", "private", 0, 0)
+            )
+            .await
+            .unwrap()["status"],
+            "not_found"
+        );
+        state.write().await.pending_history_deletions.push(
+            crate::history::HistoryDeletion::session(&recipient, "room:contact"),
+        );
+        assert_eq!(
+            read_conversation_window(&state, &recipient, window("room:contact", "request", 0, 2))
+                .await
+                .unwrap()["status"],
+            "not_found"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sender_lookup_recovers_a_real_anchor_from_cold_peer_history_without_the_name_in_the_body()
+{
+    let mut daemon = DaemonState::new();
+    let sender = daemon.create_agent(agent_config("Anima")).unwrap().state.id;
+    let recipient = daemon.create_agent(agent_config("Mom")).unwrap().state.id;
+    let store = Arc::new(MemoryHistoryStore::new());
+    daemon.set_history(HistoryService::new(store.clone()));
+    let mut record = session(
+        &recipient,
+        "peer:anima:mom",
+        SessionKind::Helper,
+        "Question",
+    );
+    record.origin = SessionOrigin::Peer;
+    record.parent_agent_id = Some(sender);
+    daemon.sessions.insert(record);
+    store
+        .upsert_messages(&[history_message(
+            &recipient,
+            "peer:anima:mom",
+            "cold-request",
+            MessageRole::User,
+            "What do you know about Julio?",
+            12,
+        )])
+        .await
+        .unwrap();
+    let state = Arc::new(RwLock::new(daemon));
+    let found = discover_conversations(
+        &state,
+        &recipient,
+        Some("chat:main"),
+        DiscoveryRequest {
+            query: "Anima".into(),
+            limit: 5,
+            kind: Some(SessionKind::Helper),
+            after_ms: None,
+            before_ms: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(found["results"][0]["matchMessageId"], "cold-request");
+    let timed = |before_ms| DiscoveryRequest {
+        query: "Anima".into(),
+        limit: 5,
+        kind: Some(SessionKind::Helper),
+        after_ms: Some(10),
+        before_ms: Some(before_ms),
+    };
+    assert_eq!(
+        discover_conversations(&state, &recipient, Some("chat:main"), timed(13))
+            .await
+            .unwrap()["results"][0]["matchMessageId"],
+        "cold-request"
+    );
+    assert_eq!(
+        discover_conversations(&state, &recipient, Some("chat:main"), timed(12))
+            .await
+            .unwrap()["status"],
+        "not_found"
+    );
+    let window = read_conversation_window(
+        &state,
+        &recipient,
+        window("peer:anima:mom", "cold-request", 0, 0),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        window["messages"][0]["text"],
+        "What do you know about Julio?"
+    );
+    assert_eq!(window["contact"]["fromAgentName"], "Anima");
+}
+
+#[tokio::test]
 async fn main_chat_discovery_falls_back_to_latest_hot_match_without_cold_evidence() {
     let mut daemon = DaemonState::new();
     let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;

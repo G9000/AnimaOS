@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import type { Session, SessionKind } from '@animaos/sdk';
+import { revealInvisible } from '../../lib/skills';
 
 import {
   SESSION_KIND_FILTER_LABELS,
@@ -23,6 +24,7 @@ export const SESSION_SEARCH_DEBOUNCE_MS = 250;
 
 export interface SessionSidebarProps {
   sessions: readonly Session[];
+  agents?: readonly { id: string; name: string }[];
   /** `sessionKey` of the open session. */
   activeKey: string | null;
   query: string;
@@ -49,9 +51,10 @@ type RowActions = Pick<
   'onOpen' | 'onRename' | 'onArchive' | 'onExport' | 'onDelete'
 >;
 
-function rowLabel(session: Session): string {
+function rowLabel(session: Session, participants: string | null): string {
   return [
     session.title,
+    participants,
     session.activeRuns > 0 ? 'working' : null,
     session.pendingApprovals > 0 ? 'needs approval' : null,
     session.unread ? 'unread' : null,
@@ -64,11 +67,19 @@ function SessionRow({
   session,
   active,
   actions,
+  agentNames,
 }: {
   session: Session;
   active: boolean;
   actions: RowActions;
+  agentNames?: ReadonlyMap<string, string>;
 }) {
+  const name = (id: string) =>
+    revealInvisible(agentNames?.get(id) ?? id).text;
+  const participants =
+    session.kind === 'helper' && session.parentAgentId && agentNames
+      ? `${name(session.parentAgentId)} → ${name(session.agentId)}`
+      : null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -152,7 +163,7 @@ function SessionRow({
           data-session-row
           data-session-key={sessionKey(session)}
           className="session-row-button"
-          aria-label={rowLabel(session)}
+          aria-label={rowLabel(session, participants)}
           aria-current={active ? 'page' : undefined}
           title={session.preview ?? session.title}
           onClick={() => actions.onOpen(session)}
@@ -160,7 +171,17 @@ function SessionRow({
           {session.activeRuns > 0 && (
             <span className="session-pulse" aria-hidden />
           )}
-          <span className="session-title">{session.title}</span>
+          <span className="session-title">
+            {session.title}
+            {participants && (
+              <span
+                className="block truncate text-[10px] font-normal text-ink-3"
+                aria-hidden
+              >
+                {participants}
+              </span>
+            )}
+          </span>
           {(session.kind === 'telegram' || session.kind === 'discord') && (
             <span className="session-source" aria-hidden>
               {SESSION_KIND_LABELS[session.kind]}
@@ -300,6 +321,7 @@ function moveBetweenRows(event: KeyboardEvent<HTMLDivElement>) {
 /** The sessions list of the sidebar and the mobile drawer (spec §15.1). */
 export function SessionSidebar({
   sessions: listed,
+  agents,
   activeKey,
   query,
   onQueryChange,
@@ -312,6 +334,10 @@ export function SessionSidebar({
   onLoadMore,
   ...actions
 }: SessionSidebarProps) {
+  const agentNames = useMemo(
+    () => agents ? new Map(agents.map((agent) => [agent.id, agent.name])) : undefined,
+    [agents],
+  );
   // An automation's check-in thread is not a place to go: its words are in
   // the main chat.
   const sessions = useMemo(() => listed.filter(shouldShowSession), [listed]);
@@ -421,7 +447,7 @@ export function SessionSidebar({
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
-      {kinds.length > 1 && (
+      {(kinds.length > 1 || kinds.includes('helper')) && (
         <div className="session-chips" role="group" aria-label="Session kinds">
           <button
             type="button"
@@ -439,7 +465,7 @@ export function SessionSidebar({
               aria-pressed={activeKind === item}
               onClick={() => setKind(item)}
             >
-              {SESSION_KIND_FILTER_LABELS[item]}
+              {item === 'helper' ? 'Agent conversations' : SESSION_KIND_FILTER_LABELS[item]}
             </button>
           ))}
         </div>
@@ -466,6 +492,7 @@ export function SessionSidebar({
                       session={session}
                       active={activeKey === sessionKey(session)}
                       actions={wrappedActions}
+                      agentNames={agentNames}
                     />
                     {helpers.length > 0 && (
                       <ul
@@ -478,6 +505,7 @@ export function SessionSidebar({
                               session={helper}
                               active={activeKey === sessionKey(helper)}
                               actions={wrappedActions}
+                              agentNames={agentNames}
                             />
                           </li>
                         ))}

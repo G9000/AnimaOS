@@ -836,7 +836,7 @@ it('lists peer requests as read-only helper sessions apart from the owner chat',
   ).not.toBeInTheDocument();
   await openSessions(user);
   await user.click(
-    await screen.findByRole('button', { name: 'Messages from Beta' }),
+    await screen.findByRole('button', { name: 'Messages from Beta, Beta → Alpha' }),
   );
   expect(await screen.findByText('Private teammate request')).toBeVisible();
   // The peer's request is credited to the peer that sent it.
@@ -4949,6 +4949,43 @@ it('switches the bootstrap to agent summaries once the event stream opens', asyn
   expect(vi.mocked(daemon.listAgents).mock.calls.length).toBe(fullReads);
   await elapse(BOOTSTRAP_SUMMARY_POLL_MS);
   expect(summaries).toHaveBeenCalled();
+});
+
+it('keeps agent conversations out of the chat header and opens their exchange from the agent history', async () => {
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({
+    agents: [snapshot('agent-main', 'Mom', 1), snapshot('anima', 'Anima', 2)],
+  });
+  mockProviders();
+  routes.sessions.push(
+    sessionFixture('chat:regular', { mainChat: true }),
+    sessionFixture('room:incoming', {
+      kind: 'helper', origin: 'delegation', title: 'Ask about Julio',
+      parentAgentId: 'anima', parentRunId: 'run:anima', capabilities: readOnly,
+    }),
+  );
+  vi.mocked(daemon.sessionMessages).mockImplementation(async (_agentId, sessionId) => ({
+    messages: sessionId === 'room:incoming' ? [
+      { id: 'request', role: 'user', text: 'Task delegated by workspace manager Anima (anima). Return the result and any blockers. Do not delegate further.\n\nWhat do you know about Julio?', attachments: [], metadata: {}, createdAtMs: 2 },
+      { id: 'reply', role: 'assistant', text: 'I know Julio prefers a warm and direct tone.', attachments: [], metadata: {}, createdAtMs: 3 },
+    ] : [],
+    nextBefore: null,
+  }));
+  window.history.replaceState(null, '', '/#/s/chat%3Aregular');
+  render(<ViewHarness />);
+  const user = userEvent.setup();
+  await screen.findByRole('textbox', { name: 'Message Mom' });
+  expect(screen.queryByText('Agent conversations')).not.toBeInTheDocument();
+  await openSessions(user);
+  const history = screen.getByRole('dialog', { name: 'History' });
+  await user.click(within(history).getByRole('button', { name: 'Agent conversations' }));
+  expect(within(history).getByText('Anima → Mom')).toBeVisible();
+  await user.click(within(history).getByRole('button', { name: /Ask about Julio, Anima → Mom/ }));
+  expect(await screen.findByText('I know Julio prefers a warm and direct tone.')).toBeVisible();
+  expect(screen.getByText('From Anima')).toBeVisible();
+  expect(screen.getByText('What do you know about Julio?')).toBeVisible();
+  expect(daemon.sessionMessages).toHaveBeenCalledWith('agent-main', 'room:incoming', expect.anything());
+  expect(screen.queryByRole('textbox', { name: 'Message Mom' })).not.toBeInTheDocument();
 });
 
 it('opens a helper session by its agent and credits its task to the companion', async () => {

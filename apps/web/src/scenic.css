@@ -2039,32 +2039,24 @@ button.scenic-thread[aria-expanded='true'] {
   backdrop-filter: blur(24px);
 }
 
-/* The composer you are writing in is the live item: pink edge, square
- * handles on its corners. */
-.scenic-shell .studio-composer-box.composer-bar:focus-within {
-  border-color: var(--color-accent);
+/* The main-chat and light-theme rules further down set the composer's
+ * border-color at equal or higher specificity, so the interactive states
+ * repeat :root to stay on top of them. */
+:root:root .scenic-shell .studio-composer-box.composer-bar:hover,
+:root:root
+  .scenic-shell
+  [data-main-chat='true']
+  .studio-composer-box.composer-bar:hover {
+  border-color: color-mix(in srgb, var(--color-ink) 34%, transparent);
 }
 
-.scenic-shell .studio-composer-box.composer-bar:focus-within::after {
-  content: '';
-  position: absolute;
-  top: -4px;
-  left: -4px;
-  width: calc(100% + 8px);
-  height: calc(100% + 8px);
-  pointer-events: none;
-  background:
-    linear-gradient(#0b0b0a, #0b0b0a) 1px 1px / 5px 5px,
-    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) 1px / 5px 5px,
-    linear-gradient(#0b0b0a, #0b0b0a) 1px calc(100% - 1px) / 5px 5px,
-    linear-gradient(#0b0b0a, #0b0b0a) calc(100% - 1px) calc(100% - 1px) / 5px
-      5px,
-    linear-gradient(var(--color-accent), var(--color-accent)) 0 0 / 7px 7px,
-    linear-gradient(var(--color-accent), var(--color-accent)) 100% 0 / 7px 7px,
-    linear-gradient(var(--color-accent), var(--color-accent)) 0 100% / 7px 7px,
-    linear-gradient(var(--color-accent), var(--color-accent)) 100% 100% / 7px
-      7px;
-  background-repeat: no-repeat;
+/* The composer you are writing in is the live item: a plain accent edge. */
+:root:root .scenic-shell .studio-composer-box.composer-bar:focus-within,
+:root:root
+  .scenic-shell
+  [data-main-chat='true']
+  .studio-composer-box.composer-bar:focus-within {
+  border-color: var(--color-accent);
 }
 
 .scenic-shell .composer-bar textarea {
@@ -3925,6 +3917,9 @@ button.scenic-thread[aria-expanded='true'] {
   border-radius: 6px;
   background: #0b0b0a;
   color: rgb(236 230 218 / 0.35);
+}
+.settings-search:hover {
+  border-color: rgb(236 230 218 / 0.22);
 }
 .settings-search:focus-within {
   border-color: rgb(236 230 218 / 0.3);
@@ -9132,6 +9127,10 @@ details.settings-item > :not(summary) {
   border-color: rgb(26 26 24 / 0.14);
   background: rgb(255 254 250 / 0.72);
   color: rgb(26 26 24 / 0.55);
+}
+
+:root[data-appearance-theme='light'] .settings-window-nav .settings-search:hover {
+  border-color: rgb(26 26 24 / 0.22);
 }
 
 :root[data-appearance-theme='light'] .settings-window-nav .settings-search:focus-within {

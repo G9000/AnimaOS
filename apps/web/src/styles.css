@@ -117,6 +117,51 @@ a {
   outline-offset: 3px;
 }
 
+/* Text-entry controls show focus on their own edge: the accent line sits on
+ * the border instead of a second square floating outside it. Wrappers that
+ * draw focus themselves (composer, search) opt out with outline: none. */
+:where(
+  input:not(
+    [type='checkbox'],
+    [type='radio'],
+    [type='range'],
+    [type='file'],
+    [type='color'],
+    [type='button'],
+    [type='submit'],
+    [type='reset'],
+    [type='image']
+  ),
+  textarea,
+  select
+):focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/* Hover lifts the border one step toward the ink colour. It only touches
+ * border-color, so inputs without a border (search fields, the composer) are
+ * unchanged; their wrappers carry the hover themselves. The extra specificity
+ * is deliberate: most inputs set their border in a page-scoped rule. */
+:root
+  :is(
+    input:not(
+      [type='checkbox'],
+      [type='radio'],
+      [type='range'],
+      [type='file'],
+      [type='color'],
+      [type='button'],
+      [type='submit'],
+      [type='reset'],
+      [type='image']
+    ),
+    textarea,
+    select
+  ):hover:not(:focus-visible, :disabled, [aria-invalid='true']) {
+  border-color: color-mix(in srgb, var(--color-ink) 34%, transparent);
+}
+
 input[type='radio'] {
   accent-color: var(--color-accent);
 }
