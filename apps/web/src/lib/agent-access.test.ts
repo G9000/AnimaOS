@@ -15,6 +15,7 @@ const COMMON_TOOLS = [
   'get_current_time',
   'calculate',
   'search_conversations',
+  'read_conversation_window',
   'load_skill',
   'skill_history',
   'list_automations',

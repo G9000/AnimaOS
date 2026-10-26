@@ -89,9 +89,10 @@ fn valid_id(id: &str) -> bool {
 }
 fn allowed(state: &DaemonState, agent: &str, record: &SessionRecord) -> bool {
     record.agent_id == agent
-        && record.kind != SessionKind::Helper
-        && record.parent_run_id.is_none()
-        && record.parent_agent_id.is_none()
+        && ((record.kind != SessionKind::Helper
+            && record.parent_run_id.is_none()
+            && record.parent_agent_id.is_none())
+            || super::interactions::incoming(state, record))
         && valid_id(&record.id)
         && state
             .agents
@@ -148,7 +149,6 @@ pub(crate) async fn discover_conversations(
         || crate::memory_text::has_hidden_text(&request.query)
         || request.query.chars().any(char::is_control)
         || !(1..=10).contains(&request.limit)
-        || request.kind == Some(SessionKind::Helper)
         || request.after_ms.is_some_and(|v| v > 9_007_199_254_740_991)
         || request.before_ms.is_some_and(|v| v > 9_007_199_254_740_991)
         || matches!((request.after_ms,request.before_ms),(Some(a),Some(b)) if a>=b)
@@ -166,7 +166,7 @@ async fn discover_inner(
     current: Option<&str>,
     request: DiscoveryRequest,
 ) -> Result<Value, HistoryReadError> {
-    let (records, hot, hidden, store) = {
+    let (records, hot, hidden, store, contacts) = {
         let guard = state.read().await;
         let Some(runtime) = guard.agents.get(agent) else {
             return Ok(
@@ -199,7 +199,14 @@ async fn discover_inner(
                 hidden_message_ids(hot.iter().filter(|message| message.room_id == *room))
             })
             .collect();
-        (records, hot, hidden, guard.history.store())
+        let contacts: HashMap<_, _> = records
+            .values()
+            .filter_map(|record| {
+                super::interactions::contact(&guard, record)
+                    .map(|contact| (record.id.clone(), contact))
+            })
+            .collect();
+        (records, hot, hidden, guard.history.store(), contacts)
     };
     let tokens = search_tokens(&request.query);
     let matches = |message: &Message| {
@@ -276,6 +283,75 @@ async fn discover_inner(
             }
         }
     }
+    // Sender names are host-owned provenance, not necessarily words in a
+    // peer's message. A name-only lookup still needs a real transcript anchor,
+    // including when that conversation has left the hot tail.
+    let sender_lookup_limited;
+    {
+        let in_time = |at: u64| {
+            request.after_ms.is_none_or(|bound| at >= bound)
+                && request.before_ms.is_none_or(|bound| at < bound)
+        };
+        let mut sender_matches: Vec<_> = records
+            .values()
+            .filter(|record| {
+                request
+                    .before_ms
+                    .is_none_or(|bound| record.created_at_ms < bound)
+                    && contacts.get(&record.id).is_some_and(|contact| {
+                        ["fromAgentId", "fromAgentName"].iter().any(|key| {
+                            contact[*key]
+                                .as_str()
+                                .is_some_and(|text| text_matches(text, &tokens))
+                        })
+                    })
+            })
+            .collect();
+        sender_lookup_limited = sender_matches.len() > request.limit + 1;
+        sender_matches.sort_by(|a, b| {
+            b.last_activity_at_ms
+                .cmp(&a.last_activity_at_ms)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        for record in sender_matches.into_iter().take(request.limit + 1) {
+            for message in hot.iter().filter(|message| {
+                message.room_id == record.room_id()
+                    && message.agent_id == agent
+                    && message.role != MessageRole::System
+                    && valid_id(&message.id)
+                    && !hidden.contains(&message.id)
+                    && in_time(message.created_at_ms)
+            }) {
+                insert_latest(&mut found, &record.id, message.clone());
+            }
+            let rows = store
+                .page_messages(&MessagePageQuery {
+                    agent_id: agent.into(),
+                    session_id: record.id.clone(),
+                    before: request.before_ms.map(|bound| MessageOrder {
+                        created_at_ms: bound,
+                        ordinal: 0,
+                        id: String::new(),
+                    }),
+                    limit: 20,
+                    include_hidden: false,
+                })
+                .await
+                .map_err(|_| HistoryReadError::Unavailable)?;
+            if rows.len() > 20 {
+                return Err(HistoryReadError::Unavailable);
+            }
+            for row in rows {
+                if !row_allowed(&row, agent, record, &hidden) || !in_time(row.message.created_at_ms)
+                {
+                    continue;
+                }
+                if !hot_ids.contains(row.message.id.as_str()) {
+                    insert_latest(&mut found, &record.id, row.message);
+                }
+            }
+        }
+    }
     let guard = state.read().await;
     let live_hidden: HashSet<_> = guard
         .agents
@@ -311,7 +387,7 @@ async fn discover_inner(
                 "kind":record.kind.as_str(),"archived":record.archived,"matchMessageId":message.id,
                 "matchedAtMs":message.created_at_ms,"role":role_name(message.role),"snippet":snippet,
                 "titleShortened":record.title.len()>240,"snippetShortened":snippet!=display_text(message),
-                "matchKind":"message","anchorUnavailable":false})));
+                "matchKind":"message","anchorUnavailable":false,"contact":super::interactions::contact(&guard, record)})));
         } else if request.after_ms.is_none()
             && request.before_ms.is_none()
             && text_matches(&record.title, &tokens)
@@ -320,12 +396,12 @@ async fn discover_inner(
                 json!({"sessionId":record.id,"title":clip(&record.title,240),"kind":record.kind.as_str(),"archived":record.archived,
                     "matchMessageId":null,"matchedAtMs":null,"role":null,"snippet":clip(&record.title,240),
                     "titleShortened":record.title.len()>240,"snippetShortened":record.title.len()>240,
-                    "matchKind":"title","anchorUnavailable":true})));
+                    "matchKind":"title","anchorUnavailable":true,"contact":super::interactions::contact(&guard, record)})));
         }
     }
     drop(guard);
     results.sort_by(|a, b| b.0.cmp(&a.0));
-    let has_more = results.len() > request.limit;
+    let has_more = results.len() > request.limit || sender_lookup_limited;
     let shortened = results
         .iter()
         .take(request.limit)
@@ -552,6 +628,17 @@ pub(crate) async fn read_conversation_window(
         "shortened":window.omitted,
         "sourceCoverage":if window.omitted{"bounded_with_omissions"}else{"hot_and_store"},
         "pairingIncomplete":false});
+    {
+        let guard = state.read().await;
+        let Some(record) = guard
+            .sessions
+            .get(agent, &window.session_id)
+            .filter(|record| allowed(&guard, agent, record))
+        else {
+            return Ok(missing(&request.session_id, &request.anchor_message_id));
+        };
+        output["contact"] = super::interactions::contact(&guard, record).unwrap_or(Value::Null);
+    }
     bound_window(&mut output);
     output["pairingIncomplete"] = json!(
         output["pairingIncomplete"] == true

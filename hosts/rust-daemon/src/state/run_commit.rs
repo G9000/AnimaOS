@@ -186,6 +186,8 @@ impl DaemonState {
         let checkpoint_text = checkpoint
             .as_ref()
             .map(|checkpoint| checkpoint.prompt_text());
+        let agent_conversations =
+            crate::sessions::interactions::recent_context(self, agent_id, room_id);
         let estimator = TokenEstimator::new(
             session
                 .and_then(|session| session.context_calibration_permille)
@@ -199,6 +201,11 @@ impl DaemonState {
                 .history_tokens(estimator.content_tokens(input))
                 .saturating_sub(
                     checkpoint_text
+                        .as_ref()
+                        .map_or(0, |text| estimator.text_tokens(text)),
+                )
+                .saturating_sub(
+                    agent_conversations
                         .as_ref()
                         .map_or(0, |text| estimator.text_tokens(text)),
                 )
@@ -221,7 +228,10 @@ impl DaemonState {
             + checkpoint_text
                 .as_ref()
                 .map_or(0, |text| raw.text_tokens(text))
-            + files.estimated_tokens;
+            + files.estimated_tokens
+            + agent_conversations
+                .as_ref()
+                .map_or(0, |text| raw.text_tokens(text));
         let pruned = session.and_then(|session| uncovered_pruned_through(session, &history));
         let context = RunContextReport {
             budget_tokens: budget.budget_tokens,
@@ -238,7 +248,7 @@ impl DaemonState {
         runtime.set_tool_output_pruning(pruning);
         runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
-        if summary.is_some() || checkpoint.is_some() {
+        if summary.is_some() || checkpoint.is_some() || agent_conversations.is_some() {
             let mut providers = crate::components::default_providers_in_zone(
                 Arc::clone(&self.memory),
                 Arc::clone(&self.memory_embeddings),
@@ -252,6 +262,12 @@ impl DaemonState {
             if let Some(checkpoint) = checkpoint {
                 providers
                     .push(Arc::new(SessionCheckpointProvider { checkpoint }) as Arc<dyn Provider>);
+            }
+            if let Some(text) = agent_conversations {
+                providers.push(
+                    Arc::new(crate::sessions::interactions::AgentConversationsProvider { text })
+                        as Arc<dyn Provider>,
+                );
             }
             runtime.set_providers(providers);
         }

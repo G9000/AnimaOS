@@ -1642,6 +1642,7 @@ export function ViewHarness() {
 
   const sidebar = (
     <SessionSidebar
+      agents={agents}
       // The main chat is where you are; History lists everything else.
       sessions={sessions.sessions.filter(
         (session) => session.mainChat !== true && shouldShowSession(session),

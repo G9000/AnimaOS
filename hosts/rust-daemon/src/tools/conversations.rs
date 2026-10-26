@@ -76,13 +76,14 @@ fn discovery_request(call: &ToolCall) -> Result<DiscoveryRequest, &'static str> 
             "email" => SessionKind::Email,
             "checkin" => SessionKind::Checkin,
             "job" => SessionKind::Job,
+            "helper" => SessionKind::Helper,
             _ => return Err(
-                "search_conversations kind must be chat, telegram, discord, email, checkin, or job",
+                "search_conversations kind must be chat, telegram, discord, email, checkin, job, or helper (own incoming agent conversations)",
             ),
         }),
         Some(_) => {
             return Err(
-                "search_conversations kind must be chat, telegram, discord, email, checkin, or job",
+                "search_conversations kind must be chat, telegram, discord, email, checkin, job, or helper (own incoming agent conversations)",
             )
         }
     };

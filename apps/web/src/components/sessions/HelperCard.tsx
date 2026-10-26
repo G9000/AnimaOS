@@ -21,7 +21,8 @@ export function HelperCard({
     <div className="helper-card" data-status={step.status}>
       <div className="helper-card-body">
         <p className="helper-card-title">
-          Helper · {step.helper?.label ?? step.name}
+          {step.name === 'delegate_to_agent' ? 'Agent conversation' : 'Helper'} ·{' '}
+          {step.helper?.label ?? step.name}
         </p>
         <p className="helper-card-status">{HELPER_STATUS[step.status]}</p>
       </div>
@@ -31,7 +32,7 @@ export function HelperCard({
           className="studio-tool-button"
           onClick={() => onOpen(target)}
         >
-          Open session
+          {step.name === 'delegate_to_agent' ? 'View conversation' : 'Open session'}
         </button>
       )}
     </div>

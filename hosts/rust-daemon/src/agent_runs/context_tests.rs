@@ -80,6 +80,62 @@ async fn budgeted(budget: f64, model: Arc<ScriptedModel>) -> (AgentRunCoordinato
 }
 
 #[tokio::test]
+async fn regular_chat_recalls_actual_incoming_agent_requests_without_merging_transcripts() {
+    let model = ScriptedModel::new(vec![
+        Step::Text(vec!["I know Julio from our conversations"]),
+        Step::Text(vec!["Anima asked me about you"]),
+    ]);
+    let (coordinator, _) = budgeted(8_000.0, model.clone()).await;
+    let sender = coordinator
+        .state
+        .write()
+        .await
+        .create_agent(super::test_support::lead_config("Anima"))
+        .unwrap()
+        .state
+        .id;
+    let mom = coordinator
+        .state
+        .write()
+        .await
+        .create_agent(companion_config("Mom"))
+        .unwrap()
+        .state;
+    let caller = coordinator.state.read().await.agents[&sender].state();
+    coordinator
+        .delegate(
+            &caller,
+            mom.id.clone(),
+            "Tell me what you know about Julio".into(),
+            None,
+        )
+        .await
+        .unwrap();
+    coordinator
+        .run(chat_request(
+            &mom.id,
+            "chat:regular",
+            "Did another agent ask you about me?",
+        ))
+        .await
+        .unwrap();
+    let requests = model.requests();
+    let system = &requests[1].system;
+    assert!(
+        system.contains("Recent incoming agent conversations"),
+        "{system}"
+    );
+    assert!(system.contains(&sender));
+    assert!(system.contains("Tell me what you know about Julio"));
+    assert!(system.contains("completed"));
+    assert!(system.contains("read_conversation_window"));
+    assert!(requests[1].messages.iter().all(|message| !message
+        .content
+        .text
+        .contains("Task delegated by workspace manager")));
+}
+
+#[tokio::test]
 async fn a_huge_newest_turn_is_dropped_and_the_current_message_still_goes_out() {
     let model = ScriptedModel::new(vec![Step::Text(vec!["ok"])]);
     let (coordinator, agent_id) = budgeted(2_000.0, model.clone()).await;
