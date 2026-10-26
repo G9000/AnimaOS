@@ -290,3 +290,60 @@ fn completed_visits_stay_conversational_without_reinventing_delivery_or_collecti
         1
     );
 }
+
+#[tokio::test]
+async fn persistent_callback_revalidates_personal_facts_after_generation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CurrentFacts(AtomicBool);
+    #[async_trait]
+    impl NpcStageExecutor for CurrentFacts {
+        fn runtime(&self) -> RuntimeInfo {
+            RuntimeInfo::unavailable()
+        }
+        fn requires_persistent_memory(&self) -> bool {
+            true
+        }
+        async fn callback_memories(&self, _: NpcId) -> Result<CallbackMemories, String> {
+            Ok(if self.0.load(Ordering::SeqCst) {
+                CallbackMemories::default()
+            } else {
+                CallbackMemories {
+                    bread_preference: Some(Preference::Honey),
+                    helped_recipe: true,
+                }
+            })
+        }
+        async fn call(
+            &self,
+            _: NpcStage,
+            _: NpcId,
+            _: &str,
+            _: &str,
+            _: u32,
+        ) -> Result<String, String> {
+            self.0.store(true, Ordering::SeqCst);
+            Ok(LINE.into())
+        }
+    }
+    let mut state = GameState::new(Language::Ja);
+    state.phase = Phase::Evening;
+    state.bread_preference = Some(Preference::Honey);
+    state.helped_recipe = true;
+    let played = play_with(
+        &CurrentFacts(AtomicBool::new(false)),
+        state,
+        GameInput::Visit,
+    )
+    .await
+    .unwrap();
+    assert!(!played.dialogue.translation.contains("honey"));
+    assert!(!played.dialogue.translation.contains("encouragement"));
+    assert_eq!(played.state.bread_preference, None);
+    assert!(!played.state.helped_recipe);
+    assert!(played
+        .state
+        .journal
+        .iter()
+        .all(|entry| !entry.translation.contains("favorite honey bread")));
+    assert_eq!(played.state.phase, Phase::Complete);
+}

@@ -105,20 +105,31 @@ pub trait ModelAdapter: Send + Sync {
         }
         let (request, mut permit) = context.reserve_prepared(config, request).await?;
         permit.revalidate().await?;
-        let result = context.bounded(self.generate(config, &request)).await;
-        let outcome = match &result {
-            Ok(response) if self.generated_usage_is_complete(response) => {
-                crate::execution_limits::SettlementOutcome::Known(response.usage.clone())
-            }
-            Ok(response) => crate::execution_limits::SettlementOutcome::Unknown {
-                observed: Some(response.usage.clone()),
-            },
-            Err(_) => permit.observed_outcome(),
-        };
-        let physical_retired = result.is_ok() || context.check_live().is_ok();
-        let _ = permit
-            .finish_with_retirement(outcome, physical_retired)
+        let dispatch = crate::execution_limits::ModelDispatchState::default();
+        let result = context
+            .dispatch(&dispatch, self.generate(config, &request))
             .await;
+        let outcome = if !dispatch.started() {
+            crate::execution_limits::SettlementOutcome::ProvenNeverSent
+        } else {
+            match &result {
+                Ok(response) if self.generated_usage_is_complete(response) => {
+                    crate::execution_limits::SettlementOutcome::Known(response.usage.clone())
+                }
+                Ok(response) => crate::execution_limits::SettlementOutcome::Unknown {
+                    observed: Some(response.usage.clone()),
+                },
+                Err(_) => permit.observed_outcome(),
+            }
+        };
+        if !dispatch.started() {
+            let _ = permit.finish_owned(outcome, true).await;
+        } else {
+            let physical_retired = result.is_ok() || context.check_live().is_ok();
+            let _ = permit
+                .finish_with_retirement(outcome, physical_retired)
+                .await;
+        }
         result
     }
 
@@ -135,14 +146,24 @@ pub trait ModelAdapter: Send + Sync {
         let (request, mut permit) = context.reserve_prepared(config, request).await?;
         permit.revalidate().await?;
         let observed = permit.stream_sink(sink);
+        let dispatch = crate::execution_limits::ModelDispatchState::default();
         let result = context
-            .bounded(self.stream(config, &request, &observed))
+            .dispatch(&dispatch, self.stream(config, &request, &observed))
             .await;
         drop(observed);
-        let physical_retired = result.is_ok() || context.check_live().is_ok();
-        let _ = permit
-            .finish_with_retirement(permit.observed_outcome(), physical_retired)
-            .await;
+        if !dispatch.started() {
+            let _ = permit
+                .finish_owned(
+                    crate::execution_limits::SettlementOutcome::ProvenNeverSent,
+                    true,
+                )
+                .await;
+        } else {
+            let physical_retired = result.is_ok() || context.check_live().is_ok();
+            let _ = permit
+                .finish_with_retirement(permit.observed_outcome(), physical_retired)
+                .await;
+        }
         result
     }
 

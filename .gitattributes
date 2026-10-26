@@ -1,2 +1,4 @@
 # Preserve checked PDF byte offsets and fixed-width xref records.
 hosts/rust-daemon/tests/fixtures/documents/*.pdf binary
+# The provider-task fixture's exact edit and hash oracle requires LF on Windows.
+packages/core-rust/acceptance/provider-task-m52/fixture/src/log-summary.mjs text eol=lf

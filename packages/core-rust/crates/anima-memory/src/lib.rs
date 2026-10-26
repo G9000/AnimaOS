@@ -1,5 +1,17 @@
+pub mod access;
 mod bm25;
+pub mod identity;
+pub mod projection;
+pub use access::MemoryAuthority;
+pub use identity::IdentityRegistry;
+pub use projection::{
+    CandidateEvidence, EvidenceKind, MemoryCandidate, MemoryEffect, MemoryEffectReceipt,
+    MemoryProjectionOutcome, MemoryProjectionPolicy, MemoryProjectionPort, RelationshipObservation,
+    ValidatedMemoryEffect, MAX_MEMORY_EFFECT_BYTES, MAX_MEMORY_EFFECT_ITEMS,
+};
 pub mod core_port;
+pub mod legacy;
+pub use legacy::LegacySnapshotArchive;
 mod eval_harness;
 pub mod external_provider;
 #[cfg(feature = "locomo-eval")]

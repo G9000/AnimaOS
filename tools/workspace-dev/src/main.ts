@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { consoleLaunchUrl, prepareOwnerCredentials } from './owner-console.js';
 import {
   getHostDefinition,
@@ -16,7 +17,10 @@ export interface WorkspaceDevPlan {
   processes: ManagedProcessDefinition[];
 }
 
+export type DevSurface = 'app' | 'docs' | 'game' | 'playground' | 'all';
+
 export interface WorkspaceDevPlanOptions {
+  surface?: DevSurface;
   reuseExistingHost?: boolean;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
@@ -40,9 +44,12 @@ export function buildWorkspaceDevPlan(
 ): WorkspaceDevPlan {
   const host = getHostDefinition(hostName);
 
+  const surface = options.surface ?? 'app';
+  const assistant =
+    surface === 'app' || surface === 'playground' || surface === 'all';
   const processes: ManagedProcessDefinition[] = [];
 
-  if (!options.reuseExistingHost) {
+  if (assistant && !options.reuseExistingHost) {
     processes.push({
       name: host.projectName,
       command: 'bun',
@@ -54,37 +61,40 @@ export function buildWorkspaceDevPlan(
     });
   }
 
-  processes.push({
-    name: '@animaos/web',
-    command: 'bun',
-    args: ['run', '--filter', '@animaos/web', 'dev'],
-    env: {
-      UI_BACKEND_ORIGIN: host.baseUrl,
-      VITE_HOST_KEY: host.key,
-    },
-  });
-
-  processes.push({
-    name: '@animaos/playground',
-    command: 'bun',
-    args: ['run', '--filter', '@animaos/playground', 'dev'],
-    env: {
-      UI_BACKEND_ORIGIN: host.baseUrl,
-      VITE_HOST_KEY: host.key,
-    },
-  });
-
-  processes.push({
-    name: '@animaos/docs',
-    command: 'bun',
-    args: ['run', '--filter', '@animaos/docs', 'dev'],
-  });
-
-  processes.push({
-    name: '@animaos/contributor-docs',
-    command: 'bun',
-    args: ['run', '--filter', '@animaos/contributor-docs', 'dev'],
-  });
+  const browserEnv = { UI_BACKEND_ORIGIN: host.baseUrl, VITE_HOST_KEY: host.key };
+  if (surface === 'app' || surface === 'all') {
+    processes.push({
+      name: '@animaos/web',
+      command: 'bun',
+      args: ['run', '--filter', '@animaos/web', 'dev'],
+      env: browserEnv,
+    });
+  }
+  if (surface === 'playground' || surface === 'all') {
+    processes.push({
+      name: '@animaos/playground',
+      command: 'bun',
+      args: ['run', '--filter', '@animaos/playground', 'dev'],
+      env: browserEnv,
+    });
+  }
+  if (surface === 'docs' || surface === 'all') {
+    for (const name of ['@animaos/docs', '@animaos/contributor-docs']) {
+      processes.push({
+        name,
+        command: 'bun',
+        args: ['run', '--filter', name, 'dev'],
+      });
+    }
+  }
+  if (surface === 'game' || surface === 'all') {
+    processes.push({
+      name: 'Village game',
+      command: 'bun',
+      args: ['run', 'dev'],
+      cwd: fileURLToPath(new URL('../../../poc/village/', import.meta.url)),
+    });
+  }
 
   return {
     host,
@@ -92,9 +102,35 @@ export function buildWorkspaceDevPlan(
   };
 }
 
+function parseSurface(argv: string[]): DevSurface {
+  const flags = [
+    ['--docs', 'docs'],
+    ['--game', 'game'],
+    ['--playground', 'playground'],
+    ['--all', 'all'],
+  ] as const;
+  const selected = flags.filter(([flag]) => argv.includes(flag));
+  if (selected.length > 1) {
+    throw new Error(
+      'Choose one development service: --docs, --game, --playground or --all.',
+    );
+  }
+  return selected[0]?.[1] ?? 'app';
+}
+
 export async function run(argv: string[]): Promise<void> {
+  const surface = parseSurface(argv);
   const hostName = parseHostArg(argv);
   const host = getHostDefinition(hostName);
+  if (surface === 'docs' || surface === 'game') {
+    if (argv.includes('--console')) {
+      throw new Error('--console requires the app or playground development service.');
+    }
+    await runManagedProcesses(
+      buildWorkspaceDevPlan(hostName, { surface }).processes,
+    );
+    return;
+  }
   const reuseExistingHost = await isHostReachable(host.baseUrl);
   const consoleOnly = argv.includes('--console');
   if (consoleOnly && !reuseExistingHost)
@@ -124,7 +160,7 @@ export async function run(argv: string[]): Promise<void> {
         'Set ANIMA_LOCAL_ADMIN_TOKEN_FILE to its matching token file, or stop the running daemon with its launcher before starting bun dev.',
     );
   }
-  const consoleOrigin = argv.includes('--playground')
+  const consoleOrigin = surface === 'playground'
     ? 'http://localhost:4201'
     : 'http://localhost:4200';
   const showConsole = () => {
@@ -138,6 +174,7 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
   const plan = buildWorkspaceDevPlan(hostName, {
+    surface,
     reuseExistingHost,
     ownerEnv: owner.daemonEnv,
   });

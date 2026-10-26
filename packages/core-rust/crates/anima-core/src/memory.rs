@@ -860,6 +860,19 @@ pub trait MemoryPort: Send + Sync {
         access: &KnowledgeAccessContext,
         query: MemoryQuery,
     ) -> Result<MemoryQueryResult, MemoryPortError>;
+    /// Looks up one exact currently active canonical record under both the bound
+    /// store authority and this access context. Reject forgotten, expired or
+    /// superseded records using authoritative store time, without ranked recall.
+    /// Ports without this contract fail closed for persistent-context validation.
+    async fn get_active(
+        &self,
+        _access: &KnowledgeAccessContext,
+        _id: &str,
+    ) -> Result<MemoryRecord, MemoryPortError> {
+        Err(MemoryPortError::unsupported(
+            "exact active memory lookup is unavailable",
+        ))
+    }
     /// Applies a CAS-guarded lifecycle mutation. Implementations must reject stale revisions.
     async fn revise(&self, revision: MemoryRevision) -> Result<MemoryRecord, MemoryPortError>;
 }

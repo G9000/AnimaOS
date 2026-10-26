@@ -71,6 +71,7 @@ impl CapabilityStepOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngineErrorCode {
     Store,
+    MemoryUnavailable,
     DefinitionUnavailable,
     ManifestUnavailable,
     Model,
@@ -99,6 +100,9 @@ impl fmt::Display for EngineError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self.code {
             EngineErrorCode::Store => "durable execution store rejected the operation",
+            EngineErrorCode::MemoryUnavailable => {
+                "required agent memory is unavailable or its accepted effects are unsettled"
+            }
             EngineErrorCode::DefinitionUnavailable => "the pinned agent definition is unavailable",
             EngineErrorCode::ManifestUnavailable => "a pinned capability manifest is unavailable",
             EngineErrorCode::Model => "the model adapter failed",
@@ -263,6 +267,19 @@ pub trait CurrentPolicyResolver: Send + Sync {
 
 #[async_trait]
 pub trait EngineCapabilityRuntime: Send + Sync {
+    /// Exact recovered output when supported; the default preserves reference-only
+    /// legacy profiles. New durable tool profiles must supply retained output.
+    async fn completed_output(
+        &self,
+        context: &CapabilityExecutionContext,
+        durable: &DurableCapabilityResult,
+    ) -> Result<CapabilityResult, CapabilityError> {
+        let _ = context;
+        Ok(CapabilityResult::new(
+            serde_json::json!({"durable_result_ref": durable.result_ref().handle()}),
+        ))
+    }
+
     fn manifest(&self, id: &str, version: u32) -> Option<CapabilityManifest>;
 
     async fn execute(
@@ -284,6 +301,20 @@ pub trait EngineCapabilityRuntime: Send + Sync {
 
 #[async_trait]
 impl EngineCapabilityRuntime for crate::CapabilityRegistry {
+    async fn completed_output(
+        &self,
+        context: &CapabilityExecutionContext,
+        durable: &DurableCapabilityResult,
+    ) -> Result<CapabilityResult, CapabilityError> {
+        Ok(self
+            .load_completed_output(context, durable)
+            .await?
+            .unwrap_or_else(|| {
+                CapabilityResult::new(
+                    serde_json::json!({"durable_result_ref": durable.result_ref().handle()}),
+                )
+            }))
+    }
     fn manifest(&self, id: &str, version: u32) -> Option<CapabilityManifest> {
         crate::CapabilityRegistry::manifest(self, id, version).cloned()
     }
@@ -417,6 +448,32 @@ where
         run_id: Uuid,
         signal: &dyn EngineControlSignal,
     ) -> Result<EngineRunOutcome, EngineError> {
+        self.run_internal(owner_id, run_id, signal, None).await
+    }
+
+    /// Uses the host's single, shared reservation authority for every physical
+    /// provider attempt. Hosts must restore the same durable binding on retry.
+    pub async fn run_controlled(
+        &self,
+        owner_id: Uuid,
+        run_id: Uuid,
+        signal: &dyn EngineControlSignal,
+        execution: &crate::execution_limits::ExecutionContext,
+    ) -> Result<EngineRunOutcome, EngineError> {
+        if execution.run_id != run_id.to_string() {
+            return Err(EngineError::new(EngineErrorCode::InvalidState));
+        }
+        self.run_internal(owner_id, run_id, signal, Some(execution))
+            .await
+    }
+
+    async fn run_internal(
+        &self,
+        owner_id: Uuid,
+        run_id: Uuid,
+        signal: &dyn EngineControlSignal,
+        execution: Option<&crate::execution_limits::ExecutionContext>,
+    ) -> Result<EngineRunOutcome, EngineError> {
         let stored = self
             .store
             .load_run(owner_id, run_id)
@@ -425,6 +482,18 @@ where
             .ok_or_else(|| EngineError::new(EngineErrorCode::InvalidState))?;
         if stored.owner_id() != owner_id {
             return Err(EngineError::new(EngineErrorCode::InvalidState));
+        }
+        if stored.run().state() == RunState::Completed {
+            let content = self
+                .store
+                .load_completed_output(owner_id, run_id)
+                .await
+                .map_err(|_| EngineError::new(EngineErrorCode::Store))?
+                .ok_or_else(|| EngineError::new(EngineErrorCode::InvalidState))?;
+            return Ok(EngineRunOutcome::Completed { content });
+        }
+        if stored.run().state() == RunState::Cancelled {
+            return Ok(EngineRunOutcome::Cancelled);
         }
         let initial_input = stored.initial_input().clone();
         let definition_pin = DefinitionPin::new(
@@ -638,14 +707,17 @@ where
             return Ok(EngineRunOutcome::RecoveryRequired);
         }
         let mut messages = provider_transcript_messages(&checkpoint, &definition, &initial_input)?;
-        if let Some(active) = checkpoint.attempts().iter().find(|attempt| {
-            matches!(
-                attempt.state(),
-                crate::AttemptRecordState::Pending
-                    | crate::AttemptRecordState::Dispatching
-                    | crate::AttemptRecordState::Uncertain
-            )
-        }) {
+        let active = latest_unfinished_attempts(&checkpoint)
+            .find(|attempt| {
+                matches!(
+                    attempt.state(),
+                    crate::AttemptRecordState::Pending
+                        | crate::AttemptRecordState::Dispatching
+                        | crate::AttemptRecordState::Uncertain
+                )
+            })
+            .cloned();
+        if let Some(active) = active {
             let invocation = active
                 .durable_invocation()
                 .map_err(|_| EngineError::new(EngineErrorCode::InvalidState))?
@@ -768,23 +840,83 @@ where
                     final_response: Mutex::new(None),
                 };
                 let model_request = ModelGenerateRequest {
-                    system: definition.system.clone(),
+                    system: if execution.is_some() && !definition.persona.is_empty() {
+                        format!("{}\n\n{}", definition.persona, definition.system)
+                    } else {
+                        definition.system.clone()
+                    },
                     messages: messages.clone(),
                     temperature: definition.model.temperature,
                     max_tokens: None,
                 };
-                let (stream_result, renewed) = self
-                    .await_with_lease_heartbeat(
-                        owner_id,
-                        lease,
-                        self.model.stream(
-                            &agent_config(&definition, &manifests),
-                            &model_request,
-                            &collector,
+                let model_context = execution.map(|execution| {
+                    crate::execution_limits::ModelCallContext::new(
+                        execution.clone(),
+                        format!(
+                            "durable-model:{}:{}",
+                            run_id,
+                            checkpoint.provider_transcript().len()
                         ),
                     )
+                });
+                let model_config = agent_config(&definition, &manifests);
+                let stream = async {
+                    match &model_context {
+                        Some(context) => {
+                            self.model
+                                .stream_controlled(
+                                    &model_config,
+                                    &model_request,
+                                    &collector,
+                                    context,
+                                )
+                                .await
+                        }
+                        None => {
+                            self.model
+                                .stream(&model_config, &model_request, &collector)
+                                .await
+                        }
+                    }
+                };
+                let (stream_result, renewed) = self
+                    .await_with_lease_heartbeat(owner_id, lease, stream)
                     .await?;
                 lease = renewed;
+                // Transport success cannot publish model progress or authorize
+                // effects after the shared accounting authority rejects its receipt.
+                let stream_result = match execution.and_then(|execution| execution.failure()) {
+                    Some(error) => Err(error),
+                    None => stream_result,
+                };
+                if stream_result.is_err() {
+                    if let Some(outcome) = self
+                        .observe_control_boundary(
+                            signal,
+                            owner_id,
+                            &current,
+                            &lease,
+                            checkpoint_version,
+                            &checkpoint,
+                        )
+                        .await?
+                    {
+                        return Ok(outcome);
+                    }
+                    if execution.is_some_and(|execution| {
+                        execution.cancel.cause() == Some(crate::CancelCause::ExecutionDeadline)
+                    }) {
+                        return self
+                            .pause_for_budget(
+                                owner_id,
+                                current,
+                                lease,
+                                checkpoint_version,
+                                &checkpoint,
+                            )
+                            .await;
+                    }
+                }
                 stream_result.map_err(|_| EngineError::new(EngineErrorCode::Model))?;
                 let response = collector
                     .final_response
@@ -1072,9 +1204,7 @@ where
             arguments,
         )
         .map_err(|_| EngineError::new(EngineErrorCode::Capability))?;
-        let recovery_attempt_number = checkpoint
-            .attempts()
-            .iter()
+        let recovery_attempt_number = latest_unfinished_attempts(&checkpoint)
             .find(|attempt| {
                 attempt.invocation().id() == invocation.id()
                     && matches!(
@@ -1665,10 +1795,21 @@ where
             .await_with_lease_heartbeat(
                 owner_id,
                 lease,
-                self.capabilities.recover_dispatched(context),
+                self.capabilities.recover_dispatched(context.clone()),
             )
             .await?;
-        let recovery = recovery.map_err(|_| EngineError::new(EngineErrorCode::Capability))?;
+        let recovery = match recovery {
+            Ok(action) => action,
+            Err(error)
+                if attempt_number > 1 && error.code() == crate::CapabilityErrorCode::Validation =>
+            {
+                // A fresh default registry cannot reconstruct retry lineage.
+                // Retain the dispatch and accounting evidence for manual review;
+                // absence of local lineage never authorizes another effect.
+                RecoveryAction::RecoveryRequired
+            }
+            Err(_) => return Err(EngineError::new(EngineErrorCode::Capability)),
+        };
         let step = ExecutionStep::new(
             current.run().id(),
             tool_call.id.clone(),
@@ -1676,8 +1817,13 @@ where
         )
         .map_err(|_| EngineError::new(EngineErrorCode::InvalidState))?;
         match recovery {
-            RecoveryAction::Completed(durable) => self
-                .commit_capability_result(
+            RecoveryAction::Completed(durable) => {
+                let output = self
+                    .capabilities
+                    .completed_output(&context, &durable)
+                    .await
+                    .map_err(|_| EngineError::new(EngineErrorCode::Capability))?;
+                self.commit_capability_result(
                     owner_id,
                     definition,
                     current,
@@ -1689,15 +1835,11 @@ where
                     manifest,
                     attempt_number,
                     step,
-                    EngineCapabilityResult {
-                        output: CapabilityResult::new(serde_json::json!({
-                            "durable_result_ref": durable.result_ref().handle()
-                        })),
-                        durable,
-                    },
+                    EngineCapabilityResult { output, durable },
                 )
                 .await
-                .map(CapabilityStepOutcome::committed),
+                .map(CapabilityStepOutcome::committed)
+            }
             RecoveryAction::RetrySameKey { authorization, .. } => {
                 if let Some(outcome) = self
                     .observe_control_boundary(
@@ -3200,6 +3342,28 @@ impl<L: EngineLiveEventSink> ModelStreamSink for EngineModelSink<'_, L> {
         }
         Ok(())
     }
+}
+
+/// Historical uncertainty is evidence, not a second active dispatch. Select
+/// the latest attempt before considering its state, and honor committed results.
+fn latest_unfinished_attempts(
+    checkpoint: &CheckpointV1,
+) -> impl Iterator<Item = &InvocationAttemptRecord> {
+    let completed: BTreeSet<_> = checkpoint
+        .completed_invocations()
+        .iter()
+        .map(|record| record.invocation().id())
+        .collect();
+    let mut latest = BTreeMap::<Uuid, &InvocationAttemptRecord>::new();
+    for attempt in checkpoint.attempts() {
+        let current = latest.entry(attempt.invocation().id()).or_insert(attempt);
+        if attempt.attempt_number() > current.attempt_number() {
+            *current = attempt;
+        }
+    }
+    latest
+        .into_values()
+        .filter(move |attempt| !completed.contains(&attempt.invocation().id()))
 }
 
 fn deterministic_id(run_id: Uuid, label: &str, sequence: u64) -> Uuid {

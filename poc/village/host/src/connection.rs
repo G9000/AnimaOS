@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 pub struct ResolvedConnection {
     pub engine: Option<Arc<dyn NpcEngine>>,
+    pub adapter: Option<Arc<dyn ModelAdapter>>,
     pub runtime: RuntimeInfo,
     pub reason: Option<String>,
 }
@@ -26,6 +27,7 @@ pub fn resolve() -> ResolvedConnection {
         Err(reason) => {
             return ResolvedConnection {
                 engine: None,
+                adapter: None,
                 runtime: RuntimeInfo::unavailable(),
                 reason: Some(reason),
             }
@@ -46,6 +48,7 @@ pub fn resolve() -> ResolvedConnection {
     };
     match adapter {
         Ok(adapter) => ResolvedConnection {
+            adapter: Some(adapter.clone()),
             engine: Some(Arc::new(HarnessNpc {
                 adapter,
                 provider,
@@ -58,6 +61,7 @@ pub fn resolve() -> ResolvedConnection {
             runtime.mode = "reviewed".into();
             ResolvedConnection {
                 engine: None,
+                adapter: None,
                 runtime,
                 reason: Some(reason),
             }

@@ -1626,6 +1626,7 @@ pub(crate) fn memory_query_expander_from_env() -> Option<QueryExpander> {
 }
 
 pub(crate) struct DaemonState {
+    pub(crate) engine_bridge: Option<Arc<crate::engine_bridge::DaemonEngineBridge>>,
     pub(crate) memory: SharedMemoryStore,
     pub(crate) memory_embeddings: SharedMemoryEmbeddings,
     pub(crate) memory_store: Option<MemoryStoreConfig>,
@@ -2399,6 +2400,7 @@ impl DaemonState {
         let memory_embeddings = Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::local_default()));
         Self {
             memory,
+            engine_bridge: None,
             memory_embeddings,
             chatgpt_auth: crate::chatgpt_auth::ChatGptAuth::in_memory(),
             provider_keys: crate::provider_keys::KeyPool::open(None, &Default::default())

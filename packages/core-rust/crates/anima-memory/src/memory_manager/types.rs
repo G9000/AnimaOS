@@ -1,4 +1,5 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum MemoryType {
     Fact,
     Observation,
@@ -6,7 +7,8 @@ pub enum MemoryType {
     Reflection,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum MemoryScope {
     Shared,
     Private,
@@ -81,7 +83,8 @@ pub struct NewMemoryEntity {
     pub summary: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryEntity {
     pub kind: RelationshipEndpointKind,
     pub id: String,
@@ -101,7 +104,8 @@ pub struct MemoryEntityOptions {
     pub limit: Option<usize>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum RelationshipEndpointKind {
     #[default]
     Agent,
@@ -150,7 +154,8 @@ pub struct NewAgentRelationship {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentRelationship {
     pub id: String,
     pub source_kind: RelationshipEndpointKind,
@@ -189,7 +194,8 @@ pub struct AgentRelationshipOptions {
     pub limit: Option<usize>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TemporalRecordStatus {
     #[default]
     Active,
@@ -239,7 +245,8 @@ pub struct NewTemporalFact {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemporalFact {
     pub id: String,
     pub subject_kind: RelationshipEndpointKind,
@@ -306,7 +313,8 @@ pub struct NewTemporalRelationship {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemporalRelationship {
     pub id: String,
     pub source_kind: RelationshipEndpointKind,
@@ -365,7 +373,8 @@ pub struct NewMemory {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Memory {
     pub id: String,
     pub agent_id: String,
@@ -575,7 +584,8 @@ pub struct MemoryRetentionReport {
     pub removed_relationship_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryManagerSnapshot {
     pub memories: Vec<Memory>,
     pub memory_entities: Vec<MemoryEntity>,

@@ -143,6 +143,17 @@ pub fn app_with_config(config: DaemonConfig) -> Router {
     app_with_state(state, config)
 }
 
+/// Explicit embedding-only installation for individually selected durable dialogue profiles.
+/// The caller owns file/key/model injection and legacy migration/cutover decisions.
+pub fn app_with_engine_bridge(
+    config: DaemonConfig,
+    bridge: Arc<crate::engine_bridge::DaemonEngineBridge>,
+) -> Router {
+    let mut state = configured_state(&config, Arc::new(DeterministicModelAdapter));
+    state.engine_bridge = Some(bridge);
+    app_with_state(Arc::new(RwLock::new(state)), config)
+}
+
 /// Builds a router with a custom database adapter, default config, and the
 /// deterministic mock model adapter.
 ///
@@ -347,7 +358,8 @@ pub async fn serve_with(
     config: DaemonConfig,
     options: ServeOptions,
 ) -> io::Result<()> {
-    let preflight = prepare_persistence(&config)?;
+    let durable = crate::engine_bridge::startup::StartupConfig::from_env()?;
+    let preflight = persistence::prepare_persistence_with_durable(&config, durable.as_ref())?;
     // Only the real daemon reads explicit operator configuration. Embeddings
     // and deterministic constructors remain independent of ambient config.
     // An unknown external memory provider id stops boot.
@@ -393,6 +405,9 @@ pub async fn serve_with(
     )));
 
     configure_persistence(&state, &config, preflight).await?;
+    if let Some(startup) = durable {
+        startup.install(&state).await?;
+    }
     start_memory_model_load(&state).await;
 
     {
@@ -557,6 +572,7 @@ async fn serve_with_state_and_voice(
     )));
     let browser = browser_state.read().await.browser_service.clone();
     let shutdown_live = live.clone();
+    let durable_bridge = browser_state.read().await.engine_bridge.clone();
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workflow_expired = Arc::clone(&drain_expired);
     let (started, deadline_started) = tokio::sync::oneshot::channel();
@@ -569,6 +585,9 @@ async fn serve_with_state_and_voice(
             tokio::time::sleep_until(deadline),
             lifecycle::producer_first_shutdown(
                 async {
+                    if let Some(bridge) = &durable_bridge {
+                        bridge.close_workers();
+                    }
                     agent_runs.request_shutdown();
                     if let Some(browser) = &browser {
                         browser.request_shutdown();
@@ -600,6 +619,9 @@ async fn serve_with_state_and_voice(
                     skills.shutdown().await;
                     connectors.shutdown().await;
                     discord.shutdown().await;
+                    if let Some(bridge) = &durable_bridge {
+                        let _ = bridge.shutdown_startup_stores().await;
+                    }
                     history.shutdown().await;
                 },
             ),

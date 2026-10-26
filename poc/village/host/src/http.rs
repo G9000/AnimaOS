@@ -20,6 +20,17 @@ pub fn router(service: Service) -> Router {
         .route("/api/village/saves/{id}/traveler", post(customize))
         .route("/api/village/saves/{id}/visit", post(visit))
         .route("/api/village/saves/{id}/turns", post(turn))
+        .route("/api/village/saves/{id}/presence", post(open_presence))
+        .route(
+            "/api/village/saves/{id}/presence/heartbeat",
+            post(heartbeat),
+        )
+        .route(
+            "/api/village/saves/{id}/presence/close",
+            post(close_presence),
+        )
+        .route("/api/village/saves/{id}/activity", get(activity))
+        .route("/api/village/saves/{id}/memories", post(edit_memory))
         .fallback(|| async { Error::new(404, "Village route not found") })
         .layer(DefaultBodyLimit::max(16_384))
         .layer(middleware::from_fn(no_store))
@@ -109,8 +120,54 @@ async fn turn(
 async fn health(State(service): State<Service>) -> Json<serde_json::Value> {
     let runtime = service.runtime();
     Json(
-        json!({"available":service.engine.is_some(),"mode":runtime.mode,"engine":runtime.engine,"provider":runtime.provider,"model":runtime.model,"reason":service.unavailable_reason}),
+        json!({"available":service.engine.is_some() || service.durable.is_some(),"mode":runtime.mode,"engine":runtime.engine,"provider":runtime.provider,"model":runtime.model,"reason":service.unavailable_reason}),
     )
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct PresenceInput {
+    session_id: String,
+}
+async fn open_presence(
+    State(service): State<Service>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<crate::agent_activity::Presence>)> {
+    let presence = service.open_game_presence(&id)?;
+    let _ = service.spawn_activity(id);
+    Ok((StatusCode::CREATED, Json(presence)))
+}
+async fn heartbeat(
+    State(service): State<Service>,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<PresenceInput>, JsonRejection>,
+) -> Result<Json<crate::agent_activity::Presence>> {
+    let presence = service.update_game_presence(&id, &body(input)?.session_id, false)?;
+    let _ = service.spawn_activity(id);
+    Ok(Json(presence))
+}
+async fn close_presence(
+    State(service): State<Service>,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<PresenceInput>, JsonRejection>,
+) -> Result<Json<crate::agent_activity::Presence>> {
+    Ok(Json(service.update_game_presence(
+        &id,
+        &body(input)?.session_id,
+        true,
+    )?))
+}
+async fn activity(
+    State(service): State<Service>,
+    Path(id): Path<String>,
+) -> Result<Json<Option<crate::agent_activity::ActivityView>>> {
+    Ok(Json(service.store.activity(&id)?))
+}
+async fn edit_memory(
+    State(service): State<Service>,
+    Path(id): Path<String>,
+    input: std::result::Result<Json<crate::memory_lifecycle::MemoryEdit>, JsonRejection>,
+) -> Result<Json<crate::memory_lifecycle::MemoryEditReceipt>> {
+    Ok(Json(service.edit_resident_memory(&id, body(input)?).await?))
 }
 
 #[cfg(test)]

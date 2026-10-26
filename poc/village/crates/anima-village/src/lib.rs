@@ -6,7 +6,10 @@ mod npc;
 mod traveler;
 mod view;
 pub use content::{choice_intent, reviewed_dialogue, suggestions};
-pub use npc::{reviewed_turn, GameInput, HarnessNpc, NpcEngine, PlayedTurn};
+pub use npc::{
+    parse_generated_dialogue, play_with, reviewed_turn, reviewed_turn_with_memories,
+    CallbackMemories, GameInput, HarnessNpc, NpcEngine, NpcStage, NpcStageExecutor, PlayedTurn,
+};
 pub use traveler::*;
 pub use view::*;
 

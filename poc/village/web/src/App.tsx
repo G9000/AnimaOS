@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { VillageApiError, villageApi } from './api';
+import { connectVillagePresence, type ResidentActivity } from './presence';
 import { DialoguePanel } from './Dialogue';
 import { VillageScene } from './VillageScene';
 import {
@@ -21,6 +22,7 @@ export function VillageApp({ api = villageApi }: { api?: typeof villageApi }) {
     readStorage('village.language') === 'zh' ? 'zh' : 'ja',
   );
   const [view, setView] = useState<GameView | null>(null);
+  const [residentActivity, setResidentActivity] = useState<{saveId: string; activity: ResidentActivity | null} | null>(null);
   const [open, setOpen] = useState(false);
   const [near, setNear] = useState<NpcId | null>(null);
   const [speaker, setSpeaker] = useState<NpcId>('tavi');
@@ -40,6 +42,12 @@ export function VillageApp({ api = villageApi }: { api?: typeof villageApi }) {
     null,
   );
   const interactButton = useRef<HTMLButtonElement>(null);
+  const activeSave = view?.saveId;
+  const currentActivity = residentActivity?.saveId === activeSave ? residentActivity?.activity : null;
+  useEffect(() => {
+    if (!activeSave || api !== villageApi) return;
+    return connectVillagePresence(activeSave, activity => setResidentActivity({saveId: activeSave, activity}));
+  }, [activeSave, api]);
   useEffect(() => {
     let cancelled = false;
     sequence.current++;
@@ -609,6 +617,17 @@ export function VillageApp({ api = villageApi }: { api?: typeof villageApi }) {
             </button>
           </div>
           <p className="journal-intro">Words you found along the way.</p>
+          {currentActivity?.terminalReason && (
+            <p role="status">{currentActivity.terminalReason}</p>
+          )}
+          {currentActivity?.replies.map((reply) => (
+            <article className="journal-phrase" key={reply.eventId}>
+              <strong>{reply.npcId === 'tavi' ? 'Tavi → Mira' : 'Mira → Tavi'}</strong>
+              <p lang={view.language}>{reply.text}</p>
+              <small>{reply.reading}</small>
+              <span>{reply.translation}</span>
+            </article>
+          ))}
           {view.journal.length ? (
             view.journal.map((phrase) => (
               <article

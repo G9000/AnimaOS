@@ -9,8 +9,11 @@ It does not own the runnable HTTP daemon. The current Rust host remains at [`hos
 | Crate                                                     | What it does                                                                                                                                                                   |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`anima-core`](crates/anima-core)                         | Agent execution loop, trait interfaces, and runtime primitives. No HTTP or database implementation details.                                                                    |
+| [`anima-execution-store-sqlite`](crates/anima-execution-store-sqlite) | Transactional sealed execution snapshots, host admissions, application-scope mappings and persistent shared allowances. |
+| [`anima-harness`](crates/anima-harness) | Existing `Harness` API plus explicit `durable::DurableHarness` embedding over the durable engine. |
 | [`anima-service-adapters`](crates/anima-service-adapters) | Reusable browser, connector, bundle, speech/audio and document contracts and validation, including derived-content context costs. Depends on core; core does not depend on it. |
 | [`anima-memory`](crates/anima-memory)                     | BM25-backed memory storage and retrieval helpers.                                                                                                                              |
+| [`anima-memory-store-sqlite`](crates/anima-memory-store-sqlite) | Owner-bound canonical memory, identity mappings, revisions, sourced receipts and relationship observations. |
 | [`anima-swarm`](crates/anima-swarm)                       | Multi-agent coordination strategies built on top of `anima-core`.                                                                                                              |
 
 ## Build

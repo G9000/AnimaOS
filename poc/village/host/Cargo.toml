@@ -10,6 +10,9 @@ publish = false
 workspace = true
 
 [dependencies]
+anima-execution-store-sqlite = { path = "../../../packages/core-rust/crates/anima-execution-store-sqlite" }
+anima-memory = { path = "../../../packages/core-rust/crates/anima-memory" }
+anima-memory-store-sqlite = { path = "../../../packages/core-rust/crates/anima-memory-store-sqlite" }
 anima-village = { path = "../crates/anima-village" }
 anima-harness = { path = "../../../packages/core-rust/crates/anima-harness" }
 axum = "0.8"
@@ -19,10 +22,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time", "signal"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = "1.9"
 
 [dev-dependencies]
+anima-harness = { path = "../../../packages/core-rust/crates/anima-harness", features = ["test-support"] }
 tempfile = "=3.27.0"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

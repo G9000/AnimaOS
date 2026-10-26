@@ -20,6 +20,9 @@
 //! ```
 
 mod config;
+#[cfg(feature = "test-support")]
+pub mod conformance;
+pub mod durable;
 mod harness;
 mod tool;
 

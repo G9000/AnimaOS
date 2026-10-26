@@ -48,6 +48,18 @@ impl CapabilityReferenceValidator for InvocationBoundReferenceValidator {
 
 #[async_trait]
 impl CapabilityResultRecorder for InMemoryCapabilityResultRecorder {
+    async fn load(
+        &self,
+        context: &CapabilityExecutionContext,
+        durable: &DurableCapabilityResult,
+    ) -> Result<Option<CapabilityResult>, CapabilityError> {
+        let records = self.records.lock().await;
+        match records.get(&(context.invocation().id(), context.attempt().number())) {
+            Some((recorded, result)) if recorded == durable => Ok(Some(result.clone())),
+            Some(_) => Err(CapabilityError::validation()),
+            None => Ok(None),
+        }
+    }
     async fn record(
         &self,
         context: &CapabilityExecutionContext,
@@ -76,6 +88,20 @@ struct RegisteredExecutor {
 }
 
 impl CapabilityRegistry {
+    pub async fn load_completed_output(
+        &self,
+        context: &CapabilityExecutionContext,
+        durable: &DurableCapabilityResult,
+    ) -> Result<Option<CapabilityResult>, CapabilityError> {
+        let manifest = self.manifest_for_context(context)?;
+        self.validate_context(context, manifest).await?;
+        let mut result = self.result_recorder.load(context, durable).await?;
+        if let Some(result) = result.as_mut() {
+            validate_result(self.entry_for_context(context)?, result)?;
+        }
+        Ok(result)
+    }
+
     pub fn new(catalog: ManifestCatalog) -> Self {
         Self::with_stores(
             catalog,

@@ -4,6 +4,46 @@ An embeddable agent harness built on the animaOS Rust core. It composes
 `anima-core`'s agentic loop (`AgentRuntime`) with `anima-model-adapters`' provider
 catalog behind a small builder API: system prompt + tools + agentic loop + events.
 
+## Explicit durable embedding
+
+`durable::DurableHarness` is an additional entry point over
+`anima_core::DurableAgentEngine`. Existing `Harness::run/chat` callers retain their
+current runtime. Hosts inject storage, model/definition/policy/capability adapters,
+clock and events. No filesystem path or world membership is required.
+
+The durable facade stores a versioned admission before execution: stable owner,
+individual, session, run, opaque application scope, complete accepted definition,
+input, required memory context and shared allowance binding. Exact retries reuse
+that record and final output; conflicting payload/identity/configuration fails.
+Accepted definitions are pinned for execution; current policy is revalidated and
+must match the admitted owner, individual and application scope before effects.
+Hosts seed existing workspace IDs in their scope registry before allocating
+non-filesystem scopes. Compatibility `workspace_id` strings grant no directory
+access.
+
+`DurableControl::execution_context` restores a persisted `ExecutionScope` and its
+durable `ExecutionBudgetPort`. Physical model attempts use `stream_controlled`;
+tool attempts reserve from the same scope. Retries and child work can share this
+allowance. Reattachment must preserve owner/store/scope identity and deadline.
+Unknown usage stays charged. Started effects remain polled through Stop until
+they retire. Hosts remain responsible for retaining the top-level runner when an
+HTTP caller disconnects; dropping a future is not an effect-recovery protocol.
+
+Product profiles use `admit_persistent` and `run_persistent`, with a
+`PersistentAgentMemory` bound to the exact individual. A host implements
+`MemoryProjectionReadiness` over its accepted-event outbox. Pending required
+effects or an unavailable memory store return `MemoryUnavailable`; the facade
+does not silently downgrade to a memoryless profile. Selected, sourced recall is
+bounded to 16 records/8 KiB and frozen with admission. Hosts validate and project
+accepted experiences; generated replies are not automatically committed as facts.
+Memoryless `admit/run` is limited to kernel/helper fixtures with memory disabled.
+
+The `test-support` feature exposes shared persistent-host basic checks. These
+exercise exact request/source replay, conflicts, preference provenance and reopen
+identity. They supplement each host's separate approval, effect, actual process
+death, migration, streaming and domain tests; passing the basics does not certify
+the complete migration. See the [current evidence](../../../../docs/superpowers/reviews/2026-10-25-unified-engine-parity.md).
+
 ```rust
 use anima_harness::Harness;
 
