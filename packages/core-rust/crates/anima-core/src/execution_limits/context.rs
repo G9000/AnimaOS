@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use async_trait::async_trait;
 use futures::FutureExt;
+use serde::{Deserialize, Serialize};
 
 use super::{
     ExecutionLimits, ExecutionOperation, ExecutionScope, ReservationAdmission, ReservationRequest,
@@ -22,10 +26,75 @@ pub struct ExecutionAllowance {
     pub remaining_total_tokens: u64,
 }
 
+/// Stable identity of one durable allowance authority, independent of its live handle.
+/// A host must compare this complete binding before reattaching a persisted run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "ExecutionBudgetAuthorityWire")]
+pub struct ExecutionBudgetAuthority {
+    pub owner_id: String,
+    pub store_id: String,
+    pub scope_id: String,
+}
+
+impl ExecutionBudgetAuthority {
+    pub fn new(
+        owner_id: impl Into<String>,
+        store_id: impl Into<String>,
+        scope_id: impl Into<String>,
+    ) -> Result<Self, String> {
+        let authority = Self {
+            owner_id: owner_id.into(),
+            store_id: store_id.into(),
+            scope_id: scope_id.into(),
+        };
+        authority.validate()?;
+        Ok(authority)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        for id in [&self.owner_id, &self.store_id, &self.scope_id] {
+            if id.is_empty()
+                || id.len() > 256
+                || id.trim() != id
+                || id.chars().any(char::is_control)
+            {
+                return Err("Invalid execution budget authority identity".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExecutionBudgetAuthorityWire {
+    owner_id: String,
+    store_id: String,
+    scope_id: String,
+}
+impl TryFrom<ExecutionBudgetAuthorityWire> for ExecutionBudgetAuthority {
+    type Error = String;
+    fn try_from(wire: ExecutionBudgetAuthorityWire) -> Result<Self, Self::Error> {
+        Self::new(wire.owner_id, wire.store_id, wire.scope_id)
+    }
+}
+
 /// Hosts atomically persist admission before returning NewlyGranted. Cancellation
 /// of an awaiting caller must not abandon an in-progress persistence operation.
 #[async_trait]
 pub trait ExecutionBudgetPort: Send + Sync {
+    /// Recovery inspection grants no dispatch authority. Durable embedders use
+    /// the stable physical-attempt key to settle only an existing reservation.
+    async fn reservation(
+        &self,
+        _scope_id: &str,
+        _reservation_id: &str,
+    ) -> Result<Option<super::ExecutionReservation>, String> {
+        Err("execution port does not support durable reservation inspection".into())
+    }
+    /// None denotes an ephemeral/helper authority and cannot certify durable reattachment.
+    fn authority_binding(&self) -> Option<ExecutionBudgetAuthority> {
+        None
+    }
     async fn reserve(
         &self,
         scope_id: &str,
@@ -87,6 +156,17 @@ impl InMemoryExecutionBudget {
 
 #[async_trait]
 impl ExecutionBudgetPort for InMemoryExecutionBudget {
+    async fn reservation(
+        &self,
+        scope_id: &str,
+        reservation_id: &str,
+    ) -> Result<Option<super::ExecutionReservation>, String> {
+        Ok(self
+            .snapshot(scope_id)?
+            .reservations
+            .get(reservation_id)
+            .cloned())
+    }
     async fn reserve(
         &self,
         scope_id: &str,
@@ -248,9 +328,20 @@ impl ExecutionContext {
     }
 
     pub async fn reserve_tool(&self, logical_id: &str) -> Result<ExecutionPermit, String> {
+        self.reserve_tool_with_id(logical_id, &uuid::Uuid::new_v4().to_string())
+            .await
+    }
+
+    /// Stable physical-attempt identity for durable effect reconciliation. Exact
+    /// reservation replay is evidence, never authority to dispatch twice.
+    pub async fn reserve_tool_with_id(
+        &self,
+        logical_id: &str,
+        reservation_id: &str,
+    ) -> Result<ExecutionPermit, String> {
         self.reserve(
             ReservationRequest {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: reservation_id.into(),
                 run_id: self.run_id.clone(),
                 logical_call_id: logical_id.into(),
                 operation: ExecutionOperation::Tool,
@@ -364,11 +455,24 @@ impl ExecutionContext {
     }
 }
 
+/// One marker per physical attempt. It becomes true only immediately before
+/// transport work is first polled, never for validation or allowance failure.
+#[derive(Default)]
+pub struct ModelDispatchState(AtomicBool);
+impl ModelDispatchState {
+    pub fn started(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+type DispatchValidator =
+    Arc<dyn Fn() -> futures::future::BoxFuture<'static, Result<(), String>> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct ModelCallContext {
     pub execution: ExecutionContext,
     pub logical_call_id: String,
     pub request_cancel: CancelSignal,
+    dispatch_validators: Vec<DispatchValidator>,
 }
 
 impl ModelCallContext {
@@ -377,7 +481,19 @@ impl ModelCallContext {
             execution,
             logical_call_id,
             request_cancel: CancelSignal::new(),
+            dispatch_validators: Vec::new(),
         }
+    }
+    /// Appends host validation without replacing existing caller validators.
+    /// Clones retain the complete chain across transport retries and fallbacks.
+    pub fn with_dispatch_validator<F, Fut>(mut self, validator: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        self.dispatch_validators
+            .push(Arc::new(move || Box::pin(validator())));
+        self
     }
     pub fn check_live(&self) -> Result<(), String> {
         self.execution.check_live()?;
@@ -462,6 +578,51 @@ impl ModelCallContext {
             )
             .await?;
         Ok((prepared, permit))
+    }
+
+    /// Controlled adapters must wrap EVERY physical transport attempt,
+    /// including retry/key-rotation/fallback sends, in this boundary. Validation
+    /// runs after allowance waits and before transport work is first polled.
+    /// The caller must settle a false marker as ProvenNeverSent through its
+    /// existing reservation; ordinary bounded waits/backoff grant no dispatch.
+    pub async fn dispatch<T>(
+        &self,
+        state: &ModelDispatchState,
+        work: impl Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        self.check_live()?;
+        self.execution
+            .check_authority_for(Some(&self.request_cancel))
+            .await?;
+        for validator in &self.dispatch_validators {
+            if let Err(error) = self
+                .execution
+                .wait(validator(), Some(&self.request_cancel))
+                .await
+            {
+                // A rejected read must not be retried with another key/model.
+                self.request_cancel.cancel();
+                return Err(error);
+            }
+        }
+        self.check_live()?;
+        let mut retirement = RequestRetirement {
+            cancel: self.request_cancel.clone(),
+            complete: false,
+        };
+        let transport = async {
+            state.0.store(true, Ordering::SeqCst);
+            work.await
+        };
+        let result = self
+            .execution
+            .wait(transport, Some(&self.request_cancel))
+            .await;
+        if self.execution.cancel.is_cancelled() {
+            self.request_cancel.cancel();
+        }
+        retirement.complete = true;
+        result
     }
 
     /// Cancellation is marked before an enclosing adapter can start a retry.
@@ -580,30 +741,10 @@ impl ExecutionPermit {
     }
     pub async fn finish_with_retirement(
         &mut self,
-        mut outcome: SettlementOutcome,
+        outcome: SettlementOutcome,
         physical_retired: bool,
     ) -> Result<(), String> {
-        if let SettlementOutcome::Unknown { observed } = &mut outcome {
-            let observation = self.observation.lock().unwrap_or_else(|e| e.into_inner());
-            *observed = super::merge_observed(observed.as_ref(), observation.partial.as_ref());
-        }
-        // Submission must happen even when cancellation/deadline already won.
-        let observed_usage = self
-            .observation
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .partial
-            .clone();
-        let mut receipt = self.execution.port.submit_settlement(
-            &self.execution.scope_id,
-            ReservationSettlement {
-                reservation_id: self.id.clone(),
-                outcome,
-                physical_retired,
-                observed_usage,
-            },
-        );
-        self.retired = true;
+        let mut receipt = self.submit_finish(outcome, physical_retired);
         // Accounting is allowed after Stop. Accept an already-ready receipt
         // before deciding whether the caller can keep waiting for a slow one.
         let result = match receipt.as_mut().now_or_never() {
@@ -625,6 +766,51 @@ impl ExecutionPermit {
             }
         }
         result
+    }
+
+    /// Retain custody of a retired effect's accounting until its owned storage
+    /// receipt arrives. Stop/deadline cannot stand in for the actual commit
+    /// result. Use only with a host port that bounds and owns admitted writes.
+    pub async fn finish_owned(
+        &mut self,
+        outcome: SettlementOutcome,
+        physical_retired: bool,
+    ) -> Result<(), String> {
+        let result = self.submit_finish(outcome, physical_retired).await;
+        if let Err(error) = &result {
+            self.execution
+                .record_failure(format!("Execution accounting commit failed: {error}"));
+        }
+        result
+    }
+
+    fn submit_finish(
+        &mut self,
+        mut outcome: SettlementOutcome,
+        physical_retired: bool,
+    ) -> futures::future::BoxFuture<'static, Result<(), String>> {
+        if let SettlementOutcome::Unknown { observed } = &mut outcome {
+            let observation = self.observation.lock().unwrap_or_else(|e| e.into_inner());
+            *observed = super::merge_observed(observed.as_ref(), observation.partial.as_ref());
+        }
+        // Submission must happen even when cancellation/deadline already won.
+        let observed_usage = self
+            .observation
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .partial
+            .clone();
+        let receipt = self.execution.port.submit_settlement(
+            &self.execution.scope_id,
+            ReservationSettlement {
+                reservation_id: self.id.clone(),
+                outcome,
+                physical_retired,
+                observed_usage,
+            },
+        );
+        self.retired = true;
+        receipt
     }
 }
 

@@ -5,6 +5,10 @@
   "license": "MIT",
   "scripts": {
     "dev": "bun tools/workspace-dev/src/main.ts",
+    "dev:docs": "bun tools/workspace-dev/src/main.ts --docs",
+    "dev:game": "bun tools/workspace-dev/src/main.ts --game",
+    "dev:playground": "bun tools/workspace-dev/src/main.ts --playground",
+    "dev:all": "bun tools/workspace-dev/src/main.ts --all",
     "build": "bun run --sequential --workspaces --if-present build",
     "build:libs": "tsc --build packages/sdk/tsconfig.lib.json packages/tui/tsconfig.lib.json packages/cli/tsconfig.lib.json",
     "build:cli-sdk": "bun run --filter @animaos/sdk --filter @animaos/tui --filter @animaos/cli build",

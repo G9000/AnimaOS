@@ -59,12 +59,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "anima-execution-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "async-trait",
+ "futures",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "anima-harness"
 version = "0.1.0"
 dependencies = [
  "anima-core",
+ "anima-memory",
  "anima-model-adapters",
  "async-trait",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "anima-memory"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "async-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "anima-memory-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "anima-memory",
+ "async-trait",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -122,7 +162,10 @@ dependencies = [
 name = "anima-village-game"
 version = "0.1.0"
 dependencies = [
+ "anima-execution-store-sqlite",
  "anima-harness",
+ "anima-memory",
+ "anima-memory-store-sqlite",
  "anima-village",
  "async-trait",
  "axum",

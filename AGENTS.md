@@ -35,7 +35,7 @@ Shared guidance for GPT-6 Astra and GPT-5.6 coding agents, adapted from the offi
 
 # Dev Workflow
 
-- Use `bun dev --host rust` for the normal local workflow. It runs the selected host plus both browser surfaces, `@animaos/web` and `@animaos/playground`, through `workspace-dev`. The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
+- Use `bun dev` (or `bun dev --host rust`) for the normal local workflow. It runs the Rust daemon/API and `@animaos/web` through `workspace-dev`. Optional root commands are `bun run dev:docs` (both docs sites), `bun run dev:game` (Village host/browser), `bun run dev:playground` (daemon/playground), and `bun run dev:all` (all services). The web console talks only to the daemon on `127.0.0.1:8080`. The daemon automatically starts restored Telegram connectors; no separate gateway process or token environment variable is used.
 - The only supported host key is `rust`.
 - Use Bun workspace scripts for focused work: `bun run --filter <workspace-name> <script>`. Inspect the workspace's `package.json` before assuming a script name.
 - Use `bun run daemon`, `bun run rust:build`, `bun run rust:test`, and `bun run rust:lint` for daemon development, build, tests, and formatting.

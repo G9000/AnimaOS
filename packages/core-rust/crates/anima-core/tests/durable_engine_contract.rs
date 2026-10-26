@@ -26,6 +26,9 @@ use anima_core::{
 use async_trait::async_trait;
 use uuid::Uuid;
 
+#[path = "durable_engine_contract/accounting.rs"]
+mod accounting;
+
 fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]

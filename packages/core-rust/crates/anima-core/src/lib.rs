@@ -1,4 +1,6 @@
+pub mod admission;
 pub mod agent_files;
+pub use admission::{HostRunAdmissionStore, MAX_HOST_RUN_ADMISSION_BYTES};
 pub use agent_files::{
     render_agent_files, render_agent_files_with_admissions, truncate_agent_file,
     AgentFileRenderBudget, AgentFileSection, RenderedAgentFiles, RuntimePromptIdentity,
@@ -27,7 +29,9 @@ pub use external_tools::{
 pub mod execution_limits;
 pub mod filesystem_checkpoints;
 pub mod guarded_repair;
+pub mod identity;
 pub mod interaction;
+pub use identity::{IdentityBinding, IndividualId, OwnerId, WorldResidentBinding};
 pub mod learn;
 pub mod memory;
 pub mod model;

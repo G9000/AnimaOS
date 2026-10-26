@@ -59,13 +59,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !(1_000..=60_000).contains(&deadline) {
         return Err("VILLAGE_GENERATION_TIMEOUT_MS must be between 1000 and 60000".into());
     }
-    let mut service = Service::new(
-        Store::open(&path).map_err(|e| std::io::Error::other(e.message))?,
-        connection.engine,
-        Duration::from_millis(deadline),
-    );
-    service.runtime_info = connection.runtime;
-    service.unavailable_reason = connection.reason;
+    let service = if let Some(startup) = anima_village_game::startup::Config::from_env()
+        .map_err(|e| std::io::Error::other(e.message))?
+    {
+        startup
+            .service(connection, Duration::from_millis(deadline))
+            .await
+            .map_err(|e| std::io::Error::other(e.message))?
+    } else {
+        let mut service = Service::new(
+            Store::open(&path).map_err(|e| std::io::Error::other(e.message))?,
+            connection.engine,
+            Duration::from_millis(deadline),
+        );
+        service.runtime_info = connection.runtime;
+        service.unavailable_reason = connection.reason;
+        service
+    };
     println!(
         "Village host listening on http://{bind}; mode={}, provider={}, model={}",
         service.runtime().mode,
@@ -76,9 +86,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Reviewed dialogue: {reason}");
     }
     let listener = tokio::net::TcpListener::bind(bind).await?;
+    let shutdown_service = service.clone();
     axum::serve(listener, http::router(service))
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
+            shutdown_service.close_workers();
+            if tokio::time::timeout(Duration::from_secs(15), shutdown_service.shutdown())
+                .await
+                .is_err()
+            {
+                eprintln!(
+                    "Village shutdown deadline expired; accepted work requires restart review"
+                );
+            }
         })
         .await?;
     Ok(())

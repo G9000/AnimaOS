@@ -57,9 +57,21 @@ bun run --filter @animaos/sdk build
 bun dev --host rust
 ```
 
-Open [localhost:4200](http://localhost:4200), create your companion, select its workspace, and connect a model provider. Onboarding covers the model, introductions, access, and voice.
+Open the owner console link printed by the launcher, create your companion, select its workspace, and connect a model provider. Onboarding covers the model, introductions, access, and voice.
 
-The launcher selects the Rust host and starts the web console, playground, and documentation sites. The console connects to the daemon at `127.0.0.1:8080`. Restored Telegram and Discord connectors run inside the daemon.
+By default, the launcher starts the Rust daemon/API and the web console. The console connects to the daemon at `127.0.0.1:8080`. Restored Telegram and Discord connectors run inside the daemon.
+
+Run the optional surfaces explicitly from the repository root:
+
+| Command | Starts |
+| --- | --- |
+| `bun dev` | Daemon/API and web console |
+| `bun run dev:docs` | User and contributor documentation sites |
+| `bun run dev:game` | Village game host and browser |
+| `bun run dev:playground` | Daemon/API and playground |
+| `bun run dev:all` | Daemon/API, web, playground, both docs sites, and game |
+
+Docs and game commands run independently of the assistant daemon. The game keeps its own ports, saves, model-connection resolution and explicit durable-engine configuration; see the [Village instructions](poc/village/README.md). Install its dependencies once from `poc/village` with `bun install`.
 
 - **Run it on a server:** the [VPS deployment guide](deploy/vps/README.md) covers HTTPS, owner authentication, credentials, backups and current limits.
 - **Day-to-day setup:** [Anima daily-use setup](docs/companion/daily-use.md) covers identity files, memory, approvals, schedules and connectors.
@@ -108,7 +120,11 @@ bun run test               # run all tests
 bun run typecheck          # check all workspace types
 bun run lint               # lint workspace code
 
-bun dev                    # daemon + web console + playground (same as bun dev --host rust)
+bun dev                    # daemon/API + web console (same as bun dev --host rust)
+bun run dev:docs           # user and contributor docs only
+bun run dev:game           # Village game host + browser
+bun run dev:playground     # daemon/API + playground
+bun run dev:all            # all development services, including the game
 bun run daemon             # the Rust daemon only
 bun run web                # the web console only (daemon must be running)
 ```

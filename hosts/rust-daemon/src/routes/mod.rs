@@ -1689,6 +1689,30 @@ fn router_with_services_with_policies_and_integrations(
         )
         .route("/api/swarms/{swarm_id}/events", get(swarm_events_entry))
         .route("/api/agents/{agent_id}/events", get(events::agent_events))
+        .route(
+            "/api/agents/{agent_id}/durable-memory",
+            get(durable_memory_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/durable-memory-events",
+            axum::routing::post(durable_memory_event_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/durable-memory-sources",
+            axum::routing::post(durable_memory_source_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/durable-relationships",
+            get(durable_relationships_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/durable-runs/{run_id}/control/{action}",
+            axum::routing::post(durable_control_entry),
+        )
+        .route(
+            "/api/agents/{agent_id}/durable-runs/{run_id}/events",
+            get(durable_events_entry),
+        )
         // Auth gates everything mounted above this line; the middleware
         // exempts health/readiness/metrics/docs by path. When
         // ANIMAOS_RS_API_KEY is unset the daemon runs in trust-the-network
@@ -2447,25 +2471,281 @@ async fn run_agent_entry(
     Path(agent_id): Path<String>,
     request: AxumRequest,
 ) -> AxumResponse {
-    if let Err(error) = state.agent_runs.refuse_while_draining() {
-        return error.into_response();
-    }
-    // Fail fast before reading the body when the daemon is saturated. Nothing is
-    // reserved here. Once the body parses, the run takes a unit of its agent's
-    // waiting budget (503 when that is exhausted), its room, an agent slot, and
-    // then a global permit, and fails fast again if the permit is gone by then.
-    if !state.agent_runs.has_available_permit() {
-        return ApiError::service_unavailable(crate::agent_runs::RUN_ADMISSION_SATURATED)
-            .into_response();
-    }
-
     match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match agents::handle_run_agent(&agent_id, body, &state.agent_runs).await {
-            Ok(response) => json_response(StatusCode::OK, &response),
-            Err(error) => error.into_response(),
-        },
+        Ok(body) => {
+            let bridge = state.daemon.read().await.engine_bridge.clone();
+            if let Some(bridge) = bridge.filter(|bridge| bridge.handles(&agent_id)) {
+                let request =
+                    match serde_json::from_slice::<crate::engine_bridge::DialogueRequest>(&body) {
+                        Ok(request) => request,
+                        Err(_) => return durable_error(crate::engine_bridge::BridgeError::Invalid),
+                    };
+                match bridge.replay_request(&agent_id, &request).await {
+                    Ok(Some(response)) => return json_response(StatusCode::OK, &response),
+                    Err(error) => return durable_error(error),
+                    Ok(None) => {}
+                }
+                let permit = match Arc::clone(&state.run_limiter).try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => return durable_error(crate::engine_bridge::BridgeError::Busy),
+                };
+                let work = match bridge.track() {
+                    Ok(work) => work,
+                    Err(error) => return durable_error(error),
+                };
+                // Keep durable custody through an HTTP disconnect/timeout. No legacy fallback.
+                return match tokio::spawn(async move {
+                    let _work = work;
+                    let _permit = permit;
+                    bridge.submit_reserved(&agent_id, request).await
+                })
+                .await
+                {
+                    Ok(Ok(response)) => json_response(StatusCode::OK, &response),
+                    Ok(Err(error)) => durable_error(error),
+                    Err(_) => durable_error(crate::engine_bridge::BridgeError::Unavailable),
+                };
+            }
+            if serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .is_some_and(|value| value.get("requestId").is_some())
+            {
+                return durable_error(crate::engine_bridge::BridgeError::Invalid);
+            }
+            if let Err(error) = state.agent_runs.refuse_while_draining() {
+                return error.into_response();
+            }
+            // Fail fast before reading the body when the daemon is saturated. Nothing is
+            // reserved here. Once the body parses, the run takes a unit of its agent's
+            // waiting budget (503 when that is exhausted), its room, an agent slot, and
+            // then a global permit, and fails fast again if the permit is gone by then.
+            if !state.agent_runs.has_available_permit() {
+                return ApiError::service_unavailable(crate::agent_runs::RUN_ADMISSION_SATURATED)
+                    .into_response();
+            }
+
+            match agents::handle_run_agent(&agent_id, body, &state.agent_runs).await {
+                Ok(response) => json_response(StatusCode::OK, &response),
+                Err(error) => error.into_response(),
+            }
+        }
         Err(response) => response,
     }
+}
+
+fn durable_error(error: crate::engine_bridge::BridgeError) -> AxumResponse {
+    json_response(
+        error.status(),
+        &serde_json::json!({"error":error.to_string()}),
+    )
+}
+async fn durable_memory_entry(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    match bridge
+        .recall(
+            &agent,
+            query.get("q").map(String::as_str).unwrap_or("memory"),
+        )
+        .await
+    {
+        Ok(records) => json_response(StatusCode::OK, &serde_json::json!({"memories":records})),
+        Err(error) => durable_error(error),
+    }
+}
+async fn durable_memory_event_entry(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: AxumRequest,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    let body = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let request = match serde_json::from_slice::<crate::engine_bridge::DialogueRequest>(&body) {
+        Ok(request) => request,
+        Err(_) => return durable_error(crate::engine_bridge::BridgeError::Invalid),
+    };
+    let work = match bridge.track() {
+        Ok(work) => work,
+        Err(error) => return durable_error(error),
+    };
+    match tokio::spawn(async move {
+        let _work = work;
+        bridge.accept_preference_reserved(&agent, request).await
+    })
+    .await
+    {
+        Ok(Ok(receipt)) => json_response(StatusCode::OK, &receipt),
+        Ok(Err(error)) => durable_error(error),
+        Err(_) => durable_error(crate::engine_bridge::BridgeError::Unavailable),
+    }
+}
+async fn durable_memory_source_entry(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: AxumRequest,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    let body = match read_limited_body(request, state.config.max_request_bytes).await {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let request = match serde_json::from_slice::<crate::engine_bridge::MemorySourceRequest>(&body) {
+        Ok(request) => request,
+        Err(_) => return durable_error(crate::engine_bridge::BridgeError::Invalid),
+    };
+    let work = match bridge.track() {
+        Ok(work) => work,
+        Err(error) => return durable_error(error),
+    };
+    match tokio::spawn(async move {
+        let _work = work;
+        bridge.memory_source_reserved(&agent, request).await
+    })
+    .await
+    {
+        Ok(Ok(receipt)) => json_response(StatusCode::OK, &receipt),
+        Ok(Err(error)) => durable_error(error),
+        Err(_) => durable_error(crate::engine_bridge::BridgeError::Unavailable),
+    }
+}
+async fn durable_relationships_entry(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    match bridge.relationships(&agent).await {
+        Ok(relationships) => json_response(StatusCode::OK, &relationships),
+        Err(error) => durable_error(error),
+    }
+}
+async fn durable_control_entry(
+    State(state): State<AppState>,
+    Path((agent, run, action)): Path<(String, uuid::Uuid, String)>,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    match bridge.control(&agent, run, &action).await {
+        Ok(()) => json_response(
+            StatusCode::ACCEPTED,
+            &serde_json::json!({"runId":run,"action":action}),
+        ),
+        Err(error) => durable_error(error),
+    }
+}
+async fn durable_events_entry(
+    State(state): State<AppState>,
+    Path((agent, run)): Path<(String, uuid::Uuid)>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+    headers: axum::http::HeaderMap,
+) -> AxumResponse {
+    let bridge = state.daemon.read().await.engine_bridge.clone();
+    let Some(bridge) = bridge else {
+        return durable_error(crate::engine_bridge::BridgeError::NotFound);
+    };
+    let cursor = query.get("after").map(String::as_str).or_else(|| {
+        headers
+            .get("last-event-id")
+            .and_then(|value| value.to_str().ok())
+    });
+    let after = match cursor.map(str::parse::<u64>).transpose() {
+        Ok(value) => value.unwrap_or(0),
+        Err(_) => return durable_error(crate::engine_bridge::BridgeError::Invalid),
+    };
+    let receiver = bridge.subscribe();
+    let events = match bridge.events(&agent, run).await {
+        Ok(events) => events,
+        Err(error) => return durable_error(error),
+    };
+    let mut initial = std::collections::VecDeque::new();
+    let mut last = after;
+    for event in events.into_iter().filter(|event| event.sequence() > after) {
+        last = event.sequence();
+        let data = match serde_json::to_string(&event) {
+            Ok(data) => data,
+            Err(_) => return durable_error(crate::engine_bridge::BridgeError::Unavailable),
+        };
+        initial.push_back(
+            axum::response::sse::Event::default()
+                .event("durable.run.event")
+                .id(event.sequence().to_string())
+                .data(data),
+        );
+    }
+    if query.get("follow").map(String::as_str) != Some("true") {
+        return axum::response::Sse::new(futures::stream::iter(
+            initial.into_iter().map(Ok::<_, std::convert::Infallible>),
+        ))
+        .into_response();
+    }
+    let stream = futures::stream::unfold(
+        (initial, receiver, last, run.to_string()),
+        |(mut initial, mut receiver, mut last, run)| async move {
+            if let Some(event) = initial.pop_front() {
+                return Some((
+                    Ok::<_, std::convert::Infallible>(event),
+                    (initial, receiver, last, run),
+                ));
+            }
+            loop {
+                match receiver.recv().await {
+                    Ok(value) if value["runId"].as_str() == Some(run.as_str()) => {
+                        let semantic = value["event"] == "semantic";
+                        let sequence = value["sequence"].as_u64();
+                        if semantic && sequence.is_some_and(|sequence| sequence <= last) {
+                            continue;
+                        }
+                        let mut event = axum::response::sse::Event::default()
+                            .event(if semantic {
+                                "durable.run.event"
+                            } else {
+                                "text.delta"
+                            })
+                            .data(value.to_string());
+                        if let Some(sequence) = sequence {
+                            last = sequence;
+                            event = event.id(sequence.to_string());
+                        }
+                        return Some((Ok(event), (initial, receiver, last, run)));
+                    }
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        return Some((
+                            Ok(axum::response::sse::Event::default()
+                                .event("durable.run.gap")
+                                .data(
+                                    serde_json::json!({"missed":missed,"after":last}).to_string(),
+                                )),
+                            (initial, receiver, last, run),
+                        ))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        },
+    );
+    axum::response::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::default())
+        .into_response()
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]

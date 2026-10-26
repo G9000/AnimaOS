@@ -1,8 +1,9 @@
 //! Shared admission accounting. A saved reservation is not a tool approval.
 mod context;
 pub use context::{
-    ExecutionAllowance, ExecutionBudgetPort, ExecutionContext, ExecutionPermit,
-    ExecutionStreamSink, InMemoryExecutionBudget, ModelCallContext, SystemBudgetClock,
+    ExecutionAllowance, ExecutionBudgetAuthority, ExecutionBudgetPort, ExecutionContext,
+    ExecutionPermit, ExecutionStreamSink, InMemoryExecutionBudget, ModelCallContext,
+    ModelDispatchState, SystemBudgetClock,
 };
 use std::collections::BTreeMap;
 

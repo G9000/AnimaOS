@@ -1,6 +1,10 @@
 //! Local game host. All persistence and transport stay out of anima-village.
+pub mod agent_activity;
 pub mod connection;
+pub mod engine_bridge;
 pub mod http;
+mod legacy_memory;
+pub mod memory_lifecycle;
 pub mod service;
 pub mod store;
 pub use service::{Customization, Interaction, Service};
@@ -29,3 +33,10 @@ mod tests;
 
 #[cfg(test)]
 mod day_tests;
+
+#[cfg(test)]
+mod engine_bridge_tests;
+#[cfg(test)]
+mod engine_capability_tests;
+
+pub mod startup;

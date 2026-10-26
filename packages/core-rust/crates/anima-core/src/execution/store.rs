@@ -1681,6 +1681,25 @@ impl std::error::Error for ExecutionStoreError {}
 /// Adapter port for durable execution state. Each operation is atomic.
 #[async_trait]
 pub trait ExecutionStore: Send + Sync {
+    /// Current CAS version of an owner's session, without granting a new run.
+    async fn load_session_version(
+        &self,
+        _owner_id: Uuid,
+        _session_id: Uuid,
+    ) -> Result<Option<u64>, ExecutionStoreError> {
+        Ok(None)
+    }
+
+    /// Exact committed final output, separate from a resumable checkpoint.
+    /// Legacy adapters may omit this until their profile passes replay parity.
+    async fn load_completed_output(
+        &self,
+        _owner_id: Uuid,
+        _run_id: Uuid,
+    ) -> Result<Option<crate::Content>, ExecutionStoreError> {
+        Ok(None)
+    }
+
     async fn apply_authoritative_policy(
         &self,
         owner_id: Uuid,

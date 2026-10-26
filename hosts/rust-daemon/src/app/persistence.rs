@@ -31,6 +31,12 @@ pub(crate) struct PersistencePreflight {
 }
 
 pub(crate) fn prepare_persistence(config: &DaemonConfig) -> io::Result<PersistencePreflight> {
+    prepare_persistence_with_durable(config, None)
+}
+pub(crate) fn prepare_persistence_with_durable(
+    config: &DaemonConfig,
+    durable: Option<&crate::engine_bridge::startup::StartupConfig>,
+) -> io::Result<PersistencePreflight> {
     let postgres = matches!(config.persistence_mode, PersistenceMode::Postgres);
     let control_plane = non_empty_env_path("ANIMAOS_RS_CONTROL_PLANE_FILE")?;
     let memory = memory_store_choice(
@@ -48,7 +54,7 @@ pub(crate) fn prepare_persistence(config: &DaemonConfig) -> io::Result<Persisten
         .map(|path| ProfileOwner::resolve_path(path))
         .transpose()?;
     let explicit_tool_root = non_empty_env_path("ANIMAOS_RS_TOOL_RESULTS_DIR")?;
-    let resources = typed_profile_resources(
+    let mut resources = typed_profile_resources(
         canonical_control_plane.as_deref(),
         memory.as_ref(),
         postgres,
@@ -57,6 +63,29 @@ pub(crate) fn prepare_persistence(config: &DaemonConfig) -> io::Result<Persisten
         checkpoint.as_deref(),
         explicit_tool_root.as_deref(),
     );
+    if let Some(startup) = durable {
+        let additions = startup.resources();
+        for added in &additions {
+            let added = match added {
+                ProfileResource::File(p)
+                | ProfileResource::Sqlite(p)
+                | ProfileResource::Directory(p) => ProfileOwner::resolve_path(p)?,
+            };
+            for existing in &resources {
+                let existing = match existing {
+                    ProfileResource::File(p)
+                    | ProfileResource::Sqlite(p)
+                    | ProfileResource::Directory(p) => ProfileOwner::resolve_path(p)?,
+                };
+                if added.starts_with(&existing) || existing.starts_with(&added) {
+                    return Err(io::Error::other(
+                        "Durable profile resources overlap existing profile storage",
+                    ));
+                }
+            }
+        }
+        resources.extend(additions);
+    }
     let owner = ProfileOwner::acquire_resources(resources)?;
     Ok(PersistencePreflight {
         owner,

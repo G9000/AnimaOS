@@ -39,16 +39,63 @@ impl GameInput {
         }
     }
 }
+/// Host-validated personal facts; these never authorize a world mutation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallbackMemories {
+    pub bread_preference: Option<Preference>,
+    pub helped_recipe: bool,
+}
+impl CallbackMemories {
+    fn from_intent(npc: NpcId, intent: &Intent) -> Self {
+        if npc != NpcId::Tavi || intent.delivery.is_some() {
+            return Self::default();
+        }
+        Self {
+            bread_preference: intent.preference,
+            helped_recipe: intent.help,
+        }
+    }
+    fn apply_to(self, state: &mut GameState) {
+        state.bread_preference = self.bread_preference;
+        state.helped_recipe = self.helped_recipe;
+    }
+}
 #[derive(Clone, Debug)]
 pub struct PlayedTurn {
     pub state: GameState,
     pub dialogue: Dialogue,
     pub runtime: RuntimeInfo,
+    pub accepted_memories: CallbackMemories,
 }
 #[async_trait]
 pub trait NpcEngine: Send + Sync {
     fn runtime(&self) -> RuntimeInfo;
     async fn play(&self, state: GameState, input: GameInput) -> Result<PlayedTurn, String>;
+}
+/// Stage execution is host-owned; all world changes remain domain-validated.
+#[derive(Clone, Copy, Debug)]
+pub enum NpcStage {
+    Interpretation,
+    Narration,
+}
+#[async_trait]
+pub trait NpcStageExecutor: Send + Sync {
+    fn runtime(&self) -> RuntimeInfo;
+    fn requires_persistent_memory(&self) -> bool {
+        false
+    }
+    /// Persistent hosts supply current authorized evidence, never saved cache flags.
+    async fn callback_memories(&self, _npc: NpcId) -> Result<CallbackMemories, String> {
+        Ok(CallbackMemories::default())
+    }
+    async fn call(
+        &self,
+        stage: NpcStage,
+        npc: NpcId,
+        system: &str,
+        input: &str,
+        max_tokens: u32,
+    ) -> Result<String, String>;
 }
 pub struct HarnessNpc {
     pub adapter: Arc<dyn ModelAdapter>,
@@ -65,83 +112,162 @@ impl NpcEngine for HarnessNpc {
             model: self.model.clone(),
         }
     }
-    async fn play(&self, mut state: GameState, input: GameInput) -> Result<PlayedTurn, String> {
-        state.npc_id = input.speaker();
-        let input = input.action().clone();
-        let outcome = match &input {
-            GameInput::WithNpc { .. } => unreachable!(),
-            GameInput::Visit => state.visit(),
-            GameInput::Turn {
-                choice_id: Some(id),
-                ..
-            } => state.apply(choice_intent(id)?),
-            GameInput::Turn {
-                message,
-                choice_id: None,
-            } => {
-                let system = interpretation_context(&state)?;
-                let intent: Intent =
-                    decode(&self.call(state.npc_id, &system, message, 400).await?)?;
-                state.apply(intent)
-            }
-        };
-        // A clarification must be exact even if a model tries to narrate a grant.
-        if matches!(
-            outcome,
-            Outcome::ClarifyOrder
-                | Outcome::AlreadyCollected
-                | Outcome::WrongSpeaker
-                | Outcome::NeedBread
-                | Outcome::ClarifyDelivery
-                | Outcome::AlreadyDelivered
-        ) {
-            let dialogue = reviewed_dialogue(&state, outcome);
-            remember_exchange(&mut state, &input, &dialogue, outcome);
-            return Ok(PlayedTurn {
-                state,
-                dialogue,
-                runtime: self.runtime().reviewed(),
-            });
-        }
-        let language = match state.language {
-            Language::Ja => "Japanese",
-            Language::Zh => "Mandarin Chinese (simplified characters)",
-        };
-        let authoritative = reviewed_dialogue(&state, outcome);
-        let system = narration_context(&state, language, &authoritative)?;
-        let user=match &input {GameInput::WithNpc { .. }=>unreachable!(),GameInput::Visit=>format!("The player approaches {} again. Use your trusted visit count to tell whether this is the first visit.",state.npc_id.name()),GameInput::Turn {message,choice_id}=>format!("Player says: {message}\nServer-validated choice: {}",choice_id.as_deref().unwrap_or("none"))};
-        let line: GeneratedLine = decode(&self.call(state.npc_id, &system, &user, 900).await?)?;
-        line.validate(state.language)?;
-        // The chapter callback is authored, but still requires a usable live
-        // generation before the candidate phase may commit.
-        let callback = outcome == Outcome::EveningCallback;
-        let dialogue = if callback {
-            authoritative
-        } else {
-            Dialogue {
-                text: line.text,
-                translation: line.translation,
-                reading: line.reading,
-                expression: line.expression,
-                source: DialogueSource::Model,
-                suggestions: suggestions(&state),
-            }
-        };
-        remember_exchange(&mut state, &input, &dialogue, outcome);
-        Ok(PlayedTurn {
-            state,
-            dialogue,
-            runtime: if callback {
-                self.runtime().reviewed()
-            } else {
-                self.runtime()
-            },
-        })
+    async fn play(&self, state: GameState, input: GameInput) -> Result<PlayedTurn, String> {
+        play_with(self, state, input).await
     }
 }
-impl HarnessNpc {
+pub async fn play_with(
+    executor: &dyn NpcStageExecutor,
+    mut state: GameState,
+    input: GameInput,
+) -> Result<PlayedTurn, String> {
+    state.npc_id = input.speaker();
+    let input = input.action().clone();
+    let persistent_callback = executor.requires_persistent_memory()
+        && matches!(input, GameInput::Visit)
+        && state.npc_id == NpcId::Tavi
+        && state.phase == Phase::Evening;
+    let callback_journal = if persistent_callback {
+        executor
+            .callback_memories(state.npc_id)
+            .await?
+            .apply_to(&mut state);
+        Some(state.journal.clone())
+    } else {
+        None
+    };
+    let mut accepted_memories = CallbackMemories::default();
+    let outcome = match &input {
+        GameInput::WithNpc { .. } => unreachable!(),
+        GameInput::Visit => state.visit(),
+        GameInput::Turn {
+            choice_id: Some(id),
+            ..
+        } => {
+            let intent = choice_intent(id)?;
+            accepted_memories = CallbackMemories::from_intent(state.npc_id, &intent);
+            state.apply(intent)
+        }
+        GameInput::Turn {
+            message,
+            choice_id: None,
+        } => {
+            let system = interpretation_context(&prompt_state(
+                &state,
+                executor.requires_persistent_memory(),
+            ))?;
+            let intent: Intent = decode(
+                &executor
+                    .call(
+                        NpcStage::Interpretation,
+                        state.npc_id,
+                        &system,
+                        message,
+                        400,
+                    )
+                    .await?,
+            )?;
+            accepted_memories = CallbackMemories::from_intent(state.npc_id, &intent);
+            state.apply(intent)
+        }
+    };
+    // A clarification must be exact even if a model tries to narrate a grant.
+    if matches!(
+        outcome,
+        Outcome::ClarifyOrder
+            | Outcome::AlreadyCollected
+            | Outcome::WrongSpeaker
+            | Outcome::NeedBread
+            | Outcome::ClarifyDelivery
+            | Outcome::AlreadyDelivered
+    ) {
+        let dialogue = reviewed_dialogue(&state, outcome);
+        remember_exchange(&mut state, &input, &dialogue, outcome);
+        return Ok(PlayedTurn {
+            state,
+            dialogue,
+            runtime: executor.runtime().reviewed(),
+            accepted_memories,
+        });
+    }
+    let language = match state.language {
+        Language::Ja => "Japanese",
+        Language::Zh => "Mandarin Chinese (simplified characters)",
+    };
+    let mut meaning_state = prompt_state(&state, executor.requires_persistent_memory());
+    // A preference stated in this very turn is a fresh claim; historical
+    // preferences come exclusively from authorized canonical recall.
+    if outcome == Outcome::Preference {
+        meaning_state.bread_preference = state.bread_preference;
+    }
+    if outcome == Outcome::EveningCallback && executor.requires_persistent_memory() {
+        executor
+            .callback_memories(state.npc_id)
+            .await?
+            .apply_to(&mut meaning_state);
+    }
+    let authoritative = reviewed_dialogue(&meaning_state, outcome);
+    let system = narration_context(
+        &prompt_state(&state, executor.requires_persistent_memory()),
+        language,
+        &authoritative,
+    )?;
+    let user=match &input {GameInput::WithNpc { .. }=>unreachable!(),GameInput::Visit=>format!("The player approaches {} again. Use your trusted visit count to tell whether this is the first visit.",state.npc_id.name()),GameInput::Turn {message,choice_id}=>format!("Player says: {message}\nServer-validated choice: {}",choice_id.as_deref().unwrap_or("none"))};
+    let line: GeneratedLine = decode(
+        &executor
+            .call(NpcStage::Narration, state.npc_id, &system, &user, 900)
+            .await?,
+    )?;
+    line.validate(state.language)?;
+    // The chapter callback is authored, but still requires a usable live
+    // generation before the candidate phase may commit.
+    let callback = outcome == Outcome::EveningCallback;
+    let dialogue = if callback {
+        if executor.requires_persistent_memory() {
+            // Recheck after generation: a canonical correction/forget may have
+            // invalidated the evidence while the provider was running.
+            let current = executor.callback_memories(state.npc_id).await?;
+            current.apply_to(&mut meaning_state);
+            current.apply_to(&mut state);
+            if let Some(previous_journal) = callback_journal {
+                state.journal = previous_journal;
+            }
+            state.record(outcome);
+            reviewed_dialogue(&meaning_state, outcome)
+        } else {
+            authoritative
+        }
+    } else {
+        Dialogue {
+            text: line.text,
+            translation: line.translation,
+            reading: line.reading,
+            expression: line.expression,
+            source: DialogueSource::Model,
+            suggestions: suggestions(&state),
+        }
+    };
+    remember_exchange(&mut state, &input, &dialogue, outcome);
+    Ok(PlayedTurn {
+        state,
+        dialogue,
+        accepted_memories,
+        runtime: if callback {
+            executor.runtime().reviewed()
+        } else {
+            executor.runtime()
+        },
+    })
+}
+
+#[async_trait]
+impl NpcStageExecutor for HarnessNpc {
+    fn runtime(&self) -> RuntimeInfo {
+        NpcEngine::runtime(self)
+    }
     async fn call(
         &self,
+        _stage: NpcStage,
         npc: NpcId,
         system: &str,
         input: &str,
@@ -168,6 +294,18 @@ impl HarnessNpc {
             .ok_or("Model response was empty or too large".into())
     }
 }
+fn prompt_state(state: &GameState, persistent: bool) -> GameState {
+    let mut state = state.clone();
+    if persistent {
+        // The canonical adapter owns recall for this profile. Legacy save flags
+        // and cached conversations cannot restore corrected or forgotten claims.
+        state.bread_preference = None;
+        state.helped_recipe = false;
+        state.conversation.clear();
+        state.mira_conversation.clear();
+    }
+    state
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GeneratedLine {
@@ -175,6 +313,18 @@ struct GeneratedLine {
     translation: String,
     reading: String,
     expression: Expression,
+}
+pub fn parse_generated_dialogue(language: Language, text: &str) -> Result<Dialogue, String> {
+    let line: GeneratedLine = decode(text)?;
+    line.validate(language)?;
+    Ok(Dialogue {
+        text: line.text,
+        translation: line.translation,
+        reading: line.reading,
+        expression: line.expression,
+        source: DialogueSource::Model,
+        suggestions: vec![],
+    })
 }
 impl GeneratedLine {
     fn validate(&self, language: Language) -> Result<(), String> {
@@ -224,20 +374,49 @@ fn remember_exchange(
         history.drain(..history.len() - 16);
     }
 }
+pub fn reviewed_turn_with_memories(
+    state: GameState,
+    input: &GameInput,
+    runtime: &RuntimeInfo,
+    memories: CallbackMemories,
+) -> Result<PlayedTurn, String> {
+    reviewed_turn_inner(state, input, runtime, Some(memories))
+}
 pub fn reviewed_turn(
-    mut state: GameState,
+    state: GameState,
     input: &GameInput,
     runtime: &RuntimeInfo,
 ) -> Result<PlayedTurn, String> {
+    reviewed_turn_inner(state, input, runtime, None)
+}
+fn reviewed_turn_inner(
+    mut state: GameState,
+    input: &GameInput,
+    runtime: &RuntimeInfo,
+    memories: Option<CallbackMemories>,
+) -> Result<PlayedTurn, String> {
     state.npc_id = input.speaker();
     let input = input.action();
+    if matches!(input, GameInput::Visit)
+        && state.npc_id == NpcId::Tavi
+        && state.phase == Phase::Evening
+    {
+        if let Some(current) = memories {
+            current.apply_to(&mut state);
+        }
+    }
+    let mut accepted_memories = CallbackMemories::default();
     let outcome = match input {
         GameInput::WithNpc { .. } => unreachable!(),
         GameInput::Visit => state.visit(),
         GameInput::Turn {
             choice_id: Some(id),
             ..
-        } => state.apply(choice_intent(id)?),
+        } => {
+            let intent = choice_intent(id)?;
+            accepted_memories = CallbackMemories::from_intent(state.npc_id, &intent);
+            state.apply(intent)
+        }
         GameInput::Turn { .. } => {
             return Err("Free text requires a live model; retry or select a reviewed choice".into())
         }
@@ -248,6 +427,7 @@ pub fn reviewed_turn(
         state,
         dialogue,
         runtime: runtime.reviewed(),
+        accepted_memories,
     })
 }
 

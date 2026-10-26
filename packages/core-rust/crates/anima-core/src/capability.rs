@@ -1421,6 +1421,16 @@ impl<'de> Deserialize<'de> for DurableCapabilityResult {
 
 #[async_trait]
 pub trait CapabilityResultRecorder: Send + Sync {
+    /// Loads the exact output for a previously recorded binding. A recorder that
+    /// only stores references retains legacy behavior until its profile migrates.
+    async fn load(
+        &self,
+        _context: &CapabilityExecutionContext,
+        _durable: &DurableCapabilityResult,
+    ) -> Result<Option<CapabilityResult>, CapabilityError> {
+        Ok(None)
+    }
+
     /// Persists one executor result outside portable lineage under the core-minted
     /// `durable.result_ref()`.
     ///

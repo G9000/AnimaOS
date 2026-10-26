@@ -4,6 +4,15 @@ See [runtime security and migration](../../docs/companion/runtime-security.md) f
 
 The installable `anima` program wraps this daemon; see [Packaged Anima](../../apps/contributor-docs/src/content/docs/packaged-anima.md).
 
+## Opt-in persistent profiles
+
+Embedding hosts can install the [durable dialogue and read-only clock bridge](src/engine_bridge/README.md),
+which uses the shared execution engine and canonical memory adapters. Its protected
+source outbox covers private statements, corrections, forgetting and directed
+relationship observations. Default startup retains the existing runtime; see the
+[implementation evidence and remaining gates](../../docs/superpowers/reviews/2026-10-25-unified-engine-parity.md)
+before selecting a profile.
+
 ## Connector contributions
 
 The Rust connector contract and Telegram pilot support reviewed, trusted source
@@ -1635,3 +1644,59 @@ not replay effects or mark unfinished tasks complete.
 ### Turn recovery and durable secondary usage
 
 See [Turn recovery and trace evaluation](../../docs/companion/turn-recovery.md) for host-bound ordinary chat progress, conservative startup adoption, reviewed continuation, durable usage custody and the crash/trace acceptance boundaries. Snapshot format 28 retains shared execution accounting and preserves an exact pre-upgrade backup.
+
+
+### Isolated durable conversation startup
+
+Durable execution is off by default. The real executable accepts
+`ANIMAOS_RS_DURABLE_PROFILE_FILE`, an absolute path to a strict version-1 JSON
+configuration. It has `storage` paths (execution, memory, owner, key),
+an `outbox` SQLite path, and `profiles` entries with `agent_id`,
+`definition_version`, and `mode` (active or draining). All paths must be
+absolute, distinct regular-file locations without path aliases. Provision a
+non-nil UUID owner file and a separate raw 32-byte random seal key before boot;
+Rust never replaces missing or corrupt authority material.
+
+Only explicitly selected, restored conversation agents are admitted. Tools,
+plugins, fallback models, and helper profiles remain unsupported. Existing
+registered profiles omitted from the file remain available in draining mode.
+Draining rejects new dialogue admissions while preserving exact accepted request
+replay, controls, reconciliation and the current canonical memory reader.
+A selected profile's existing provider, model and authored persona are retained;
+a definition change requires a newer definition version. Startup takes the same
+OS profile lease as other daemon resources and uses its guarded model adapter.
+Detached workers retain custody through HTTP disconnects. Shutdown closes the
+worker gate and drains them before closing startup-owned stores; an expired
+shutdown deadline leaves accepted work for restart review. Embedded bridges do
+not close injected shared execution or memory stores.
+
+For fixture-only acceptance, first build the isolated validation binaries, then
+prepare a fresh directory:
+
+`bun tools/workspace-dev/scripts/isolated-engine.ts prepare --root C:/anima-fixtures/example --source-control-plane C:/path/to/existing/data/control-plane.json --source-profile C:/path/to/existing`
+
+Add `--keychain-namespace installed` only when selecting that existing credential
+namespace; omit it for the historical default namespace. Preparation reads only
+the selected provider/model, creates a fresh UUID conversation agent with an
+authored fixture persona and empty histories/jobs/connectors, and exclusively
+creates and flushes fresh owner, seal-key and local administrator-token files.
+It refuses an existing root and never copies existing instructions, memories,
+vault entries or saves. Keep that directory for restart acceptance.
+
+Use the same script with `daemon --root <absolute-root>`,
+`village --root <absolute-root>`, or `status --root <absolute-root>`.
+An optional `--binary <absolute-path>` selects a prebuilt executable; defaults
+use `target/cargo/combined-validation/debug/anima-daemon` and
+`target/cargo/combined-village/debug/anima-village-game` (with `.exe` on Windows).
+The launcher clears inherited application paths, supplies fixture-owned storage,
+a fresh working directory, fresh administrator authentication and isolated ports
+29341/29342/29343, and disables embedding-model downloads. The status command
+uses the game's read-only credential lookup and makes no provider request.
+Daemon provider requests can refresh the selected shared credential vault;
+fixture startup and status checks do not certify live provider behavior.
+
+The fixture launcher currently targets the existing ChatGPT connection. Other API
+providers require their existing standard credential environment variables; stored
+provider-key files are not forwarded or copied. Only selected HTTP conversation
+admissions use this opt-in bridge. Connector, schedule, coding, helper and other
+entrypoints retain their existing runner; this is not whole-agent cutover.

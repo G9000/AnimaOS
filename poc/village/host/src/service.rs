@@ -31,6 +31,10 @@ pub struct Service {
     pub deadline: Duration,
     pub unavailable_reason: Option<String>,
     pub runtime_info: RuntimeInfo,
+    pub durable: Option<Arc<crate::engine_bridge::DurableVillage>>,
+    pub(crate) workers: anima_harness::durable::hosted::HostWorkers,
+    pub(crate) startup_lease: Option<Arc<anima_harness::durable::hosted::StorageLease>>,
+    pub(crate) memory_edit_gate: Arc<tokio::sync::Mutex<()>>,
 }
 impl Service {
     pub fn new(store: Store, engine: Option<Arc<dyn NpcEngine>>, deadline: Duration) -> Self {
@@ -44,7 +48,64 @@ impl Service {
             deadline,
             unavailable_reason: None,
             runtime_info,
+            durable: None,
+            workers: Default::default(),
+            startup_lease: None,
+            memory_edit_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+    /// Opt in only for newly admitted resident dialogue. Existing request
+    /// mappings keep their execution version across retries and restarts.
+    pub async fn with_durable(
+        mut self,
+        bridge: Arc<crate::engine_bridge::DurableVillage>,
+    ) -> Result<Self> {
+        bridge.attach(&self.store).await?;
+        self.runtime_info = bridge.runtime();
+        self.durable = Some(bridge);
+        Ok(self)
+    }
+    pub fn with_admission(self, active: bool) -> Result<Self> {
+        self.store.set_admission(active)?;
+        Ok(self)
+    }
+    pub(crate) fn track(&self) -> Result<anima_harness::durable::hosted::HostWork> {
+        self.workers
+            .enter()
+            .ok_or_else(|| Error::new(503, "The village host is shutting down"))
+    }
+    pub(crate) fn spawn_activity(&self, save: String) -> Result<()> {
+        let work = self.track()?;
+        let worker = self.clone();
+        tokio::spawn(async move {
+            let _work = work;
+            let _ = worker.run_resident_activity_reserved(&save).await;
+        });
+        Ok(())
+    }
+    pub fn close_workers(&self) {
+        self.workers.close();
+    }
+    pub async fn shutdown(&self) -> Result<()> {
+        self.close_workers();
+        while !self.workers.is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        if self.startup_lease.is_some() {
+            if let Some(bridge) = &self.durable {
+                bridge
+                    .memory
+                    .shutdown()
+                    .await
+                    .map_err(|_| Error::storage())?;
+                bridge
+                    .execution
+                    .shutdown()
+                    .await
+                    .map_err(|_| Error::storage())?;
+            }
+        }
+        Ok(())
     }
     pub fn runtime(&self) -> RuntimeInfo {
         self.runtime_info.clone()
@@ -69,6 +130,7 @@ impl Service {
             .customize(id, &input.request_id, &payload, input.traveler)
     }
     pub async fn interact(&self, id: &str, input: Interaction, visit: bool) -> Result<GameView> {
+        let work = self.track()?;
         validate(&input, visit)?;
         let game_input = if visit {
             GameInput::Visit
@@ -85,16 +147,68 @@ impl Service {
         let payload = serde_json::to_string(&(visit, &input))
             .map_err(|_| Error::new(400, "Invalid interaction"))?;
         if let Some(original) = &input.recovery_of {
-            return self.store.recover(
+            let persistent = self.store.persistent_request(id, original)?;
+            let callback_memories = if persistent {
+                let facts = if self.store.needs_callback_recovery(
+                    id,
+                    &input.request_id,
+                    original,
+                    game_input.speaker(),
+                )? {
+                    if let Some(bridge) = &self.durable {
+                        let ids = self.store.resident_identities(id)?;
+                        bridge
+                            .callback_memories(&self.store, id, &ids, game_input.speaker())
+                            .await?
+                    } else {
+                        Default::default()
+                    }
+                } else {
+                    Default::default()
+                };
+                // Preflight only avoids unnecessary recall. Every persistent
+                // recovery carries an explicit view, including an empty one.
+                Some(facts)
+            } else {
+                None
+            };
+            use anima_harness::anima_core::{execution_limits::SystemBudgetClock, ExecutionClock};
+            let at_ms = self
+                .durable
+                .as_ref()
+                .map(|bridge| bridge.clock.now_ms())
+                .unwrap_or_else(|| SystemBudgetClock.now_ms());
+            let (view, newly_committed) = self.store.recover(
                 id,
                 &input.request_id,
                 &payload,
                 original,
                 &game_input,
                 &self.runtime(),
-            );
+                at_ms,
+                callback_memories,
+            )?;
+            if !newly_committed {
+                return Ok(view);
+            }
+            if let Some(bridge) = self.durable.as_ref().filter(|_| persistent) {
+                let ids = self.store.resident_identities(id)?;
+                bridge.project(&self.store, &ids).await?;
+                if self.store.presence_active(id, bridge.clock.now_ms())? {
+                    let _ = self.spawn_activity(id.to_owned());
+                }
+            }
+            return Ok(view);
         }
-        match self.store.begin(id, &input.request_id, &payload)? {
+        let profile = if self.durable.is_some() {
+            crate::engine_bridge::EXECUTION_VERSION
+        } else {
+            "legacy"
+        };
+        match self
+            .store
+            .begin_profile(id, &input.request_id, &payload, profile)?
+        {
             Admission::Replay(view) => Ok(*view),
             Admission::Pending => {
                 let expires = tokio::time::Instant::now() + self.deadline + Duration::from_secs(2);
@@ -117,8 +231,22 @@ impl Service {
                 // The worker outlives a disconnected HTTP caller. Only its durable
                 // generation token can commit; recovery revokes that token.
                 tokio::spawn(async move {
+                    let _work=work;
                     let state = record.state;
-                    let played = if let Some(engine) = &app.engine {
+                    let persistent = app.store.persistent_request(&id, &input.request_id)?;
+                    let played = if persistent && app.durable.is_some() {
+                        let bridge = app.durable.as_ref().ok_or_else(Error::storage)?;
+                        match bridge.play(app.store.clone(), &id, &input.request_id, &token, state.clone(), game_input.clone(), app.deadline.as_millis() as u64).await {
+                            Ok(played) => played,
+                            Err(error) => {
+                                if let Some(winner) = app.store.release(&id, &input.request_id, &token)? { return Ok(winner); }
+                                return Err(error);
+                            }
+                        }
+                    } else if persistent {
+                        app.store.release(&id, &input.request_id, &token)?;
+                        return Err(Error::new(503, "This request requires its persistent resident engine; retry with that profile available or use reviewed recovery"));
+                    } else if let Some(engine) = &app.engine {
                         match tokio::time::timeout(
                             app.deadline,
                             engine.play(state.clone(), game_input.clone()),
@@ -148,7 +276,17 @@ impl Service {
                             }
                         }
                     };
-                    app.store.commit(&id, &input.request_id, &token, played)
+                    let view = app.store.commit(&id, &input.request_id, &token, played)?;
+                    if let Some(bridge) = &app.durable {
+                        let ids = app.store.resident_identities(&id)?;
+                        // The game result is already durable. Projection failure
+                        // remains pending and blocks the next dependent turn.
+                        bridge.project(&app.store, &ids).await?;
+                        if app.store.presence_active(&id, bridge.clock.now_ms())? {
+                            let _=app.spawn_activity(id.clone());
+                        }
+                    }
+                    Ok(view)
                 })
                 .await
                 .map_err(|_| {

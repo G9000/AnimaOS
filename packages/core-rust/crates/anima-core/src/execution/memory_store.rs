@@ -949,6 +949,98 @@ pub struct PersistenceProtection {
 }
 
 impl PersistenceProtection {
+    /// Protects immutable host admission data with the same explicit model-payload
+    /// permission, secret replacement inventory, and external integrity key as
+    /// execution snapshots. The signed record binds its owner and run.
+    pub fn protect_host_admission(
+        &self,
+        owner_id: Uuid,
+        run_id: Uuid,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, ExecutionStoreError> {
+        if !self.model_payloads_allowed
+            || owner_id.is_nil()
+            || run_id.is_nil()
+            || payload.is_empty()
+            || payload.len() > crate::MAX_HOST_RUN_ADMISSION_BYTES
+        {
+            return Err(invalid_snapshot());
+        }
+        let text = std::str::from_utf8(payload).map_err(|_| invalid_snapshot())?;
+        let nonce = Uuid::new_v4();
+        let protected = protect_json(
+            &Value::String(text.into()),
+            "/host-admission",
+            self,
+            None,
+            *nonce.as_bytes(),
+        )?;
+        let wire = ProtectedHostAdmission {
+            kind: "host-run-admission-v1".into(),
+            owner_id,
+            run_id,
+            nonce,
+            payload: protected,
+        };
+        let bytes = serde_jcs::to_vec(&wire).map_err(|_| invalid_snapshot())?;
+        let envelope = seal_snapshot_payload(&bytes, self);
+        serde_json::to_vec(&envelope).map_err(|_| invalid_snapshot())
+    }
+
+    pub fn restore_host_admission(
+        &self,
+        owner_id: Uuid,
+        run_id: Uuid,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, ExecutionStoreError> {
+        if !self.model_payloads_allowed || bytes.len() > 4 * crate::MAX_HOST_RUN_ADMISSION_BYTES {
+            return Err(invalid_snapshot());
+        }
+        let envelope: SealedSnapshotEnvelope =
+            serde_json::from_slice(bytes).map_err(|_| invalid_snapshot())?;
+        if envelope.schema_version != PERSISTENCE_SNAPSHOT_SCHEMA_VERSION
+            || envelope.payload_encoding != PERSISTENCE_SNAPSHOT_PAYLOAD_ENCODING
+        {
+            return Err(invalid_snapshot());
+        }
+        let payload =
+            decode_snapshot_hex(&envelope.payload, 2 * crate::MAX_HOST_RUN_ADMISSION_BYTES)?;
+        let prefix = format!("{PERSISTENCE_SNAPSHOT_AUTHENTICATION}:");
+        let supplied = envelope
+            .authentication
+            .strip_prefix(&prefix)
+            .ok_or_else(invalid_snapshot)
+            .and_then(|value| decode_snapshot_hex(value, 32))?;
+        let mut authenticated = PERSISTENCE_SNAPSHOT_MAC_DOMAIN.to_vec();
+        authenticated.extend_from_slice(&payload);
+        if !constant_time_eq(
+            &supplied,
+            &hmac_sha256(self.seal_key.bytes(), &authenticated),
+        ) {
+            return Err(invalid_snapshot());
+        }
+        let wire: ProtectedHostAdmission =
+            serde_json::from_slice(&payload).map_err(|_| invalid_snapshot())?;
+        if wire.kind != "host-run-admission-v1"
+            || wire.owner_id != owner_id
+            || wire.run_id != run_id
+            || wire.nonce.is_nil()
+        {
+            return Err(invalid_snapshot());
+        }
+        let value = restore_json(
+            wire.payload,
+            "/host-admission",
+            self,
+            *wire.nonce.as_bytes(),
+        )?;
+        let text = value.as_str().ok_or_else(invalid_snapshot)?;
+        if text.is_empty() || text.len() > crate::MAX_HOST_RUN_ADMISSION_BYTES {
+            return Err(invalid_snapshot());
+        }
+        Ok(text.as_bytes().to_vec())
+    }
+
     pub fn new(
         seal_key: PersistenceSnapshotSealKey,
         inventories: Vec<PersistenceCapabilitySecretInventory>,
@@ -1108,6 +1200,16 @@ struct SealedSnapshotEnvelope {
     payload_encoding: String,
     payload: String,
     authentication: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtectedHostAdmission {
+    kind: String,
+    owner_id: Uuid,
+    run_id: Uuid,
+    nonce: Uuid,
+    payload: PersistedJsonValue,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -3356,6 +3458,51 @@ fn hex_value(value: u8) -> Option<u8> {
 
 #[async_trait]
 impl ExecutionStore for InMemoryExecutionStore {
+    async fn load_session_version(
+        &self,
+        owner_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<Option<u64>, ExecutionStoreError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .sessions
+            .get(&(owner_id, session_id))
+            .map(|session| session.version))
+    }
+
+    async fn load_completed_output(
+        &self,
+        owner_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Option<crate::Content>, ExecutionStoreError> {
+        let state = self.state.lock().await;
+        let Some(aggregate) = state.runs.get(&(owner_id, run_id)) else {
+            return Ok(None);
+        };
+        if aggregate.stored.run().state() != RunState::Completed {
+            return Ok(None);
+        }
+        // Progress receipts retain sealed immutable checkpoints after terminal
+        // completion clears resumable authority. Select only this owner's run.
+        let checkpoint = state
+            .outcomes
+            .iter()
+            .filter(|((owner, _), outcome)| {
+                *owner == owner_id && outcome.stored_run().run().id() == run_id
+            })
+            .filter_map(|(_, outcome)| outcome.checkpoint())
+            .max_by_key(|checkpoint| checkpoint.last_durable_event_sequence());
+        match checkpoint.and_then(|checkpoint| checkpoint.provider_transcript().last()) {
+            Some(entry) => Ok(entry
+                .model_response()
+                .map_err(|_| invalid_snapshot())?
+                .map(|(content, _, _)| content)),
+            None => Ok(None),
+        }
+    }
+
     async fn apply_authoritative_policy(
         &self,
         owner_id: Uuid,
@@ -5054,6 +5201,55 @@ mod snapshot_tests {
 
     fn no_secret_protection() -> PersistenceProtection {
         PersistenceProtection::payload_free(snapshot_seal_key()).expect("payload-free protection")
+    }
+
+    #[test]
+    fn host_admission_uses_payload_permission_secret_replacement_and_owner_run_authentication() {
+        let owner = Uuid::new_v4();
+        let run = Uuid::new_v4();
+        let secrets = [
+            "primary-model-secret",
+            "second-model-secret",
+            "third-model-secret",
+            "fourth-model-secret",
+            "fifth-model-secret",
+        ];
+        let protection = persistence_protection(secrets);
+        let payload = secrets.join(" ").into_bytes();
+        let protected = protection
+            .protect_host_admission(owner, run, &payload)
+            .unwrap();
+        let envelope: SealedSnapshotEnvelope = serde_json::from_slice(&protected).unwrap();
+        let decoded = String::from_utf8(
+            decode_snapshot_hex(&envelope.payload, MAX_PERSISTENCE_SNAPSHOT_PAYLOAD_BYTES).unwrap(),
+        )
+        .unwrap();
+        for secret in secrets {
+            assert!(!decoded.contains(secret));
+        }
+        assert_eq!(
+            protection
+                .restore_host_admission(owner, run, &protected)
+                .unwrap(),
+            payload
+        );
+        assert!(protection
+            .restore_host_admission(Uuid::new_v4(), run, &protected)
+            .is_err());
+        assert!(protection
+            .restore_host_admission(owner, Uuid::new_v4(), &protected)
+            .is_err());
+        assert!(no_secret_protection()
+            .protect_host_admission(owner, run, &payload)
+            .is_err());
+        let wrong = PersistenceProtection::allow_model_payloads(
+            PersistenceSnapshotSealKey::new([3; 32]).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        assert!(wrong
+            .restore_host_admission(owner, run, &protected)
+            .is_err());
     }
 
     fn snapshot_payload(snapshot: &ExecutionStoreSnapshot) -> serde_json::Value {

@@ -100,3 +100,25 @@ describe('existing daemon owner bootstrap', () => {
     expect(headers.get('x-api-key')).toBe('synthetic-api-key');
   });
 });
+
+
+describe('independent development services', () => {
+  it.each(['--docs', '--game'])('%s skips daemon probes and owner bootstrap', async flag => {
+    const fetch = vi.fn().mockRejectedValue(new Error('No daemon needed'));
+    vi.stubGlobal('fetch', fetch);
+    dependencies.processes.mockResolvedValue(undefined);
+    await run([flag]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(dependencies.processes).toHaveBeenCalledOnce();
+    expect(dependencies.processes.mock.calls[0]?.[0].map((p: { name: string }) => p.name)).toEqual(
+      flag === '--docs' ? ['@animaos/docs', '@animaos/contributor-docs'] : ['Village game'],
+    );
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('rejects conflicting service selections before startup', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('No network')));
+    await expect(run(['--docs', '--game'])).rejects.toThrow(/Choose one/);
+    expect(dependencies.processes).not.toHaveBeenCalled();
+  });
+});

@@ -7,7 +7,8 @@ import {
 } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { VillageApp } from './App';
-import { VillageApiError, type villageApi } from './api';
+import * as presence from './presence';
+import { VillageApiError, villageApi } from './api';
 import type { GameView, Traveler } from './types';
 
 vi.mock('./VillageScene', () => ({
@@ -621,4 +622,23 @@ it('discards stale appearance metadata without trapping a legacy save or resetti
     expect.any(String),
     'mira',
   );
+});
+
+
+it('shows the resident activity terminal reason alongside retained supper replies', async () => {
+  const stop = vi.fn();
+  const connection = vi.spyOn(presence, 'connectVillagePresence').mockImplementation((_save, update) => {
+    update({ interactionId: 'supper-1', sourceEventId: 'delivery', complete: false, status: 'budget_exhausted', terminalReason: 'The supper conversation reached its time limit.', replies: [{eventId:'tavi-reply',npcId:'tavi',text:'パンです。',translation:'Here is the bread.',reading:'Pan desu.'}] });
+    return stop;
+  });
+  const create = vi.spyOn(villageApi, 'create').mockResolvedValue(savedView);
+  try {
+    render(<VillageApp />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open phrase journal' }));
+    expect(await screen.findByText('The supper conversation reached its time limit.')).toBeVisible();
+    expect(screen.getByText('Here is the bread.')).toBeVisible();
+  } finally {
+    connection.mockRestore();
+    create.mockRestore();
+  }
 });

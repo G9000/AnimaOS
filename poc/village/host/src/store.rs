@@ -40,7 +40,7 @@ pub(crate) enum Admission {
     Pending,
 }
 impl Store {
-    pub fn open(path: &Path) -> Result<Self> {
+    pub(crate) fn acquire_lease(path: &Path) -> Result<std::fs::File> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).map_err(|_| Error::storage())?;
         }
@@ -59,6 +59,13 @@ impl Store {
                 "This village save database is already open in another host",
             )
         })?;
+        Ok(lease)
+    }
+    pub fn open(path: &Path) -> Result<Self> {
+        let lease = Self::acquire_lease(path)?;
+        Self::open_with_lease(path, lease)
+    }
+    pub(crate) fn open_with_lease(path: &Path, lease: std::fs::File) -> Result<Self> {
         let store = Self {
             path: path.into(),
             _lease: lease,
@@ -66,6 +73,7 @@ impl Store {
         let db = store.db()?;
         db.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+            CREATE TABLE IF NOT EXISTS village_runtime_mode(singleton INTEGER PRIMARY KEY CHECK(singleton=1),active INTEGER NOT NULL CHECK(active IN(0,1))); INSERT OR REPLACE INTO village_runtime_mode VALUES(1,1);
             CREATE TABLE IF NOT EXISTS village_saves (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS village_requests (
                 save_id TEXT NOT NULL, request_id TEXT NOT NULL, payload TEXT NOT NULL,
@@ -74,6 +82,7 @@ impl Store {
                 FOREIGN KEY(save_id) REFERENCES village_saves(id));",
         )
         .map_err(|_| Error::storage())?;
+        crate::engine_bridge::migrate(&db)?;
         // The process owns the DB lease, so pending tokens belonged to a stopped
         // host. Keep their identity/payload and permit an explicit exact retry.
         db.execute(
@@ -83,13 +92,30 @@ impl Store {
         .map_err(|_| Error::storage())?;
         Ok(store)
     }
-    fn db(&self) -> Result<Connection> {
+    pub(crate) fn db(&self) -> Result<Connection> {
         let db = Connection::open(&self.path).map_err(|_| Error::storage())?;
         db.busy_timeout(Duration::from_secs(2))
             .map_err(|_| Error::storage())?;
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
             .map_err(|_| Error::storage())?;
         Ok(db)
+    }
+    pub(crate) fn new_admissions(db: &Connection) -> Result<bool> {
+        db.query_row(
+            "SELECT active FROM village_runtime_mode WHERE singleton=1",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| Error::storage())
+    }
+    pub(crate) fn set_admission(&self, active: bool) -> Result<()> {
+        self.db()?
+            .execute(
+                "UPDATE village_runtime_mode SET active=?1 WHERE singleton=1",
+                [active],
+            )
+            .map_err(|_| Error::storage())?;
+        Ok(())
     }
     pub fn create(&self, language: Language, runtime: RuntimeInfo) -> Result<GameView> {
         let id = uuid::Uuid::new_v4().to_string();
@@ -153,13 +179,24 @@ impl Store {
                 state: record.state,
                 dialogue: record.dialogue,
                 runtime: record.runtime,
+                accepted_memories: Default::default(),
             },
         )?;
         tx.execute("INSERT INTO village_requests(save_id,request_id,payload,status,response) VALUES(?1,?2,?3,'committed',?4)",params![id,request,payload,encode(&view)?]).map_err(|_|Error::storage())?;
         tx.commit().map_err(|_| Error::storage())?;
         Ok(view)
     }
+    #[cfg(test)]
     pub(crate) fn begin(&self, id: &str, request: &str, payload: &str) -> Result<Admission> {
+        self.begin_profile(id, request, payload, "legacy")
+    }
+    pub(crate) fn begin_profile(
+        &self,
+        id: &str,
+        request: &str,
+        payload: &str,
+        profile: &str,
+    ) -> Result<Admission> {
         let mut db = self.db()?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -181,6 +218,13 @@ impl Store {
             if owned {
                 return Ok(Admission::Pending);
             }
+            let resident_busy:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM village_supper_activity WHERE save_id=?1 AND token IS NOT NULL AND complete=0)",[id],|r|r.get(0)).map_err(|_|Error::storage())?;
+            if resident_busy {
+                return Err(Error::new(
+                    409,
+                    "The residents are finishing their supper conversation; try again shortly",
+                ));
+            }
             let token = uuid::Uuid::new_v4().to_string();
             tx.execute("UPDATE village_requests SET token=?1 WHERE save_id=?2 AND request_id=?3 AND status='pending'",params![token,id,request]).map_err(|_|Error::storage())?;
             tx.commit().map_err(|_| Error::storage())?;
@@ -189,6 +233,16 @@ impl Store {
                 token,
             });
         }
+        if !Self::new_admissions(&tx)? {
+            return Err(Error::new(503,"This persistent village is draining; retry an accepted request or use reviewed recovery"));
+        }
+        let resident_busy:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM village_supper_activity WHERE save_id=?1 AND token IS NOT NULL AND complete=0)",[id],|r|r.get(0)).map_err(|_|Error::storage())?;
+        if resident_busy {
+            return Err(Error::new(
+                409,
+                "The residents are finishing their supper conversation; try again shortly",
+            ));
+        }
         let busy:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM village_requests WHERE save_id=?1 AND status='pending')",[id],|r|r.get(0)).map_err(|_|Error::storage())?;
         if busy {
             return Err(Error::new(
@@ -196,8 +250,25 @@ impl Store {
                 "A request is pending for this save; retry it or use reviewed recovery",
             ));
         }
+        if profile == "legacy" {
+            let requires_memory: bool = tx
+                .query_row(
+                "SELECT EXISTS(SELECT 1 FROM village_engine_requests WHERE save_id=?1) OR EXISTS(SELECT 1 FROM village_memory_outbox WHERE save_id=?1)",
+                    [id],
+                    |r| r.get(0),
+                )
+                .map_err(|_| Error::storage())?;
+            if requires_memory {
+                return Err(Error::new(503,"This village requires its persistent resident memory before starting a new conversation"));
+            }
+        }
         let token = uuid::Uuid::new_v4().to_string();
         tx.execute("INSERT INTO village_requests(save_id,request_id,payload,status,token) VALUES(?1,?2,?3,'pending',?4)",params![id,request,payload,token]).map_err(|_|Error::storage())?;
+        tx.execute(
+            "INSERT INTO village_request_profiles VALUES(?1,?2,?3)",
+            params![id, request, profile],
+        )
+        .map_err(|_| Error::storage())?;
         tx.commit().map_err(|_| Error::storage())?;
         Ok(Admission::Start {
             record: Box::new(record),
@@ -250,10 +321,36 @@ impl Store {
                 "This generation no longer owns the pending request",
             ));
         }
+        crate::engine_bridge::accept_observation(&tx, id, request, &played)?;
         let view = write_snapshot(&tx, id, played)?;
         finish_receipt(&tx, id, request, &view)?;
         tx.commit().map_err(|_| Error::storage())?;
         Ok(view)
+    }
+    pub(crate) fn needs_callback_recovery(
+        &self,
+        id: &str,
+        request: &str,
+        original: &str,
+        npc: anima_village::NpcId,
+    ) -> Result<bool> {
+        let db = self.db()?;
+        if receipt(&db, id, request)?.is_some() {
+            return Ok(false);
+        }
+        let Some((payload, status, _)) = receipt(&db, id, original)? else {
+            return Ok(false);
+        };
+        if status == "committed" {
+            return Ok(false);
+        }
+        let Ok((visit, input)) = serde_json::from_str::<(bool, Interaction)>(&payload) else {
+            return Ok(false);
+        };
+        Ok(visit
+            && npc == anima_village::NpcId::Tavi
+            && input.npc_id.unwrap_or_default() == npc
+            && load(&db, id)?.state.phase == Phase::Evening)
     }
     pub(crate) fn recover(
         &self,
@@ -263,7 +360,9 @@ impl Store {
         original: &str,
         input: &GameInput,
         runtime: &RuntimeInfo,
-    ) -> Result<GameView> {
+        at_ms: u64,
+        callback_memories: Option<anima_village::CallbackMemories>,
+    ) -> Result<(GameView, bool)> {
         let mut db = self.db()?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -277,7 +376,7 @@ impl Store {
                 ));
             }
             if status == "committed" {
-                return decode(&response.ok_or_else(Error::storage)?);
+                return Ok((decode(&response.ok_or_else(Error::storage)?)?, false));
             }
             return Err(Error::new(409, "The recovery request is already pending"));
         }
@@ -311,8 +410,17 @@ impl Store {
                 && state.phase == Phase::Evening
                 && input.speaker() == anima_village::NpcId::Tavi;
             let played = if was_visit {
-                let visited = reviewed_turn(state, &GameInput::Visit.at(input.speaker()), runtime)
-                    .map_err(|e| Error::new(400, e))?;
+                let visit = GameInput::Visit.at(input.speaker());
+                let visited = if callback {
+                    if let Some(memories) = callback_memories {
+                        anima_village::reviewed_turn_with_memories(state, &visit, runtime, memories)
+                    } else {
+                        reviewed_turn(state, &visit, runtime)
+                    }
+                } else {
+                    reviewed_turn(state, &visit, runtime)
+                }
+                .map_err(|e| Error::new(400, e))?;
                 if callback {
                     visited
                 } else {
@@ -321,16 +429,19 @@ impl Store {
             } else {
                 reviewed_turn(state, input, runtime).map_err(|e| Error::new(400, e))?
             };
+            crate::engine_bridge::accept_reviewed_observation(
+                &tx, id, original, request, input, &played, at_ms,
+            )?;
             let view = write_snapshot(&tx, id, played)?;
             finish_receipt(&tx, id, original, &view)?;
             view
         };
         tx.execute("INSERT INTO village_requests(save_id,request_id,payload,status,response) VALUES(?1,?2,?3,'committed',?4)",params![id,request,payload,encode(&view)?]).map_err(|_|Error::storage())?;
         tx.commit().map_err(|_| Error::storage())?;
-        Ok(view)
+        Ok((view, status != "committed"))
     }
 }
-fn load(db: &Connection, id: &str) -> Result<SaveRecord> {
+pub(crate) fn load(db: &Connection, id: &str) -> Result<SaveRecord> {
     let body: Option<String> = db
         .query_row(
             "SELECT snapshot FROM village_saves WHERE id=?1",

@@ -144,7 +144,10 @@ dependencies = [
  "anima-acp",
  "anima-core",
  "anima-document-content",
+ "anima-execution-store-sqlite",
+ "anima-harness",
  "anima-memory",
+ "anima-memory-store-sqlite",
  "anima-model-adapters",
  "anima-process",
  "anima-schedule",
@@ -175,6 +178,7 @@ dependencies = [
  "rusqlite",
  "rustix 1.1.4",
  "serde",
+ "serde_jcs",
  "serde_json",
  "serde_yaml",
  "sha2 0.11.1",
@@ -211,12 +215,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "anima-execution-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "async-trait",
+ "futures",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "anima-harness"
 version = "0.1.0"
 dependencies = [
  "anima-core",
+ "anima-execution-store-sqlite",
+ "anima-memory",
+ "anima-memory-store-sqlite",
  "anima-model-adapters",
  "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -230,6 +254,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "anima-memory-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anima-core",
+ "anima-memory",
+ "async-trait",
+ "futures",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

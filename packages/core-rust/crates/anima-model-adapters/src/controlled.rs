@@ -1,5 +1,7 @@
 //! Physical-attempt custody shared by native transports. No retry is free.
-use anima_core::execution_limits::{ExecutionPermit, ExecutionStreamSink, ModelCallContext};
+use anima_core::execution_limits::{
+    ExecutionPermit, ExecutionStreamSink, ModelCallContext, ModelDispatchState, SettlementOutcome,
+};
 use anima_core::{
     AgentConfig, ModelGenerateRequest, ModelStreamFrame, ModelStreamSink, TokenUsage,
 };
@@ -9,6 +11,7 @@ pub(crate) struct PreparedAttempt {
     pub request: ModelGenerateRequest,
     permit: Option<ExecutionPermit>,
     context: Option<ModelCallContext>,
+    dispatch: ModelDispatchState,
 }
 
 impl PreparedAttempt {
@@ -29,6 +32,7 @@ impl PreparedAttempt {
             request,
             permit,
             context: context.cloned(),
+            dispatch: ModelDispatchState::default(),
         })
     }
     pub async fn bounded<T>(
@@ -36,7 +40,7 @@ impl PreparedAttempt {
         work: impl std::future::Future<Output = Result<T, String>>,
     ) -> Result<T, String> {
         match &self.context {
-            Some(context) => context.bounded(work).await,
+            Some(context) => context.dispatch(&self.dispatch, work).await,
             None => work.await,
         }
     }
@@ -48,6 +52,12 @@ impl PreparedAttempt {
     }
     pub async fn finish<T>(&mut self, result: &Result<T, String>) {
         if let Some(permit) = &mut self.permit {
+            if !self.dispatch.started() {
+                let _ = permit
+                    .finish_owned(SettlementOutcome::ProvenNeverSent, true)
+                    .await;
+                return;
+            }
             let retired = result.is_ok()
                 || self
                     .context

@@ -20,6 +20,7 @@ mod controlled_model;
 pub(crate) mod conversation_shares;
 mod core_memory;
 mod doctor;
+pub mod engine_bridge;
 mod events;
 pub(crate) mod execution_backends;
 mod execution_budgets;
@@ -73,8 +74,8 @@ pub use app::entry::{bind_addr_from_env, config_from_env, run_from_env, ServeOpt
 pub use app::persistence::runtime_memory_store_label;
 pub use app::{
     app, app_with_config, app_with_configured_persistence,
-    app_with_configured_persistence_for_listener, app_with_database, serve, serve_with,
-    DaemonConfig, PersistenceMode,
+    app_with_configured_persistence_for_listener, app_with_database, app_with_engine_bridge, serve,
+    serve_with, DaemonConfig, PersistenceMode,
 };
 mod chatgpt_auth;
 #[cfg(test)]
