@@ -57,9 +57,9 @@ bun run --filter @animaos/sdk build
 bun dev --host rust
 ```
 
-Open the owner console link printed by the launcher, create your companion, select its workspace, and connect a model provider. Onboarding covers the model, introductions, access, and voice.
+The launcher automatically opens an approved Anima page once the web console and daemon are ready. Create your companion, select its workspace, and connect a model provider. Onboarding covers the model, introductions, access, and voice.
 
-By default, the launcher starts the Rust daemon/API and the web console. The console connects to the daemon at `127.0.0.1:8080`. Restored Telegram and Discord connectors run inside the daemon.
+By default, the launcher starts the Rust daemon/API and the web console. Run `bun dev --console` to reopen an approved page while the services are running. Use `bun dev --no-open` to keep browser opening manual; the terminal prints a fresh owner link. The console connects to the daemon at `127.0.0.1:8080`. Restored Telegram and Discord connectors run inside the daemon.
 
 Run the optional surfaces explicitly from the repository root:
 

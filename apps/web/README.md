@@ -32,7 +32,7 @@ The normal operator workflow starts the selected Rust host and browser surfaces:
 bun dev --host rust
 ```
 
-Open the console URL printed by `workspace-dev`. Host selection belongs in that
+The launcher opens an approved console page automatically after startup. Use `bun dev --console` to reopen it, or `--no-open` to print a manual owner link. Host selection belongs in that
 launcher. The console uses the loopback daemon on `127.0.0.1:8080`; the Rust host
 wraps reusable `packages/core-rust` code. Elixir/Python hosts are placeholders.
 

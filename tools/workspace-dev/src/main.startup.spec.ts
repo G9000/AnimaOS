@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const dependencies = vi.hoisted(() => ({ home: vi.fn(), processes: vi.fn() }));
+const dependencies = vi.hoisted(() => ({ home: vi.fn(), processes: vi.fn(), browser: vi.fn() }));
+vi.mock('./owner-console.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('./owner-console.js')>()),
+  openConsoleBrowser: dependencies.browser,
+}));
 vi.mock('node:os', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:os')>()),
   homedir: dependencies.home,
@@ -22,6 +26,7 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'anima-dev-startup-'));
   dependencies.home.mockReturnValue(home);
   dependencies.processes.mockReset();
+  dependencies.browser.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('ANIMA_LOCAL_ADMIN_TOKEN_FILE', undefined);
   vi.stubEnv('ANIMA_LOCAL_ADMIN_TOKEN', undefined);
   vi.stubEnv('ANIMAOS_RS_CONTROL_PLANE_FILE', undefined);
@@ -30,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -60,6 +66,7 @@ describe('existing daemon owner bootstrap', () => {
     reachableDaemon(false);
     await expect(run(['--console'])).rejects.toThrow(/Stop the running daemon/);
     expect(log).not.toHaveBeenCalled();
+    expect(dependencies.browser).not.toHaveBeenCalled();
     expect(dependencies.processes).not.toHaveBeenCalled();
   });
 
@@ -83,7 +90,7 @@ describe('existing daemon owner bootstrap', () => {
     expect(headers.get('authorization')).toBe(`Bearer ${owner.token}`);
     expect(headers.has('origin')).toBe(false);
     expect(probe?.init?.redirect).toBe('error');
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('anima-login='));
+    expect(dependencies.browser).toHaveBeenCalledWith(expect.stringContaining('http://localhost:4200/?anima-login='));
     expect(dependencies.processes).not.toHaveBeenCalled();
   });
 
@@ -109,6 +116,7 @@ describe('independent development services', () => {
     dependencies.processes.mockResolvedValue(undefined);
     await run([flag]);
     expect(fetch).not.toHaveBeenCalled();
+    expect(dependencies.browser).not.toHaveBeenCalled();
     expect(dependencies.processes).toHaveBeenCalledOnce();
     expect(dependencies.processes.mock.calls[0]?.[0].map((p: { name: string }) => p.name)).toEqual(
       flag === '--docs' ? ['@animaos/docs', '@animaos/contributor-docs'] : ['Village game'],
@@ -120,5 +128,69 @@ describe('independent development services', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('No network')));
     await expect(run(['--docs', '--game'])).rejects.toThrow(/Choose one/);
     expect(dependencies.processes).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('automatic owner console', () => {
+  it('opens one signed page only after the frontend proxy is ready', async () => {
+    prepareOwnerCredentials({}, home, true);
+    let ready = false;
+    let finishServices = () => {};
+    dependencies.processes.mockImplementation(() => new Promise<void>(resolve => { finishServices = resolve; }));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url === 'http://localhost:4200/api/health') return new Response(null, { status: ready ? 200 : 503 });
+      if (url.endsWith('/api/health')) return Response.json({ status: 'ok' });
+      return Response.json({ draining: false, inFlight: {} });
+    }));
+    const running = run([]);
+    try {
+      await vi.waitFor(() => expect(dependencies.processes).toHaveBeenCalledOnce());
+      expect(dependencies.browser).not.toHaveBeenCalled();
+      ready = true;
+      await vi.waitFor(() => expect(dependencies.browser).toHaveBeenCalledOnce());
+      expect(dependencies.browser).toHaveBeenCalledWith(expect.stringContaining('http://localhost:4200/?anima-login='));
+      expect(log.mock.calls.flat().join(' ')).not.toContain('anima-login=');
+    } finally {
+      finishServices();
+      await running;
+    }
+  });
+
+  it('opens the approved playground when requested', async () => {
+    prepareOwnerCredentials({}, home, true);
+    reachableDaemon(true);
+    await run(['--playground', '--console']);
+    expect(dependencies.browser).toHaveBeenCalledWith(expect.stringContaining('http://localhost:4201/?anima-login='));
+  });
+
+  it('prints a fresh manual link without opening when --no-open is requested', async () => {
+    prepareOwnerCredentials({}, home, true);
+    reachableDaemon(true);
+    await run(['--console', '--no-open']);
+    expect(dependencies.browser).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('anima-login='));
+  });
+
+  it('keeps the server workflow available and mints a fresh fallback after browser failure', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const started = Date.UTC(2026, 9, 26, 0, 0);
+    vi.setSystemTime(started);
+    prepareOwnerCredentials({}, home, true);
+    reachableDaemon(true);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    dependencies.browser.mockImplementation(async () => {
+      vi.setSystemTime(started + 20_000);
+      throw new Error('Native error containing a sensitive launch argument');
+    });
+    await run(['--console']);
+    expect(dependencies.browser).toHaveBeenCalledOnce();
+    const fallback = log.mock.calls.flat().find((value: unknown) => typeof value === 'string' && value.includes('?anima-login='));
+    expect(fallback).toBeDefined();
+    const issued = new URL(fallback as string).searchParams.get('anima-login')!.split('.')[0];
+    expect(Number(issued)).toBe((started + 20_000) / 1000);
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('sensitive');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('automatically'));
   });
 });

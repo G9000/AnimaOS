@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { consoleLaunchUrl, prepareOwnerCredentials } from './owner-console.js';
+import { consoleLaunchUrl, openConsoleBrowser, prepareOwnerCredentials } from './owner-console.js';
 import {
   getHostDefinition,
   hostProcessEnv,
@@ -163,14 +163,25 @@ export async function run(argv: string[]): Promise<void> {
   const consoleOrigin = surface === 'playground'
     ? 'http://localhost:4201'
     : 'http://localhost:4200';
-  const showConsole = () => {
-    console.log(
-      'Owner console link (expires in 15 seconds; refresh with bun dev --console):',
-    );
+  const refreshCommand = surface === 'playground'
+    ? 'bun dev --playground --console'
+    : 'bun dev --console';
+  const showConsole = async () => {
+    if (!argv.includes('--no-open')) {
+      console.log('Opening your approved Anima console…');
+      try {
+        await openConsoleBrowser(consoleLaunchUrl(consoleOrigin, owner.token));
+        return;
+      } catch {
+        console.warn('Could not open your browser automatically. Use the owner console link below.');
+      }
+    }
+    // A failed opener may have consumed the first link's TTL; mint this only now.
+    console.log('Owner console link (expires in 15 seconds; refresh with ' + refreshCommand + '):');
     console.log(consoleLaunchUrl(consoleOrigin, owner.token));
   };
   if (consoleOnly) {
-    showConsole();
+    await showConsole();
     return;
   }
   const plan = buildWorkspaceDevPlan(hostName, {
@@ -195,12 +206,12 @@ export async function run(argv: string[]): Promise<void> {
 async function announceWhenReady(
   origin: string,
   signal: AbortSignal,
-  announce: () => void,
+  announce: () => Promise<void>,
 ): Promise<void> {
   // The launch TTL starts only after Vite and its daemon proxy are ready.
   while (!signal.aborted) {
     if (await isHostReachable(origin)) {
-      if (!signal.aborted) announce();
+      if (!signal.aborted) await announce();
       return;
     }
     await new Promise<void>((resolve) => {

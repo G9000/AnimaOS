@@ -8,7 +8,7 @@ Every private `/api/*` route requires owner credentials. An allowed `Origin`, re
 
 The optional `ANIMAOS_RS_API_KEY` is a separate gate. Native SDK clients use `ownerToken` for owner identity and `apiKey` for that additional gate. Browser credentials are not put in image or stream URLs and authenticated fetches do not follow redirects.
 
-The installed supervisor provides a signed launch link. `bun dev --host rust` provisions its owner-token file and prints a signed console URL after readiness. Use `bun dev --console` to obtain a fresh link, or `bun dev --console --playground` for the playground. Standalone daemon deployments must configure `ANIMA_LOCAL_ADMIN_TOKEN_FILE` or `ANIMA_LOCAL_ADMIN_TOKEN`; an unreadable configured token file fails closed. Keep token files outside agent workspaces.
+The installed supervisor provides a signed launch link. `bun dev --host rust` provisions its owner-token file and automatically opens a fresh signed console URL after readiness. Use `bun dev --console` to reopen an approved page, or `bun dev --console --playground` for the playground. Add `--no-open` to print a manual link; browser-launch failure also prints a fresh fallback link. Standalone daemon deployments must configure `ANIMA_LOCAL_ADMIN_TOKEN_FILE` or `ANIMA_LOCAL_ADMIN_TOKEN`; an unreadable configured token file fails closed. Keep token files outside agent workspaces.
 
 The launcher verifies owner access before reusing an existing daemon. For a daemon started before owner-token provisioning, stop that daemon with its launcher and run `bun dev` again. To reuse a separately started daemon, configure its matching `ANIMA_LOCAL_ADMIN_TOKEN_FILE`.
 

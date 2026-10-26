@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import {
   closeSync,
@@ -8,7 +9,8 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, win32 } from 'node:path';
+import { platform } from 'node:os';
 import { defaultControlPlaneFile } from './hosts.js';
 
 export interface OwnerCredentials {
@@ -108,4 +110,42 @@ export function consoleLaunchUrl(
     .digest('hex');
   url.searchParams.set('anima-login', issued + '.' + id + '.' + mac);
   return url.toString();
+}
+
+/** Native browser dispatch; launch secrets are never copied into an error message. */
+export async function openConsoleBrowser(address: string): Promise<void> {
+  const url = new URL(address);
+  if (
+    url.protocol !== 'http:' ||
+    !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+    url.username ||
+    url.password
+  )
+    throw new Error('The owner console must use a loopback HTTP origin.');
+
+  let command: string;
+  let args: string[];
+  const currentPlatform = platform();
+  if (currentPlatform === 'win32') {
+    command = win32.join(
+      process.env.SystemRoot || 'C:/Windows',
+      'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe',
+    );
+    // Start-Process uses the registered URL handler. Encode the script to keep
+    // PowerShell parsing separate from native argument quoting; quote the URL as data.
+    const script = "Start-Process -FilePath '" + url.toString().replaceAll("'", "''") + "' -ErrorAction Stop";
+    args = [
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ];
+  } else {
+    command = currentPlatform === 'darwin' ? '/usr/bin/open' : 'xdg-open';
+    args = [url.toString()];
+  }
+  await new Promise<void>((resolve, reject) => {
+    execFile(command, args, { shell: false, windowsHide: true, timeout: 10_000 }, error => {
+      if (error) reject(new Error('Could not open the local console browser.'));
+      else resolve();
+    });
+  });
 }
