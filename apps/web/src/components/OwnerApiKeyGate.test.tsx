@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OwnerApiKeyGate } from './OwnerApiKeyGate';
 import { clearOwnerApiKey, ownerApiKeyHeaders } from '../lib/owner-api-key';
+import { LAUNCH_CODE_EXPIRED_WARNING, type ConsoleSessionClaim } from '../lib/console-session';
 
 afterEach(() => { clearOwnerApiKey(); vi.unstubAllGlobals(); });
 
@@ -39,6 +40,16 @@ it('keeps forbidden local-owner access outside the workspace', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 403 })));
   render(<OwnerApiKeyGate><p>Owner workspace</p></OwnerApiKeyGate>);
   expect(await screen.findByRole('alert')).toHaveTextContent('not approved as the local owner');
+  expect(screen.getByText('bun dev --console')).toBeInTheDocument();
+  expect(screen.queryByText('Owner workspace')).not.toBeInTheDocument();
+});
+
+it('explains an expired launch link before the owner workspace can mount', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 403 })));
+  const claim = Promise.resolve<ConsoleSessionClaim>({ kind: 'refused', warning: LAUNCH_CODE_EXPIRED_WARNING });
+  render(<OwnerApiKeyGate sessionClaim={claim}><p>Owner workspace</p></OwnerApiKeyGate>);
+  expect(await screen.findByRole('alert')).toHaveTextContent(LAUNCH_CODE_EXPIRED_WARNING);
+  expect(screen.getByText('bun dev --console')).toBeInTheDocument();
   expect(screen.queryByText('Owner workspace')).not.toBeInTheDocument();
 });
 
@@ -55,13 +66,13 @@ it('cannot restore owner authority from a late login after unmount', async () =>
 });
 
 it('waits for the signed session exchange before probing private access', async () => {
-  let complete!: () => void;
-  const claim = new Promise<void>((resolve) => { complete = resolve; });
+  let complete!: (claim: ConsoleSessionClaim) => void;
+  const claim = new Promise<ConsoleSessionClaim>((resolve) => { complete = resolve; });
   const fetch = vi.fn().mockResolvedValue(Response.json({})); vi.stubGlobal('fetch', fetch);
   localStorage.setItem('anima.consoleSession', 'signed-header');
   render(<OwnerApiKeyGate sessionClaim={claim}><p>Owner workspace</p></OwnerApiKeyGate>);
   expect(fetch).not.toHaveBeenCalled();
-  complete();
+  complete({ kind: 'opened' });
   expect(await screen.findByText('Owner workspace')).toBeInTheDocument();
   expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'x-anima-console-session': 'signed-header' });
   localStorage.clear();

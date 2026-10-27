@@ -1,4 +1,4 @@
-import { consoleSessionHeaders } from '../lib/console-session';
+import { consoleSessionHeaders, type ConsoleSessionClaim } from '../lib/console-session';
 import {
   useCallback,
   useEffect,
@@ -36,9 +36,9 @@ async function ownerAccessStatus(
 }
 
 /** Owner bootstrap and console launch-code exchange must live inside this gate. */
-export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNode; sessionClaim?: Promise<unknown> }) {
+export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNode; sessionClaim?: Promise<ConsoleSessionClaim> }) {
   const [phase, setPhase] = useState<
-    'checking' | 'ready' | 'login' | 'unavailable'
+    'checking' | 'ready' | 'login' | 'approval' | 'unavailable'
   >('checking');
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +51,9 @@ export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNod
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    return Promise.resolve(sessionClaim).then(() => ownerAccessStatus(suppliedKey, controller.signal))
-      .then((status) => {
+    return Promise.resolve(sessionClaim)
+      .then(async (claim) => ({ claim, status: await ownerAccessStatus(suppliedKey, controller.signal) }))
+      .then(({ claim, status }) => {
         if (current !== version.current || controller.signal.aborted) return;
         if (status === 200) {
           if (suppliedKey !== undefined) setOwnerApiKey(suppliedKey);
@@ -65,9 +66,11 @@ export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNod
             setError('That owner API key was not accepted.');
         } else if (status === 403) {
           clearOwnerApiKey();
-          setPhase('unavailable');
+          setPhase('approval');
           setError(
-            'This browser is not approved as the local owner. Open the configured Anima console on this computer.',
+            claim?.kind === 'refused'
+              ? claim.warning
+              : 'This browser is not approved as the local owner. Open Anima again to sign in to this tab.',
           );
         } else {
           setPhase('unavailable');
@@ -141,14 +144,21 @@ export function OwnerApiKeyGate({ children, sessionClaim }: { children: ReactNod
           </button>
         </form>
       )}
-      {phase === 'unavailable' && (
+      {phase === 'approval' && (
+        <p>
+          {import.meta.env.DEV ? <>
+            Keep <code>bun dev</code> running, then run <code>bun dev --console</code> in another terminal to open a signed-in tab.
+          </> : 'Choose Open Console from the Anima tray menu to open a signed-in tab.'}
+        </p>
+      )}
+      {(phase === 'approval' || phase === 'unavailable') && (
         <button
           className="studio-tool-button"
           type="button"
           disabled={busy}
           onClick={() => startVerify()}
         >
-          Retry connection
+          {phase === 'approval' ? 'Check owner access again' : 'Retry connection'}
         </button>
       )}
       {error && <p role="alert">{error}</p>}

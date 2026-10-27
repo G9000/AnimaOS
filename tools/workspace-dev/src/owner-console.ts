@@ -129,15 +129,11 @@ export async function openConsoleBrowser(address: string): Promise<void> {
   if (currentPlatform === 'win32') {
     command = win32.join(
       process.env.SystemRoot || 'C:/Windows',
-      'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe',
+      'System32', 'rundll32.exe',
     );
-    // Start-Process uses the registered URL handler. Encode the script to keep
-    // PowerShell parsing separate from native argument quoting; quote the URL as data.
-    const script = "Start-Process -FilePath '" + url.toString().replaceAll("'", "''") + "' -ErrorAction Stop";
-    args = [
-      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand',
-      Buffer.from(script, 'utf16le').toString('base64'),
-    ];
+    // Dispatch straight to the registered browser: shell startup can outlast
+    // the launch code's short TTL. Keep the URL in one native argument.
+    args = ['url.dll,FileProtocolHandler', url.toString()];
   } else {
     command = currentPlatform === 'darwin' ? '/usr/bin/open' : 'xdg-open';
     args = [url.toString()];

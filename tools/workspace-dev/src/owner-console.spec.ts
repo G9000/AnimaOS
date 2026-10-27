@@ -57,14 +57,13 @@ describe('owner console bootstrap', () => {
 
 
 describe('native console browser opening', () => {
-  it('dispatches Windows URLs through an encoded, quoted command in a hidden helper', async () => {
+  it('dispatches Windows URLs directly through the native URL handler in a hidden helper', async () => {
     vi.stubEnv('SystemRoot', 'C:/Windows');
     const address = consoleLaunchUrl('http://localhost:4200', 'test-owner');
     await openConsoleBrowser(address);
     const [command, args, options] = native.exec.mock.calls[0]!;
-    expect(command).toBe('C:' + String.fromCharCode(92) + ['Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'].join(String.fromCharCode(92)));
-    expect(args.slice(0, 5)).toEqual(['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand']);
-    expect(Buffer.from(args[5], 'base64').toString('utf16le')).toBe("Start-Process -FilePath '" + address + "' -ErrorAction Stop");
+    expect(command).toBe('C:' + String.fromCharCode(92) + ['Windows', 'System32', 'rundll32.exe'].join(String.fromCharCode(92)));
+    expect(args).toEqual(['url.dll,FileProtocolHandler', address]);
     expect(options).toMatchObject({ shell: false, windowsHide: true, timeout: 10_000 });
   });
 
