@@ -88,6 +88,62 @@ beforeEach(() => {
   );
 });
 
+describe('artifact conversation layout', () => {
+  it('keeps the composer with the conversation and preserves its draft while previewing', async () => {
+    vi.spyOn(daemon, 'downloadWorkspaceFile').mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const view = renderView({
+      session: {
+        ...sessionFixture('chat:artifact'),
+        title: 'Artifact conversation',
+        mainChat: true,
+      },
+      messages: [
+        {
+          id: 'artifact-message',
+          role: 'Assistant',
+          content: { text: 'Created `artifacts/credit-card-bill-check.html`.' },
+          created_at_ms: 2,
+        },
+      ],
+    });
+    view.rerender({ composer: { ...view.composer, draft: 'Keep this draft' } });
+    const conversation = screen.getByRole('region', {
+      name: 'Artifact conversation',
+    });
+    const composer = screen.getByRole('textbox', {
+      name: 'Message Nova',
+    }) as HTMLTextAreaElement;
+    composer.setSelectionRange(5, 9);
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open artifacts/credit-card-bill-check.html',
+      }),
+    );
+    const preview = await screen.findByRole('complementary', {
+      name: 'Artifact preview',
+    });
+    expect(conversation).toContainElement(composer);
+    expect(conversation).not.toContainElement(preview);
+    expect(screen.getByRole('textbox', { name: 'Message Nova' })).toBe(
+      composer,
+    );
+    expect(composer).toHaveValue('Keep this draft');
+    expect([composer.selectionStart, composer.selectionEnd]).toEqual([5, 9]);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close artifact preview' }),
+    );
+    expect(
+      screen.queryByRole('complementary', { name: 'Artifact preview' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message Nova' })).toBe(
+      composer,
+    );
+    expect(composer).toHaveValue('Keep this draft');
+  });
+});
+
 describe('chat workflows integration', () => {
   it('sends a literal retry /btw draft without creating a side question', () => {
     const onSend = vi.fn();

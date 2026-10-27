@@ -135,11 +135,11 @@ fn validate_download_path(path: &str) -> Result<(), ApiError> {
     if !path.rsplit_once('.').is_some_and(|(_, extension)| {
         matches!(
             extension.to_ascii_lowercase().as_str(),
-            "txt" | "md" | "csv" | "docx" | "xlsx" | "pptx" | "pdf"
+            "txt" | "md" | "csv" | "html" | "htm" | "docx" | "xlsx" | "pptx" | "pdf"
         )
     }) {
         return Err(ApiError::bad_request_static(
-            "Only TXT, Markdown, CSV and verified Anima-generated DOCX, XLSX, PPTX or PDF files can be downloaded",
+            "Only TXT, Markdown, CSV, HTML and verified Anima-generated DOCX, XLSX, PPTX or PDF files can be downloaded",
         ));
     }
     Ok(())
@@ -439,7 +439,7 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
         Err(_) => {
             return Err(ApiError::bad_request_static(
                 "Only UTF-8 text files can be previewed",
-            ))
+            ));
         }
     };
     if text

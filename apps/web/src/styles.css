@@ -13,6 +13,7 @@
 @import './system.css';
 @import './attachments.css';
 @import './scenic.css';
+@import './components/artifacts/workspace-artifact-preview.css';
 
 @source '../../packages/ui/src/**/*.{ts,tsx}';
 

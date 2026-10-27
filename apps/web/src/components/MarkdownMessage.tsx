@@ -14,6 +14,11 @@ import ReactMarkdown, {
 } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
+  ArtifactLinkBoundary,
+  WorkspaceArtifactLink,
+} from './artifacts/WorkspaceArtifactPreview';
+import { workspaceArtifactPath } from './artifacts/artifact-document';
+import {
   WorkspaceFileDownload,
   workspaceFileTarget,
 } from './WorkspaceFileDownload';
@@ -212,21 +217,27 @@ const components: Components = {
     </blockquote>
   ),
   a: ({ children, href, className, node: _node, ...props }) =>
-    chatExportTarget(href) ? (
-      <ChatExportDownload url={href!}>{children}</ChatExportDownload>
-    ) : workspaceFileTarget(href) ? (
-      <WorkspaceFileDownload url={href!}>{children}</WorkspaceFileDownload>
+    workspaceArtifactPath(href) ? (
+      <WorkspaceArtifactLink path={href!}>{children}</WorkspaceArtifactLink>
     ) : (
-      <a
-        {...props}
-        className={`break-words text-accent underline underline-offset-2 ${className ?? ''}`}
-        href={href}
-        {...(isAbsoluteWebUrl(href)
-          ? { target: '_blank', rel: 'noopener noreferrer' }
-          : {})}
-      >
-        {children}
-      </a>
+      <ArtifactLinkBoundary>
+        {chatExportTarget(href) ? (
+          <ChatExportDownload url={href!}>{children}</ChatExportDownload>
+        ) : workspaceFileTarget(href) ? (
+          <WorkspaceFileDownload url={href!}>{children}</WorkspaceFileDownload>
+        ) : (
+          <a
+            {...props}
+            className={`break-words text-accent underline underline-offset-2 ${className ?? ''}`}
+            href={href}
+            {...(isAbsoluteWebUrl(href)
+              ? { target: '_blank', rel: 'noopener noreferrer' }
+              : {})}
+          >
+            {children}
+          </a>
+        )}
+      </ArtifactLinkBoundary>
     ),
   img: ({ alt }) => (
     <span className="text-ink-3">
@@ -298,9 +309,11 @@ const components: Components = {
     return fenced ? (
       <CodeBlock className={className}>{children}</CodeBlock>
     ) : (
-      <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em] [overflow-wrap:anywhere]">
-        {children}
-      </code>
+      <WorkspaceArtifactLink path={source} literal>
+        <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em] [overflow-wrap:anywhere]">
+          {children}
+        </code>
+      </WorkspaceArtifactLink>
     );
   },
 };

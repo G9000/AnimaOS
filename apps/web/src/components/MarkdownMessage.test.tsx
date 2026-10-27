@@ -8,6 +8,7 @@ import {
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownMessage } from './MarkdownMessage';
+import { WorkspaceArtifactLayout } from './artifacts/WorkspaceArtifactPreview';
 import { ChatExportScope } from './sessions/ChatExportDownload';
 import { daemon } from '../lib/daemon-api';
 
@@ -24,6 +25,25 @@ vi.mock('react-markdown', async (importOriginal) => {
 });
 
 describe('MarkdownMessage', () => {
+  it('turns an inline HTML artifact path into an openable file reference', () => {
+    render(
+      <WorkspaceArtifactLayout
+        agentId="a"
+        sessionId="current"
+        clearGeneration={0}
+      >
+        <MarkdownMessage>
+          {'Created at `artifacts/credit-card-bill-check.html`.'}
+        </MarkdownMessage>
+      </WorkspaceArtifactLayout>,
+    );
+    expect(
+      screen.getByRole('button', {
+        name: 'Open artifacts/credit-card-bill-check.html',
+      }),
+    ).toBeVisible();
+  });
+
   it('downloads a finished file through the owner transport only after a click', async () => {
     const download = vi
       .spyOn(daemon, 'downloadWorkspaceFile')

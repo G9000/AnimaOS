@@ -722,3 +722,33 @@ async fn m68_normal_write_file_receipt_then_owner_files_and_download_are_exact()
     );
     assert_eq!(model.secondary_requests().len(), secondary_calls);
 }
+
+#[tokio::test]
+async fn html_artifact_download_returns_exact_source_as_an_attachment() {
+    let fixture = WorkspaceAvatarTemp::new("html-artifact-download");
+    std::fs::create_dir_all(fixture.root.join("artifacts")).unwrap();
+    let source =
+        b"<!doctype html><html><body><button onclick='this.textContent=2'>1</button></body></html>";
+    std::fs::write(fixture.root.join("artifacts/bill.html"), source).unwrap();
+    let app = router(fixture.state(), DaemonConfig::default());
+    let response = app
+        .oneshot(owner_get(
+            "/api/workspace/file/download?path=artifacts%2Fbill.html",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/octet-stream"
+    );
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert!(response.headers()["content-disposition"]
+        .to_str()
+        .unwrap()
+        .starts_with("attachment;"));
+    assert_eq!(
+        to_bytes(response.into_body(), 1024).await.unwrap().as_ref(),
+        source
+    );
+}

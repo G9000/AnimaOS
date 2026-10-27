@@ -321,3 +321,19 @@ export const SquareIcon = (p: IconProps) =>
   base(p, <rect x="3" y="3" width="18" height="18" rx="2" />);
 export const DownloadIcon = (p: IconProps) =>
   base(p, <path d="M12 3v12m-5-5 5 5 5-5M5 21h14" />);
+export const RefreshIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9" />,
+  );
+export const ExternalLinkIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M15 3h6v6m0-6L10 14M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4" />,
+  );
+export const CodeIcon = (p: IconProps) =>
+  base(p, <path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 20" />);
+export const MaximizeIcon = (p: IconProps) =>
+  base(p, <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />);
+export const MinimizeIcon = (p: IconProps) =>
+  base(p, <path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5" />);

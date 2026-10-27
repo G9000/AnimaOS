@@ -55,7 +55,7 @@ import {
   type ChatPanelRequest,
   type ChatPanelName,
 } from './ChatExtensions';
-import { ChatResultsLayout } from '../results/ChatResultsPanel';
+import { WorkspaceArtifactLayout } from '../artifacts/WorkspaceArtifactPreview';
 import type { ChatModelPreferencesView } from '@animaos/sdk';
 
 export interface SessionComposerState {
@@ -555,7 +555,7 @@ export function SessionView({
       }
       onJumpToLatest={historyAnchor?.onReturnToLatest}
       onAtBottomChange={onAtBottomChange}
-      summary={session?.mainChat ? session.summary ?? undefined : undefined}
+      summary={session?.mainChat ? (session.summary ?? undefined) : undefined}
       summaryKey={session?.id ?? 'new'}
       tail={
         <>
@@ -647,18 +647,7 @@ export function SessionView({
           </p>
         ) : null}
       </div>
-      {session?.kind === 'chat' && extensions && daemon.chatResults ? (
-        <ChatResultsLayout
-          agentId={session.agentId}
-          sessionId={session.id}
-          clearGeneration={session.clearGeneration ?? 0}
-          refreshKey={`${contextRefreshKey}:${session.lastActivityAtMs}:${messages.length}:${runs.map(({ run }) => `${run.id}:${run.status}`).join()}`}
-        >
-          {renderMessages}
-        </ChatResultsLayout>
-      ) : (
-        renderMessages()
-      )}
+      {renderMessages()}
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts
           sessionId={session.id}
@@ -815,7 +804,17 @@ export function SessionView({
   );
   return (
     <ChatExportScope.Provider value={exportScope}>
-      {view}
+      {session?.kind === 'chat' ? (
+        <WorkspaceArtifactLayout
+          agentId={session.agentId}
+          sessionId={session.id}
+          clearGeneration={session.clearGeneration ?? 0}
+        >
+          {view}
+        </WorkspaceArtifactLayout>
+      ) : (
+        view
+      )}
     </ChatExportScope.Provider>
   );
 }
