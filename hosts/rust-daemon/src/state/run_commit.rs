@@ -76,6 +76,11 @@ impl DaemonState {
         .with_checkpoint_root(self.checkpoint_root.clone())
         .with_owner_time_zone(self.owner_time_zone.clone())
         .with_mail(self.mail_manager.as_ref().and_then(|mail| mail.upgrade()))
+        .with_connected_search(
+            self.connected_search_service
+                .as_ref()
+                .and_then(|service| service.upgrade()),
+        )
         .with_drive(
             self.drive_manager
                 .as_ref()

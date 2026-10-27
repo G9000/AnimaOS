@@ -1,16 +1,62 @@
 # Browser work
 
-M46 adds a scoped browser adapter for ordinary owner chat runs. Its controlled
-Windows acceptance passes; see the [current handover](../superpowers/handover/2026-09-28-companion-console.md).
-The initial destination boundary is an operator-configured numeric loopback origin
-with exact GET/POST routes. M63 adds the pinned public HTTPS static-page mode
-below; actual public-site/account/non-Windows acceptance remains open.
+Browser tasks support owner-approved public HTTPS destinations with JavaScript,
+forms, typed controls and bounded document downloads. The owner can take over the
+dedicated browser page for sign-in, then return it to the agent. Fixed-route
+loopback and static-page policies retain their original limits.
 
 The Rust daemon owns task authority and Windows process lifetime. A small worker
-uses Playwright-core 1.59.1 and a fresh, sandboxed Chromium context. It receives no
+uses locked Playwright-core 1.64.1 and a fresh, sandboxed Chromium context. It receives no
 personal browser profile, existing cookies, CDP connection or model-selected code,
 selectors, executable paths or launch options. Application request interception
 does not provide OS network isolation or bound the browser engine's internal memory.
+
+## Websites and dedicated sign-in
+
+On Windows with Node 22 or 24, install the locked workspace dependencies and run
+`bun run browser:setup`. This explicit setup installs the paired full Chromium
+156.0.8078.4, checks its version in an owned browser process, and records the
+program/script hashes under `%LOCALAPPDATA%/AnimaOS/browser/setup.json`.
+Restart AnimaOS to load the installation. After worker updates, run
+`bun run browser:setup --check` and restart to refresh its hashes. No model tool
+can install a browser or select its executable.
+
+In a chat, open **Browser task → Websites and sign-in**. Enter the starting HTTPS
+URL and any required additional HTTPS origins, review the list, and add the
+website. The starting origin is included; at most eight origins are authorized.
+The daemon resolves them once and freezes public IPv4 pins. Reading or creating
+this metadata starts no browsing and grants no tools. Explicit browser tool
+access and action approvals still apply when the task runs.
+
+For a site requiring sign-in, create a dedicated account, choose **Sign in**, use
+the separate browser window, then choose **Finish sign-in**. Cookies and local
+storage are sealed outside the workspace; no personal browser profile is attached.
+Cookies are forwarded only to the account's primary origin. An account marked
+ready means the owner confirmed saving that state, rather than a live provider
+health check. Websites must be reauthorized after daemon restart; identical
+destination settings retain the logical account binding. **Remove website**
+revokes its accounts and closes owned workers.
+
+During an active interactive task, **Take control** pauses model operations and
+invalidates its page references. **Return control to agent** requires fresh
+observation and approval checks. If an action is busy, refresh after it settles
+and request control again; dispatched effects are never replayed. These controls
+preserve the original deadline. **Stop browser** retains physical ownership
+until process and socket cleanup completes.
+
+The initial interactive limits are 40 actions, 80 requests and 120 seconds,
+including blocked/background requests. Each resource or accepted download is at
+most 4 MiB, with a 32 MiB aggregate network budget and four output slots.
+CSV, text, JSON, PDF, PNG and JPEG use generated filenames and owned attachment
+IDs; native browser-managed downloads remain disabled. Public pages receive no
+uploaded workspace files.
+
+Only approved origins can be contacted through guarded requests. Private
+networks, personal profiles, popup/frame sign-in flows, WebSockets, service
+workers, IDN and IPv6-only destinations remain unsupported. Additional CDN or
+identity-provider origins require owner authorization; this does not promise
+compatibility with every site or SSO flow. Pins do not follow changing DNS.
+Controlled acceptance and real-account compatibility are separate checks.
 
 ## One pinned public HTTPS site
 
@@ -53,24 +99,22 @@ policy, not a reachability guarantee. TLS behavior follows the pinned
 and [TLS identity](https://nodejs.org/download/release/v22.12.0/docs/api/tls.html)
 contracts. Test certificates are never installed or accepted by production config.
 
-## Operator installation
+## Manual operator configuration
 
 Install the workspace dependencies using its pinned lockfile. Supply an absolute
-Node 22.12.0 executable, the tracked
+Node 22 or 24 executable, the tracked
 `packages/core-rust/browser-worker/worker.mjs`, and an absolute supported Chromium
-browser executable. Accepted local compatibility is the already installed
-Playwright-paired Chromium headless shell, revision1217, whose package metadata
-reports147.0.7727.15. Its executable SHA-256 is
-`f7c1ef91a3e287b64509a9733fc8fd43678cf4e2765d67f4d0eceb0e39ecd026`.
-Node22.12.0 and Playwright-core1.59.1 are the tested combination. Branded Edge155
-and Chrome155 attempts remain unaccepted: native downloads and browser background
-traffic exposed incompatibilities with the strict task boundary.
-No browser download or installer runs through the agent.
+browser executable from the locked Playwright pairing. Interactive and sign-in
+work require the full browser, rather than the headless shell. Earlier M46/M77
+acceptance used Node22.12.0, Playwright-core1.59.1 and Chromium headless revision1217;
+those are historical results and do not establish compatibility with this worker.
 
 Create a version-1 JSON configuration outside the agent's workspace authority.
 Set `ANIMAOS_RS_BROWSER_CONFIG_FILE` to its absolute file path before starting the
 real daemon. Deterministic test/embedding constructors do not load this variable.
-Omission leaves browser work unavailable. Invalid configured installations fail
+If this variable is omitted, the daemon uses the explicit setup record described
+above when present. Without either configuration, browser work is unavailable.
+Invalid configured installations fail
 validation rather than selecting another program from PATH.
 
 Calculate lowercase SHA-256 for each program/script:
@@ -78,7 +122,7 @@ Calculate lowercase SHA-256 for each program/script:
 ```powershell
 (Get-FileHash -LiteralPath 'C:\path\to\node.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
 (Get-FileHash -LiteralPath 'C:\path\to\worker.mjs' -Algorithm SHA256).Hash.ToLowerInvariant()
-(Get-FileHash -LiteralPath 'C:\path\to\chrome-headless-shell.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+(Get-FileHash -LiteralPath 'C:\path\to\chrome.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
 ```
 
 Replace every angle-bracket placeholder in this example. The origin and routes

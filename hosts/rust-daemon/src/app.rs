@@ -382,7 +382,7 @@ pub async fn serve_with(
             "Native file checkpoints require the supported Windows profile",
         ));
     }
-    let browser_setup = match std::env::var_os(crate::browser::config::BROWSER_CONFIG_ENV) {
+    let browser_setup = match crate::browser::config::startup_path() {
         Some(path) => Some(
             tokio::task::spawn_blocking(move || {
                 crate::browser::config::load_startup_setup(std::path::Path::new(&path))

@@ -1741,7 +1741,13 @@ pub(crate) struct DaemonState {
     pub(crate) drive_manager: Option<crate::connectors::drive::WeakDriveManager>,
     pub(crate) mail_records: HashMap<String, crate::connectors::mail::MailRecord>,
     pub(crate) mail_drafts: HashMap<String, crate::connectors::mail::MailDraft>,
+    pub(crate) connected_search: crate::connected_search::SearchRegistry,
+    pub(crate) connected_search_service: Option<crate::connected_search::WeakSearchService>,
+    pub(crate) account_workflows: crate::account_workflows::AccountWorkflowState,
     pub(crate) workspace: Option<WorkspaceConfig>,
+    /// An explicit fixture-owned pool keeps HTTP download tests independent.
+    #[cfg(test)]
+    pub(crate) workspace_download_read_slots: Option<Arc<tokio::sync::Semaphore>>,
     pub(crate) model_adapter: Arc<dyn ModelAdapter>,
     pub(crate) chatgpt_auth: crate::chatgpt_auth::ChatGptAuth,
     /// The provider API key pool the model adapters draw from (spec: key pools).
@@ -2485,11 +2491,16 @@ impl DaemonState {
             calendar_writes: HashMap::new(),
             calendar_manager: None,
             mail_manager: None,
+            connected_search: Default::default(),
+            connected_search_service: None,
+            account_workflows: Default::default(),
             drive_records: HashMap::new(),
             drive_manager: None,
             mail_records: HashMap::new(),
             mail_drafts: HashMap::new(),
             workspace: None,
+            #[cfg(test)]
+            workspace_download_read_slots: None,
             model_adapter,
             tool_registry: ToolRegistry::new(),
             process_manager: new_shared_process_manager_with_limit(max_background_processes),
@@ -2584,6 +2595,7 @@ impl DaemonState {
     }
 
     pub(crate) fn control_plane_persist_request(&mut self) -> ControlPlanePersistRequest {
+        crate::connected_search::reconcile_all(self);
         self.control_plane_revision = self
             .control_plane_revision
             .checked_add(1)
@@ -2758,6 +2770,8 @@ impl DaemonState {
             .workflows
             .sort_by(|left, right| left.id.cmp(&right.id));
         snapshot.workflow_templates = self.workflow_templates.values().cloned().collect();
+        snapshot.connected_search = self.connected_search.clone();
+        snapshot.account_workflows = self.account_workflows.clone();
         snapshot
             .workflow_templates
             .sort_by(|a, b| (&a.agent_id, &a.slug).cmp(&(&b.agent_id, &b.slug)));
@@ -2990,6 +3004,8 @@ impl DaemonState {
             .into_iter()
             .map(|run| (run.id.clone(), run))
             .collect();
+        self.connected_search = snapshot.connected_search.clone();
+        self.account_workflows = snapshot.account_workflows.clone();
         self.workflow_templates = snapshot
             .workflow_templates
             .into_iter()
@@ -3217,6 +3233,11 @@ impl DaemonState {
         }
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
+        crate::connected_search::validate_snapshot(&snapshot.connected_search)?;
+        crate::account_workflows::validate_snapshot(
+            &snapshot.account_workflows,
+            &snapshot.workflows,
+        )?;
         crate::jobs::workflows::validate_snapshot(&snapshot.workflows, &snapshot.jobs)?;
         crate::jobs::workflow_templates::validate_snapshot(
             &snapshot.workflow_templates,

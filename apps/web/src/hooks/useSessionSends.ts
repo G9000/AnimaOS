@@ -280,6 +280,9 @@ export class SendQueue {
           ? {
               browserSelection: {
                 policyId: input.browserSelection.policyId,
+                ...(input.browserSelection.profileId === undefined
+                  ? {}
+                  : { profileId: input.browserSelection.profileId }),
                 selectedInputIds: [...input.browserSelection.selectedInputIds],
               },
             }

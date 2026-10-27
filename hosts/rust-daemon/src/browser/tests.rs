@@ -53,6 +53,7 @@ pub(crate) fn policies(scope_ms: u32) -> InstalledBrowserPolicies {
                 origin: "http://127.0.0.1:43220".into(),
                 public_ipv4_pin: None,
                 authenticated: false,
+                interactive: None,
                 routes: vec![BrowserRoute {
                     id: "page".into(),
                     method: BrowserMethod::Get,

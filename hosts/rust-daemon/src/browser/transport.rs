@@ -464,7 +464,10 @@ fn check(inner: &Inner, control: &BrowserControl) -> Result<(), BrowserError> {
 fn needs_witness(operation: &BrowserOperation) -> bool {
     !matches!(
         operation,
-        BrowserOperation::Navigate { .. } | BrowserOperation::Observe { .. }
+        BrowserOperation::Navigate { .. }
+            | BrowserOperation::NavigateUrl { .. }
+            | BrowserOperation::OwnerControl { .. }
+            | BrowserOperation::Observe { .. }
     )
 }
 struct ActorCommand {

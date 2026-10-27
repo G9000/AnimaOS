@@ -64,8 +64,8 @@ pub(super) fn validate_slots(
             return Err(error(BrowserErrorCode::Invalid));
         }
         match output.kind {
-            BrowserArtifactKind::Csv => csv = true,
             BrowserArtifactKind::Screenshot => screenshot = true,
+            _ => csv = true,
         }
     }
     if !csv || !screenshot {
@@ -124,10 +124,7 @@ impl PrivateFiles {
             .iter()
             .enumerate()
             .map(|(index, output)| {
-                let extension = match output.kind {
-                    BrowserArtifactKind::Csv => "csv",
-                    BrowserArtifactKind::Screenshot => "jpg",
-                };
+                let extension = output.kind.extension();
                 Ok(BootstrapOutput {
                     id: output.id.clone(),
                     kind: output.kind,
@@ -160,14 +157,28 @@ impl PrivateFiles {
         scope: &BrowserScope,
         artifact: &BrowserArtifact,
     ) -> Result<VerifiedOutput, BrowserError> {
+        if scope.interactive.is_none()
+            && !matches!(
+                artifact.kind,
+                BrowserArtifactKind::Csv | BrowserArtifactKind::Screenshot
+            )
+        {
+            return Err(error(BrowserErrorCode::Denied));
+        }
         let slot = self
             .outputs
             .iter()
-            .find(|slot| slot.id == artifact.id && slot.kind == artifact.kind)
+            .find(|slot| {
+                slot.id == artifact.id
+                    && (slot.kind == artifact.kind
+                        || scope.interactive.is_some()
+                            && slot.kind == BrowserArtifactKind::Csv
+                            && artifact.kind != BrowserArtifactKind::Screenshot)
+            })
             .ok_or_else(|| error(BrowserErrorCode::Denied))?;
         let maximum = match artifact.kind {
-            BrowserArtifactKind::Csv => scope.limits.output_bytes,
             BrowserArtifactKind::Screenshot => scope.limits.screenshot_bytes,
+            _ => scope.limits.output_bytes,
         };
         if artifact.bytes == 0
             || artifact.bytes > u64::from(maximum)
@@ -209,4 +220,58 @@ pub(super) fn path_text(path: &Path) -> Result<String, BrowserError> {
     path.to_str()
         .map(str::to_owned)
         .ok_or_else(|| error(BrowserErrorCode::Invalid))
+}
+
+#[cfg(test)]
+mod interactive_kind_tests {
+    use super::*;
+    #[test]
+    fn general_output_kinds_cannot_use_a_legacy_csv_slot() {
+        let scope = crate::browser::tests::policies(120_000)
+            .policies
+            .remove("controlled-operator-policy")
+            .unwrap()
+            .template;
+        let private = PrivateFiles::create(
+            &scope,
+            &[],
+            &[
+                super::super::transport::OutputSlot {
+                    id: "download".into(),
+                    kind: BrowserArtifactKind::Csv,
+                },
+                super::super::transport::OutputSlot {
+                    id: "screenshot".into(),
+                    kind: BrowserArtifactKind::Screenshot,
+                },
+                super::super::transport::OutputSlot {
+                    id: "download_two".into(),
+                    kind: BrowserArtifactKind::Csv,
+                },
+                super::super::transport::OutputSlot {
+                    id: "screenshot_two".into(),
+                    kind: BrowserArtifactKind::Screenshot,
+                },
+            ],
+        )
+        .unwrap();
+        let output = &private.outputs[0];
+        let bytes = b"bounded fixture";
+        std::fs::write(&output.file_path, bytes).unwrap();
+        for kind in [
+            BrowserArtifactKind::Text,
+            BrowserArtifactKind::Json,
+            BrowserArtifactKind::Pdf,
+            BrowserArtifactKind::Png,
+            BrowserArtifactKind::Jpeg,
+        ] {
+            let artifact = BrowserArtifact {
+                id: output.id.clone(),
+                kind,
+                bytes: bytes.len() as u64,
+                sha256: hash(bytes),
+            };
+            assert!(private.read_output(&scope, &artifact).is_err());
+        }
+    }
 }

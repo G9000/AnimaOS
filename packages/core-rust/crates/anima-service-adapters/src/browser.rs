@@ -57,9 +57,29 @@ pub struct BrowserScope {
     /// Separate owner-authenticated lane; hosts must require a profile witness.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub authenticated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<BrowserInteractive>,
     pub routes: Vec<BrowserRoute>,
     pub input_ids: Vec<String>,
     pub limits: BrowserLimits,
+}
+
+/// One exact canonical HTTPS origin and its owner-reviewed public IPv4 dial pin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BrowserOrigin {
+    pub origin: String,
+    pub public_ipv4_pin: String,
+}
+
+/// Additional bounded interactive-network admission data. Resource and aggregate
+/// response limits are independent of the control protocol's wire-byte budget.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BrowserInteractive {
+    pub origins: Vec<BrowserOrigin>,
+    pub resource_bytes: u32,
+    pub network_bytes: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +127,13 @@ pub enum BrowserOperation {
     Navigate {
         route_id: String,
     },
+    NavigateUrl {
+        url: String,
+    },
+    /// Host-only owner control; never exposed by a model tool schema.
+    OwnerControl {
+        enabled: bool,
+    },
     Observe {
         screenshot: bool,
     },
@@ -116,6 +143,14 @@ pub enum BrowserOperation {
     Type {
         node: BrowserNodeRef,
         text: String,
+    },
+    SelectOption {
+        node: BrowserNodeRef,
+        value: String,
+    },
+    PressKey {
+        node: BrowserNodeRef,
+        key: BrowserKey,
     },
     #[serde(rename_all = "camelCase")]
     Scroll {
@@ -131,6 +166,16 @@ pub enum BrowserOperation {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BrowserKey {
+    Enter,
+    Tab,
+    Space,
+    ArrowUp,
+    ArrowDown,
+    Escape,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BrowserNode {
@@ -144,6 +189,34 @@ pub struct BrowserNode {
 pub enum BrowserArtifactKind {
     Screenshot,
     Csv,
+    Text,
+    Json,
+    Pdf,
+    Png,
+    Jpeg,
+}
+
+impl BrowserArtifactKind {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Screenshot | Self::Jpeg => "jpg",
+            Self::Csv => "csv",
+            Self::Text => "txt",
+            Self::Json => "json",
+            Self::Pdf => "pdf",
+            Self::Png => "png",
+        }
+    }
+    pub fn mime(self) -> &'static str {
+        match self {
+            Self::Screenshot | Self::Jpeg => "image/jpeg",
+            Self::Csv => "text/csv",
+            Self::Text => "text/plain",
+            Self::Json => "application/json",
+            Self::Pdf => "application/pdf",
+            Self::Png => "image/png",
+        }
+    }
 }
 
 /// Owned-artifact metadata only: no bytes, base64, host path or browser filename.
@@ -159,6 +232,8 @@ pub struct BrowserArtifact {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BrowserObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_url: Option<String>,
     pub document_generation: u64,
     pub route_id: String,
     pub nodes: Vec<BrowserNode>,
@@ -307,7 +382,7 @@ fn loopback_origin(value: &str) -> Result<(), BrowserError> {
     }
     Ok(())
 }
-fn public_hostname(value: &str) -> Result<(), BrowserError> {
+pub fn public_hostname(value: &str) -> Result<(), BrowserError> {
     let name = value.strip_prefix("https://").ok_or_else(invalid)?;
     if name.len() > 253 || name.is_empty() {
         return Err(invalid());
@@ -357,7 +432,7 @@ fn public_hostname(value: &str) -> Result<(), BrowserError> {
     }
     Ok(())
 }
-fn public_ipv4_pin(value: &str) -> Result<(), BrowserError> {
+pub fn public_ipv4_pin(value: &str) -> Result<(), BrowserError> {
     let address = value.parse::<std::net::Ipv4Addr>().map_err(|_| invalid())?;
     if address.to_string() != value {
         return Err(invalid());
@@ -411,6 +486,39 @@ fn route_path(value: &str) -> Result<(), BrowserError> {
     }
     Ok(())
 }
+
+fn interactive_path(value: &str) -> Result<(), BrowserError> {
+    if !value.starts_with('/')
+        || value.starts_with("//")
+        || value.len() > 2048
+        || value
+            .bytes()
+            .any(|b| !b.is_ascii() || b.is_ascii_control() || matches!(b, b'\\' | b'#' | b' '))
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// Checks URL shape and exact membership in the owner-reviewed origin list.
+/// Returns `Invalid` for malformed input and `Denied` for foreign origins;
+/// successful validation grants no live run, profile, or action authority.
+pub fn validate_interactive_url(scope: &BrowserScope, value: &str) -> Result<(), BrowserError> {
+    let interactive = scope.interactive.as_ref().ok_or_else(invalid)?;
+    if value.len() > 2048 {
+        return Err(invalid());
+    }
+    let origin = interactive
+        .origins
+        .iter()
+        .find(|origin| {
+            value
+                .strip_prefix(&origin.origin)
+                .is_some_and(|tail| tail.starts_with('/'))
+        })
+        .ok_or_else(|| failure(BrowserErrorCode::Denied))?;
+    interactive_path(&value[origin.origin.len()..])
+}
 fn fits_frame<T: Serialize>(value: &T, maximum: u32) -> Result<(), BrowserError> {
     let bytes = serde_json::to_vec(value).map_err(|_| invalid())?;
     frame_size(bytes.len(), maximum)
@@ -426,12 +534,36 @@ fn frame_size(length: usize, maximum: u32) -> Result<(), BrowserError> {
 pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
     identifier(&scope.id)?;
     safe_positive_integer(scope.revision)?;
+    if let Some(interactive) = &scope.interactive {
+        if scope.public_ipv4_pin.is_none()
+            || interactive.origins.is_empty()
+            || interactive.origins.len() > 8
+        {
+            return Err(invalid());
+        }
+        let mut origins = HashSet::new();
+        for origin in &interactive.origins {
+            public_hostname(&origin.origin)?;
+            public_ipv4_pin(&origin.public_ipv4_pin)?;
+            if !origins.insert(&origin.origin) {
+                return Err(invalid());
+            }
+        }
+        if !interactive.origins.iter().any(|o| {
+            o.origin == scope.origin && Some(&o.public_ipv4_pin) == scope.public_ipv4_pin.as_ref()
+        }) {
+            return Err(invalid());
+        }
+        limit(interactive.resource_bytes, 4 * 1024 * 1024)?;
+        limit(interactive.network_bytes, 32 * 1024 * 1024)?;
+    }
     match scope.public_ipv4_pin.as_deref() {
         Some(pin) => {
             public_hostname(&scope.origin)?;
             public_ipv4_pin(pin)?;
             if !scope.input_ids.is_empty()
                 || (!scope.authenticated
+                    && scope.interactive.is_none()
                     && scope
                         .routes
                         .iter()
@@ -451,7 +583,11 @@ pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
     let mut method_paths = HashSet::new();
     for route in &scope.routes {
         identifier(&route.id)?;
-        route_path(&route.path)?;
+        if scope.interactive.is_some() {
+            interactive_path(&route.path)?;
+        } else {
+            route_path(&route.path)?;
+        }
         if !route_ids.insert(&route.id)
             || !method_paths.insert((route.method == BrowserMethod::Get, &route.path))
         {
@@ -480,7 +616,14 @@ pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
         MAX_BROWSER_OBSERVATION_TEXT_BYTES,
     )?;
     limit(limits.input_bytes, MAX_BROWSER_ASSET_BYTES)?;
-    limit(limits.output_bytes, MAX_BROWSER_ASSET_BYTES)?;
+    limit(
+        limits.output_bytes,
+        if scope.interactive.is_some() {
+            4 * 1024 * 1024
+        } else {
+            MAX_BROWSER_ASSET_BYTES
+        },
+    )?;
     limit(limits.screenshot_bytes, MAX_BROWSER_SCREENSHOT_BYTES)?;
     if limits.frame_bytes > limits.wire_bytes {
         return Err(invalid());
@@ -491,13 +634,26 @@ pub fn validate_scope(scope: &BrowserScope) -> Result<(), BrowserError> {
 fn validate_operation_shape(operation: &BrowserOperation) -> Result<(), BrowserError> {
     match operation {
         BrowserOperation::Navigate { route_id } => identifier(route_id)?,
-        BrowserOperation::Observe { .. } => {}
-        BrowserOperation::Click { node } | BrowserOperation::Download { node } => {
-            identifier(&node.token)?
+        BrowserOperation::NavigateUrl { url } => {
+            if url.len() > 2048
+                || !url.starts_with("https://")
+                || url.bytes().any(|b| b.is_ascii_control() || b == b'\\')
+            {
+                return Err(invalid());
+            }
         }
+        BrowserOperation::OwnerControl { .. } => {}
+        BrowserOperation::Observe { .. } => {}
+        BrowserOperation::Click { node }
+        | BrowserOperation::Download { node }
+        | BrowserOperation::PressKey { node, .. } => identifier(&node.token)?,
         BrowserOperation::Type { node, text } => {
             identifier(&node.token)?;
             cap(text.len(), MAX_BROWSER_TYPE_BYTES)?;
+        }
+        BrowserOperation::SelectOption { node, value } => {
+            identifier(&node.token)?;
+            cap(value.len(), MAX_BROWSER_TYPE_BYTES)?;
         }
         BrowserOperation::Scroll { delta_y } => {
             if *delta_y == 0
@@ -522,6 +678,12 @@ pub fn validate_operation(
     validate_scope(scope)?;
     validate_operation_shape(operation)?;
     match operation {
+        BrowserOperation::NavigateUrl { url } => {
+            validate_interactive_url(scope, url)?;
+        }
+        BrowserOperation::OwnerControl { .. } if scope.interactive.is_none() => {
+            return Err(failure(BrowserErrorCode::Denied))
+        }
         BrowserOperation::Navigate { route_id } => {
             if !scope
                 .routes
@@ -578,6 +740,9 @@ pub fn validate_observation(
     observation: &BrowserObservation,
 ) -> Result<(), BrowserError> {
     validate_scope(scope)?;
+    if let Some(url) = &observation.current_url {
+        validate_interactive_url(scope, url)?;
+    }
     safe_positive_integer(observation.document_generation)?;
     identifier(&observation.route_id)?;
     if !scope
@@ -612,6 +777,14 @@ pub fn validate_observation(
     let mut screenshot = false;
     let mut csv = false;
     for artifact in &observation.artifacts {
+        if scope.interactive.is_none()
+            && !matches!(
+                artifact.kind,
+                BrowserArtifactKind::Csv | BrowserArtifactKind::Screenshot
+            )
+        {
+            return Err(failure(BrowserErrorCode::Denied));
+        }
         identifier(&artifact.id)?;
         if !artifact_ids.insert(&artifact.id)
             || artifact.bytes == 0
@@ -631,7 +804,7 @@ pub fn validate_observation(
                 screenshot = true;
                 scope.limits.screenshot_bytes
             }
-            BrowserArtifactKind::Csv => {
+            _ => {
                 if csv {
                     return Err(invalid());
                 }
@@ -770,6 +943,7 @@ mod tests {
             origin: "http://127.0.0.1:41873".into(),
             public_ipv4_pin: None,
             authenticated: false,
+            interactive: None,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),
@@ -824,6 +998,7 @@ mod tests {
             origin: "http://127.0.0.1:41873".into(),
             public_ipv4_pin: None,
             authenticated: false,
+            interactive: None,
             routes: vec![
                 BrowserRoute {
                     id: "offers".into(),
@@ -869,6 +1044,7 @@ mod tests {
     }
     fn observation() -> BrowserObservation {
         BrowserObservation {
+            current_url: None,
             document_generation: 1,
             route_id: "offers".into(),
             nodes: vec![BrowserNode {
@@ -1625,6 +1801,40 @@ mod tests {
             validate_observation(&scope, &view),
             BrowserErrorCode::LimitsExceeded,
         );
+    }
+
+    #[test]
+    fn m84_general_download_kinds_require_an_interactive_authorization() {
+        let legacy = sample();
+        let mut interactive = legacy.clone();
+        interactive.origin = "https://example.com".into();
+        interactive.public_ipv4_pin = Some("93.184.216.34".into());
+        interactive.input_ids.clear();
+        interactive.interactive = Some(BrowserInteractive {
+            origins: vec![BrowserOrigin {
+                origin: interactive.origin.clone(),
+                public_ipv4_pin: "93.184.216.34".into(),
+            }],
+            resource_bytes: 1024,
+            network_bytes: 4096,
+        });
+        for kind in [
+            BrowserArtifactKind::Text,
+            BrowserArtifactKind::Json,
+            BrowserArtifactKind::Pdf,
+            BrowserArtifactKind::Png,
+            BrowserArtifactKind::Jpeg,
+        ] {
+            let mut evidence = observation();
+            evidence.artifacts = vec![BrowserArtifact {
+                id: "file".into(),
+                kind,
+                bytes: 8,
+                sha256: "a".repeat(64),
+            }];
+            assert!(validate_observation(&legacy, &evidence).is_err());
+            assert!(validate_observation(&interactive, &evidence).is_ok());
+        }
     }
 
     #[test]

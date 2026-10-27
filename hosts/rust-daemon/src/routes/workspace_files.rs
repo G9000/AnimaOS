@@ -73,17 +73,37 @@ pub(super) async fn download(
     state: &SharedDaemonState,
     path: String,
 ) -> Result<axum::response::Response, ApiError> {
-    use crate::attachments::documents::source_read::read_retained;
+    use crate::attachments::documents::source_read::{read_retained_with_slots, shared_read_slots};
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     validate_download_path(&path)?;
-    let root = tokio::time::timeout_at(deadline, configured_root(state))
-        .await
-        .map_err(|_| ApiError::service_unavailable("Workspace download timed out"))??;
+    let (root, slots) = tokio::time::timeout_at(deadline, async {
+        let state = state.read().await;
+        let root = state
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root_path.clone())
+            .ok_or_else(|| ApiError::conflict("Configure a workspace before browsing files"))?;
+        #[cfg(test)]
+        let slots = state
+            .workspace_download_read_slots
+            .clone()
+            .unwrap_or_else(shared_read_slots);
+        #[cfg(not(test))]
+        let slots = shared_read_slots();
+        Ok::<_, ApiError>((root, slots))
+    })
+    .await
+    .map_err(|_| ApiError::service_unavailable("Workspace download timed out"))??;
     let disposition = download_disposition(&path);
     let cancel = anima_core::CancelSignal::new();
-    let bytes = read_retained(move || capture_download(&root, &path), &cancel, deadline)
-        .await
-        .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))??;
+    let bytes = read_retained_with_slots(
+        move || capture_download(&root, &path),
+        &cancel,
+        deadline,
+        slots,
+    )
+    .await
+    .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))??;
     if tokio::time::Instant::now() >= deadline {
         return Err(ApiError::service_unavailable(
             "Workspace download timed out",

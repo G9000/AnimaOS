@@ -12,6 +12,82 @@ fn owner_get(path: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn m68_download_capacity_is_bounded_and_isolated_between_fixtures() {
+    let busy = WorkspaceAvatarTemp::new("m68-busy-pool");
+    let independent = WorkspaceAvatarTemp::new("m68-independent-pool");
+    for fixture in [&busy, &independent] {
+        std::fs::write(fixture.root.join("report.txt"), b"exact report bytes").unwrap();
+        std::fs::write(fixture.root.join("report.xlsx"), b"unverified document").unwrap();
+    }
+    let busy_state = busy.state();
+    let slots = busy_state
+        .read()
+        .await
+        .workspace_download_read_slots
+        .clone()
+        .expect("workspace fixtures own an isolated read pool");
+    assert_eq!(slots.available_permits(), 4);
+    let held = slots.clone().try_acquire_many_owned(4).unwrap();
+    let busy_app = router(busy_state, DaemonConfig::default());
+    let independent_app = router(independent.state(), DaemonConfig::default());
+
+    for path in ["report.txt", "report.xlsx"] {
+        let response = busy_app
+            .clone()
+            .oneshot(owner_get(&format!(
+                "/api/workspace/file/download?path={path}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert!(!response.headers().contains_key("content-disposition"));
+    }
+
+    // Another fixture must still validate and read files while all four of
+    // this fixture's physical read leases are held.
+    for (path, status) in [
+        ("report.txt", StatusCode::OK),
+        ("report.xlsx", StatusCode::BAD_REQUEST),
+    ] {
+        let response = independent_app
+            .clone()
+            .oneshot(owner_get(&format!(
+                "/api/workspace/file/download?path={path}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        if status == StatusCode::OK {
+            assert_eq!(
+                to_bytes(response.into_body(), 64).await.unwrap().as_ref(),
+                b"exact report bytes"
+            );
+        } else {
+            assert!(!response.headers().contains_key("content-disposition"));
+        }
+    }
+
+    drop(held);
+    for (path, status) in [
+        ("report.txt", StatusCode::OK),
+        ("report.xlsx", StatusCode::BAD_REQUEST),
+    ] {
+        let response = busy_app
+            .clone()
+            .oneshot(owner_get(&format!(
+                "/api/workspace/file/download?path={path}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    assert_eq!(slots.available_permits(), 4);
+}
+
+#[tokio::test]
 async fn m68_owner_download_returns_exact_report_bytes_and_safe_headers() {
     let fixture = WorkspaceAvatarTemp::new("m68-report-download");
     let reports = fixture.root.join("reports");
@@ -550,6 +626,7 @@ async fn m68_normal_write_file_receipt_then_owner_files_and_download_are_exact()
         Step::Text(vec!["The report is saved in reports/ledger.csv."]),
     ]);
     let mut daemon = DaemonState::with_model_adapter(model.clone());
+    daemon.workspace_download_read_slots = Some(Arc::new(Semaphore::new(4)));
     daemon.workspace = Some(WorkspaceConfig {
         root_path: root.clone(),
         company_name: "M68 synthetic".into(),

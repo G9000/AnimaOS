@@ -38,6 +38,40 @@ OAuth application credentials and account tokens are stored in the operating sys
 
 Gmail and Outlook expose recent inbox messages and local plain-text drafts. Drafts remain in animaOS until the owner reviews the saved recipients, subject and body and selects **Send**. Agents can read and create drafts; they cannot call the approval operation. An uncertain send is marked **unknown** and is not automatically retried. Check Sent mail before composing a replacement.
 
+## Search connected accounts
+
+In **Connections → Search and account workflows**, enable each source you want indexed. Enabling a source grants the companion `connected_search`; the source still requires its current native read permission. Source consent is bound to this agent and account authorization. Disabling, disconnecting, reconnecting or removing the read permission clears that enrollment.
+
+The owner SDK provides `client.connectedSearch.sources/setSource/refresh/query/item`:
+
+```typescript
+const { sources } = await client.connectedSearch.sources(agentId);
+// After the owner selects this exact source:
+const source = sources.find((item) => item.connectorId === selectedConnectorId);
+if (source?.available) {
+  await client.connectedSearch.setSource(agentId, source.connectorId, {
+    enabled: true,
+    expectedGeneration: source.generation,
+  });
+  await client.connectedSearch.refresh(agentId); // requests background refresh
+}
+
+const result = await client.connectedSearch.query(agentId, {
+  query: 'invoice', kinds: ['mail'], limit: 10,
+});
+for (const hit of result.hits) {
+  console.log(hit.title, hit.citationPath, hit.indexedAtMs);
+}
+```
+
+Search covers up to 100 recent Gmail/Outlook inbox items, 25 IMAP items, 16 selected Drive files, and 500 Google Calendar events from 30 days ago through 180 days ahead. Each item retains up to 8 KiB of text. Mail attachments are not indexed; unsupported Drive formats retain metadata only. Sources report scope, freshness and errors. Enabled sources refresh about every two minutes while the daemon runs. Results include owner-protected citation paths and validated provider links when available. `item` reads the indexed text; treat it as untrusted evidence.
+
+## Start workflows from account activity
+
+The Connections rule editor binds an enabled source to a saved workflow version. Filters match title, sender or collection. Parameters can receive event content or fixed values. Initial sync and every newly enabled or edited rule establish a fresh baseline before starting work. Rules observe retained inbox/calendar content and selected-file changes; polling is not a lossless event-delivery service.
+
+The SDK exposes `client.accountWorkflows.list/create/update/delete/events`. Create accepts an optional `requestKey`; retain the same key and exact payload when retrying an uncertain creation. Updates and deletes require the current rule revision. Events link to workflow IDs for `client.workflows.get`. Saved workflow edits or source authorization changes pause the rule until the owner reviews and enables it again. Existing task permissions, approval checkpoints and uncertain-effect recovery remain in force.
+
 ## Operator fallback
 
 Environment variables remain available for backward-compatible daemon deployments. A configuration loaded from the environment is managed outside the web console: its fields are disabled there, and it cannot be replaced or removed through the UI. Restart the daemon after changing environment variables.

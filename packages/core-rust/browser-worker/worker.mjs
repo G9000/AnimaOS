@@ -19,7 +19,13 @@ import { Readable } from 'node:stream';
 
 const require = createRequire(import.meta.url);
 const engineMetadata = require('playwright-core/package.json');
-export const PLAYWRIGHT_VERSION = '1.59.1';
+export const PLAYWRIGHT_VERSION = '1.64.1';
+const MAINTAINED_CHROMIUM_VERSION = require(
+  path.join(
+    path.dirname(require.resolve('playwright-core/package.json')),
+    'browsers.json',
+  ),
+).browsers.find((browser) => browser.name === 'chromium').browserVersion;
 if (engineMetadata.version !== PLAYWRIGHT_VERSION)
   throw new Error('Browser worker dependency version is unavailable');
 
@@ -431,10 +437,35 @@ export function validateScope(scope) {
     'limits',
     ...(pinned ? ['publicIpv4Pin'] : []),
     ...(Object.hasOwn(scope ?? {}, 'authenticated') ? ['authenticated'] : []),
+    ...(Object.hasOwn(scope ?? {}, 'interactive') ? ['interactive'] : []),
   ]);
   if (Object.hasOwn(scope, 'authenticated')) boolean(scope.authenticated);
   identifier(scope.id);
   integer(scope.revision);
+  if (scope.interactive) {
+    exact(scope.interactive, ['origins', 'resourceBytes', 'networkBytes']);
+    array(scope.interactive.origins, 8);
+    if (!pinned || !scope.interactive.origins.length) fail();
+    const origins = new Set();
+    for (const target of scope.interactive.origins) {
+      exact(target, ['origin', 'publicIpv4Pin']);
+      publicHostname(target.origin);
+      publicPin(target.publicIpv4Pin);
+      if (origins.has(target.origin)) fail();
+      origins.add(target.origin);
+    }
+    if (
+      !scope.interactive.origins.some(
+        (o) =>
+          o.origin === scope.origin && o.publicIpv4Pin === scope.publicIpv4Pin,
+      )
+    )
+      fail();
+    integer(scope.interactive.resourceBytes);
+    cap(scope.interactive.resourceBytes, 4194304);
+    integer(scope.interactive.networkBytes);
+    cap(scope.interactive.networkBytes, 33554432);
+  } else if (Object.hasOwn(scope, 'interactive')) fail();
   if (pinned) {
     publicHostname(scope.origin);
     publicPin(scope.publicIpv4Pin);
@@ -452,8 +483,15 @@ export function validateScope(scope) {
     exact(route, ['id', 'method', 'path']);
     identifier(route.id);
     if (route.method !== 'GET' && route.method !== 'POST') fail();
-    if (pinned && !scope.authenticated && route.method !== 'GET') fail();
-    routePath(route.path);
+    if (
+      pinned &&
+      !scope.authenticated &&
+      !scope.interactive &&
+      route.method !== 'GET'
+    )
+      fail();
+    if (scope.interactive) interactiveUrl(scope, scope.origin + route.path);
+    else routePath(route.path);
     const pair = route.method + ' ' + route.path;
     if (routeIds.has(route.id) || pairs.has(pair)) fail();
     routeIds.add(route.id);
@@ -470,11 +508,41 @@ export function validateScope(scope) {
   exact(scope.limits, LIMIT_KEYS);
   for (const key of LIMIT_KEYS) {
     integer(scope.limits[key]);
-    cap(scope.limits[key], LIMITS[key]);
+    cap(
+      scope.limits[key],
+      scope.interactive && key === 'outputBytes' ? 4194304 : LIMITS[key],
+    );
   }
   if (scope.limits.frameBytes > scope.limits.wireBytes) fail();
   cap(serializedBytes(scope).length, scope.limits.frameBytes);
   return scope;
+}
+
+export function interactiveUrl(scope, value) {
+  if (
+    !scope.interactive ||
+    typeof value !== 'string' ||
+    Buffer.byteLength(value) > 2048 ||
+    /[\s\\\x00-\x1f\x7f]/.test(value)
+  )
+    fail('denied');
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    fail('denied');
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    url.port ||
+    url.href !== value ||
+    !scope.interactive.origins.some((o) => o.origin === url.origin)
+  )
+    fail('denied');
+  return url;
 }
 
 function nodeRef(value) {
@@ -483,6 +551,31 @@ function nodeRef(value) {
 }
 function operationShape(operation) {
   switch (operation?.kind) {
+    case 'navigateUrl':
+      exact(operation, ['kind', 'url']);
+      validString(operation.url);
+      cap(Buffer.byteLength(operation.url), 2048);
+      break;
+    case 'ownerControl':
+      exact(operation, ['kind', 'enabled']);
+      boolean(operation.enabled);
+      break;
+    case 'selectOption':
+      exact(operation, ['kind', 'node', 'value']);
+      nodeRef(operation.node);
+      validString(operation.value);
+      cap(Buffer.byteLength(operation.value), LIMITS.typeBytes);
+      break;
+    case 'pressKey':
+      exact(operation, ['kind', 'node', 'key']);
+      nodeRef(operation.node);
+      if (
+        !['Enter', 'Tab', 'Space', 'ArrowUp', 'ArrowDown', 'Escape'].includes(
+          operation.key,
+        )
+      )
+        fail();
+      break;
     case 'navigate':
       exact(operation, ['kind', 'routeId']);
       identifier(operation.routeId);
@@ -522,6 +615,8 @@ function operationShape(operation) {
 }
 function validateOperation(scope, operation) {
   operationShape(operation);
+  if (operation.kind === 'navigateUrl') interactiveUrl(scope, operation.url);
+  if (operation.kind === 'ownerControl' && !scope.interactive) fail('denied');
   if (
     operation.kind === 'navigate' &&
     !scope.routes.some(
@@ -699,9 +794,12 @@ function request(message) {
     integer(payload.expiresAtMs);
   } else if (message.op === 'execute') {
     operationShape(payload?.operation);
-    const needsWitness = !['navigate', 'observe'].includes(
-      payload.operation.kind,
-    );
+    const needsWitness = ![
+      'navigate',
+      'navigateUrl',
+      'ownerControl',
+      'observe',
+    ].includes(payload.operation.kind);
     exact(payload, [
       'scopeId',
       'scopeRevision',
@@ -732,12 +830,18 @@ function artifact(value, scope) {
   identifier(value.id);
   integer(value.bytes);
   hash(value.sha256);
-  if (value.kind !== 'csv' && value.kind !== 'screenshot') fail();
+  if (
+    !['csv', 'text', 'json', 'pdf', 'png', 'jpeg', 'screenshot'].includes(
+      value.kind,
+    ) ||
+    (!scope.interactive && !['csv', 'screenshot'].includes(value.kind))
+  )
+    fail();
   cap(
     value.bytes,
-    value.kind === 'csv'
-      ? scope.limits.outputBytes
-      : scope.limits.screenshotBytes,
+    value.kind === 'screenshot'
+      ? scope.limits.screenshotBytes
+      : scope.limits.outputBytes,
   );
 }
 
@@ -750,7 +854,10 @@ export function validateObservation(scope, observation) {
     'shortened',
     'omittedNodes',
     'artifacts',
+    ...(Object.hasOwn(observation ?? {}, 'currentUrl') ? ['currentUrl'] : []),
   ]);
+  if (Object.hasOwn(observation, 'currentUrl'))
+    interactiveUrl(scope, observation.currentUrl);
   integer(observation.documentGeneration);
   identifier(observation.routeId);
   if (!scope.routes.some((route) => route.id === observation.routeId))
@@ -806,6 +913,7 @@ export function boundObservation(
     'shortened',
     'omittedNodes',
     'artifacts',
+    ...(Object.hasOwn(source ?? {}, 'currentUrl') ? ['currentUrl'] : []),
   ]);
   array(source.nodes, LIMITS.jsonNodes);
   array(source.artifacts, LIMITS.observationArtifacts);
@@ -1178,7 +1286,12 @@ export function validateExecute(
   )
     fail('stale');
   validateOperation(bootstrap.scope, payload.operation);
-  if (!['navigate', 'observe'].includes(payload.operation.kind)) {
+  if (
+    !['navigate', 'navigateUrl', 'ownerControl', 'observe'].includes(
+      payload.operation.kind,
+    )
+  ) {
+    if (!current.document) fail('stale');
     witness(current.document);
     if (
       canonicalDigest(payload.documentWitness) !==
@@ -1223,6 +1336,42 @@ export function guardRequest(scope, intercepted, window) {
     intercepted.channel !== 'http'
   )
     denied();
+  if (scope.interactive) {
+    let target;
+    try {
+      target = interactiveUrl(scope, intercepted.url);
+    } catch {
+      denied();
+    }
+    if (
+      !['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(
+        intercepted.method,
+      ) ||
+      (!['GET', 'HEAD', 'OPTIONS'].includes(intercepted.method) &&
+        !window.effectActive)
+    )
+      denied();
+    if (
+      !Number.isSafeInteger(intercepted.bodyBytes) ||
+      intercepted.bodyBytes < 0 ||
+      intercepted.bodyBytes > 32768 ||
+      !Number.isSafeInteger(intercepted.headerBytes) ||
+      intercepted.headerBytes < 0 ||
+      intercepted.headerBytes > 32768
+    )
+      denied('limitsExceeded');
+    if (intercepted.navigation && !window.effectActive) denied();
+    const pin = scope.interactive.origins.find(
+      (o) => o.origin === target.origin,
+    ).publicIpv4Pin;
+    return freeze({
+      id: scope.routes[0].id,
+      method: intercepted.method,
+      path: target.pathname + target.search,
+      origin: target.origin,
+      publicIpv4Pin: pin,
+    });
+  }
   const route = scope.routes.find(
     (candidate) =>
       candidate.method === intercepted.method &&
@@ -1272,17 +1421,35 @@ export function guardRequest(scope, intercepted, window) {
 
 /** Manual redirects and stream caps checked before fulfillment; this performs no fetch. */
 export async function readBoundedResponse(response, limits, control) {
-  if (limits.kind !== 'csv' && limits.kind !== 'asset') fail();
+  const mimeKinds = {
+    csv: 'text/csv',
+    text: 'text/plain',
+    json: 'application/json',
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpeg: 'image/jpeg',
+  };
+  if (!(limits.kind in mimeKinds) && limits.kind !== 'asset') fail();
   integer(limits.bodyBytes);
   boolean(limits.allowAttachment);
   integer(control.deadlineMs);
   const bodyCap =
-    limits.kind === 'csv'
-      ? Math.min(limits.bodyBytes, LIMITS.outputBytes)
-      : Math.min(limits.bodyBytes, 65536);
+    limits.kind === 'asset'
+      ? Math.min(limits.bodyBytes, limits.interactive ? 4194304 : 65536)
+      : Math.min(
+          limits.bodyBytes,
+          limits.kind === 'csv' && !limits.interactive
+            ? LIMITS.outputBytes
+            : 4194304,
+        );
   integer(bodyCap);
   integer(limits.totalBytes);
-  cap(limits.totalBytes, LIMITS.wireBytes);
+  cap(
+    limits.totalBytes,
+    limits.interactive || !['asset', 'csv'].includes(limits.kind)
+      ? 33554432
+      : LIMITS.wireBytes,
+  );
   integer(control.aggregateBytes, false);
   if (control.diagnostics) {
     integer(control.diagnostics.blockedRequests, false);
@@ -1330,7 +1497,7 @@ export async function readBoundedResponse(response, limits, control) {
     cap(headerBytes, 8192);
     if (
       response.headers.has('content-disposition') &&
-      (limits.allowAttachment !== true || limits.kind !== 'csv')
+      (limits.allowAttachment !== true || limits.kind === 'asset')
     )
       fail('denied');
     const announced = response.headers.get('content-length');
@@ -1347,9 +1514,10 @@ export async function readBoundedResponse(response, limits, control) {
     const safeHeaders = {};
     const contentType = response.headers.get('content-type');
     if (
-      limits.kind === 'csv' &&
+      limits.kind !== 'asset' &&
       (contentType === null ||
-        !/^text\/csv(?:;\s*charset=utf-8)?$(?![\s\S])/i.test(contentType))
+        contentType.split(';')[0].trim().toLowerCase() !==
+          mimeKinds[limits.kind])
     )
       fail('denied');
     for (const name of [
@@ -1358,6 +1526,15 @@ export async function readBoundedResponse(response, limits, control) {
       'content-security-policy-report-only',
       'x-content-type-options',
       'referrer-policy',
+      ...(limits.interactive
+        ? [
+            'access-control-allow-origin',
+            'access-control-allow-credentials',
+            'access-control-allow-methods',
+            'access-control-allow-headers',
+            'vary',
+          ]
+        : []),
     ]) {
       const value = response.headers.get(name);
       if (value !== null) safeHeaders[name] = value;
@@ -1406,10 +1583,43 @@ export async function readBoundedResponse(response, limits, control) {
       }
     }
     if (announced !== null && Number(announced) !== count) fail('protocol');
+    const body = Buffer.concat(chunks, count);
+    if (
+      limits.kind === 'pdf' &&
+      !body.subarray(0, 5).equals(Buffer.from('%PDF-'))
+    )
+      fail('denied');
+    if (
+      limits.kind === 'png' &&
+      !body
+        .subarray(0, 8)
+        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    )
+      fail('denied');
+    if (
+      limits.kind === 'jpeg' &&
+      !body.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+    )
+      fail('denied');
+    if (['text', 'json'].includes(limits.kind)) {
+      let content;
+      try {
+        content = textDecoder.decode(body);
+      } catch {
+        fail('denied');
+      }
+      if (limits.kind === 'json') {
+        try {
+          JSON.parse(content);
+        } catch {
+          fail('denied');
+        }
+      }
+    }
     return {
       status: response.status,
       headers: Object.freeze(safeHeaders),
-      body: Buffer.concat(chunks, count),
+      body,
     };
   } catch (error) {
     if (control.diagnostics) control.diagnostics.blockedRequests++;
@@ -1431,7 +1641,7 @@ export async function readBoundedResponse(response, limits, control) {
 
 // Runtime adapter. The engine and pinned maintained YAML bundle are loaded only
 // by the explicit CLI. The bundle export is version-coupled, not a stable API.
-// Playwright-core1.59.1 is Microsoft/Apache-2.0; its bundled notices remain with
+// Playwright-core1.64.1 is Microsoft/Apache-2.0; its bundled notices remain with
 // that distribution. This adapter imports it rather than copying its engine.
 export function parseCliArguments(argv, privateCwd) {
   if (!Array.isArray(argv) || argv.length !== 2 || argv[0] !== '--bootstrap')
@@ -1809,7 +2019,10 @@ function snapshotKey(key) {
     )
       fail('unavailable');
     if (attribute[1] === 'ref') {
-      if (ref || !/^e[1-9][0-9]*$(?![\s\S])/.test(attribute[2] ?? ''))
+      if (
+        ref ||
+        !/^(?:f[1-9][0-9]*)?e[1-9][0-9]*$(?![\s\S])/.test(attribute[2] ?? '')
+      )
         fail('unavailable');
       ref = attribute[2];
     }
@@ -1896,7 +2109,7 @@ export function snapshotEvidence(snapshot, yaml) {
 
 // All page JavaScript below is fixed worker source installed before page scripts.
 // These application hooks are not an OS egress or browser-memory sandbox.
-function installDocumentGuards({ marker, report }) {
+function installDocumentGuards({ marker, report, ownerNavigation }) {
   const originalDocument = document;
   const documentToken = Array.from(
     crypto.getRandomValues(new Uint8Array(16)),
@@ -1923,7 +2136,7 @@ function installDocumentGuards({ marker, report }) {
       ready,
     }),
   });
-  const refuse = () => {
+  const refuse = function () {
     try {
       Promise.resolve(globalThis[report]()).catch(() => {});
     } catch {}
@@ -1997,6 +2210,32 @@ function installDocumentGuards({ marker, report }) {
       writable: false,
       value: refuse,
     });
+  if (ownerNavigation) {
+    const announce = (value) => {
+      try {
+        Promise.resolve(
+          globalThis[ownerNavigation](new URL(value, document.baseURI).origin),
+        ).catch(() => {});
+      } catch {}
+    };
+    document.addEventListener(
+      'submit',
+      (event) => {
+        if (event.isTrusted && event.target instanceof HTMLFormElement)
+          announce(event.submitter?.formAction || event.target.action);
+      },
+      true,
+    );
+    document.addEventListener(
+      'click',
+      (event) => {
+        if (!event.isTrusted || !(event.target instanceof Element)) return;
+        const link = event.target.closest('a[href]');
+        if (link) announce(link.href);
+      },
+      true,
+    );
+  }
   ready = true;
 }
 
@@ -2021,22 +2260,22 @@ export async function createDenyProxy({ signal, onRequest, onFailure } = {}) {
     resolveStart = resolve;
     rejectStart = reject;
   });
-  const notify = (callback, code) => {
+  const notify = (callback, code, metadata) => {
     try {
-      callback?.(code);
+      callback?.(code, metadata);
     } catch {
       /* Only static refusal is exposed. */
     }
   };
-  const refused = (socket, code = 'denied') => {
+  const refused = (socket, code = 'denied', metadata) => {
     if (socket) observed.add(socket);
-    notify(onRequest, code);
+    notify(onRequest, code, metadata);
   };
   const response =
     'HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n';
-  const denySocket = (socket, count = true) => {
+  const denySocket = (socket, count = true, metadata) => {
     if (!socket.destroyed && !socket.writableEnded) socket.end(response);
-    if (count) refused(socket);
+    if (count) refused(socket, 'denied', metadata);
   };
   const server = createServer(
     {
@@ -2071,7 +2310,9 @@ export async function createDenyProxy({ signal, onRequest, onFailure } = {}) {
     });
     if (closing) socket.destroy();
   });
-  server.on('connect', (_request, socket) => denySocket(socket));
+  server.on('connect', (request, socket) =>
+    denySocket(socket, true, { method: 'CONNECT', authority: request.url }),
+  );
   server.on('upgrade', (_request, socket) => denySocket(socket));
   server.on('clientError', (_error, socket) =>
     denySocket(socket, !observed.has(socket)),
@@ -2144,21 +2385,66 @@ export async function createDenyProxy({ signal, onRequest, onFailure } = {}) {
 export function createPinnedHttpsRequest(
   scope,
   route,
-  { signal, requestImpl = httpsRequest, cookie, contentType, body } = {},
+  {
+    signal,
+    requestImpl = httpsRequest,
+    cookie,
+    contentType,
+    body,
+    requestOrigin,
+    requestedMethod,
+    requestedHeaders,
+  } = {},
 ) {
   validateScope(scope);
   if (
     !scope.publicIpv4Pin ||
-    !scope.routes.some(
-      (candidate) =>
-        candidate.id === route?.id &&
-        candidate.method === route.method &&
-        (scope.authenticated || candidate.method === 'GET') &&
-        candidate.path === route.path,
-    )
+    (!scope.interactive &&
+      !scope.routes.some(
+        (candidate) =>
+          candidate.id === route?.id &&
+          candidate.method === route.method &&
+          (scope.authenticated || candidate.method === 'GET') &&
+          candidate.path === route.path,
+      ))
   )
     fail();
-  const hostname = publicHostname(scope.origin);
+  const selectedOrigin = scope.interactive
+    ? interactiveUrl(scope, (route.origin ?? scope.origin) + route.path).origin
+    : scope.origin;
+  const selectedPin = scope.interactive
+    ? scope.interactive.origins.find((o) => o.origin === selectedOrigin)
+        .publicIpv4Pin
+    : scope.publicIpv4Pin;
+  const hostname = publicHostname(selectedOrigin);
+  if (
+    requestOrigin !== undefined &&
+    (!scope.interactive ||
+      !scope.interactive.origins.some(
+        (origin) => origin.origin === requestOrigin,
+      ))
+  )
+    fail('denied');
+  if (
+    requestedMethod !== undefined &&
+    (route.method !== 'OPTIONS' ||
+      !scope.interactive ||
+      !['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(
+        requestedMethod,
+      ))
+  )
+    fail('denied');
+  if (
+    requestedHeaders !== undefined &&
+    (route.method !== 'OPTIONS' ||
+      typeof requestedHeaders !== 'string' ||
+      requestedHeaders.length > 1024 ||
+      requestedHeaders.split(',').length > 16 ||
+      !requestedHeaders
+        .split(',')
+        .every((name) => /^[a-z0-9-]+$/.test(name.trim())))
+  )
+    fail('denied');
   const resources = new Map();
   let closing = false,
     settled = false,
@@ -2239,7 +2525,7 @@ export function createPinnedHttpsRequest(
   }
   try {
     const request = requestImpl({
-      hostname: scope.publicIpv4Pin,
+      hostname: selectedPin,
       port: 443,
       path: route.path,
       method: route.method,
@@ -2247,12 +2533,21 @@ export function createPinnedHttpsRequest(
       headers: {
         Host: hostname,
         'Accept-Encoding': 'identity',
-        ...(scope.authenticated && cookie ? { Cookie: cookie } : {}),
-        ...(scope.authenticated && contentType
+        ...(scope.authenticated && selectedOrigin === scope.origin && cookie
+          ? { Cookie: cookie }
+          : {}),
+        ...((scope.authenticated || scope.interactive) && contentType
           ? { 'Content-Type': contentType }
           : {}),
-        ...(scope.authenticated && route.method === 'POST'
-          ? { Origin: scope.origin }
+        ...((scope.authenticated || scope.interactive) &&
+        (requestOrigin || !['GET', 'HEAD'].includes(route.method))
+          ? { Origin: requestOrigin ?? scope.origin }
+          : {}),
+        ...(route.method === 'OPTIONS' && requestedMethod
+          ? { 'Access-Control-Request-Method': requestedMethod }
+          : {}),
+        ...(route.method === 'OPTIONS' && requestedHeaders
+          ? { 'Access-Control-Request-Headers': requestedHeaders }
           : {}),
       },
       rejectUnauthorized: true,
@@ -2300,7 +2595,10 @@ export function createPinnedHttpsRequest(
       }
     });
     request.end(
-      scope.authenticated && route.method === 'POST' ? body : undefined,
+      (scope.authenticated || scope.interactive) &&
+        !['GET', 'HEAD'].includes(route.method)
+        ? body
+        : undefined,
     );
   } catch {
     reject();
@@ -2330,6 +2628,8 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   const pageId = 'page-' + randomUUID();
   const marker = '__anima_document_' + randomUUID().replaceAll('-', '');
   const report = '__anima_refused_' + randomUUID().replaceAll('-', '');
+  const ownerNavigation =
+    '__anima_owner_navigation_' + randomUUID().replaceAll('-', '');
   const privateDiagnostics = {
     blockedRequests: 0,
     redirectsRejected: 0,
@@ -2355,6 +2655,13 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     expectPage = false,
     expectedNavigation;
   let profileLoaded = false;
+  let ownerControl = false;
+  let admittedNavigationAuthority;
+  let ownerNavigationActive = false;
+  let ownerNavigationExpires = 0;
+  let ownerNavigationUses = 0;
+  let pendingRedirect;
+  let redirectHops = 0;
   let currentUrl = 'about:blank';
   let actionsUsed = 0,
     serial = 0,
@@ -2389,6 +2696,8 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   async function close() {
     if (!closing) {
       shutdown.abort();
+      admittedNavigationAuthority = undefined;
+      ownerNavigationActive = false;
       network.effectActive = false;
       closing = (async () => {
         await startup;
@@ -2466,6 +2775,25 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   const leaseTimer = setTimeout(() => retire('deadline'), remaining);
   leaseTimer.unref();
   function allowedRoute(value, method = 'GET') {
+    if (scope.interactive && typeof value === 'string') {
+      try {
+        const url = interactiveUrl(
+          scope,
+          new URL(
+            value,
+            currentUrl === 'about:blank' ? scope.origin : currentUrl,
+          ).href,
+        );
+        return {
+          id: scope.routes[0].id,
+          method,
+          path: url.pathname + url.search,
+          origin: url.origin,
+        };
+      } catch {
+        return undefined;
+      }
+    }
     return scope.routes.find(
       (route) =>
         route.method === method &&
@@ -2475,13 +2803,17 @@ export async function createMaintainedSession(bootstrap, dependencies) {
   async function writeArtifact(kind, body) {
     timeout();
     const slot = bootstrap.outputs.find(
-      (candidate) => candidate.kind === kind && !usedOutputs.has(candidate.id),
+      (candidate) =>
+        candidate.kind === (kind === 'screenshot' ? 'screenshot' : 'csv') &&
+        !usedOutputs.has(candidate.id),
     );
     if (!slot || usedOutputs.size >= LIMITS.sessionArtifacts)
       fail('limitsExceeded');
     cap(
       body.length,
-      kind === 'csv' ? scope.limits.outputBytes : scope.limits.screenshotBytes,
+      kind === 'screenshot'
+        ? scope.limits.screenshotBytes
+        : scope.limits.outputBytes,
     );
     if (!body.length) fail('invalid');
     usedOutputs.add(slot.id);
@@ -2506,9 +2838,14 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       sha256: createHash('sha256').update(body).digest('hex'),
     };
   }
-  async function guardedResponse(intercepted, headers = {}, body) {
+  async function guardedResponse(
+    intercepted,
+    headers = {},
+    body,
+    redirects = 0,
+  ) {
     network.nowMs = now();
-    if (bootstrap.profile?.ownerLogin) {
+    if (bootstrap.profile?.ownerLogin || ownerControl) {
       network.effectActive = true;
       if (intercepted.navigation) {
         const candidate = scope.routes.find(
@@ -2521,15 +2858,40 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       }
     }
     const target = guardRequest(scope, intercepted, network);
-    const targetUrl = scope.origin + target.path;
-    const cookie = bootstrap.profile
-      ? profileCookieHeader(
-          scope.origin,
-          targetUrl,
-          await context.cookies(targetUrl),
+    const targetUrl = (target.origin ?? scope.origin) + target.path;
+    let cookie;
+    if (
+      bootstrap.profile &&
+      (target.origin ?? scope.origin) === scope.origin &&
+      (intercepted.download || headers.cookie !== undefined)
+    ) {
+      const owned = profileCookieHeader(
+        scope.origin,
+        targetUrl,
+        await context.cookies(targetUrl),
+      );
+      if (intercepted.download) cookie = owned;
+      else {
+        // Routed requests retain Chromium's credentials/SameSite decision.
+        // A cookie in the owned jar is not permission to add it to an omit request.
+        if (
+          typeof headers.cookie !== 'string' ||
+          Buffer.byteLength(headers.cookie) > 32768 ||
+          /[\r\n\x00]/.test(headers.cookie)
         )
-      : undefined;
-    if (intercepted.navigation) expectedNavigation = scope.origin + target.path;
+          fail('denied');
+        const selected = headers.cookie.split(';').map((pair) => pair.trim());
+        const permitted = new Set(owned.split('; '));
+        if (
+          !selected.length ||
+          selected.length > 64 ||
+          selected.some((pair) => !pair || !permitted.has(pair))
+        )
+          fail('denied');
+        cookie = headers.cookie;
+      }
+    }
+    if (intercepted.navigation) expectedNavigation = targetUrl;
     timeout();
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -2562,6 +2924,15 @@ export async function createMaintainedSession(bootstrap, dependencies) {
           cookie,
           contentType: headers['content-type'],
           body,
+          ...(scope.interactive && headers.origin
+            ? { requestOrigin: headers.origin }
+            : {}),
+          ...(target.method === 'OPTIONS'
+            ? {
+                requestedMethod: headers['access-control-request-method'],
+                requestedHeaders: headers['access-control-request-headers'],
+              }
+            : {}),
         });
         publicRequests.add(publicOwner); // No yield between dispatch and ownership.
         response = await publicOwner.response;
@@ -2586,26 +2957,144 @@ export async function createMaintainedSession(bootstrap, dependencies) {
           credentials: 'omit',
           cache: 'no-store',
         });
+      let responseCookieHeaders = {};
+      if (
+        bootstrap.profile &&
+        (target.origin ?? scope.origin) === scope.origin
+      ) {
+        const values = response.headers.getSetCookie();
+        const received = profileResponseCookies(
+          scope.origin,
+          targetUrl,
+          values,
+        );
+        if (intercepted.download) {
+          if (received.length) await context.addCookies(received);
+        } else if (received.length) {
+          // Chromium applies routed response cookies, including credentials:omit.
+          // Playwright splits this bounded newline form into separate Set-Cookie headers.
+          responseCookieHeaders = { 'set-cookie': values.join('\n') };
+        }
+      }
+      if (
+        scope.interactive &&
+        response.status >= 300 &&
+        response.status < 400
+      ) {
+        if (redirects >= 5 || !response.headers.get('location')) fail('denied');
+        const nextUrl = interactiveUrl(
+          scope,
+          new URL(response.headers.get('location'), targetUrl).href,
+        );
+        if (intercepted.navigation) {
+          if (
+            !['GET', 'HEAD'].includes(intercepted.method) &&
+            response.status !== 303 &&
+            ![301, 302].includes(response.status)
+          )
+            fail('denied');
+          await response.body?.cancel();
+          // Chromium can attempt a proxy CONNECT before interception on a
+          // fulfilled HTTP redirect. Issue a fresh guarded navigation instead;
+          // the destination remains the actual document URL for relative assets.
+          if (++redirectHops > 5) fail('denied');
+          pendingRedirect = nextUrl.href;
+          if (admittedNavigationAuthority)
+            admittedNavigationAuthority = nextUrl.hostname + ':443';
+          const literal = JSON.stringify(nextUrl.href).replaceAll(
+            '<',
+            '\\u003c',
+          );
+          const nonce = randomBytes(16).toString('hex');
+          return {
+            status: 200,
+            headers: {
+              ...responseCookieHeaders,
+              'content-type': 'text/html; charset=utf-8',
+              'cache-control': 'no-store',
+              'content-security-policy':
+                "default-src 'none'; script-src 'nonce-" +
+                nonce +
+                "'; base-uri 'none'; form-action 'none'",
+            },
+            body: Buffer.from(
+              '<!doctype html><script nonce="' +
+                nonce +
+                '">location.replace(' +
+                literal +
+                ')</script>',
+            ),
+          };
+        }
+        if (
+          !intercepted.download &&
+          nextUrl.origin !== new URL(targetUrl).origin
+        )
+          fail('denied');
+        let method = intercepted.method;
+        if (
+          response.status === 303 ||
+          ([301, 302].includes(response.status) && method === 'POST')
+        )
+          method = 'GET';
+        if (!['GET', 'HEAD'].includes(method)) fail('denied');
+        await response.body?.cancel();
+        if (publicOwner) {
+          await publicOwner.close();
+          publicRequests.delete(publicOwner);
+          publicOwner = undefined;
+        }
+        if (intercepted.navigation) expectedNavigation = nextUrl.href;
+        return guardedResponse(
+          {
+            ...intercepted,
+            url: nextUrl.href,
+            method,
+            bodyBytes: 0,
+            navigation: false,
+          },
+          {},
+          undefined,
+          redirects + 1,
+        );
+      }
+      const acceptedKinds = {
+        'text/csv': 'csv',
+        'text/plain': 'text',
+        'application/json': 'json',
+        'application/pdf': 'pdf',
+        'image/png': 'png',
+        'image/jpeg': 'jpeg',
+      };
+      const downloadKind = scope.interactive
+        ? acceptedKinds[
+            response.headers
+              .get('content-type')
+              ?.split(';')[0]
+              .trim()
+              .toLowerCase()
+          ]
+        : 'csv';
+      if (downloading && !downloadKind) fail('denied');
       const bounded = await readBoundedResponse(
         response,
         {
-          kind: downloading ? 'csv' : 'asset',
-          bodyBytes: downloading ? scope.limits.outputBytes : 65536,
-          totalBytes: 1048576,
+          kind: downloading ? downloadKind : 'asset',
+          bodyBytes: downloading
+            ? scope.limits.outputBytes
+            : (scope.interactive?.resourceBytes ?? 65536),
+          totalBytes: scope.interactive?.networkBytes ?? 1048576,
+          interactive: Boolean(scope.interactive),
           allowAttachment: downloading,
         },
         responseControl,
       );
       timeout();
-      if (bootstrap.profile) {
-        const received = profileResponseCookies(
-          scope.origin,
-          targetUrl,
-          response.headers.getSetCookie(),
-        );
-        if (received.length) await context.addCookies(received);
-      }
-      return bounded;
+      return {
+        ...bounded,
+        headers: { ...bounded.headers, ...responseCookieHeaders },
+        kind: downloadKind,
+      };
     } finally {
       clearTimeout(timer);
       shutdown.signal.removeEventListener('abort', abort);
@@ -2620,6 +3109,14 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     let requestPage,
       isMainFrame = false;
     try {
+      if (scope.interactive) {
+        let previous = request.redirectedFrom?.(),
+          hops = 0;
+        while (previous) {
+          if (++hops > 5) fail('denied');
+          previous = previous.redirectedFrom?.();
+        }
+      }
       const frame = request.frame();
       requestPage = frame.page();
       isMainFrame = frame === requestPage.mainFrame();
@@ -2665,6 +3162,16 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     }
   }
   function attachPage(owned) {
+    owned.on('load', () => {
+      if (
+        ownerNavigationActive &&
+        (!pendingRedirect || owned.url() === pendingRedirect)
+      ) {
+        admittedNavigationAuthority = undefined;
+        ownerNavigationActive = false;
+        pendingRedirect = undefined;
+      }
+    });
     owned.on('popup', () => retire('denied'));
     owned.on('worker', () => retire('denied'));
     owned.on('crash', () => retire('unavailable'));
@@ -2685,6 +3192,17 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         return;
       }
       if (frame.url() === 'about:blank' && currentUrl === 'about:blank') return;
+      if (scope.interactive) {
+        try {
+          interactiveUrl(scope, frame.url());
+        } catch {
+          retire('denied');
+          return;
+        }
+        currentUrl = frame.url();
+        expectedNavigation = undefined;
+        return;
+      }
       if (!network.effectActive || frame.url() !== expectedNavigation) {
         retire('denied');
         return;
@@ -2727,12 +3245,14 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       fingerprint: createHash('sha256').update(snapshot).digest('hex'),
     };
   }
-  async function observe(artifacts = []) {
+  async function observeOnce(artifacts = []) {
     const evidence = await currentEvidence();
     const parsed = snapshotEvidence(evidence.snapshot, yaml);
-    const route = scope.routes.find(
-      (candidate) => scope.origin + candidate.path === page.url(),
-    );
+    const route = scope.interactive
+      ? scope.routes[0]
+      : scope.routes.find(
+          (candidate) => scope.origin + candidate.path === page.url(),
+        );
     if (!route) fail('denied');
     await disposeTokens();
     const generation = ++serial;
@@ -2746,6 +3266,7 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       scope,
       {
         documentGeneration: generation,
+        ...(scope.interactive ? { currentUrl: page.url() } : {}),
         routeId: route.id,
         nodes: candidates,
         shortened: parsed.omittedNodes > 0,
@@ -2786,6 +3307,24 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       fingerprint: evidence.fingerprint,
     };
     return { contextId, pageId, document, observation, counters: counters() };
+  }
+  async function observe(artifacts = []) {
+    // Asynchronous JS forms may mutate while their read-only evidence is being
+    // collected. Re-read evidence only; never repeat the dispatched action.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await observeOnce(artifacts);
+      } catch (error) {
+        if (
+          !(error instanceof BrowserWorkerError) ||
+          error.code !== 'stale' ||
+          attempt >= 2
+        )
+          throw error;
+        timeout();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
   }
   async function pinNode(token) {
     const known = tokens.get(token);
@@ -2844,8 +3383,40 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         document: latest?.document,
         nodeTokens: new Set(tokens.keys()),
       });
+      if (operation.kind === 'ownerControl') {
+        if (ownerControl === operation.enabled) fail('stale');
+        ownerControl = operation.enabled;
+        await disposeTokens();
+        latest = undefined;
+        network.effectActive = ownerControl;
+        if (ownerControl) await page.bringToFront();
+        actionsUsed++;
+        if (actionsUsed > scope.limits.actions) fail('limitsExceeded');
+        const observation = {
+          documentGeneration: ++serial,
+          routeId: scope.routes[0].id,
+          nodes: [],
+          shortened: false,
+          omittedNodes: 0,
+          artifacts: [],
+        };
+        return {
+          contextId,
+          pageId,
+          document: {
+            documentId: 'control-' + serial,
+            documentGeneration: serial,
+            observationDigest: canonicalDigest(observation),
+          },
+          observation,
+          counters: counters(),
+        };
+      }
+      if (ownerControl) fail('denied');
+      if (['navigate', 'navigateUrl'].includes(operation.kind))
+        redirectHops = 0;
       if (actionsUsed >= scope.limits.actions) fail('limitsExceeded');
-      if (!['navigate', 'observe'].includes(operation.kind)) {
+      if (!['navigate', 'navigateUrl', 'observe'].includes(operation.kind)) {
         if (!latest) fail('stale');
         const current = await currentEvidence();
         if (
@@ -2876,8 +3447,11 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         selectedRoute = scope.routes.find(
           (route) => route.id === operation.routeId && route.method === 'GET',
         );
+      if (operation.kind === 'navigateUrl')
+        selectedRoute = allowedRoute(operation.url);
       if (operation.kind === 'click')
         selectedRoute = await navigationFor(handle);
+      if (operation.kind === 'click' && selectedRoute) redirectHops = 0;
       if (operation.kind === 'download') {
         const href = await handle.evaluate((element) =>
           element.tagName === 'A' ? element.getAttribute('href') : null,
@@ -2895,29 +3469,48 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       actionsUsed++;
       network.effectActive = !['observe', 'download'].includes(operation.kind);
       const navigates =
-        operation.kind === 'navigate' || operation.kind === 'click';
+        operation.kind === 'navigate' ||
+        operation.kind === 'navigateUrl' ||
+        operation.kind === 'click';
       network.navigationRouteId = navigates ? selectedRoute?.id : undefined;
       network.navigationRemaining = navigates && selectedRoute ? 1 : 0;
+      if (scope.interactive && navigates && selectedRoute)
+        admittedNavigationAuthority =
+          new URL((selectedRoute.origin ?? scope.origin) + selectedRoute.path)
+            .hostname + ':443';
       network.downloadRouteId =
         operation.kind === 'download' ? selectedRoute?.id : undefined;
       const artifacts = [];
       switch (operation.kind) {
         case 'navigate':
+        case 'navigateUrl':
           dispatched = true;
-          await page.goto(scope.origin + selectedRoute.path, {
-            waitUntil: 'load',
-            timeout: timeout(),
-          });
+          await page.goto(
+            (selectedRoute.origin ?? scope.origin) + selectedRoute.path,
+            {
+              waitUntil: 'load',
+              timeout: timeout(),
+            },
+          );
+          if (pendingRedirect) {
+            const destination = pendingRedirect;
+            pendingRedirect = undefined;
+            await page.waitForURL(destination, {
+              waitUntil: 'load',
+              timeout: timeout(),
+            });
+          }
           break;
         case 'observe':
           break;
         case 'click': {
-          const navigation = selectedRoute
-            ? page.waitForURL(scope.origin + selectedRoute.path, {
-                waitUntil: 'load',
-                timeout: timeout(),
-              })
-            : undefined;
+          const navigation =
+            selectedRoute && !scope.interactive
+              ? page.waitForURL(scope.origin + selectedRoute.path, {
+                  waitUntil: 'load',
+                  timeout: timeout(),
+                })
+              : undefined;
           navigation?.catch(() => {});
           dispatched = true;
           await handle.click({ timeout: timeout() });
@@ -2927,6 +3520,14 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         case 'type':
           dispatched = true;
           await handle.fill(operation.text, { timeout: timeout() });
+          break;
+        case 'selectOption':
+          dispatched = true;
+          await handle.selectOption(operation.value, { timeout: timeout() });
+          break;
+        case 'pressKey':
+          dispatched = true;
+          await handle.press(operation.key, { timeout: timeout() });
           break;
         case 'scroll':
           dispatched = true;
@@ -2950,13 +3551,15 @@ export async function createMaintainedSession(bootstrap, dependencies) {
             isMainFrame: true,
             channel: 'http',
             method: 'GET',
-            url: scope.origin + selectedRoute.path,
+            url: (selectedRoute.origin ?? scope.origin) + selectedRoute.path,
             navigation: false,
             download: true,
             bodyBytes: 0,
             headerBytes: 0,
           });
-          artifacts.push(await writeArtifact('csv', bounded.body));
+          artifacts.push(
+            await writeArtifact(bounded.kind ?? 'csv', bounded.body),
+          );
           break;
         }
       }
@@ -2993,7 +3596,10 @@ export async function createMaintainedSession(bootstrap, dependencies) {
         retire(failure.code);
       throw failure;
     } finally {
-      network.effectActive = bootstrap.profile?.ownerLogin === true;
+      admittedNavigationAuthority = undefined;
+      ownerNavigationActive = false;
+      network.effectActive =
+        bootstrap.profile?.ownerLogin === true || ownerControl;
       network.navigationRemaining = 0;
       network.navigationRouteId = undefined;
       network.downloadRouteId = undefined;
@@ -3019,19 +3625,60 @@ export async function createMaintainedSession(bootstrap, dependencies) {
           mode: 0o700,
         });
         await realContained(downloadDirectory, bootstrap.privateRoot);
+        if (scope.interactive || bootstrap.profile) {
+          const profileDirectory = windowsPath.join(
+            bootstrap.privateRoot,
+            'profile-context',
+            'Default',
+          );
+          await filesystem.mkdir(profileDirectory, {
+            recursive: true,
+            mode: 0o700,
+          });
+          await realContained(profileDirectory, bootstrap.privateRoot);
+          await filesystem.writeFile(
+            windowsPath.join(profileDirectory, 'Preferences'),
+            JSON.stringify({
+              net: { network_prediction_options: 2 },
+              dns_prefetching: { enabled: false },
+              default_search_provider: { enabled: false },
+              search: { suggest_enabled: false },
+              autofill: { profile_enabled: false, credit_card_enabled: false },
+              credentials_enable_service: false,
+            }),
+            { flag: 'wx', mode: 0o600 },
+          );
+        }
       });
     await prepareRuntime();
     timeout();
     denyProxy = await (dependencies.createDenyProxy ?? createDenyProxy)({
       signal: shutdown.signal,
-      onRequest(code = 'denied') {
+      onRequest(code = 'denied', metadata) {
         network.requestsUsed++;
         network.blockedRequests++;
         const failure =
           network.requestsUsed > scope.limits.requests
             ? 'limitsExceeded'
             : code;
-        if (actionsUsed > 0 || failure !== 'denied') retire(failure);
+        // Native Chromium 1248 emits a speculative CONNECT for page.goto before
+        // its paused request reaches interception. The deny proxy STILL returns
+        // 403 and never forwards any socket. Only that exact approved hostname
+        // during an already admitted navigation may continue; all refusals stay
+        // charged, and every other fallback retains strict retirement.
+        const expectedSpeculation =
+          scope.interactive &&
+          admittedNavigationAuthority &&
+          !fatal &&
+          !shutdown.signal.aborted &&
+          now() < expiresAtMs &&
+          (!ownerNavigationActive ||
+            (now() < ownerNavigationExpires && ownerNavigationUses > 0)) &&
+          metadata?.method === 'CONNECT' &&
+          metadata.authority === admittedNavigationAuthority;
+        if (expectedSpeculation && ownerNavigationActive) ownerNavigationUses--;
+        if ((actionsUsed > 0 && !expectedSpeculation) || failure !== 'denied')
+          retire(failure);
       },
       onFailure() {
         retire('unavailable');
@@ -3041,12 +3688,22 @@ export async function createMaintainedSession(bootstrap, dependencies) {
     const launchOptions = {
       executablePath: bootstrap.installation.browserExecutable,
       chromiumSandbox: true,
-      headless: bootstrap.profile?.ownerLogin
-        ? dependencies.profileHeadlessForTests === true
-        : true,
+      headless:
+        bootstrap.profile?.ownerLogin || scope.interactive
+          ? dependencies.profileHeadlessForTests === true
+          : true,
       env: environment,
       downloadsPath: downloadDirectory,
       proxy: { server: denyProxy.server },
+      args: [
+        '--disable-quic',
+        '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--proxy-bypass-list=<-loopback>',
+        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+        '--disable-background-networking',
+        '--disable-preconnect',
+        '--dns-prefetch-disable',
+      ],
       timeout: Math.min(10000, remaining),
     };
     const contextOptions = {
@@ -3056,37 +3713,82 @@ export async function createMaintainedSession(bootstrap, dependencies) {
       permissions: [],
       ignoreHTTPSErrors: false,
       bypassCSP: false,
-      ...(scope.publicIpv4Pin && !scope.authenticated
+      ...(scope.publicIpv4Pin && !scope.authenticated && !scope.interactive
         ? { javaScriptEnabled: false }
         : {}),
     };
-    if (bootstrap.profile) {
+    if (bootstrap.profile || scope.interactive) {
       context = await chromium.launchPersistentContext(
         windowsPath.join(bootstrap.privateRoot, 'profile-context'),
         { ...launchOptions, ...contextOptions },
       );
-      try {
-        const sealed = JSON.parse(
-          await filesystem.readFile(bootstrap.profile.sealedPath, 'utf8'),
-        );
-        await context.setStorageState(
-          openProfileState(bootstrap.profile, sealed),
-        );
-      } catch (error) {
-        if (!(bootstrap.profile.ownerLogin && error.code === 'ENOENT'))
-          throw error;
-      }
-      profileLoaded = true;
       for (const startupPage of context.pages()) await startupPage.close();
+      if (bootstrap.profile) {
+        try {
+          const sealed = JSON.parse(
+            await filesystem.readFile(bootstrap.profile.sealedPath, 'utf8'),
+          );
+          await context.setStorageState(
+            openProfileState(bootstrap.profile, sealed),
+          );
+        } catch (error) {
+          if (!(bootstrap.profile.ownerLogin && error.code === 'ENOENT'))
+            throw error;
+        }
+        profileLoaded = true;
+      }
     } else {
       browser = await chromium.launch(launchOptions);
       timeout();
       context = await browser.newContext(contextOptions);
     }
     timeout();
+    if (scope.interactive && !dependencies.prepareRuntime) {
+      const launched = browser ?? context.browser();
+      if (!launched || launched.version() !== MAINTAINED_CHROMIUM_VERSION)
+        fail('unavailable');
+    }
     context.setDefaultTimeout(10000);
     await context.exposeBinding(report, () => retire('denied'));
-    await context.addInitScript(installDocumentGuards, { marker, report });
+    if (scope.interactive)
+      await context.exposeBinding(ownerNavigation, (source, origin) => {
+        if (
+          !ownerControl ||
+          closing ||
+          fatal ||
+          shutdown.signal.aborted ||
+          now() >= expiresAtMs ||
+          source.page !== page ||
+          source.frame !== page.mainFrame()
+        )
+          return false;
+        if (
+          typeof origin !== 'string' ||
+          !scope.interactive.origins.some(
+            (approved) => approved.origin === origin,
+          )
+        )
+          return false;
+        try {
+          publicHostname(origin);
+        } catch {
+          return false;
+        }
+        admittedNavigationAuthority = new URL(origin).hostname + ':443';
+        ownerNavigationActive = true;
+        // This page-supplied origin is an untrusted hint under explicit owner
+        // control, not proof of human identity. It can suppress at most three
+        // already-denied CONNECT refusals over two seconds; it grants no egress.
+        ownerNavigationExpires = Math.min(expiresAtMs, now() + 2000);
+        ownerNavigationUses = 3;
+        redirectHops = 0;
+        return true;
+      });
+    await context.addInitScript(installDocumentGuards, {
+      marker,
+      report,
+      ...(scope.interactive ? { ownerNavigation } : {}),
+    });
     await context.route('**/*', (route) => {
       const work = routeHttp(route);
       routeTasks.add(work);
@@ -3322,7 +4024,10 @@ export async function runCli(options = {}) {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   try {
-    if (process.platform !== 'win32' || process.versions.node !== '22.12.0')
+    if (
+      process.platform !== 'win32' ||
+      ![22, 24].includes(Number(process.versions.node.split('.')[0]))
+    )
       fail('unavailable');
     const bootstrapPath = parseCliArguments(argv, cwd);
     const browserEnvironment = validateWorkerEnvironment(environment, cwd);

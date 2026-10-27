@@ -279,7 +279,69 @@ async fn provider_capture_mcp(count: usize, discovery: bool) {
             .flatten()
             .any(|t| t.name.starts_with("mcp_")));
         assert!(configs[1].tools.as_ref().unwrap().contains(exact));
-        assert!(size(&configs[0]) * 3 < size(&original));
+        let mcp_descriptors = |config: &anima_core::AgentConfig| {
+            config
+                .tools
+                .iter()
+                .flatten()
+                .filter(|tool| tool.name.starts_with("mcp_"))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let discovery_descriptors = |config: &anima_core::AgentConfig| {
+            config
+                .tools
+                .iter()
+                .flatten()
+                .filter(|tool| {
+                    tool.name.starts_with("mcp_")
+                        || matches!(tool.name.as_str(), "search_tools" | "describe_tool")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let native_prefix = |config: &anima_core::AgentConfig| {
+            config
+                .tools
+                .iter()
+                .flatten()
+                .filter(|tool| {
+                    !tool.name.starts_with("mcp_")
+                        && !matches!(tool.name.as_str(), "search_tools" | "describe_tool")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let schema_bytes =
+            |tools: &[anima_core::ToolDescriptor]| serde_json::to_vec(tools).unwrap().len();
+        let all_mcp = mcp_descriptors(&original);
+        let first_discovery = discovery_descriptors(&configs[0]);
+        let hydrated_discovery = discovery_descriptors(&configs[1]);
+        assert_eq!(all_mcp.len(), count);
+        assert_eq!(
+            first_discovery.len(),
+            2,
+            "both discovery control descriptors are charged to the compact request"
+        );
+        assert_eq!(
+            mcp_descriptors(&configs[1]),
+            vec![exact.clone()],
+            "only the exact selected MCP schema is hydrated"
+        );
+        assert_eq!(
+            native_prefix(&configs[0]),
+            native_prefix(&configs[1]),
+            "hydration must preserve the entire native control prefix"
+        );
+        // Saved configuration contains MCP grants, while provider requests also
+        // include host-derived owner controls. Measure the variable MCP and
+        // discovery overhead together; unrelated native schemas stay identical.
+        let all_mcp_bytes = schema_bytes(&all_mcp);
+        let first_discovery_bytes = schema_bytes(&first_discovery);
+        let hydrated_discovery_bytes = schema_bytes(&hydrated_discovery);
+        assert!(first_discovery_bytes * 3 < all_mcp_bytes, "initial discovery descriptors ({first_discovery_bytes}) must be less than a third of configured MCP descriptors ({all_mcp_bytes})");
+        assert!(hydrated_discovery_bytes * 3 < all_mcp_bytes, "selected MCP schema plus discovery controls ({hydrated_discovery_bytes}) must be less than a third of all configured MCP descriptors ({all_mcp_bytes})");
+        eprintln!("reviewed MCP projection bytes: all={all_mcp_bytes}, discovery={first_discovery_bytes}, selected_with_discovery={hydrated_discovery_bytes}, native_prefix={}", schema_bytes(&native_prefix(&configs[0])));
         eprintln!(
             "reviewed MCP schema bytes: full={}, compact={}, hydrated={}",
             size(&original),

@@ -12,9 +12,13 @@ Use `/model` to open the panel, `/model inherit` to restore inheritance, or `/mo
 
 ## Interactive results and reports
 
-Anima can use `show_result` to save a chart, comparison table, document or calculator in the current owner chat. Results appear inline and survive reloads. **Pin report** keeps a result beside the chat on wide screens and below it on narrow screens. Pinning is durable. Anima can use `list_results` to find a result and read its current revision before updating it.
+Anima can use `show_result` to save a chart, comparison table, document, calculator, editable tracker or dashboard in the current owner chat. Results appear inline and survive reloads. **Pin report** keeps a result beside the chat on wide screens and below it on narrow screens. Pinning is durable. Anima can use `list_results` to find a result and read its current revision before updating it.
 
-Charts support series toggles, comparison tables support filtering, and calculator inputs update a closed arithmetic expression locally. Documents render text or Markdown. A result contains data, not generated JavaScript, HTML, an iframe or access to the host. There are at most 32 saved results per chat, with a 32 KiB payload limit and bounded fields and expression depth.
+Charts support series toggles, comparison tables support filtering, and calculator inputs update a closed arithmetic expression locally. Documents render text or Markdown. Trackers have editable text, number and checkbox columns; dashboards combine up to eight charts, tables, documents, calculators or trackers. Dashboards cannot contain other dashboards. Save your tracker edits to keep them after reopening the conversation; unsaved changes remain local drafts. Calculator input changes stay local to the preview. The JSON export contains the saved structured result.
+
+Try “Build a weekly project dashboard with a task tracker, a cost calculator and a progress chart,” then “Add an owner column to that tracker and keep my current entries.” Anima reads the current saved revision before refining the result. Save local edits before asking for a refinement so the companion can read them.
+
+A result contains structured data and closed arithmetic. Generated JavaScript, executable HTML and embedded frames are unsupported. There are at most 32 saved results per chat, with a 32 KiB payload limit and a 256 KiB combined conversation result limit. Trackers allow 12 columns and 100 rows; their stable keys and typed cells are validated by the daemon.
 
 Updates and pin changes use optimistic revisions. A stale update returns a conflict instead of overwriting a newer result. Request keys make retried saves idempotent. Results carry their source run and tool-call IDs and remain bound to the originating agent, conversation and clear generation. Clearing a chat removes its results.
 

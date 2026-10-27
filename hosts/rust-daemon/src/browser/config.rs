@@ -77,11 +77,7 @@ pub(crate) fn load_startup_setup(path: &Path) -> Result<VerifiedBrowserSetup, Br
         return Err(error(BrowserErrorCode::Invalid));
     }
     input.policies.append(&mut input.authenticated_policies);
-    if input.schema_version != 1
-        || !valid_id(&input.installation.id)
-        || input.policies.is_empty()
-        || input.policies.len() > 16
-    {
+    if input.schema_version != 1 || !valid_id(&input.installation.id) || input.policies.len() > 16 {
         return Err(error(BrowserErrorCode::Invalid));
     }
     let i = input.installation;
@@ -121,6 +117,18 @@ pub(crate) fn load_startup_setup(path: &Path) -> Result<VerifiedBrowserSetup, Br
         Arc::new(BrowserPhysicalRuntime::default()),
     ));
     Ok(VerifiedBrowserSetup { policies, factory })
+}
+
+pub(crate) fn startup_path() -> Option<PathBuf> {
+    std::env::var_os(BROWSER_CONFIG_ENV)
+        .map(PathBuf::from)
+        .or_else(|| {
+            let path = PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+                .join("AnimaOS")
+                .join("browser")
+                .join("setup.json");
+            path.is_file().then_some(path)
+        })
 }
 impl VerifiedBrowserInstallation {
     pub(super) fn revalidate(&self) -> Result<(), BrowserError> {

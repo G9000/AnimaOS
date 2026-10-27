@@ -300,6 +300,9 @@ async fn serve_exposes_health_and_error_paths_over_real_http() {
         "ANIMAOS_RS_CONTROL_PLANE_FILE",
         workspace.path().join("control-plane.json"),
     );
+    // Health fixtures must not discover and verify the operator's installed
+    // browser runtime before the server can answer its first request.
+    let _local_app_data = EnvVarGuard::set("LOCALAPPDATA", workspace.path().join("local-app-data"));
     // serve loads the default search model in the background; tests never download it.
     let _embeddings = EnvVarGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", "local");
     let listener = TcpListener::bind("127.0.0.1:0")

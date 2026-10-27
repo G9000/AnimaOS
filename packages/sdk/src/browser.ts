@@ -2,6 +2,7 @@ import type { DaemonClient } from './client.js';
 
 export interface BrowserSelection {
   policyId: string;
+  profileId?: string;
   selectedInputIds: string[];
 }
 
@@ -18,7 +19,39 @@ export interface BrowserLimits {
   screenshotBytes: number;
 }
 
-/** Operator-installed destinations; reading them opens no browser. */
+export interface BrowserSetup {
+  available: boolean;
+  reason: string | null;
+  setupCommand: string;
+}
+
+export interface CreateBrowserDestinationInput {
+  startUrl: string;
+  allowedOrigins: string[];
+  authenticated: boolean;
+}
+
+export interface BrowserProfile {
+  id: string;
+  agentId: string;
+  policyId: string;
+  origin: string;
+  revision: number;
+  digest: string;
+  ready: boolean;
+  revoked: boolean;
+  loginActive: boolean;
+}
+
+export interface BrowserProfileMutationInput {
+  expectedRevision: number;
+}
+
+export interface StartBrowserProfileLoginInput extends BrowserProfileMutationInput {
+  routeId: string;
+}
+
+/** Reviewed destinations; reading them opens no browser. */
 export interface BrowserPolicy {
   id: string;
   origin: string;
@@ -28,6 +61,10 @@ export interface BrowserPolicy {
   installationDigest: string;
   limits: BrowserLimits;
   workerAvailable: boolean;
+  authenticated: boolean;
+  interactive: boolean;
+  allowedOrigins: string[];
+  version: number;
 }
 
 export interface BrowserDocument {
@@ -38,7 +75,7 @@ export interface BrowserDocument {
 
 export interface BrowserArtifact {
   id: string;
-  kind: 'screenshot' | 'csv';
+  kind: 'screenshot' | 'csv' | 'text' | 'json' | 'pdf' | 'png' | 'jpeg';
   bytes: number;
   sha256: string;
 }
@@ -55,6 +92,7 @@ export interface BrowserScope {
     | 'disabled'
     | 'scoped'
     | 'active'
+    | 'ownerControl'
     | 'stopping'
     | 'closed'
     | 'unavailable';
@@ -69,6 +107,8 @@ export interface BrowserScope {
   requestsUsed: number;
   wireBytesUsed: number;
   physicalLeaseHeld: boolean;
+  ownerControl: boolean;
+  profile: BrowserProfile | null;
   document: BrowserDocument | null;
   artifacts: BrowserArtifact[];
   toolNames: string[];
@@ -91,6 +131,96 @@ export interface BrowserReadOptions {
 /** Owner transport only: never grants, starts a worker, renews a scope or retries. */
 export class BrowserScopesClient {
   constructor(private readonly client: DaemonClient) {}
+
+  setup(
+    agentId: string,
+    options: BrowserReadOptions = {},
+  ): Promise<BrowserSetup> {
+    return this.client.requestJson(
+      `${agentPath(agentId)}/browser-setup`,
+      options,
+    );
+  }
+
+  async createDestination(
+    agentId: string,
+    input: CreateBrowserDestinationInput,
+  ): Promise<BrowserPolicy> {
+    const response = await this.client.requestJson<{ policy: BrowserPolicy }>(
+      `${agentPath(agentId)}/browser-destinations`,
+      { method: 'POST', body: input },
+    );
+    return response.policy;
+  }
+
+  revokeDestination(
+    agentId: string,
+    policyId: string,
+    input: { expectedVersion: number },
+  ): Promise<{ revoked: boolean }> {
+    return this.client.requestJson(
+      `${agentPath(agentId)}/browser-destinations/${encodeURIComponent(policyId)}/revoke`,
+      { method: 'POST', body: input },
+    );
+  }
+
+  async profiles(
+    agentId: string,
+    options: BrowserReadOptions = {},
+  ): Promise<BrowserProfile[]> {
+    const response = await this.client.requestJson<{
+      profiles: BrowserProfile[];
+    }>(`${agentPath(agentId)}/browser-profiles`, options);
+    return response.profiles;
+  }
+
+  async createProfile(
+    agentId: string,
+    input: { policyId: string },
+  ): Promise<BrowserProfile> {
+    const response = await this.client.requestJson<{ profile: BrowserProfile }>(
+      `${agentPath(agentId)}/browser-profiles`,
+      { method: 'POST', body: input },
+    );
+    return response.profile;
+  }
+
+  async startProfileLogin(
+    agentId: string,
+    profileId: string,
+    input: StartBrowserProfileLoginInput,
+  ): Promise<BrowserProfile> {
+    return this.profileMutation(agentId, profileId, 'sign-in/start', input);
+  }
+
+  async finishProfileLogin(
+    agentId: string,
+    profileId: string,
+    input: BrowserProfileMutationInput,
+  ): Promise<BrowserProfile> {
+    return this.profileMutation(agentId, profileId, 'sign-in/finish', input);
+  }
+
+  async revokeProfile(
+    agentId: string,
+    profileId: string,
+    input: BrowserProfileMutationInput,
+  ): Promise<BrowserProfile> {
+    return this.profileMutation(agentId, profileId, 'revoke', input);
+  }
+
+  private async profileMutation(
+    agentId: string,
+    profileId: string,
+    action: string,
+    input: BrowserProfileMutationInput,
+  ): Promise<BrowserProfile> {
+    const response = await this.client.requestJson<{ profile: BrowserProfile }>(
+      `${agentPath(agentId)}/browser-profiles/${encodeURIComponent(profileId)}/${action}`,
+      { method: 'POST', body: input },
+    );
+    return response.profile;
+  }
 
   async get(
     agentId: string,
@@ -135,6 +265,9 @@ export class BrowserScopesClient {
         method: 'PUT',
         body: {
           policyId: input.policyId,
+          ...(input.profileId === undefined
+            ? {}
+            : { profileId: input.profileId }),
           selectedInputIds: input.selectedInputIds,
           enabled: input.enabled,
           ...(input.expectedVersion === undefined
@@ -154,6 +287,35 @@ export class BrowserScopesClient {
     const response = await this.client.requestJson<{ scope: BrowserScope }>(
       `${scopePath(agentId, runId)}/stop`,
       { method: 'POST', body: { expectedVersion: input.expectedVersion } },
+    );
+    return response.scope;
+  }
+
+  async takeover(
+    agentId: string,
+    runId: string,
+    input: StopBrowserScopeInput,
+  ): Promise<BrowserScope> {
+    return this.control(agentId, runId, 'takeover', input);
+  }
+
+  async resume(
+    agentId: string,
+    runId: string,
+    input: StopBrowserScopeInput,
+  ): Promise<BrowserScope> {
+    return this.control(agentId, runId, 'resume', input);
+  }
+
+  private async control(
+    agentId: string,
+    runId: string,
+    action: 'takeover' | 'resume',
+    input: StopBrowserScopeInput,
+  ): Promise<BrowserScope> {
+    const response = await this.client.requestJson<{ scope: BrowserScope }>(
+      `${scopePath(agentId, runId)}/${action}`,
+      { method: 'POST', body: input },
     );
     return response.scope;
   }

@@ -5,6 +5,7 @@ pub(crate) mod generic;
 #[cfg(test)]
 pub(crate) mod generic_tests;
 mod mailbox;
+mod search;
 #[cfg(test)]
 mod tests;
 use super::gcalendar::{
@@ -1064,6 +1065,18 @@ impl MailManager {
                                 .poll_email_mailbox(&r.connector.agent_id, &r.connector.id)
                                 .await;
                             continue;
+                        }
+                        if let Ok(shared) = manager.shared() {
+                            let state = shared.read().await;
+                            if crate::connected_search::source_authority(
+                                &state,
+                                &r.connector.agent_id,
+                                &r.connector.id,
+                            )
+                            .is_some_and(|a| a.enabled)
+                            {
+                                continue;
+                            }
                         }
                         let _ = manager
                             .messages(

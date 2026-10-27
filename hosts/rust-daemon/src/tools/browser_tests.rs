@@ -191,6 +191,7 @@ impl BrowserTransportHandle for FakeHandle {
             });
         }
         let observation = BrowserObservation {
+            current_url: None,
             document_generation: generation,
             route_id: self.task.scope.routes[0].id.clone(),
             nodes: vec![BrowserNode {
@@ -1027,6 +1028,7 @@ async fn m46_accepted_csv_is_an_owned_attachment_after_disposal_without_private_
 async fn m46_normal_chat_terminal_retires_browser_and_retains_accepted_csv() {
     use crate::agent_runs::test_support::{accept, add_chat, Step};
     let first = BrowserObservation {
+        current_url: None,
         document_generation: 1,
         route_id: "page".into(),
         nodes: vec![BrowserNode {
@@ -2051,6 +2053,7 @@ fn m64_public_scope(pin: &str) -> BrowserScope {
         origin: "https://example.com".into(),
         public_ipv4_pin: Some(pin.into()),
         authenticated: false,
+        interactive: None,
         routes: vec![BrowserRoute {
             id: "page".into(),
             method: BrowserMethod::Get,
@@ -2474,6 +2477,7 @@ fn m64_oracle_compares_only_declared_observation_roles_and_labels() {
         label: "Example Domain".into(),
     }];
     let mut observation = BrowserObservation {
+        current_url: None,
         document_generation: 1,
         route_id: "page".into(),
         nodes: vec![BrowserNode {

@@ -1,5 +1,29 @@
 use super::*;
 impl DriveManager {
+    pub(crate) async fn require_search_reauthorization(
+        &self,
+        agent: String,
+        id: String,
+        generation: String,
+    ) -> Result<(), DriveError> {
+        let manager = self.clone();
+        self.owned(async move {
+            let shared = manager.shared()?;
+            let capture = {
+                let s = shared.read().await;
+                s.drive_records
+                    .get(&id)
+                    .filter(|r| r.agent_id == agent && r.generation == generation)
+                    .cloned()
+                    .ok_or(DriveError::Conflict)?
+            };
+            let mut next = capture.clone();
+            next.status = DriveStatus::ReauthRequired;
+            next.updated_at_ms = now_ms();
+            manager.edit_record(Some(capture), next, Some(false)).await
+        })
+        .await
+    }
     async fn capture(&self, agent: &str, tool: &str) -> Result<DriveRecord, DriveError> {
         let shared = self.shared()?;
         let capture = shared
@@ -121,7 +145,21 @@ impl DriveManager {
         let id = DriveFileId::parse(file)?;
         tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            self.read_inner(agent, id),
+            self.read_inner(agent, id, None),
+        )
+        .await
+        .map_err(|_| DriveError::Deadline)?
+    }
+    pub(crate) async fn read_for_search(
+        &self,
+        agent: &str,
+        file: &str,
+        generation: &str,
+    ) -> Result<DriveReadResult, DriveError> {
+        let id = DriveFileId::parse(file)?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            self.read_inner(agent, id, Some(generation)),
         )
         .await
         .map_err(|_| DriveError::Deadline)?
@@ -130,8 +168,12 @@ impl DriveManager {
         &self,
         agent: &str,
         id: DriveFileId,
+        expected_generation: Option<&str>,
     ) -> Result<DriveReadResult, DriveError> {
         let capture = self.capture(agent, "drive_read").await?;
+        if expected_generation.is_some_and(|expected| capture.generation != expected) {
+            return Err(DriveError::Conflict);
+        }
         if !capture.selected_file_ids.contains(&id) {
             return Err(DriveError::NotSelected);
         } // before vault or provider access

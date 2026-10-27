@@ -18,6 +18,7 @@ import { ConversationSharesClient } from './conversation-shares.js';
 import { InteractionsClient } from './interactions.js';
 import { RunsClient } from './runs.js';
 import { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
+import { AccountWorkflowsClient, ConnectedSearchClient } from './connected-accounts.js';
 import { ToolResultsClient } from './tool-results.js';
 import { LearningClient } from './learning.js';
 import { McpClient } from './mcp.js';
@@ -94,6 +95,8 @@ export class DaemonClient {
   readonly runs: RunsClient;
   readonly workflows: WorkflowsClient;
   readonly workflowTemplates: WorkflowTemplatesClient;
+  readonly connectedSearch: ConnectedSearchClient;
+  readonly accountWorkflows: AccountWorkflowsClient;
   readonly toolResults: ToolResultsClient;
   readonly learning: LearningClient;
   readonly mcp: McpClient;
@@ -145,6 +148,8 @@ export class DaemonClient {
     this.runs = new RunsClient(this);
     this.workflows = new WorkflowsClient(this);
     this.workflowTemplates = new WorkflowTemplatesClient(this);
+    this.connectedSearch = new ConnectedSearchClient(this);
+    this.accountWorkflows = new AccountWorkflowsClient(this);
     this.toolResults = new ToolResultsClient(this);
     this.learning = new LearningClient(this);
     this.mcp = new McpClient(this);

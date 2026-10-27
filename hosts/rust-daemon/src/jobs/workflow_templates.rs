@@ -200,6 +200,11 @@ impl JobService {
         self.refuse_while_draining()?;
         validate_slug(slug).map_err(JobError::Validation)?;
         validate_run_input(&input).map_err(JobError::Validation)?;
+        if crate::account_workflows::reserved_request_key(&input.request_key) {
+            return Err(JobError::Validation(
+                "This workflow request-key prefix is reserved for account event admissions".into(),
+            ));
+        }
         let (agent, slug) = (agent_id.to_owned(), slug.to_owned());
         self.mutate(move |state| {
             let config = state

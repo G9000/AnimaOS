@@ -28,6 +28,11 @@ export type {
   SaveBrowserScopeInput,
   StopBrowserScopeInput,
   BrowserReadOptions,
+  BrowserSetup,
+  CreateBrowserDestinationInput,
+  BrowserProfile,
+  BrowserProfileMutationInput,
+  StartBrowserProfileLoginInput,
 } from './browser.js';
 export type { UploadedAttachment } from './attachments.js';
 export { AgenciesClient } from './agencies.js';
@@ -104,6 +109,13 @@ export type {
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
 export { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
+export { ConnectedSearchClient, AccountWorkflowsClient } from './connected-accounts.js';
+export type {
+  ConnectedProvider, ConnectedKind, ConnectedSource, ConnectedSources,
+  ConnectedSearchHit, ConnectedSearchItem, ConnectedSearchQuery, ConnectedSearchResult,
+  AccountEventKind, AccountEventField, AccountInputBinding, AccountWorkflowFilters,
+  AccountWorkflowInput, AccountWorkflowRule, AccountWorkflowEvent,
+} from './connected-accounts.js';
 export { ToolResultsClient } from './tool-results.js';
 export type { ToolResultArtifact, ToolResultPage } from './tool-results.js';
 export type {

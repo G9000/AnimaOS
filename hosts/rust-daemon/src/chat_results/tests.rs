@@ -93,3 +93,153 @@ fn calculator_references_and_depth_are_validated_without_executable_code() {
         .validate()
         .is_err());
 }
+
+fn tracker() -> serde_json::Value {
+    json!({
+        "kind":"tracker",
+        "columns":[
+            {"key":"task","label":"Task","kind":"text"},
+            {"key":"hours","label":"Hours","kind":"number"},
+            {"key":"done","label":"Done","kind":"checkbox"}
+        ],
+        "rows":[{"id":"task_1","cells":{"task":"Draft <script> is text","hours":2,"done":false}}]
+    })
+}
+
+fn valid_payload(value: serde_json::Value) -> bool {
+    serde_json::from_value::<ResultPayload>(value).is_ok_and(|payload| payload.validate().is_ok())
+}
+
+#[test]
+fn dashboard_tracker_payloads_compose_and_round_trip_as_closed_data() {
+    let tracker_data = tracker();
+    assert!(valid_payload(tracker_data.clone()));
+    let dashboard = json!({"kind":"dashboard","widgets":[
+        {"id":"tasks","title":"Project tasks","payload":tracker_data},
+        {"id":"summary","title":"Summary","payload":{"kind":"document","format":"markdown","text":"# Project"}},
+        {"id":"cost","title":"Estimate","payload":{"kind":"calculator","inputs":[{"key":"hours","label":"Hours","value":2}],"expression":{"op":"multiply","left":{"op":"input","key":"hours"},"right":{"op":"constant","value":10}},"outputLabel":"Cost"}}
+    ]});
+    assert!(valid_payload(dashboard.clone()));
+    let parsed: ResultPayload = serde_json::from_value(dashboard.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), dashboard);
+    let mut empty_tracker = tracker();
+    empty_tracker["rows"] = json!([]);
+    assert!(valid_payload(empty_tracker));
+}
+
+#[test]
+fn tracker_payloads_validate_stable_ids_columns_cell_types_and_limits() {
+    let mut invalid = Vec::new();
+    for value in [
+        json!("wrong"),
+        json!(true),
+        json!(null),
+        json!(9_007_199_254_740_992_u64),
+    ] {
+        let mut item = tracker();
+        item["rows"][0]["cells"]["hours"] = value;
+        invalid.push(item);
+    }
+    let mut item = tracker();
+    item["rows"][0]["cells"]
+        .as_object_mut()
+        .unwrap()
+        .remove("done");
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"][0]["cells"]["extra"] = json!(false);
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"][0]["cells"]["done"] = json!("false");
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"][0]["cells"]["task"] = json!(2048);
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"][0]["cells"]["task"] = json!("a".repeat(2049));
+    invalid.push(item);
+    let mut item = tracker();
+    item["columns"][1] = item["columns"][0].clone();
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"] = json!([item["rows"][0].clone(), item["rows"][0].clone()]);
+    invalid.push(item);
+    for id in ["", "row-1", "../row", "row 1", "é"] {
+        let mut item = tracker();
+        item["rows"][0]["id"] = json!(id);
+        invalid.push(item);
+    }
+    let mut item = tracker();
+    item["columns"] = json!([]);
+    invalid.push(item);
+    let mut item = tracker();
+    item["columns"][0]["key"] = json!("bad-key");
+    invalid.push(item);
+    let mut item = tracker();
+    item["columns"][0]["label"] = json!("a".repeat(161));
+    invalid.push(item);
+    let mut item = tracker();
+    item["columns"] = serde_json::Value::Array(
+        (0..13)
+            .map(|index| json!({"key":format!("col_{index}"),"label":"Column","kind":"text"}))
+            .collect(),
+    );
+    item["rows"] = json!([]);
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"] = serde_json::Value::Array((0..101).map(|index| json!({"id":format!("row_{index}"),"cells":{"task":"Task","hours":2,"done":false}})).collect());
+    invalid.push(item);
+    let mut item = tracker();
+    item["columns"][0]["script"] = json!("alert(1)");
+    invalid.push(item);
+    let mut item = tracker();
+    item["rows"][0]["script"] = json!("alert(1)");
+    invalid.push(item);
+    assert!(invalid.into_iter().all(|value| !valid_payload(value)));
+}
+
+#[test]
+fn dashboards_refuse_nesting_duplicate_widgets_and_unbounded_composition() {
+    let widget = json!({"id":"tasks","title":"Tasks","payload":tracker()});
+    for widgets in [
+        json!([]),
+        json!([widget.clone(),widget.clone()]),
+        json!([{"id":"nested","title":"Nested","payload":{"kind":"dashboard","widgets":[widget.clone()]}}]),
+        serde_json::Value::Array((0..9).map(|index| json!({"id":format!("widget_{index}"),"title":"Tasks","payload":tracker()})).collect()),
+        json!([{"id":"bad-id","title":"Bad","payload":tracker()}]),
+        json!([{"id":"bad","title":"a".repeat(161),"payload":tracker()}]),
+        json!([{"id":"bad","title":"Bad","payload":{"kind":"html","html":"<script>bad</script>"}}]),
+    ] {
+        assert!(!valid_payload(json!({"kind":"dashboard","widgets":widgets})));
+    }
+    let widgets = (0..8).map(|index| json!({"id":format!("widget_{index}"),"title":"Document","payload":{"kind":"document","format":"text","text":"a".repeat(5000)}})).collect::<Vec<_>>();
+    assert!(!valid_payload(
+        json!({"kind":"dashboard","widgets":widgets})
+    ));
+}
+
+#[test]
+fn tracker_owner_edits_require_the_latest_revision_for_future_model_replacements() {
+    let mut room = session();
+    let mut create = input("create_tracker");
+    create.payload = serde_json::from_value(tracker()).unwrap();
+    let first = upsert(&mut room, create, "run", "call", 2).unwrap();
+    let mut edited = tracker();
+    edited["rows"][0]["cells"]["done"] = json!(true);
+    let mut save = input("owner_edit");
+    save.id = Some(first.id.clone());
+    save.expected_revision = first.revision;
+    save.payload = serde_json::from_value(edited.clone()).unwrap();
+    let acknowledged = upsert(&mut room, save, "owner", "owner_edit", 3).unwrap();
+    let mut stale = input("stale_model_update");
+    stale.id = Some(first.id);
+    stale.expected_revision = 1;
+    assert!(upsert(&mut room, stale, "next-run", "stale-call", 4).is_err());
+    assert_eq!(room.chat_results[0], acknowledged);
+    let reopened: SessionRecord =
+        serde_json::from_slice(&serde_json::to_vec(&room).unwrap()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&reopened.chat_results[0].payload).unwrap(),
+        edited
+    );
+}

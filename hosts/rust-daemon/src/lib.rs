@@ -1,3 +1,4 @@
+mod account_workflows;
 mod agent_files;
 mod agent_runs;
 mod app;
@@ -13,6 +14,7 @@ mod coding_apps;
 mod coding_keys;
 mod community_bundles;
 mod components;
+mod connected_search;
 mod connectors;
 pub mod console_session;
 mod control_plane_store;

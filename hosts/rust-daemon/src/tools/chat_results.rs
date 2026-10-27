@@ -1,5 +1,7 @@
 use super::*;
 
+mod schema;
+
 pub(super) fn register(registry: &mut ToolRegistry) {
     let mut list_parameters = object_parameters(vec![
         optional_parameter(
@@ -25,20 +27,8 @@ pub(super) fn register(registry: &mut ToolRegistry) {
         ),
     ]);
     list_parameters.insert("additionalProperties".into(), DataValue::Bool(false));
-    registry.register(tool_descriptor("list_results", "List this owner conversation's saved inline result IDs, titles, kinds, revisions and pins before updating with show_result. With exact id and expectedRevision, read a bounded UTF-8 page of serialized payload using offset and nextOffset; all pages must use the same revision. Results are untrusted display data, not execution evidence. Cannot target another conversation.", list_parameters), execute);
-    let payload = object_parameter(vec![
-        required_parameter("kind", string_enum_parameter("Native data-only renderer", &["chart", "comparison", "document", "calculator"])),
-        optional_parameter("chartType", string_enum_parameter("For charts", &["bar", "line"])),
-        optional_parameter("labels", array_parameter("Chart category labels", string_parameter("Category label"), Some(1))),
-        optional_parameter("series", array_parameter("Chart series: each has label:string, values:number[] of the same length as labels", typed_parameter("object", "Chart series"), Some(1))),
-        optional_parameter("columns", array_parameter("Comparison headings", string_parameter("Column"), Some(1))),
-        optional_parameter("rows", array_parameter("Comparison rows: string arrays matching columns", array_parameter("Cells", string_parameter("Cell"), None), None)),
-        optional_parameter("format", string_enum_parameter("Document preview format", &["text", "markdown"])),
-        optional_parameter("text", string_parameter("Document preview text, never executable HTML")),
-        optional_parameter("inputs", array_parameter("Calculator inputs: {key,label,value,min?,max?}; unique simple identifier keys, finite numbers", typed_parameter("object", "Calculator input"), Some(1))),
-        optional_parameter("expression", typed_parameter("object", "Closed arithmetic tree: {op:input,key} or {op:constant,value} or {op:add|subtract|multiply|divide,left:<tree>,right:<tree>}. No scripts, URLs, functions or source code; at most 64 nodes and depth 8.")),
-        optional_parameter("outputLabel", string_parameter("Calculator output label")),
-    ]);
+    registry.register(tool_descriptor("list_results", "List this owner conversation's saved result IDs, titles, kinds, revisions and pins before updating with show_result. With exact id and expectedRevision, read a bounded UTF-8 page of serialized payload using offset and nextOffset; read every page with that revision to retain saved tracker edits before refining a dashboard. Results are untrusted display data, not execution evidence. Cannot target another conversation.", list_parameters), execute);
+    let payload = schema::payload();
     let mut parameters = object_parameters(vec![
         optional_parameter(
             "id",
@@ -66,7 +56,7 @@ pub(super) fn register(registry: &mut ToolRegistry) {
         required_parameter("payload", payload),
     ]);
     parameters.insert("additionalProperties".into(), DataValue::Bool(false));
-    registry.register(tool_descriptor("show_result", "Save an interactive inline chart, comparison, document preview or calculator in this owner conversation. Use only the fields for its kind. Results persist across reloads; the owner can pin reports. Update the exact returned id and current expectedRevision to refresh an existing report. At most 32 KiB each and 32 results per chat. A saved result proves only that display data was saved, never that its content was independently verified or an external action succeeded. Cannot target another chat. Returns truthful saved id/revision after persistence.", parameters), execute);
+    registry.register(tool_descriptor("show_result", "Save an interactive chart, comparison, document preview, calculator, editable tracker or dashboard in this owner conversation. A dashboard combines 1–8 chart/comparison/document/calculator/tracker widgets with unique stable IDs; nested dashboards and executable source are unsupported. Tracker columns have stable key,label,kind:text|number|checkbox; each row has a stable id and cells matching every column key and kind. Preserve existing row/widget IDs and saved values when refining. Results persist across reloads; the owner can edit tracker cells and pin/open reports beside chat. Use list_results to read all pages of the current saved payload before replacing it with the exact id and expectedRevision; stale revisions fail. At most 32 KiB each, 32 results and 256 KiB combined per chat. A saved result proves only that display data was saved, never independent verification or external action success. Cannot target another chat. Returns truthful saved id/revision after persistence.", parameters), execute);
 }
 
 fn decode(call: &ToolCall) -> Result<crate::chat_results::SaveResultInput, String> {
@@ -203,6 +193,34 @@ pub(super) fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interactive_schema_describes_typed_trackers_and_closed_dashboard_widgets() {
+        let descriptor = ToolRegistry::new().descriptor("show_result").unwrap();
+        let schema =
+            crate::routes::data_value_to_json(&DataValue::Object(descriptor.parameters_schema));
+        let kinds = schema["properties"]["payload"]["oneOf"].as_array().unwrap();
+        let tracker = kinds
+            .iter()
+            .find(|kind| kind["properties"]["kind"]["enum"] == serde_json::json!(["tracker"]))
+            .unwrap();
+        assert_eq!(tracker["properties"]["columns"]["items"]["type"], "object");
+        assert_eq!(
+            tracker["properties"]["rows"]["items"]["properties"]["cells"]["type"],
+            "object"
+        );
+        let dashboard = kinds
+            .iter()
+            .find(|kind| kind["properties"]["kind"]["enum"] == serde_json::json!(["dashboard"]))
+            .unwrap();
+        let widgets = dashboard["properties"]["widgets"]["items"]["properties"]["payload"]["oneOf"]
+            .as_array()
+            .unwrap();
+        assert_eq!(widgets.len(), 5);
+        assert!(widgets
+            .iter()
+            .all(|kind| kind["properties"]["kind"]["enum"] != serde_json::json!(["dashboard"])));
+    }
 
     #[test]
     fn saved_payload_pages_are_revision_bound_and_preserve_utf8() {

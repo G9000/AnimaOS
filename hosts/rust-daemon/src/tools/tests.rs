@@ -763,6 +763,11 @@ fn registry_defines_every_registered_tool_schema() {
         ("doctor_undo", &["id", "fingerprint"][..], &[][..]),
         ("search_tools", &["query"][..], &["limit"][..]),
         ("describe_tool", &["name"][..], &[][..]),
+        (
+            "connected_search",
+            &[][..],
+            &["query", "kind", "citationId"][..],
+        ),
         ("rename_chat", &["title"][..], &[][..]),
         ("rename_discord_thread", &["title"][..], &[][..]),
         ("send_discord_file", &["path"][..], &["caption"][..]),
@@ -1028,7 +1033,7 @@ fn registry_defines_every_registered_tool_schema() {
         ("drive_search", &[][..], &["query"][..]),
         ("drive_read", &["file_id"][..], &[][..]),
         ("propose_plan", &["title", "steps"][..], &["estimate"][..]),
-        ("browser_navigate", &["routeId"][..], &[][..]),
+        ("browser_navigate", &[][..], &["routeId", "url"][..]),
         ("checkpoint_list", &[][..], &[][..]),
         ("checkpoint_restore", &["checkpoint_id"][..], &[][..]),
         ("browser_observe", &["screenshot"][..], &[][..]),
@@ -1062,6 +1067,62 @@ fn registry_defines_every_registered_tool_schema() {
             "{name} must have a model-facing description"
         );
         assert_object_parameters(&descriptor, required, optional);
+    }
+}
+
+#[test]
+fn browser_navigation_schema_requires_exactly_one_typed_destination() {
+    let registry = ToolRegistry::new();
+    let descriptor = registry.descriptor("browser_navigate").unwrap();
+    let schema =
+        crate::routes::data_value_to_json(&DataValue::Object(descriptor.parameters_schema));
+    assert_eq!(schema["required"], json!([]));
+    assert_eq!(schema["additionalProperties"], json!(false));
+    assert_eq!(
+        schema["oneOf"],
+        json!([
+            {"required": ["routeId"]},
+            {"required": ["url"]}
+        ])
+    );
+    assert_eq!(schema["properties"]["routeId"]["type"], "string");
+    assert_eq!(
+        schema["properties"]["routeId"]["minLength"].as_f64(),
+        Some(1.0)
+    );
+    assert_eq!(
+        schema["properties"]["routeId"]["maxLength"].as_f64(),
+        Some(64.0)
+    );
+    assert_eq!(
+        schema["properties"]["url"],
+        json!({
+            "type": "string", "minLength": 1.0, "maxLength": 2048.0,
+            "format": "uri", "pattern": "^https://"
+        })
+    );
+
+    let route = ("routeId".into(), DataValue::String("start".into()));
+    let url = (
+        "url".into(),
+        DataValue::String("https://example.com/search?q=one".into()),
+    );
+    for (args, accepted) in [
+        (BTreeMap::from([route.clone()]), true),
+        (BTreeMap::from([url.clone()]), true),
+        (BTreeMap::from([route, url]), false),
+        (BTreeMap::new(), false),
+        (
+            BTreeMap::from([("url".into(), DataValue::Number(1.0))]),
+            false,
+        ),
+    ] {
+        let call = ToolCall {
+            id: "browser-schema".into(),
+            name: "browser_navigate".into(),
+            args,
+        };
+        assert_eq!(super::browser::arguments(&call).is_ok(), accepted);
     }
 }
 

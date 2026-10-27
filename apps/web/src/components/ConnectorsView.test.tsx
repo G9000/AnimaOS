@@ -487,7 +487,7 @@ it('shows mail services with honest OAuth setup state', async () => {
   render(
     <ConnectorsView agentId="main" telegram={<div>Telegram management</div>} />,
   );
-  expect(screen.getByText('Telegram management')).toBeVisible();
+  expect(screen.getByText('Telegram')).toBeVisible();
   for (const name of [
     'Google Calendar',
     'Google Drive',
@@ -902,9 +902,8 @@ it('refreshes inbox from the provider only on explicit Refresh', async () => {
 it('shows OAuth redirect URIs and accessible credential fields', async () => {
   render(<ConnectorsView agentId="main" telegram={null} />);
 
-  expect(
-    screen.getByRole('heading', { name: 'OAuth app setup' }),
-  ).toBeVisible();
+  fireEvent.click(screen.getByText('OAuth app setup'));
+  expect(screen.getByText('OAuth app setup')).toBeVisible();
   expect(
     screen.getByText(
       'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.',
@@ -1085,6 +1084,7 @@ it('clears a submitted secret before a failed configuration request settles', as
   );
   const user = userEvent.setup();
   render(<ConnectorsView agentId="main" telegram={null} />);
+  fireEvent.click(screen.getByText('OAuth app setup'));
 
   await user.type(await screen.findByLabelText('Google client ID'), '  id  ');
   await user.type(
@@ -1128,12 +1128,13 @@ it('keeps provider failures independent and validates credentials locally', asyn
   render(
     <ConnectorsView agentId="main" telegram={<div>Telegram management</div>} />,
   );
+  fireEvent.click(screen.getByText('OAuth app setup'));
 
   expect(
     await screen.findByText('Could not refresh this connection. Try again.'),
   ).toBeVisible();
   expect(screen.getByText('Microsoft OAuth app')).toBeVisible();
-  expect(screen.getByText('Telegram management')).toBeVisible();
+  expect(screen.getByText('Telegram')).toBeVisible();
   await user.type(screen.getByLabelText('Microsoft client ID'), 'id-only');
   await user.click(
     screen.getByRole('button', { name: 'Save Microsoft OAuth app' }),
@@ -1159,6 +1160,7 @@ it('removes vault credentials and treats environment credentials as managed outs
   api.removeOauthApp.mockRejectedValue(new Error('connector_conflict secret'));
   const user = userEvent.setup();
   render(<ConnectorsView agentId="main" telegram={null} />);
+  fireEvent.click(screen.getByText('OAuth app setup'));
 
   expect(await screen.findByText('goo…123')).toBeVisible();
   expect(screen.getByText('mic…456')).toBeVisible();

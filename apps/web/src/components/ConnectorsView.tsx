@@ -15,6 +15,7 @@ import {
 } from '@animaos/sdk';
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
+import { ConnectedAccountsPanel } from './connected-accounts/ConnectedAccountsPanel';
 import { GenericEmailSettings } from './GenericEmailSettings';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
 import { CommunityBundlesPanel } from './community-bundles/CommunityBundlesPanel';
@@ -1147,6 +1148,13 @@ export function ConnectorsView({
                   />
                 </div>
               </section>
+              <ConnectedAccountsPanel
+                agentId={agentId}
+                online={online}
+                epoch={epoch}
+                disabled={disabled || ownerBusy}
+                onGrantsChanged={onMcpGrantsChanged}
+              />
               <section className="connections-section" aria-labelledby="chat-app-connections-heading">
                 <div className="connections-section-heading">
                   <div>

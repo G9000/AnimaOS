@@ -66,6 +66,7 @@ describe('useSessionSends', () => {
         ...message('browser-key'),
         browserSelection: {
           policyId: 'quotes',
+          profileId: 'dedicated-account',
           selectedInputIds: ['att-input'],
         },
       }),
@@ -76,6 +77,7 @@ describe('useSessionSends', () => {
       expect.objectContaining({
         browserSelection: {
           policyId: 'quotes',
+          profileId: 'dedicated-account',
           selectedInputIds: ['att-input'],
         },
       }),

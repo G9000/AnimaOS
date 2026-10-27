@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { EventEmitter, once } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -81,6 +81,137 @@ function publicScope() {
     ],
   };
 }
+
+function interactiveScope() {
+  const value = publicScope();
+  value.interactive = {
+    origins: [{ origin: value.origin, publicIpv4Pin: value.publicIpv4Pin }],
+    resourceBytes: 4194304,
+    networkBytes: 33554432,
+  };
+  return value;
+}
+
+test('interactive public scope admits JS resource and form requests only on owner approved origins', () => {
+  const value = interactiveScope();
+  assert.deepEqual(validateScope(value), value);
+  const window = {
+    requestsUsed: 0,
+    blockedRequests: 0,
+    nowMs: 10,
+    expiresAtMs: 100,
+    pageId: 'page',
+    effectActive: true,
+    navigationRemaining: 0,
+  };
+  const request = {
+    pageId: 'page',
+    isMainFrame: true,
+    channel: 'http',
+    method: 'GET',
+    url: value.origin + '/assets/app.js?v=2',
+    navigation: false,
+    download: false,
+    bodyBytes: 0,
+    headerBytes: 0,
+  };
+  assert.equal(guardRequest(value, request, window).path, '/assets/app.js?v=2');
+  assert.equal(
+    guardRequest(
+      value,
+      {
+        ...request,
+        method: 'POST',
+        url: value.origin + '/submit',
+        bodyBytes: 10,
+      },
+      window,
+    ).method,
+    'POST',
+  );
+  rejected(
+    () =>
+      guardRequest(
+        value,
+        { ...request, url: 'https://foreign.example/app.js' },
+        window,
+      ),
+    'denied',
+  );
+  rejected(() =>
+    validateScope({
+      ...value,
+      interactive: {
+        ...value.interactive,
+        origins: [{ origin: value.origin, publicIpv4Pin: '127.0.0.1' }],
+      },
+    }),
+  );
+});
+
+test('interactive bounded PDF download preserves the complete body and rejects oversized streams', async () => {
+  const body = Buffer.from('%PDF-1.7\ncontrolled result\n%%EOF');
+  const result = await readBoundedResponse(
+    new Response(body, { headers: { 'content-type': 'application/pdf' } }),
+    {
+      kind: 'pdf',
+      bodyBytes: 4194304,
+      totalBytes: 33554432,
+      allowAttachment: true,
+    },
+    { aggregateBytes: 0, deadlineMs: Date.now() + 1000 },
+  );
+  assert.deepEqual(Buffer.from(result.body), body);
+  await assert.rejects(
+    readBoundedResponse(
+      new Response('<html>not a PDF</html>', {
+        headers: { 'content-type': 'application/pdf' },
+      }),
+      {
+        kind: 'pdf',
+        bodyBytes: 4194304,
+        totalBytes: 33554432,
+        allowAttachment: true,
+      },
+      { aggregateBytes: 0, deadlineMs: Date.now() + 1000 },
+    ),
+    (error) => error.code === 'denied',
+  );
+});
+
+test('interactive forms expose typed select and a closed key set', () => {
+  for (const operation of [
+    { kind: 'selectOption', node: { token: 'node-1' }, value: 'yearly' },
+    { kind: 'pressKey', node: { token: 'node-1' }, key: 'Enter' },
+  ])
+    assert.deepEqual(
+      decodeOperation(
+        interactiveScope(),
+        Buffer.from(JSON.stringify(operation)),
+      ),
+      operation,
+    );
+  rejected(() =>
+    decodeOperation(
+      interactiveScope(),
+      Buffer.from(
+        JSON.stringify({
+          kind: 'pressKey',
+          node: { token: 'node-1' },
+          key: 'Control+L',
+        }),
+      ),
+    ),
+  );
+});
+
+test('interactive maintained snapshot preserves frame-qualified refs after a real navigation', () => {
+  const parsed = snapshotEvidence(
+    '- heading "Protected report" [level=1] [ref=f2e1]',
+    pinnedYaml,
+  );
+  assert.equal(parsed.entries[0].ref, 'f2e1');
+});
 
 test('m63_public_scope_and_bootstrap_admit_only_the_operator_pin_and_preserve_loopback', () => {
   assert.deepEqual(validateScope(publicScope()), publicScope());
@@ -412,6 +543,46 @@ function m63HeldRequest() {
     socketCloses: () => socketCloses,
   };
 }
+
+test(
+  'interactive preflight forwards only bounded approved origin and closed requested methods',
+  { timeout: 2000 },
+  async () => {
+    const value = interactiveScope();
+    const fake = m63HeldRequest();
+    const owner = worker.createPinnedHttpsRequest(
+      value,
+      {
+        id: 'index',
+        origin: value.origin,
+        path: '/api/report',
+        method: 'OPTIONS',
+      },
+      {
+        requestImpl: fake.requestImpl,
+        requestOrigin: value.origin,
+        requestedMethod: 'POST',
+        requestedHeaders: 'content-type, x-report-mode',
+      },
+    );
+    owner.response.catch(() => {});
+    await new Promise((resolve) => setImmediate(resolve));
+    try {
+      assert.equal(
+        fake.captured[0].headers['Access-Control-Request-Method'],
+        'POST',
+      );
+      assert.equal(
+        fake.captured[0].headers['Access-Control-Request-Headers'],
+        'content-type, x-report-mode',
+      );
+      assert.equal(fake.captured[0].headers.Origin, value.origin);
+    } finally {
+      fake.release();
+      await owner.close();
+    }
+  },
+);
 
 test(
   'm63_pinned_request_options_fail_once_without_dns_fetch_or_identity_override',
@@ -936,7 +1107,9 @@ function executeMessage(operation, id = 2, document = documentWitness()) {
       scopeRevision: 1,
       contextId: 'context-1',
       operation,
-      ...(['navigate', 'observe'].includes(operation.kind)
+      ...(['navigate', 'navigateUrl', 'ownerControl', 'observe'].includes(
+        operation.kind,
+      )
         ? {}
         : { documentWitness: document }),
     },
@@ -2008,7 +2181,11 @@ test('m46_cli_accepts_only_fixed_private_bootstrap_and_cleared_private_environme
 
 test(
   'm46_windows_node22_cli_real_private_bootstrap_and_eof_exits_cleanly_without_open_or_output',
-  { skip: process.platform !== 'win32' || process.versions.node !== '22.12.0' },
+  {
+    skip:
+      process.platform !== 'win32' ||
+      ![22, 24].includes(Number(process.versions.node.split('.')[0])),
+  },
   async () => {
     const cwd = await filesystem.mkdtemp(path.join(tmpdir(), 'anima-m46-cli-'));
     try {
@@ -2140,6 +2317,7 @@ function adapterSetupSpy(overrides = {}, publicPolicy = false) {
     order.push('unexpected-page-close');
   };
   const context = new EventEmitter();
+  context.pages = () => [];
   context.setDefaultTimeout = (value) => {
     assert.equal(value, 10000);
     order.push('timeout');
@@ -2147,6 +2325,8 @@ function adapterSetupSpy(overrides = {}, publicPolicy = false) {
   context.exposeBinding = async (name, callback) => {
     order.push('binding');
     hooks.binding = callback;
+    hooks.bindings ??= {};
+    hooks.bindings[name] = callback;
   };
   context.addInitScript = async (script, args) => {
     order.push('init-script');
@@ -2183,7 +2363,7 @@ function adapterSetupSpy(overrides = {}, publicPolicy = false) {
         permissions: [],
         ignoreHTTPSErrors: false,
         bypassCSP: false,
-        ...(publicPolicy ? { javaScriptEnabled: false } : {}),
+        ...(publicPolicy === true ? { javaScriptEnabled: false } : {}),
       });
       return context;
     },
@@ -2221,15 +2401,45 @@ function adapterSetupSpy(overrides = {}, publicPolicy = false) {
           options.executablePath,
           bootstrap().installation.browserExecutable,
         );
-        assert.equal(options.headless, true);
+        assert.equal(options.headless, publicPolicy !== 'interactive');
         assert.deepEqual(options.proxy, { server: 'http://127.0.0.1:43218' });
         assert.deepEqual(options.env, environment);
-        assert.equal(Object.hasOwn(options, 'args'), false);
+        assert.ok(options.args.includes('--disable-quic'));
+        assert.ok(
+          options.args.includes(
+            '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+          ),
+        );
         assert.equal(Object.hasOwn(options, 'channel'), false);
         return browser;
       },
     },
     ...overrides,
+  };
+  dependencies.chromium.launchPersistentContext ??= async (
+    _directory,
+    options,
+  ) => {
+    const {
+      serviceWorkers,
+      acceptDownloads,
+      viewport,
+      permissions,
+      ignoreHTTPSErrors,
+      bypassCSP,
+      javaScriptEnabled,
+      ...launch
+    } = options;
+    const launched = await dependencies.chromium.launch(launch);
+    return launched.newContext({
+      serviceWorkers,
+      acceptDownloads,
+      viewport,
+      permissions,
+      ignoreHTTPSErrors,
+      bypassCSP,
+      ...(javaScriptEnabled === undefined ? {} : { javaScriptEnabled }),
+    });
   };
   return { dependencies, order, hooks, page, context, frame };
 }
@@ -2269,6 +2479,739 @@ function pinDownloadPageSpy(setup) {
   };
   return calls;
 }
+
+test(
+  'interactive routed credentials honor omitted browser cookies and only forward owned included pairs',
+  { timeout: 5000 },
+  async (t) => {
+    const seen = [];
+    const otherOrigin = 'https://wrong-browser.anima.tools';
+    const peer = await m63TlsPeer(t, 'server.pem', (request, response) => {
+      seen.push({
+        cookie: request.headers.cookie,
+        origin: request.headers.origin,
+      });
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'access-control-allow-origin': '*',
+        'set-cookie': [
+          'response_one=one; Path=/; Secure; HttpOnly',
+          'response_two=two; Path=/; Secure; HttpOnly',
+        ],
+      });
+      response.end('{"ok":true}');
+    });
+    const supplied = {
+      ...bootstrap(),
+      scope: { ...interactiveScope(), authenticated: true },
+      inputs: [],
+      profile: {
+        id: 'cookie-owner',
+        revision: 1,
+        digest: 'd'.repeat(64),
+        origin: interactiveScope().origin,
+        keyHex: 'a'.repeat(64),
+        sealedPath: path.join(
+          tmpdir(),
+          'absent-cookie-profile-' + randomUUID(),
+        ),
+        ownerLogin: true,
+        loginRouteId: 'index',
+      },
+    };
+    supplied.scope.interactive.origins.push({
+      origin: otherOrigin,
+      publicIpv4Pin: '93.184.216.35',
+    });
+    const setup = adapterSetupSpy(
+      { httpsRequestImpl: peer.requestImpl },
+      'interactive',
+    );
+    pinDownloadPageSpy(setup);
+    const added = [];
+    setup.context.pages = () => [];
+    setup.context.cookies = async () => [
+      {
+        name: 'session',
+        value: 'synthetic-owner',
+        domain: new URL(supplied.scope.origin).hostname,
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        expires: -1,
+      },
+      {
+        name: 'another',
+        value: 'not-selected',
+        domain: new URL(supplied.scope.origin).hostname,
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        expires: -1,
+      },
+    ];
+    setup.context.addCookies = async (cookies) => {
+      added.push(...cookies);
+    };
+    setup.context.setStorageState = async () => {};
+    setup.dependencies.chromium.launchPersistentContext = async () =>
+      setup.context;
+    const session = await createMaintainedSession(supplied, setup.dependencies);
+    try {
+      for (const cookie of [undefined, 'session=synthetic-owner']) {
+        const attempt = simulatedRoute(
+          setup,
+          supplied.scope.origin + '/api/account',
+        );
+        const request = attempt.route.request();
+        request.allHeaders = async () =>
+          cookie === undefined
+            ? { origin: otherOrigin }
+            : { origin: otherOrigin, cookie };
+        attempt.route.request = () => request;
+        let headers;
+        attempt.route.fulfill = async (response) => {
+          headers = response.headers;
+        };
+        await setup.hooks.http(attempt.route);
+        assert.equal(attempt.aborted(), 0);
+        assert.equal(
+          headers['set-cookie'],
+          'response_one=one; Path=/; Secure; HttpOnly\nresponse_two=two; Path=/; Secure; HttpOnly',
+        );
+      }
+      assert.deepEqual(seen, [
+        { cookie: undefined, origin: otherOrigin },
+        { cookie: 'session=synthetic-owner', origin: otherOrigin },
+      ]);
+      assert.deepEqual(
+        added,
+        [],
+        'the browser, not a manual jar write, applies routed Set-Cookie credentials rules',
+      );
+      const invalid = simulatedRoute(
+        setup,
+        supplied.scope.origin + '/api/account',
+      );
+      const request = invalid.route.request();
+      request.allHeaders = async () => ({ cookie: 'session=forged' });
+      invalid.route.request = () => request;
+      await setup.hooks.http(invalid.route);
+      assert.equal(invalid.aborted(), 1);
+      assert.equal(
+        peer.captured.length,
+        2,
+        'an unowned cookie is denied before a native request',
+      );
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test('interactive owner takeover fences observations and invalidates old nodes without extending scope', async () => {
+  const supplied = bootstrap();
+  supplied.scope = interactiveScope();
+  supplied.inputs = [];
+  const setup = adapterSetupSpy({}, 'interactive');
+  pinDownloadPageSpy(setup);
+  let focused = 0;
+  setup.page.bringToFront = async () => {
+    focused++;
+  };
+  const session = await createMaintainedSession(supplied, setup.dependencies);
+  const message = (operation, document) => {
+    const value = executeMessage(operation, 2, document);
+    value.payload.contextId = session.contextId;
+    return value;
+  };
+  try {
+    const first = await session.execute(
+      message({ kind: 'navigate', routeId: 'index' }),
+    );
+    const held = await session.execute(
+      message({ kind: 'ownerControl', enabled: true }),
+    );
+    assert.deepEqual(held.observation.nodes, []);
+    assert.equal(focused, 1);
+    await assert.rejects(
+      session.execute(message({ kind: 'observe', screenshot: false })),
+      (e) => e.code === 'denied' && e.effect === 'notDispatched',
+    );
+    await session.execute(message({ kind: 'ownerControl', enabled: false }));
+    await assert.rejects(
+      session.execute(
+        message(
+          { kind: 'click', node: first.observation.nodes[0].node },
+          first.document,
+        ),
+      ),
+      (e) => e.code === 'stale',
+    );
+    const fresh = await session.execute(
+      message({ kind: 'observe', screenshot: false }),
+    );
+    assert.equal(fresh.observation.currentUrl, supplied.scope.origin + '/');
+    assert.equal(supplied.scope.limits.scopeMs, 120000);
+  } finally {
+    await session.close();
+  }
+});
+
+test('interactive speculative CONNECT stays denied and charged only for the exact currently admitted navigation', async () => {
+  const approved = new URL(interactiveScope().origin).hostname + ':443';
+  for (const metadata of [
+    { method: 'CONNECT', authority: approved },
+    { method: 'CONNECT', authority: approved.replace(':443', ':444') },
+    { method: 'CONNECT', authority: 'foreign.example:443' },
+    { method: 'GET', authority: approved },
+    { method: 'CONNECT', authority: approved + '@foreign.example:443' },
+    { method: 'CONNECT', authority: 'background.example:443' },
+    undefined,
+  ]) {
+    const supplied = bootstrap();
+    supplied.scope = interactiveScope();
+    supplied.inputs = [];
+    const fatals = [];
+    const setup = adapterSetupSpy(
+      { onFatal: (error) => fatals.push(error.code) },
+      'interactive',
+    );
+    pinDownloadPageSpy(setup);
+    const goto = setup.page.goto;
+    setup.page.goto = async (url) => {
+      setup.hooks.denyProxy.onRequest('denied', metadata);
+      await goto(url);
+    };
+    const session = await createMaintainedSession(supplied, setup.dependencies);
+    const navigate = executeMessage({ kind: 'navigate', routeId: 'index' });
+    navigate.payload.contextId = session.contextId;
+    try {
+      if (metadata?.authority === approved && metadata?.method === 'CONNECT') {
+        await session.execute(navigate);
+        assert.deepEqual(fatals, []);
+        assert.equal(session.counters().requestsUsed, 1);
+        setup.hooks.denyProxy.onRequest('denied', metadata);
+        assert.deepEqual(
+          fatals,
+          ['denied'],
+          'same host outside a navigation still retires',
+        );
+      } else {
+        await assert.rejects(session.execute(navigate));
+        assert.deepEqual(fatals, ['denied']);
+      }
+    } finally {
+      await session.close();
+    }
+  }
+});
+
+test('interactive owner navigation binding grants no witness outside live owner main-frame control', async () => {
+  const supplied = bootstrap();
+  supplied.scope = interactiveScope();
+  supplied.inputs = [];
+  const fatals = [];
+  const setup = adapterSetupSpy(
+    { onFatal: (error) => fatals.push(error.code) },
+    'interactive',
+  );
+  pinDownloadPageSpy(setup);
+  setup.page.bringToFront = async () => {};
+  const session = await createMaintainedSession(supplied, setup.dependencies);
+  const message = (operation) => {
+    const value = executeMessage(operation);
+    value.payload.contextId = session.contextId;
+    return value;
+  };
+  const binding = Object.entries(setup.hooks.bindings).find(([name]) =>
+    name.startsWith('__anima_owner_navigation_'),
+  )[1];
+  const source = { page: setup.page, frame: setup.frame };
+  try {
+    await session.execute(message({ kind: 'navigate', routeId: 'index' }));
+    assert.equal(binding(source, supplied.scope.origin), false);
+    await session.execute(message({ kind: 'ownerControl', enabled: true }));
+    assert.equal(
+      binding({ page: {}, frame: setup.frame }, supplied.scope.origin),
+      false,
+    );
+    assert.equal(
+      binding({ page: setup.page, frame: {} }, supplied.scope.origin),
+      false,
+    );
+    assert.equal(binding(source, 'https://foreign.example'), false);
+    assert.equal(binding(source, supplied.scope.origin), true);
+    setup.hooks.denyProxy.onRequest('denied', {
+      method: 'CONNECT',
+      authority: new URL(supplied.scope.origin).hostname + ':443',
+    });
+    assert.deepEqual(fatals, []);
+    assert.equal(session.counters().requestsUsed, 1);
+    setup.page.emit('load');
+    setup.hooks.denyProxy.onRequest('denied', {
+      method: 'CONNECT',
+      authority: new URL(supplied.scope.origin).hostname + ':443',
+    });
+    assert.deepEqual(fatals, ['denied']);
+  } finally {
+    await session.close();
+  }
+});
+
+test('interactive owner navigation hints have bounded uses and never suppress request limits', async () => {
+  for (const scenario of ['uses', 'budget']) {
+    const supplied = bootstrap();
+    supplied.scope = interactiveScope();
+    supplied.inputs = [];
+    if (scenario === 'budget') supplied.scope.limits.requests = 1;
+    const fatals = [];
+    const setup = adapterSetupSpy(
+      { onFatal: (error) => fatals.push(error.code) },
+      'interactive',
+    );
+    pinDownloadPageSpy(setup);
+    setup.page.bringToFront = async () => {};
+    const session = await createMaintainedSession(supplied, setup.dependencies);
+    const message = (operation) => {
+      const value = executeMessage(operation);
+      value.payload.contextId = session.contextId;
+      return value;
+    };
+    try {
+      await session.execute(message({ kind: 'navigate', routeId: 'index' }));
+      await session.execute(message({ kind: 'ownerControl', enabled: true }));
+      const binding = Object.entries(setup.hooks.bindings).find(([name]) =>
+        name.startsWith('__anima_owner_navigation_'),
+      )[1];
+      assert.equal(
+        binding(
+          { page: setup.page, frame: setup.frame },
+          supplied.scope.origin,
+        ),
+        true,
+      );
+      const requests = scenario === 'budget' ? 2 : 4;
+      for (let count = 0; count < requests; count++)
+        setup.hooks.denyProxy.onRequest('denied', {
+          method: 'CONNECT',
+          authority: new URL(supplied.scope.origin).hostname + ':443',
+        });
+      assert.deepEqual(fatals, [
+        scenario === 'budget' ? 'limitsExceeded' : 'denied',
+      ]);
+      assert.equal(session.counters().requestsUsed, requests);
+    } finally {
+      await session.close();
+    }
+  }
+});
+
+test(
+  'interactive native Chromium handles JS relative assets login redirects forms owner takeover and PDF download',
+  { timeout: 60000 },
+  async (t) => {
+    const browserExecutable = path.join(
+      process.env.LOCALAPPDATA ?? '',
+      'ms-playwright',
+      'chromium-1248',
+      'chrome-win64',
+      'chrome.exe',
+    );
+    await filesystem.access(browserExecutable); // Required acceptance: missing runtime is a failure.
+    const { chromium } = createRequire(import.meta.url)('playwright-core');
+    const directory = await filesystem.mkdtemp(
+      path.join(tmpdir(), 'anima-interactive-acceptance-'),
+    );
+    const pdf = Buffer.from('%PDF-1.7\ncontrolled-browser-report\n%%EOF');
+    let formPosts = 0,
+      reportPosts = 0,
+      ownerPosts = 0;
+    let omittedCookie = 'not-requested';
+    const peer = await m63TlsPeer(t, 'server.pem', (request, response) => {
+      if (request.url === '/public') {
+        response.setHeader('content-type', 'text/html');
+        response.end(
+          '<h1>Public application</h1><script src="/public.js"></script>',
+        );
+        return;
+      }
+      if (request.url === '/public.js') {
+        response.setHeader('content-type', 'application/javascript');
+        response.end(
+          'document.body.insertAdjacentHTML("beforeend","<button>Public JS ready</button>")',
+        );
+        return;
+      }
+      if (request.url === '/') {
+        response.writeHead(302, { location: '/app/login' });
+        response.end();
+        return;
+      }
+      if (request.url === '/app/login') {
+        response.setHeader('content-type', 'text/html');
+        response.end('<h1>Owner sign in</h1><script src="login.js"></script>');
+        return;
+      }
+      if (request.url === '/app/login.js') {
+        response.setHeader('content-type', 'application/javascript');
+        response.end(
+          'document.body.insertAdjacentHTML("beforeend",`<form method="post" action="/session"><label>Passcode<input name="code"></label><button>Sign in</button></form>`);',
+        );
+        return;
+      }
+      if (request.url === '/session' && request.method === 'POST') {
+        formPosts++;
+        request.resume();
+        response.writeHead(303, {
+          location: '/app/home',
+          'set-cookie':
+            'session=synthetic-owner-only; Path=/; Secure; HttpOnly; SameSite=Strict',
+        });
+        response.end();
+        return;
+      }
+      if (request.url === '/credential-omit') {
+        omittedCookie = request.headers.cookie;
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          'access-control-allow-origin': '*',
+          'set-cookie':
+            'session=must-not-store; Path=/; Secure; HttpOnly; SameSite=Strict',
+        });
+        response.end('{"public":true}');
+        return;
+      }
+      if (request.headers.cookie !== 'session=synthetic-owner-only') {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+      if (request.url === '/owner-confirm' && request.method === 'POST') {
+        ownerPosts++;
+        request.resume();
+        response.writeHead(303, { location: '/app/confirmed' });
+        response.end();
+        return;
+      }
+      if (request.url === '/app/home' || request.url === '/app/confirmed') {
+        response.setHeader('content-type', 'text/html');
+        response.end(
+          '<h1>Protected report</h1><form method="post" action="/owner-confirm"><label>Owner code<input name="owner-code"></label><button>Continue as owner</button></form><label>Quantity<input name="quantity" value="1"></label><label>Period<select><option value="month">Monthly</option><option value="year">Yearly</option></select></label><button onclick="fetch(\'/report\',{method:\'POST\',body:document.querySelector(\'input[name=quantity]\').value}).then(()=>{document.body.insertAdjacentHTML(\'beforeend\',\'<a href=/report.pdf>Download PDF</a>\')})">Generate report</button>',
+        );
+        return;
+      }
+      if (request.url === '/report' && request.method === 'POST') {
+        reportPosts++;
+        request.resume();
+        response.setHeader('content-type', 'application/json');
+        response.end('{"ready":true}');
+        return;
+      }
+      if (request.url === '/report.pdf') {
+        response.setHeader('content-type', 'application/pdf');
+        response.setHeader(
+          'content-disposition',
+          'attachment; filename="untrusted-name.pdf"',
+        );
+        response.end(pdf);
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    const base = interactiveScope();
+    base.authenticated = true;
+    base.limits.outputBytes = 4194304;
+    const profile = {
+      id: 'interactive-owner',
+      revision: 1,
+      digest: 'd'.repeat(64),
+      origin: base.origin,
+      keyHex: 'a'.repeat(64),
+      sealedPath: path.join(directory, 'owner.sealed'),
+      ownerLogin: true,
+      loginRouteId: 'index',
+    };
+    const contexts = [];
+    const make = async (ownerLogin, anonymous = false) => {
+      const privateRoot = await filesystem.mkdtemp(
+        path.join(directory, 'worker-'),
+      );
+      const supplied = {
+        ...bootstrap(),
+        scope: { ...base, authenticated: !anonymous },
+        inputs: [],
+        outputs: [
+          {
+            id: 'csv-1',
+            kind: 'csv',
+            filePath: path.join(privateRoot, 'download-1.csv'),
+          },
+          {
+            id: 'csv-2',
+            kind: 'csv',
+            filePath: path.join(privateRoot, 'download-2.csv'),
+          },
+          {
+            id: 'shot-1',
+            kind: 'screenshot',
+            filePath: path.join(privateRoot, 'shot-1.jpg'),
+          },
+          {
+            id: 'shot-2',
+            kind: 'screenshot',
+            filePath: path.join(privateRoot, 'shot-2.jpg'),
+          },
+        ],
+        privateRoot,
+        expiresAtMs: Date.now() + 120000,
+        installation: {
+          id: 'installed-1',
+          browserExecutable,
+          browserSha256: createHash('sha256')
+            .update(await filesystem.readFile(browserExecutable))
+            .digest('hex'),
+        },
+        ...(!anonymous ? { profile: { ...profile, ownerLogin } } : {}),
+      };
+      const captured = {
+        launch: async (...args) => {
+          const browser = await chromium.launch(...args);
+          const createContext = browser.newContext.bind(browser);
+          browser.newContext = async (...options) => {
+            const context = await createContext(...options);
+            contexts.push(context);
+            return context;
+          };
+          return browser;
+        },
+        launchPersistentContext: async (...args) => {
+          const context = await chromium.launchPersistentContext(...args);
+          contexts.push(context);
+          return context;
+        },
+      };
+      const session = await createMaintainedSession(supplied, {
+        chromium: captured,
+        yaml: pinnedYaml,
+        environment: {
+          SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
+          WINDIR: process.env.WINDIR ?? 'C:\\Windows',
+          TEMP: privateRoot,
+          TMP: privateRoot,
+        },
+        profileHeadlessForTests: true,
+        httpsRequestImpl: peer.requestImpl,
+      });
+      return { session, supplied, context: contexts.at(-1) };
+    };
+    let login, task, publicTask;
+    try {
+      publicTask = await make(false, true);
+      const publicMessage = executeMessage({
+        kind: 'navigateUrl',
+        url: base.origin + '/public',
+      });
+      publicMessage.payload.contextId = publicTask.session.contextId;
+      const publicReply = await publicTask.session.execute(publicMessage);
+      assert.ok(
+        publicReply.observation.nodes.some(
+          (node) => node.label === 'Public JS ready',
+        ),
+      );
+      await publicTask.session.close();
+      publicTask = undefined;
+      login = await make(true);
+      const ownerPage = login.context.pages()[0];
+      await ownerPage.getByLabel('Passcode').fill('synthetic-passcode');
+      await ownerPage.getByRole('button', { name: 'Sign in' }).click();
+      await ownerPage
+        .getByRole('heading', { name: 'Protected report' })
+        .waitFor();
+      assert.equal(ownerPage.url(), base.origin + '/app/home');
+      assert.equal(formPosts, 1);
+      await filesystem.writeFile(
+        path.join(login.supplied.privateRoot, 'profile.finish'),
+        'finish',
+      );
+      await login.session.close();
+      login = undefined;
+      assert.ok((await filesystem.readFile(profile.sealedPath)).length > 0);
+      assert.equal(
+        worker.openProfileState(
+          profile,
+          JSON.parse(await filesystem.readFile(profile.sealedPath, 'utf8')),
+        ).cookies.length,
+        1,
+      );
+      task = await make(false);
+      assert.equal((await task.context.cookies(base.origin)).length, 1);
+      const message = (operation, document) => {
+        const value = executeMessage(operation, 2, document);
+        value.payload.contextId = task.session.contextId;
+        return value;
+      };
+      let reply = await task.session.execute(
+        message({ kind: 'navigateUrl', url: base.origin + '/app/home' }),
+      );
+      assert.ok(
+        reply.observation.nodes.some(
+          (node) => node.label === 'Protected report',
+        ),
+      );
+      await task.session.execute(
+        message({ kind: 'ownerControl', enabled: true }),
+      );
+      await assert.rejects(
+        task.session.execute(message({ kind: 'observe', screenshot: false })),
+        (e) => e.code === 'denied',
+      );
+      await task.context.pages()[0].getByLabel('Quantity').fill('7');
+      await task.context
+        .pages()[0]
+        .getByLabel('Owner code')
+        .fill('synthetic-owner-confirmation');
+      await task.context
+        .pages()[0]
+        .getByRole('button', { name: 'Continue as owner' })
+        .click();
+      await task.context.pages()[0].waitForURL(base.origin + '/app/confirmed');
+      await task.context
+        .pages()[0]
+        .getByRole('heading', { name: 'Protected report' })
+        .waitFor();
+      assert.equal(
+        ownerPosts,
+        1,
+        'one explicit human form navigation during takeover',
+      );
+      await task.session.execute(
+        message({ kind: 'ownerControl', enabled: false }),
+      );
+      reply = await task.session.execute(
+        message({ kind: 'observe', screenshot: false }),
+      );
+      const period = reply.observation.nodes.find(
+        (node) => node.role === 'combobox',
+      );
+      assert.ok(period);
+      reply = await task.session.execute(
+        message(
+          { kind: 'selectOption', node: period.node, value: 'year' },
+          reply.document,
+        ),
+      );
+      const generate = reply.observation.nodes.find(
+        (node) => node.role === 'button' && node.label === 'Generate report',
+      );
+      assert.ok(generate);
+      await task.session.execute(
+        message({ kind: 'click', node: generate.node }, reply.document),
+      );
+      await task.context
+        .pages()[0]
+        .getByRole('link', { name: 'Download PDF' })
+        .waitFor();
+      reply = await task.session.execute(
+        message({ kind: 'observe', screenshot: false }),
+      );
+      const download = reply.observation.nodes.find(
+        (node) => node.role === 'link',
+      );
+      assert.ok(download);
+      reply = await task.session.execute(
+        message({ kind: 'download', node: download.node }, reply.document),
+      );
+      const artifact = reply.observation.artifacts[0];
+      assert.equal(artifact.kind, 'pdf');
+      assert.equal(artifact.bytes, pdf.length);
+      assert.equal(
+        artifact.sha256,
+        createHash('sha256').update(pdf).digest('hex'),
+      );
+      assert.deepEqual(
+        await filesystem.readFile(task.supplied.outputs[0].filePath),
+        pdf,
+      );
+      assert.equal(formPosts, 1);
+      assert.equal(ownerPosts, 1);
+      assert.equal(
+        reportPosts,
+        1,
+        'one owner navigation plus one model submission, without effect retry',
+      );
+      assert.ok(
+        peer.captured.every(
+          (request) =>
+            request.hostname === base.publicIpv4Pin &&
+            request.servername === new URL(base.origin).hostname,
+        ),
+      );
+      assert.deepEqual(
+        await task.context
+          .pages()[0]
+          .evaluate(() =>
+            fetch('/credential-omit', { credentials: 'omit' }).then(
+              (response) => response.json(),
+            ),
+          ),
+        { public: true },
+      );
+      assert.equal(
+        omittedCookie,
+        undefined,
+        'a real browser credentials:omit request sends no owned Cookie',
+      );
+      assert.equal(
+        (await task.context.cookies(base.origin)).find(
+          (cookie) => cookie.name === 'session',
+        ).value,
+        'synthetic-owner-only',
+        'the browser ignores Set-Cookie on an omitted-credentials response',
+      );
+      const udp = (await import('node:dgram')).createSocket('udp4');
+      let udpPackets = 0;
+      udp.on('message', () => udpPackets++);
+      await new Promise((resolve) => udp.bind(0, '127.0.0.1', resolve));
+      try {
+        let refused = false;
+        try {
+          refused = await task.context.pages()[0].evaluate((port) => {
+            try {
+              new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:127.0.0.1:' + port }],
+              });
+              return false;
+            } catch (error) {
+              return error.name === 'NotAllowedError';
+            }
+          }, udp.address().port);
+        } catch (error) {
+          refused = /closed|destroyed/.test(error.message);
+        }
+        assert.equal(refused, true);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        assert.equal(
+          udpPackets,
+          0,
+          'the blocked WebRTC constructor sends no UDP to the owned sentinel',
+        );
+        await assert.rejects(
+          task.session.execute(message({ kind: 'observe', screenshot: false })),
+          (error) => ['denied', 'cancelled'].includes(error.code),
+        );
+      } finally {
+        await new Promise((resolve) => udp.close(resolve));
+      }
+    } finally {
+      await login?.session.close();
+      await task?.session.close();
+      await publicTask?.session.close();
+      await filesystem.rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 function proxyResponse(proxy, target, options = {}) {
   return new Promise((resolve, reject) => {
@@ -3240,14 +4183,14 @@ test(
       path.join(
         process.env.LOCALAPPDATA ?? '',
         'ms-playwright',
-        'chromium_headless_shell-1217',
-        'chrome-headless-shell-win64',
-        'chrome-headless-shell.exe',
+        'chromium-1248',
+        'chrome-win64',
+        'chrome.exe',
       );
     try {
       await filesystem.access(browserExecutable);
     } catch {
-      t.skip('Pinned Chromium 1217 is not installed');
+      t.skip('Maintained Chromium 1248 is not installed');
       return;
     }
     const profileRequire = createRequire(import.meta.url);
@@ -3496,14 +4439,14 @@ test(
       path.join(
         process.env.LOCALAPPDATA ?? '',
         'ms-playwright',
-        'chromium_headless_shell-1217',
-        'chrome-headless-shell-win64',
-        'chrome-headless-shell.exe',
+        'chromium-1248',
+        'chrome-win64',
+        'chrome.exe',
       );
     try {
       await filesystem.access(browserExecutable);
     } catch {
-      t.skip('Pinned Chromium 1217 is not installed');
+      t.skip('Maintained Chromium 1248 is not installed');
       return;
     }
     const profileRequire = createRequire(import.meta.url);

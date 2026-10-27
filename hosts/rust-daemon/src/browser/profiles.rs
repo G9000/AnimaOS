@@ -15,6 +15,8 @@ use zeroize::Zeroizing;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BrowserProfileView {
+    #[serde(default)]
+    pub(crate) login_active: bool,
     pub(crate) id: String,
     pub(crate) agent_id: String,
     pub(crate) policy_id: String,
@@ -194,6 +196,7 @@ impl ProfileStore {
             return Err(error);
         }
         let mut view = BrowserProfileView {
+            login_active: false,
             id,
             agent_id: agent.into(),
             policy_id: policy.into(),

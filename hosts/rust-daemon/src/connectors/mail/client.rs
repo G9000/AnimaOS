@@ -1,5 +1,7 @@
 #[path = "mime.rs"]
 mod mime;
+#[path = "client_search.rs"]
+mod search;
 
 use super::*;
 use async_trait::async_trait;
@@ -20,14 +22,25 @@ pub(crate) trait MailTransport: Send + Sync {
     ) -> Result<GoogleOAuthTokens, MailError>;
     async fn account(&self, p: Provider, access: &str) -> Result<String, MailError>;
     async fn inbox(&self, p: Provider, access: &str) -> Result<Vec<MailMessage>, MailError>;
+    async fn search_inbox(
+        &self,
+        _p: Provider,
+        _access: &str,
+    ) -> Result<Vec<crate::connected_search::IndexedDocument>, MailError> {
+        Err(MailError::Upstream)
+    }
     async fn send(&self, p: Provider, access: &str, draft: &MailDraft) -> Result<(), MailError>;
 }
 pub(crate) struct MailClient {
     http: reqwest::Client,
+    gmail_api: String,
+    graph_api: String,
 }
 impl MailClient {
     pub(crate) fn new() -> Self {
         Self {
+            gmail_api: "https://gmail.googleapis.com/gmail/v1".into(),
+            graph_api: "https://graph.microsoft.com/v1.0".into(),
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(20))
@@ -106,6 +119,13 @@ fn text(v: &Value, key: &str, max: usize) -> String {
 }
 #[async_trait]
 impl MailTransport for MailClient {
+    async fn search_inbox(
+        &self,
+        p: Provider,
+        access: &str,
+    ) -> Result<Vec<crate::connected_search::IndexedDocument>, MailError> {
+        self.search_documents(p, access).await
+    }
     async fn exchange(
         &self,
         c: &OAuthConfig,

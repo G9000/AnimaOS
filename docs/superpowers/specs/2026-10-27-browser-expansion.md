@@ -1,0 +1,21 @@
+# Owner scoped interactive browser expansion
+
+The existing BrowserPort, daemon authority checks, action receipts, Windows process ownership, dedicated sealed profiles, and owned attachment publication remain the execution boundary. Legacy static and loopback policies keep their existing behavior.
+
+Owners create a destination in the console by entering a public HTTPS starting URL and up to eight explicit allowed origins. The owner API resolves each hostname, refuses nonpublic addresses, and freezes one public IPv4 pin per origin. Creation starts no browser and grants no tools. The destination appears in the normal policy picker; the selected policy digest and all pins are frozen for each run. No model tool can create destinations or choose executable paths. Destination authorizations are ephemeral to the daemon, while their logical identity comes from canonical settings. After restart, an owner must reauthorize the same settings before reusing a durable dedicated account. Each authorization has a fresh JS-safe version; an old revoke cannot remove a later authorization. Explicit removal revokes its dedicated accounts, fences new startup and joins owned cleanup independently of the HTTP caller.
+
+Interactive policies enable JavaScript and bounded scripts, styles, images, fonts and fetch requests on approved origins. Chromium still uses the deny-only fallback proxy; intercepted requests use owned Node HTTPS connections to frozen pins with normal hostname certificate verification. Requests, response bodies, redirects, and cancellation stay bounded. Cross-origin requests require an explicitly approved origin. Service workers, arbitrary popups, private networks and personal profile attachment remain unavailable.
+
+Interactive sessions use a maintained full Chromium browser in a dedicated headed context. The owner can take control of the same page at an action boundary. A busy action returns a conflict for explicit refresh after its receipt settles. Takeover fences new dispatch, preserves the current receipt, invalidates page witnesses, and disables model observation and action. Resume invalidates witnesses again and requires a fresh observation and action approval. Neither control transition extends the original 120-second deadline or retries an effect; the 40-action/80-request budgets stay unchanged. Stop retains physical ownership until every owned process/socket and private directory is retired.
+
+Downloads use typed observed links and the existing guarded streaming transport. Accepted CSV, plain text, JSON, PDF and PNG/JPEG files have complete bounded bodies, generated names, owned IDs and SHA-256 hashes. They enter the existing attachment store; browser-supplied paths and filenames grant no authority. The initial file cap is 4 MiB, four output slots; resource cap 4 MiB and aggregate network cap 32 MiB are separate from IPC wire limits.
+
+Owner routes (all under `/api/agents/{agent_id}`):
+
+- `GET /browser-setup` returns `{available, reason, setupCommand}` without starting a browser. Setup is an explicit operator command using the locked full Chromium installation; a restart loads its recorded hashes.
+- `POST /browser-destinations` accepts `{startUrl, allowedOrigins, authenticated}` and returns `{policy}`. `GET /browser-policies` includes created destinations.
+- `POST /browser-destinations/{destination_id}/revoke` accepts `{expectedVersion}` and returns `{revoked:true}` after owned retirement and account revocation. Repeating a stale version fails rather than affecting a later authorization.
+- `POST /runs/{run_id}/browser-scope/takeover` and `/resume` accept `{expectedVersion}` and return `{scope}`. Scope includes an `ownerControl` boolean and an `ownerControl` state while the owner holds the page.
+- Existing profile create/list/sign-in/start/sign-in/finish/revoke routes are exposed by the SDK and UI.
+
+Validation starts with failing contract tests. Focused worker/core/daemon tests cover destination refusal, pinning, shared byte budgets, JS forms, download integrity, stale witnesses, owner-control fencing and Stop. Controlled local browser acceptance covers a JS form, result download and dedicated profile lifecycle. Real-account and arbitrary-site compatibility are reported separately from controlled acceptance. Full Rust/workspace verification runs after the combined source freeze.

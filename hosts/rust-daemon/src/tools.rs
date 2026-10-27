@@ -12,6 +12,7 @@ mod checkpoints;
 mod clarify;
 pub(crate) mod command_binding;
 pub(crate) mod completion;
+pub(crate) mod connected_search;
 mod conversations;
 mod credential_paths;
 mod discord;
@@ -140,6 +141,7 @@ pub(crate) struct ToolExecutionContext {
         Arc<dyn crate::attachments::documents::worker::DocumentExtractor>,
     pub(super) calendar: Option<CalendarManager>,
     pub(super) mail: Option<MailManager>,
+    pub(super) connected_search: Option<crate::connected_search::SearchService>,
     pub(super) drive: Option<crate::connectors::drive::DriveManager>,
     pub(super) discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
     #[cfg(test)]
@@ -253,6 +255,7 @@ impl ToolExecutionContext {
             document_extractor: Arc::new(crate::attachments::documents::worker::DocumentWorker),
             calendar,
             mail: None,
+            connected_search: None,
             drive: None,
             discord_thread: None,
             #[cfg(test)]
@@ -308,6 +311,13 @@ impl ToolExecutionContext {
 
     pub(crate) fn with_mail(mut self, mail: Option<MailManager>) -> Self {
         self.mail = mail;
+        self
+    }
+    pub(crate) fn with_connected_search(
+        mut self,
+        service: Option<crate::connected_search::SearchService>,
+    ) -> Self {
+        self.connected_search = service;
         self
     }
     pub(crate) fn with_discord_thread(
@@ -2168,6 +2178,7 @@ impl ToolRegistry {
             optional_parameter("offset", bounded_integer_parameter("Byte offset from a preceding page, default 0", 0, 4194304)),
             optional_parameter("limit", bounded_integer_parameter("Page byte limit, 1 to 8192", 1, 8192)),
         ])), tool_results::handle);
+        connected_search::register(&mut registry);
         browser::register(&mut registry);
         catalog::register(&mut registry);
         doctor::register(&mut registry);

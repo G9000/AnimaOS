@@ -4,6 +4,9 @@ use serde_json::Number;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+mod interactive;
+pub(crate) use interactive::{DashboardWidget, TrackerColumn, TrackerRow};
+
 pub(crate) const MAX_RESULT_BYTES: usize = 32 * 1024;
 const MAX_RESULTS: usize = 32;
 const MAX_SESSION_BYTES: usize = 256 * 1024;
@@ -59,6 +62,13 @@ pub(crate) enum ResultPayload {
         expression: Calculation,
         #[serde(rename = "outputLabel")]
         output_label: String,
+    },
+    Tracker {
+        columns: Vec<TrackerColumn>,
+        rows: Vec<TrackerRow>,
+    },
+    Dashboard {
+        widgets: Vec<DashboardWidget>,
     },
 }
 
@@ -140,6 +150,8 @@ impl ResultPayload {
             Self::Comparison { .. } => "comparison",
             Self::Document { .. } => "document",
             Self::Calculator { .. } => "calculator",
+            Self::Tracker { .. } => "tracker",
+            Self::Dashboard { .. } => "dashboard",
         }
     }
 
@@ -225,6 +237,8 @@ impl ResultPayload {
                 }
                 expression.validate(&keys, 0, &mut 0)
             }
+            Self::Tracker { columns, rows } => interactive::validate_tracker(columns, rows),
+            Self::Dashboard { widgets } => interactive::validate_dashboard(widgets),
         }
     }
 }

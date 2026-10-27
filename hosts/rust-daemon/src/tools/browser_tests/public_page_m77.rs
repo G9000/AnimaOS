@@ -358,6 +358,7 @@ fn m77_missing_changed_or_foreign_child_files_do_not_consume_case() {
 
 fn m77_observation() -> BrowserObservation {
     BrowserObservation {
+        current_url: None,
         document_generation: 1,
         route_id: "page".into(),
         nodes: vec![

@@ -14,6 +14,7 @@ mod chat_controls;
 mod chatgpt;
 mod coding;
 mod community_bundles;
+mod connected_search;
 mod connectors;
 mod contracts;
 mod core_memory;
@@ -46,6 +47,7 @@ mod paired_devices;
 mod queue_controls;
 mod standing_intents;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
+mod account_workflow_rules;
 mod chat_capabilities;
 mod chat_models;
 mod chat_results;
@@ -135,6 +137,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         capabilities_entry,
         browser::get,browser::save,browser::stop,browser::list,browser::policies,
         browser::profiles,browser::create_profile,browser::start_profile_login,browser::finish_profile_login,browser::revoke_profile,
+        browser::setup,browser::create_destination,browser::revoke_destination,browser::takeover,browser::resume,
         community_bundles::review,community_bundles::install,community_bundles::list,community_bundles::get,
         community_bundles::update,community_bundles::set_enabled,community_bundles::remove,
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
@@ -149,6 +152,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         jobs::review_job,
         workflows::list, workflows::create, workflows::get, workflows::resume, workflows::cancel,
         workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
+        account_workflow_rules::list, account_workflow_rules::create, account_workflow_rules::update, account_workflow_rules::delete, account_workflow_rules::events,
         tool_results::get_tool_result, tool_results::download_tool_result,
         goals::list_goals,
         goals::create_goal,
@@ -207,6 +211,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         folder_picker::pick_folder,
         resume_workspace_entry,
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
+        connected_search::sources,connected_search::configure,connected_search::refresh,connected_search::search,connected_search::item,
         discord::list, discord::create, discord::check, discord::configure, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
         connectors::create_telegram_connector,
@@ -314,6 +319,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         crate::browser::BrowserSelection,crate::browser::SaveBrowserScope,crate::browser::StopBrowserScope,crate::browser::BrowserScopeEnvelope,crate::browser::BrowserSavedScopeEnvelope,
         crate::browser::BrowserScopesEnvelope,crate::browser::BrowserPoliciesEnvelope,crate::browser::BrowserScopeView,
         crate::browser::BrowserProfileView,crate::browser::BrowserProfileMutation,crate::browser::CreateBrowserProfile,
+        crate::browser::BrowserSetupView,crate::browser::CreateBrowserDestination,crate::browser::BrowserDestinationEnvelope,crate::browser::BrowserDestinationRevoked,
         crate::browser::StartBrowserLogin,crate::browser::BrowserProfileEnvelope,crate::browser::BrowserProfilesEnvelope,
         crate::browser::BrowserScopeState,crate::browser::BrowserPolicyView,crate::browser::BrowserPolicyRouteView,
         crate::browser::BrowserDocumentView,crate::browser::BrowserArtifactView,crate::browser::BrowserArtifactKindView,crate::browser::BrowserLimitsView,
@@ -359,6 +365,7 @@ struct ApiDoc;
 
 #[derive(Clone)]
 struct AppState {
+    connected_search: crate::connected_search::SearchService,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     browser: crate::browser::BrowserService,
@@ -939,10 +946,25 @@ fn router_with_services_with_policies_and_integrations(
     let agent_runs = agent_runs.with_browser(browser.clone());
     // Background mail installation may acquire the daemon state immediately.
     // Finish synchronous runtime installation before starting that work.
+    let connected_search = crate::connected_search::SearchService::new(
+        &state,
+        agent_runs.control_plane_transactions(),
+        mail.clone(),
+        drive.clone(),
+        calendar.clone(),
+    );
+    {
+        let mut guard = state
+            .try_write()
+            .expect("search installation requires uncontended state");
+        guard.connected_search_service = Some(connected_search.weak());
+    }
     mail.start();
+    connected_search.start();
     let voice_request_timeout = voice.request_timeout();
     let speech_request_timeout = speech.request_timeout();
     let app_state = AppState {
+        connected_search,
         voice,
         speech,
         browser,
@@ -981,6 +1003,11 @@ fn router_with_services_with_policies_and_integrations(
                 ),
         );
     let timed_routes = Router::new()
+        .route("/api/agents/{agent_id}/connected-search/sources",get(connected_search::sources))
+        .route("/api/agents/{agent_id}/connected-search/sources/{connector_id}",axum::routing::put(connected_search::configure))
+        .route("/api/agents/{agent_id}/connected-search/refresh",axum::routing::post(connected_search::refresh))
+        .route("/api/agents/{agent_id}/connected-search/query",axum::routing::post(connected_search::search))
+        .route("/api/agents/{agent_id}/connected-search/items/{citation_id}",get(connected_search::item))
         .route(
             "/api/agents/{agent_id}/connectors/gdrive",
             get(gdrive::status).post(gdrive::connect),
@@ -1041,6 +1068,11 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/browser-scopes",get(browser::list))
         .route("/api/agents/{agent_id}/browser-policies",get(browser::policies))
         .route("/api/agents/{agent_id}/browser-profiles",get(browser::profiles).post(browser::create_profile))
+        .route("/api/agents/{agent_id}/browser-setup",get(browser::setup))
+        .route("/api/agents/{agent_id}/browser-destinations",axum::routing::post(browser::create_destination))
+        .route("/api/agents/{agent_id}/browser-destinations/{destination_id}/revoke",axum::routing::post(browser::revoke_destination))
+        .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope/takeover",axum::routing::post(browser::takeover))
+        .route("/api/agents/{agent_id}/runs/{run_id}/browser-scope/resume",axum::routing::post(browser::resume))
         .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start",axum::routing::post(browser::start_profile_login))
         .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish",axum::routing::post(browser::finish_profile_login))
         .route("/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke",axum::routing::post(browser::revoke_profile))
@@ -1077,6 +1109,9 @@ fn router_with_services_with_policies_and_integrations(
         )
         .route("/api/goals/{goal_id}/jobs", get(goals::goal_jobs))
         .route("/api/agents/{agent_id}/workflow-templates", get(workflow_templates::list).post(workflow_templates::save))
+        .route("/api/agents/{agent_id}/account-workflow-rules", get(account_workflow_rules::list).post(account_workflow_rules::create))
+        .route("/api/agents/{agent_id}/account-workflow-rules/{rule_id}", axum::routing::patch(account_workflow_rules::update).delete(account_workflow_rules::delete))
+        .route("/api/agents/{agent_id}/account-workflow-rules/{rule_id}/events", get(account_workflow_rules::events))
         .route("/api/agents/{agent_id}/workflow-templates/{slug}", get(workflow_templates::get).delete(workflow_templates::delete))
         .route("/api/agents/{agent_id}/workflow-templates/{slug}/run", axum::routing::post(workflow_templates::run))
         .route("/api/agents/{agent_id}/tool-results/{artifact_id}", get(tool_results::get_tool_result))
@@ -3382,6 +3417,7 @@ mod tests {
 
         fn state(&self) -> Arc<RwLock<DaemonState>> {
             let mut daemon = DaemonState::new();
+            daemon.workspace_download_read_slots = Some(Arc::new(Semaphore::new(4)));
             daemon.workspace = Some(WorkspaceConfig {
                 root_path: self.root.clone(),
                 company_name: "Acme".into(),

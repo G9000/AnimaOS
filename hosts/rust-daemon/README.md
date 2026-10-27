@@ -202,6 +202,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `GET`    | `/api/agents/{agent_id}/browser-policies`                                                    |
 | `GET`    | `/api/agents/{agent_id}/browser-scopes`                                                      |
+| `GET`    | `/api/agents/{agent_id}/browser-setup`                                                       |
 | `GET`    | `/api/agents/{agent_id}/coding-keys`                                                         |
 | `GET`    | `/api/agents/{agent_id}/community-bundles`                                                   |
 | `GET`    | `/api/agents/{agent_id}/community-bundles/{bundle_id}`                                       |
@@ -353,6 +354,18 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/learning-reviews/{review_id}/cancel`                                 |
 | `POST`   | `/api/agents/{agent_id}/memory-maintenance/sources`                                          |
 | `POST`   | `/api/agents/{agent_id}/browser-profiles`                                                    |
+| `GET`    | `/api/agents/{agent_id}/connected-search/sources`                                           |
+| `PUT`    | `/api/agents/{agent_id}/connected-search/sources/{connector_id}`                            |
+| `POST`   | `/api/agents/{agent_id}/connected-search/refresh`                                           |
+| `POST`   | `/api/agents/{agent_id}/connected-search/query`                                             |
+| `GET`    | `/api/agents/{agent_id}/connected-search/items/{citation_id}`                               |
+| `GET`    | `/api/agents/{agent_id}/account-workflow-rules`                                             |
+| `POST`   | `/api/agents/{agent_id}/account-workflow-rules`                                             |
+| `PATCH`  | `/api/agents/{agent_id}/account-workflow-rules/{rule_id}`                                   |
+| `DELETE` | `/api/agents/{agent_id}/account-workflow-rules/{rule_id}`                                   |
+| `GET`    | `/api/agents/{agent_id}/account-workflow-rules/{rule_id}/events`                            |
+| `POST`   | `/api/agents/{agent_id}/browser-destinations`                                                |
+| `POST`   | `/api/agents/{agent_id}/browser-destinations/{destination_id}/revoke`                        |
 | `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/start`                         |
 | `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/sign-in/finish`                        |
 | `POST`   | `/api/agents/{agent_id}/browser-profiles/{profile_id}/revoke`                                |
@@ -371,6 +384,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/messages`                                                            |
 | `POST`   | `/api/agents/{agent_id}/run`                                                                 |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/browser-scope/stop`                                    |
+| `POST`   | `/api/agents/{agent_id}/runs/{run_id}/browser-scope/takeover`                                |
+| `POST`   | `/api/agents/{agent_id}/runs/{run_id}/browser-scope/resume`                                  |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/learning-review`                                       |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/recovery`                                              |
 | `POST`   | `/api/agents/{agent_id}/runs/{run_id}/stop`                                                  |

@@ -318,6 +318,10 @@ function mockBrowserPolicy(): BrowserPolicy {
     installationId: 'edge',
     installationDigest: 'b'.repeat(64),
     workerAvailable: true,
+    authenticated: false,
+    interactive: false,
+    allowedOrigins: ['http://127.0.0.1:43220'],
+    version: 1,
     limits: {
       actions: 40,
       requests: 80,
@@ -380,6 +384,31 @@ it('M46 sends one explicit browser selection from an existing chat without carry
   expect(vi.mocked(daemon.startRun).mock.calls[1][2]).not.toHaveProperty(
     'browserSelection',
   );
+});
+
+it('sends the selected dedicated account through the composer and send queue', async () => {
+  const user = userEvent.setup();
+  const base = mockBrowserPolicy();
+  const website = { ...base, authenticated: true, interactive: true, origin: 'https://example.com', allowedOrigins: ['https://example.com'] };
+  vi.mocked(daemon.browserScopes.policies).mockResolvedValue([website]);
+  vi.spyOn(daemon.browserScopes, 'setup').mockResolvedValue({ available: true, reason: null, setupCommand: 'bun run browser:setup' });
+  vi.spyOn(daemon.browserScopes, 'profiles').mockResolvedValue([{
+    id: 'account-ready', agentId: 'agent-main', policyId: website.id,
+    origin: website.origin, revision: 2, digest: 'd'.repeat(64), ready: true,
+    revoked: false, loginActive: false,
+  }]);
+  const { input } = await openLiveSession({ kind: 'chat' });
+  vi.mocked(daemon.startRun).mockImplementation(async (agentId, sessionId, sent) => acceptedRun(agentId, sessionId, sent.text));
+  await user.selectOptions(await openBrowserPolicyPicker(), website.id);
+  const websites = screen.getByText('Websites and sign-in').closest('details')!;
+  websites.open = true;
+  fireEvent(websites, new Event('toggle'));
+  await user.selectOptions(await screen.findByLabelText('Account for next message'), 'account-ready');
+  await user.type(input, 'Use my dedicated account');
+  await user.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledWith(
+    'agent-main', 'room-7', expect.objectContaining({ browserSelection: { policyId: website.id, profileId: 'account-ready', selectedInputIds: [] } }), expect.any(String),
+  ));
 });
 
 it('M46 sends browser selection from the resolved main session without creating another chat', async () => {

@@ -7,6 +7,8 @@ use zeroize::Zeroizing;
 
 use super::store::GoogleOAuthTokens;
 use super::{url_encode, CalendarEventDraft, GoogleOAuthConfig};
+#[path = "client_search.rs"]
+mod search;
 
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API_BASE: &str = "https://www.googleapis.com/calendar/v3";
@@ -51,6 +53,36 @@ pub(crate) struct GoogleCalendarEvent {
 
 #[async_trait]
 pub(crate) trait GoogleCalendarTransport: Send + Sync {
+    async fn search_events(
+        &self,
+        access_token: &str,
+        calendar_id: &str,
+        time_min: &str,
+        time_max: &str,
+    ) -> Result<Vec<crate::connected_search::IndexedDocument>, GoogleTransportError> {
+        let events = self
+            .list_events(access_token, calendar_id, time_min, time_max)
+            .await?;
+        Ok(events
+            .into_iter()
+            .map(|e| {
+                let mut d = crate::connected_search::providers::document(
+                    crate::connected_search::DocumentKind::Event,
+                    e.id,
+                    calendar_id.into(),
+                    e.title,
+                    format!(
+                        "{}\n{}",
+                        e.description.unwrap_or_default(),
+                        e.location.unwrap_or_default()
+                    ),
+                );
+                d.event_start = Some(e.start);
+                d.event_end = Some(e.end);
+                d
+            })
+            .collect())
+    }
     async fn exchange_code(
         &self,
         config: &GoogleOAuthConfig,
@@ -96,6 +128,7 @@ pub(crate) trait GoogleCalendarTransport: Send + Sync {
 
 pub(crate) struct GoogleCalendarClient {
     client: Client,
+    api_base: String,
 }
 
 /// Transport used when Google OAuth is not configured on this daemon. Every
@@ -163,11 +196,15 @@ impl GoogleCalendarTransport for UnconfiguredGoogleTransport {
 impl GoogleCalendarClient {
     pub(crate) fn new() -> Result<Self, GoogleTransportError> {
         let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(20))
             .build()
             .map_err(|_| GoogleTransportError::Configuration)?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            api_base: GOOGLE_CALENDAR_API_BASE.into(),
+        })
     }
 }
 
@@ -233,7 +270,7 @@ struct GoogleEventBodyTime<'a> {
 }
 
 async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
 ) -> Result<T, GoogleTransportError> {
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -248,12 +285,16 @@ async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     if !status.is_success() {
         return Err(GoogleTransportError::Unavailable);
     }
-    let bytes = response
-        .bytes()
+    let mut bytes = vec![];
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|_| GoogleTransportError::Unavailable)?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err(GoogleTransportError::Unavailable);
+        .map_err(|_| GoogleTransportError::Unavailable)?
+    {
+        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return Err(GoogleTransportError::Unavailable);
+        }
+        bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(|_| GoogleTransportError::Unavailable)
 }
@@ -276,6 +317,16 @@ fn tokens_from_response(
 
 #[async_trait]
 impl GoogleCalendarTransport for GoogleCalendarClient {
+    async fn search_events(
+        &self,
+        access_token: &str,
+        calendar_id: &str,
+        time_min: &str,
+        time_max: &str,
+    ) -> Result<Vec<crate::connected_search::IndexedDocument>, GoogleTransportError> {
+        self.search_documents(access_token, calendar_id, time_min, time_max)
+            .await
+    }
     async fn exchange_code(
         &self,
         config: &GoogleOAuthConfig,

@@ -63,6 +63,30 @@ pub(crate) struct StopBrowserScope {
     pub(crate) expected_version: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateBrowserDestination {
+    pub(crate) start_url: String,
+    pub(crate) allowed_origins: Vec<String>,
+    pub(crate) authenticated: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserSetupView {
+    pub(crate) available: bool,
+    pub(crate) reason: Option<String>,
+    pub(crate) setup_command: String,
+}
+#[derive(Serialize, ToSchema)]
+pub(crate) struct BrowserDestinationEnvelope {
+    pub(crate) policy: BrowserPolicyView,
+}
+#[derive(Serialize, ToSchema)]
+pub(crate) struct BrowserDestinationRevoked {
+    pub(crate) revoked: bool,
+}
+
 /// Operator-selected actual installation witness. No HTTP/model constructor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BrowserInstallation {
@@ -84,10 +108,7 @@ impl InstalledBrowserPolicies {
         installation: BrowserInstallation,
         policies: Vec<InstalledBrowserPolicy>,
     ) -> Result<Self, BrowserServiceError> {
-        if !valid_id(&installation.id)
-            || !digest_valid(&installation.digest)
-            || policies.is_empty()
-            || policies.len() > 16
+        if !valid_id(&installation.id) || !digest_valid(&installation.digest) || policies.len() > 16
         {
             return Err(BrowserServiceError::Invalid);
         }
@@ -168,6 +189,7 @@ pub(crate) enum BrowserScopeState {
     Disabled,
     Scoped,
     Active,
+    OwnerControl,
     Stopping,
     Closed,
     Unavailable,
@@ -184,6 +206,25 @@ pub(crate) struct BrowserDocumentView {
 pub(crate) enum BrowserArtifactKindView {
     Screenshot,
     Csv,
+    Text,
+    Json,
+    Pdf,
+    Png,
+    Jpeg,
+}
+impl From<anima_service_adapters::browser::BrowserArtifactKind> for BrowserArtifactKindView {
+    fn from(value: anima_service_adapters::browser::BrowserArtifactKind) -> Self {
+        use anima_service_adapters::browser::BrowserArtifactKind as Kind;
+        match value {
+            Kind::Screenshot => Self::Screenshot,
+            Kind::Csv => Self::Csv,
+            Kind::Text => Self::Text,
+            Kind::Json => Self::Json,
+            Kind::Pdf => Self::Pdf,
+            Kind::Png => Self::Png,
+            Kind::Jpeg => Self::Jpeg,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -196,6 +237,7 @@ pub(crate) struct BrowserArtifactView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserScopeView {
+    pub(crate) owner_control: bool,
     pub(crate) profile: Option<super::profiles::BrowserProfileView>,
     pub(crate) id: String,
     pub(crate) agent_id: String,
@@ -260,6 +302,9 @@ impl From<&anima_service_adapters::browser::BrowserLimits> for BrowserLimitsView
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserPolicyView {
+    pub(crate) interactive: bool,
+    pub(crate) allowed_origins: Vec<String>,
+    pub(crate) version: u64,
     pub(crate) authenticated: bool,
     pub(crate) id: String,
     pub(crate) origin: String,

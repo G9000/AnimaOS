@@ -44,6 +44,7 @@ const READ_TOOLS: &[&str] = &[
     "wait_helper_runs",
     "calendar_list_events",
     "mail_list_messages",
+    "connected_search",
     "drive_search",
     "drive_read",
     "search_conversations",

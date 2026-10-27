@@ -42,7 +42,62 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 316, "complete registered operation count");
+    assert_eq!(actual.len(), 331, "complete registered operation count");
+    let connected_account_additions = [
+        ("GET", "/api/agents/{agent_id}/connected-search/sources"),
+        (
+            "PUT",
+            "/api/agents/{agent_id}/connected-search/sources/{connector_id}",
+        ),
+        ("POST", "/api/agents/{agent_id}/connected-search/refresh"),
+        ("POST", "/api/agents/{agent_id}/connected-search/query"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/connected-search/items/{citation_id}",
+        ),
+        ("GET", "/api/agents/{agent_id}/account-workflow-rules"),
+        ("POST", "/api/agents/{agent_id}/account-workflow-rules"),
+        (
+            "PATCH",
+            "/api/agents/{agent_id}/account-workflow-rules/{rule_id}",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/account-workflow-rules/{rule_id}",
+        ),
+        (
+            "GET",
+            "/api/agents/{agent_id}/account-workflow-rules/{rule_id}/events",
+        ),
+    ];
+    for (method, path) in connected_account_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "connected account owner operation must be registered"
+        );
+    }
+    let browser_expansion_additions = [
+        ("GET", "/api/agents/{agent_id}/browser-setup"),
+        ("POST", "/api/agents/{agent_id}/browser-destinations"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/browser-destinations/{destination_id}/revoke",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/runs/{run_id}/browser-scope/takeover",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/runs/{run_id}/browser-scope/resume",
+        ),
+    ];
+    for (method, path) in browser_expansion_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "interactive browser owner operation must be registered"
+        );
+    }
     let oauth_additions = [
         (
             "POST",
@@ -523,7 +578,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         actual
             .iter()
             .filter(|(method, path)| {
-                !oauth_additions.contains(&(method.as_str(), path.as_str()))
+                !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                    && !browser_expansion_additions.contains(&(method.as_str(), path.as_str()))
+                    && !oauth_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
                     && !chat_suite_additions.contains(&(method.as_str(), path.as_str()))
                     && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
@@ -578,37 +635,38 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
     assert_eq!(
         actual
             .iter()
-            .filter(
-                |(method, path)| !oauth_additions.contains(&(method.as_str(), path.as_str()))
-                    && !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
-                    && !reusable_additions.contains(&(method.as_str(), path.as_str()))
-                    && !chat_suite_additions.contains(&(method.as_str(), path.as_str()))
-                    && !workflow_additions.contains(&(method.as_str(), path.as_str()))
-                    && !additions.contains(&(method.as_str(), path.as_str()))
-                    && !coding_additions.contains(&(method.as_str(), path.as_str()))
-                    && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
-                    && !side_model_additions.contains(&(method.as_str(), path.as_str()))
-                    && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
-                    && !system_additions.contains(&(method.as_str(), path.as_str()))
-                    && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
-                    && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
-                    && !import_additions.contains(&(method.as_str(), path.as_str()))
-                    && !message_search_additions.contains(&(method.as_str(), path.as_str()))
-                    && !speech_additions.contains(&(method.as_str(), path.as_str()))
-                    && !credential_additions.contains(&(method.as_str(), path.as_str()))
-                    && !report_additions.contains(&(method.as_str(), path.as_str()))
-                    && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
-                    && !owner_editing_additions.contains(&(method.as_str(), path.as_str()))
-                    && !usage_limit_additions.contains(&(method.as_str(), path.as_str()))
-                    && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
-                    && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
-                    && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
-                    && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
-                    && !reminder_additions.contains(&(method.as_str(), path.as_str()))
-                    && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
-                    && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
-                    && !runtime_capability_additions.contains(&(method.as_str(), path.as_str()))
-            )
+            .filter(|(method, path)| !connected_account_additions
+                .contains(&(method.as_str(), path.as_str()))
+                && !browser_expansion_additions.contains(&(method.as_str(), path.as_str()))
+                && !oauth_additions.contains(&(method.as_str(), path.as_str()))
+                && !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
+                && !reusable_additions.contains(&(method.as_str(), path.as_str()))
+                && !chat_suite_additions.contains(&(method.as_str(), path.as_str()))
+                && !workflow_additions.contains(&(method.as_str(), path.as_str()))
+                && !additions.contains(&(method.as_str(), path.as_str()))
+                && !coding_additions.contains(&(method.as_str(), path.as_str()))
+                && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
+                && !side_model_additions.contains(&(method.as_str(), path.as_str()))
+                && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
+                && !system_additions.contains(&(method.as_str(), path.as_str()))
+                && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
+                && !learning_undo_additions.contains(&(method.as_str(), path.as_str()))
+                && !import_additions.contains(&(method.as_str(), path.as_str()))
+                && !message_search_additions.contains(&(method.as_str(), path.as_str()))
+                && !speech_additions.contains(&(method.as_str(), path.as_str()))
+                && !credential_additions.contains(&(method.as_str(), path.as_str()))
+                && !report_additions.contains(&(method.as_str(), path.as_str()))
+                && !main_chat_additions.contains(&(method.as_str(), path.as_str()))
+                && !owner_editing_additions.contains(&(method.as_str(), path.as_str()))
+                && !usage_limit_additions.contains(&(method.as_str(), path.as_str()))
+                && !core_memory_additions.contains(&(method.as_str(), path.as_str()))
+                && !memory_export_additions.contains(&(method.as_str(), path.as_str()))
+                && !discord_interaction_additions.contains(&(method.as_str(), path.as_str()))
+                && !durable_work_additions.contains(&(method.as_str(), path.as_str()))
+                && !reminder_additions.contains(&(method.as_str(), path.as_str()))
+                && !maintenance_additions.contains(&(method.as_str(), path.as_str()))
+                && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
+                && !runtime_capability_additions.contains(&(method.as_str(), path.as_str())))
             .count(),
         188,
         "pre-M49 registered operations remain present"

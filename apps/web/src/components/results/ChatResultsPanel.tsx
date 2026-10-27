@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type {
   Calculation,
   ChatResult,
@@ -9,8 +9,12 @@ import { daemon } from '../../lib/daemon-api';
 import { MarkdownMessage } from '../MarkdownMessage';
 import { useLatest } from '../../hooks/useLatest';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
+import { useRenderScope } from '../../hooks/useRenderScope';
+import { TrackerResult } from './TrackerResult';
+import { InteractiveResultEditor } from './InteractiveResultEditor';
 
-type ResultsApi = Pick<ChatResultsClient, 'list' | 'pin'>;
+type ResultsApi = Pick<ChatResultsClient, 'list' | 'pin'> &
+  Partial<Pick<ChatResultsClient, 'save'>>;
 type ResultsState = {
   scope: string;
   results: ChatResult[];
@@ -32,7 +36,8 @@ export function useChatResults({
   refreshKey?: unknown;
   api?: ResultsApi;
 }) {
-  const scope = JSON.stringify([agentId, sessionId, clearGeneration]);
+  const { generation } = useRenderScope(agentId, sessionId, clearGeneration);
+  const scope = JSON.stringify([agentId, sessionId, clearGeneration, generation]);
   const currentScope = useLatest(scope);
   const [state, setState] = useState<ResultsState>({
     scope,
@@ -44,6 +49,7 @@ export function useChatResults({
   const [pending, setPending] = useState<{ scope: string; id: string } | null>(
     null,
   );
+  const mutation = useRef<string | null>(null);
   useResetOnChange(
     [agentId, sessionId, clearGeneration, scope, refreshKey, retry, api],
     () => {
@@ -118,10 +124,12 @@ export function useChatResults({
 
   async function pin(result: ChatResult) {
     if (
+      mutation.current === scope ||
       pending?.scope === scope ||
       !owns(result, agentId, sessionId, clearGeneration)
     )
       return;
+    mutation.current = scope;
     setPending({ scope, id: result.id });
     try {
       const response = await api.pin(agentId, sessionId, result.id, {
@@ -163,6 +171,58 @@ export function useChatResults({
             : { ...previous, error: errorText(error) },
         );
     } finally {
+      if (mutation.current === scope) mutation.current = null;
+      setPending((previous) =>
+        previous?.scope === scope && previous.id === result.id
+          ? null
+          : previous,
+      );
+    }
+  }
+  async function save(
+    result: ChatResult,
+    payload: ChatResultPayload,
+  ): Promise<ChatResult> {
+    if (
+      !api.save ||
+      mutation.current === scope ||
+      !owns(result, agentId, sessionId, clearGeneration)
+    )
+      throw new Error(
+        'This result is busy or no longer belongs to this conversation.',
+      );
+    mutation.current = scope;
+    setPending({ scope, id: result.id });
+    try {
+      const response = await api.save(agentId, sessionId, clearGeneration, {
+        id: result.id,
+        expectedRevision: result.revision,
+        requestKey: `edit_${crypto.randomUUID().replaceAll('-', '')}`,
+        title: result.title,
+        payload,
+      });
+      if (
+        currentScope.current !== scope ||
+        !owns(response.result, agentId, sessionId, clearGeneration) ||
+        response.result.id !== result.id
+      )
+        throw new Error('The conversation changed while saving.');
+      setState((previous) =>
+        previous.scope !== scope
+          ? previous
+          : {
+              ...previous,
+              error: null,
+              results: previous.results.map((old) =>
+                old.id === result.id && old.revision <= response.result.revision
+                  ? response.result
+                  : old,
+              ),
+            },
+      );
+      return response.result;
+    } finally {
+      if (mutation.current === scope) mutation.current = null;
       setPending((previous) =>
         previous?.scope === scope && previous.id === result.id
           ? null
@@ -178,6 +238,7 @@ export function useChatResults({
     ...visible,
     pendingId: pending?.scope === scope ? pending.id : null,
     pin,
+    save: api.save ? save : undefined,
     refresh: () => setRetry((n) => n + 1),
   };
 }
@@ -223,27 +284,79 @@ export function ChatResultsLayout({
 }) {
   const results = useChatResults(props);
   const pinned = results.results.filter((result) => result.pinned);
+  const scope = JSON.stringify([
+    props.agentId,
+    props.sessionId,
+    props.clearGeneration,
+  ]);
+  const [preview, setPreview] = useState<{ scope: string; id: string } | null>(
+    null,
+  );
+  useResetOnChange([scope], () => setPreview(null));
+  const selected =
+    preview?.scope === scope
+      ? results.results.find((result) => result.id === preview.id)
+      : undefined;
   return (
     <div className="chat-results-layout flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {children(<InlineResults state={results} />)}
+        {children(
+          <InlineResults
+            state={results}
+            onOpen={(result) => setPreview({ scope, id: result.id })}
+          />,
+        )}
       </div>
-      {pinned.length > 0 && (
+      {(selected || pinned.length > 0) && (
         <aside
-          aria-label="Pinned reports"
-          className="max-h-80 shrink-0 space-y-3 overflow-auto border-t border-line bg-panel-2/50 p-3 xl:max-h-none xl:w-80 xl:border-l xl:border-t-0"
+          aria-label={selected ? 'Interactive preview' : 'Pinned reports'}
+          className={`max-h-[65vh] shrink-0 space-y-3 overflow-auto border-t border-line bg-panel-2/50 p-3 xl:max-h-none xl:border-l xl:border-t-0 ${selected ? 'xl:w-[min(45%,42rem)] xl:min-w-80' : 'xl:w-80'}`}
         >
-          <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">
-            Pinned reports
-          </h2>
-          {pinned.map((result) => (
-            <ChatResultCard
-              key={`${result.id}:${result.revision}`}
-              result={result}
-              onPin={() => void results.pin(result)}
-              pinDisabled={results.pendingId !== null}
-            />
-          ))}
+          {selected ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">
+                  Live preview
+                </h2>
+                <button
+                  type="button"
+                  className="text-xs underline"
+                  onClick={() => setPreview(null)}
+                >
+                  Close preview
+                </button>
+              </div>
+              <ChatResultCard
+                key={`${scope}:${selected.id}`}
+                result={selected}
+                onSave={results.save}
+                onPin={() => void results.pin(selected)}
+                pinDisabled={results.pendingId !== null}
+              />
+              <button
+                type="button"
+                className="text-xs text-ink-2 underline"
+                onClick={results.refresh}
+              >
+                Refresh saved results
+              </button>
+            </>
+          ) : (
+            <>
+              <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">
+                Pinned reports
+              </h2>
+              {pinned.map((result) => (
+                <ChatResultCard
+                  key={`${result.id}:${result.revision}`}
+                  result={result}
+                  onPin={() => void results.pin(result)}
+                  pinDisabled={results.pendingId !== null}
+                  onOpen={() => setPreview({ scope, id: result.id })}
+                />
+              ))}
+            </>
+          )}
         </aside>
       )}
     </div>
@@ -252,8 +365,10 @@ export function ChatResultsLayout({
 
 function InlineResults({
   state: results,
+  onOpen,
 }: {
   state: ReturnType<typeof useChatResults>;
+  onOpen?: (result: ChatResult) => void;
 }) {
   if (!results.loading && !results.error && results.results.length === 0)
     return null;
@@ -285,6 +400,7 @@ function InlineResults({
           result={result}
           onPin={() => void results.pin(result)}
           pinDisabled={results.pendingId !== null}
+          onOpen={onOpen ? () => onOpen(result) : undefined}
         />
       ))}
     </section>
@@ -295,10 +411,17 @@ export function ChatResultCard({
   result,
   onPin,
   pinDisabled = false,
+  onOpen,
+  onSave,
 }: {
   result: ChatResult;
   onPin?: () => void;
   pinDisabled?: boolean;
+  onOpen?: () => void;
+  onSave?: (
+    result: ChatResult,
+    payload: ChatResultPayload,
+  ) => Promise<ChatResult>;
 }) {
   return (
     <article
@@ -324,12 +447,48 @@ export function ChatResultCard({
           </button>
         )}
       </header>
-      <ResultContent payload={result.payload} />
+      {onOpen && (
+        <button
+          type="button"
+          className="mb-3 rounded border border-line px-2 py-1 text-xs"
+          onClick={onOpen}
+        >
+          Open preview
+        </button>
+      )}
+      {onSave ? (
+        <InteractiveResultEditor result={result} onSave={onSave}>
+          {(payload, change, disabled) => (
+            <ResultContent
+              payload={payload}
+              onChange={change}
+              disabled={disabled}
+            />
+          )}
+        </InteractiveResultEditor>
+      ) : (
+        <ResultContent payload={result.payload} />
+      )}
+      <a
+        className="mt-3 inline-block text-xs text-ink-2 underline"
+        download={`result-${result.id}.json`}
+        href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify({ title: result.title, revision: result.revision, payload: result.payload }, null, 2))}`}
+      >
+        Download source
+      </a>
     </article>
   );
 }
 
-function ResultContent({ payload }: { payload: ChatResultPayload }) {
+function ResultContent({
+  payload,
+  onChange,
+  disabled = false,
+}: {
+  payload: ChatResultPayload;
+  onChange?: (payload: ChatResultPayload) => void;
+  disabled?: boolean;
+}) {
   switch (payload.kind) {
     case 'document':
       return (
@@ -349,6 +508,46 @@ function ResultContent({ payload }: { payload: ChatResultPayload }) {
       return <Chart payload={payload} />;
     case 'calculator':
       return <Calculator payload={payload} />;
+    case 'tracker':
+      return (
+        <TrackerResult
+          payload={payload}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+    case 'dashboard':
+      return (
+        <div className="grid gap-4 2xl:grid-cols-2">
+          {payload.widgets.map((widget) => (
+            <section
+              key={widget.id}
+              className="min-w-0 rounded-lg border border-line p-3"
+            >
+              <h4 className="mb-3 font-medium text-ink">{widget.title}</h4>
+              <ResultContent
+                payload={widget.payload}
+                disabled={disabled}
+                onChange={
+                  onChange
+                    ? (child) => {
+                        if (child.kind !== 'dashboard')
+                          onChange({
+                            ...payload,
+                            widgets: payload.widgets.map((item) =>
+                              item.id === widget.id
+                                ? { ...item, payload: child }
+                                : item,
+                            ),
+                          });
+                      }
+                    : undefined
+                }
+              />
+            </section>
+          ))}
+        </div>
+      );
     default:
       return <p>Unsupported saved result.</p>;
   }

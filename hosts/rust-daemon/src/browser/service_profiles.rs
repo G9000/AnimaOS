@@ -96,7 +96,10 @@ impl BrowserService {
         });
         work.len()
     }
-    async fn profile_workspace(&self, agent: &str) -> Result<PathBuf, BrowserServiceError> {
+    pub(super) async fn profile_workspace(
+        &self,
+        agent: &str,
+    ) -> Result<PathBuf, BrowserServiceError> {
         let state = self.state()?;
         let guard = state.read().await;
         Self::owner(&guard, agent)?;
@@ -106,7 +109,7 @@ impl BrowserService {
             .map(|w| w.root_path.clone())
             .ok_or(BrowserServiceError::Conflict)
     }
-    fn remember_profile(&self, view: &BrowserProfileView) {
+    pub(super) fn remember_profile(&self, view: &BrowserProfileView) {
         self.inner
             .profile_versions
             .lock()
@@ -120,10 +123,7 @@ impl BrowserService {
     ) -> Result<BrowserProfileView, BrowserServiceError> {
         let workspace = self.profile_workspace(agent).await?;
         let policy = self
-            .inner
-            .policies
-            .policies
-            .get(&input.policy_id)
+            .policy(agent, &input.policy_id)
             .filter(|p| p.template.authenticated)
             .ok_or(BrowserServiceError::Invalid)?;
         let _gate = self.inner.profile_mutations.lock().await;
@@ -145,9 +145,18 @@ impl BrowserService {
         let workspace = self.profile_workspace(agent).await?;
         let store = self.inner.profile_store.clone();
         let agent = agent.to_owned();
-        tokio::task::spawn_blocking(move || store.list(&workspace, &agent))
+        let mut profiles = tokio::task::spawn_blocking(move || store.list(&workspace, &agent))
             .await
-            .map_err(|_| BrowserServiceError::Unavailable)?
+            .map_err(|_| BrowserServiceError::Unavailable)??;
+        let setups = self
+            .inner
+            .profile_setups
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        for profile in &mut profiles {
+            profile.login_active = setups.contains_key(&profile.id);
+        }
+        Ok(profiles)
     }
     pub(super) async fn profile_for_policy(
         &self,
@@ -279,10 +288,7 @@ impl BrowserService {
             return Err(BrowserServiceError::Conflict);
         }
         let policy = self
-            .inner
-            .policies
-            .policies
-            .get(&old.policy_id)
+            .policy(agent, &old.policy_id)
             .filter(|p| {
                 p.template.authenticated
                     && p.template.origin == old.origin
@@ -368,7 +374,10 @@ impl BrowserService {
                             _session: session,
                         },
                     );
-                Ok(view)
+                Ok(BrowserProfileView {
+                    login_active: true,
+                    ..view
+                })
             }
             Err(_) => {
                 task.handle.close().await;

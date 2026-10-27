@@ -132,3 +132,80 @@ async fn result_routes_scope_pins_and_reject_untrusted_origins_before_parsing() 
     }
     let _ = std::fs::remove_file(path);
 }
+
+#[tokio::test]
+async fn tracker_route_edits_are_durable_and_require_current_revision_and_generation() {
+    let path =
+        std::env::temp_dir().join(format!("anima-tracker-http-{}.json", uuid::Uuid::new_v4()));
+    let mut state = crate::state::DaemonState::new();
+    state.set_control_plane_store(Some(
+        crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+    ));
+    let agent = state
+        .create_agent(
+            serde_json::from_value(json!({"name":"Owner","model":"deterministic"})).unwrap(),
+        )
+        .unwrap()
+        .state
+        .id;
+    state.sessions.insert(crate::sessions::SessionRecord::new(
+        &agent,
+        "chat:tracker",
+        crate::sessions::SessionKind::Chat,
+        crate::sessions::SessionOrigin::Web,
+        "Tracker".into(),
+        crate::sessions::TitleSource::Owner,
+        1,
+    ));
+    let app = crate::routes::router(
+        std::sync::Arc::new(tokio::sync::RwLock::new(state)),
+        crate::app::DaemonConfig::default(),
+    );
+    let uri = format!("/api/agents/{agent}/sessions/chat:tracker/results");
+    let mut create = json!({"clearGeneration":0,"result":{"expectedRevision":0,"requestKey":"tracker_create","title":"Tasks","payload":{"kind":"tracker","columns":[{"key":"task","label":"Task","kind":"text"},{"key":"done","label":"Done","kind":"checkbox"}],"rows":[{"id":"first","cells":{"task":"Draft","done":false}}]}}});
+    let response = call(app.clone(), "POST", &uri, create.clone()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = json_body(response).await;
+    create["result"]["id"] = saved["result"]["id"].clone();
+    create["result"]["expectedRevision"] = json!(1);
+    create["result"]["requestKey"] = json!("tracker_edit");
+    create["result"]["payload"]["rows"][0]["cells"]["done"] = json!(true);
+    let edited = call(app.clone(), "POST", &uri, create.clone()).await;
+    assert_eq!(edited.status(), StatusCode::OK);
+    assert_eq!(json_body(edited).await["result"]["revision"], 2);
+    create["result"]["requestKey"] = json!("stale_edit");
+    create["result"]["payload"]["rows"][0]["cells"]["done"] = json!(false);
+    assert_eq!(
+        call(app.clone(), "POST", &uri, create.clone())
+            .await
+            .status(),
+        StatusCode::CONFLICT
+    );
+    create["clearGeneration"] = json!(1);
+    create["result"]["expectedRevision"] = json!(2);
+    assert_eq!(
+        call(app.clone(), "POST", &uri, create).await.status(),
+        StatusCode::CONFLICT
+    );
+    let listed = json_body(call(app, "GET", &uri, Value::Null).await).await;
+    assert_eq!(
+        listed["results"][0]["payload"]["rows"][0]["cells"]["done"],
+        true
+    );
+    let restored = crate::control_plane_store::load_control_plane_snapshot(
+        &crate::control_plane_store::ControlPlaneStoreConfig::Json(path.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let saved = restored
+        .sessions
+        .iter()
+        .find(|session| session.agent_id == agent && session.id == "chat:tracker")
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&saved.chat_results[0].payload).unwrap()["rows"][0]["cells"]["done"],
+        true
+    );
+    let _ = std::fs::remove_file(path);
+}

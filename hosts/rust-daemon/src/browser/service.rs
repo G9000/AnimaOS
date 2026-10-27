@@ -1,3 +1,5 @@
+#[path = "service_destinations.rs"]
+mod service_destinations;
 #[path = "service_profiles.rs"]
 mod service_profiles;
 use super::transport::{
@@ -23,7 +25,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex as StdMutex, Weak,
 };
 use std::time::{Duration, Instant, SystemTime};
@@ -110,7 +112,10 @@ struct Inner {
     state: Weak<RwLock<crate::state::DaemonState>>,
     transactions: Arc<Mutex<()>>,
     policies: InstalledBrowserPolicies,
+    destinations: StdMutex<BTreeMap<(String, String), InstalledBrowserPolicy>>,
+    destination_sequence: AtomicU64,
     scopes: StdMutex<BTreeMap<String, ScopeRecord>>,
+    control_changed: tokio::sync::Notify,
     // Deliberately not invoked by any metadata route. The worker lane is held.
     _port: Arc<dyn BrowserPort>,
     factory: Option<Arc<dyn BrowserTransportFactory>>,
@@ -149,6 +154,16 @@ pub(crate) struct BrowserService {
 }
 
 impl BrowserService {
+    fn policy(&self, agent: &str, id: &str) -> Option<InstalledBrowserPolicy> {
+        self.inner.policies.policies.get(id).cloned().or_else(|| {
+            self.inner
+                .destinations
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&(agent.to_owned(), id.to_owned()))
+                .cloned()
+        })
+    }
     fn grants(
         state: &crate::state::DaemonState,
         agent: &str,
@@ -230,10 +245,7 @@ impl BrowserService {
             expected_version: None,
         })?;
         let policy = self
-            .inner
-            .policies
-            .policies
-            .get(&selection.policy_id)
+            .policy(agent, &selection.policy_id)
             .ok_or(BrowserServiceError::Unavailable)?;
         if policy.template.public_ipv4_pin.is_some() && !selection.selected_input_ids.is_empty() {
             return Err(BrowserServiceError::Invalid);
@@ -251,7 +263,7 @@ impl BrowserService {
             .profile_for_policy(
                 &admission.workspace.root_path,
                 agent,
-                policy,
+                &policy,
                 selection.profile_id.as_deref(),
             )
             .await?;
@@ -341,6 +353,11 @@ impl BrowserService {
                 state: Arc::downgrade(state),
                 transactions,
                 policies,
+                destinations: StdMutex::new(BTreeMap::new()),
+                destination_sequence: AtomicU64::new(
+                    now_millis().min(MAX_BROWSER_SAFE_INTEGER - 1),
+                ),
+                control_changed: tokio::sync::Notify::new(),
                 scopes: StdMutex::new(BTreeMap::new()),
                 _port: port,
                 factory: None,
@@ -547,12 +564,34 @@ impl BrowserService {
         let Some(installation) = &self.inner.policies.installation else {
             return Ok(vec![]);
         };
-        self.inner
+        let mut policies = self
+            .inner
             .policies
             .policies
             .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        policies.extend(
+            self.inner
+                .destinations
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .iter()
+                .filter(|((owner, _), _)| owner == agent)
+                .map(|(_, policy)| policy.clone()),
+        );
+        policies
+            .iter()
             .map(|p| {
                 Ok(BrowserPolicyView {
+                    interactive: p.template.interactive.is_some(),
+                    allowed_origins: p
+                        .template
+                        .interactive
+                        .as_ref()
+                        .map(|i| i.origins.iter().map(|o| o.origin.clone()).collect())
+                        .unwrap_or_else(|| vec![p.template.origin.clone()]),
+                    version: p.template.revision,
                     authenticated: p.template.authenticated,
                     id: p.id.clone(),
                     origin: p.template.origin.clone(),
@@ -597,10 +636,7 @@ impl BrowserService {
     ) -> Result<BrowserScopeView, BrowserServiceError> {
         records::validate_save(&input)?;
         let policy = self
-            .inner
-            .policies
-            .policies
-            .get(&input.policy_id)
+            .policy(agent, &input.policy_id)
             .ok_or(BrowserServiceError::Unavailable)?;
         if policy.template.public_ipv4_pin.is_some() && !input.selected_input_ids.is_empty() {
             return Err(BrowserServiceError::Invalid);
@@ -622,7 +658,7 @@ impl BrowserService {
             .profile_for_policy(
                 &admission.workspace.root_path,
                 agent,
-                policy,
+                &policy,
                 input.profile_id.as_deref(),
             )
             .await?;
@@ -735,6 +771,7 @@ impl BrowserService {
         anima_service_adapters::browser::validate_scope(&scope)
             .map_err(|_| BrowserServiceError::Invalid)?;
         let view = BrowserScopeView {
+            owner_control: false,
             profile: profile.clone(),
             id,
             agent_id: agent.into(),
@@ -771,6 +808,15 @@ impl BrowserService {
             .ok_or(BrowserServiceError::Conflict)?
             .cancel
             .clone();
+        if self
+            .policy(agent, &input.policy_id)
+            .as_ref()
+            .is_none_or(|current| {
+                scope_digest(&current.template).ok() != scope_digest(&policy.template).ok()
+            })
+        {
+            return Err(BrowserServiceError::Conflict);
+        }
         scopes.insert(
             run.into(),
             ScopeRecord {
@@ -1075,6 +1121,22 @@ impl BrowserService {
         operation: BrowserOperation,
         expected: Option<BrowserDocumentWitness>,
     ) -> Result<BrowserDispatchStamp, BrowserError> {
+        if matches!(operation, BrowserOperation::OwnerControl { .. }) {
+            return Err(browser_error(BrowserErrorCode::Denied));
+        }
+        loop {
+            let changed = self.inner.control_changed.notified();
+            let held = {
+                let rows = self.inner.scopes.lock().unwrap_or_else(|p| p.into_inner());
+                rows.get(&run.run_id)
+                    .filter(|row| row.view.owner_control && row.view.enabled)
+                    .map(|row| (row.cancel.clone(), row.deadline))
+            };
+            let Some((cancel, deadline)) = held else {
+                break;
+            };
+            tokio::select! { _ = changed => {}, _ = cancel.cancelled() => return Err(browser_error(BrowserErrorCode::Cancelled)), _ = tokio::time::sleep_until(deadline.into()) => return Err(browser_error(BrowserErrorCode::Deadline)) }
+        }
         let state = self
             .state()
             .map_err(|_| browser_error(BrowserErrorCode::Unavailable))?;
@@ -1385,13 +1447,13 @@ impl BrowserService {
                 self.revalidate_dispatch(&stamp).await?;
                 let mut accepted=Vec::new();
                 for artifact in &reply.observation.artifacts {
-                    if let Some(existing)=published.get(&artifact.id) {let kind=if artifact.kind==BrowserArtifactKind::Csv{BrowserArtifactKindView::Csv}else{BrowserArtifactKindView::Screenshot};if existing.bytes!=artifact.bytes||existing.sha256!=artifact.sha256||existing.kind!=kind{return Err(browser_error(BrowserErrorCode::Protocol));}accepted.push(existing.clone());continue;}
+                    if let Some(existing)=published.get(&artifact.id) {let kind=BrowserArtifactKindView::from(artifact.kind);if existing.bytes!=artifact.bytes||existing.sha256!=artifact.sha256||existing.kind!=kind{return Err(browser_error(BrowserErrorCode::Protocol));}accepted.push(existing.clone());continue;}
                     let bytes=task.handle.read_output(artifact).await?;
                     if bytes.bytes.len() as u64!=artifact.bytes || bytes.sha256!=artifact.sha256 || hex::encode(Sha256::digest(&bytes.bytes))!=artifact.sha256 {return Err(browser_error(BrowserErrorCode::Protocol));}
                     self.revalidate_dispatch(&stamp).await?;
                     if Self::identity(workspace.root_path.clone()).await.map_err(|_|browser_error(BrowserErrorCode::Stale))?!=identity {return Err(browser_error(BrowserErrorCode::Stale));}
                     let attachment_id=format!("att-{}",uuid::Uuid::new_v4());
-                    let name=format!("browser-{}.{}",attachment_id,if artifact.kind==BrowserArtifactKind::Csv{"csv"}else{"jpg"});
+                    let name=format!("browser-{}.{}",attachment_id,artifact.kind.extension());
                     #[cfg(test)]
                     let _publication_completion=self.pause_output_publication(&attachment_id).await;
                     // Follow existing owned attachment upload ordering: Stop,
@@ -1404,11 +1466,11 @@ impl BrowserService {
                     let root=workspace.root_path.clone();let captured=bytes.bytes.clone();let filename=name.clone();let date=chrono::Utc::now().format("%Y-%m-%d").to_string();
                     let saved=tokio::task::spawn_blocking(move||crate::attachments::files::save_upload(&root,&date,&filename,&captured)).await.map_err(|_|browser_error(BrowserErrorCode::Unavailable))?.map_err(|_|browser_error(BrowserErrorCode::Unavailable))?;
                     if saved.workspace_root!=identity.canonical_root.to_str().unwrap_or("") || saved.sha256!=artifact.sha256 {return Err(browser_error(BrowserErrorCode::Stale));}
-                    let row=AttachmentRecord{id:attachment_id,agent_id:stamp.agent_id.clone(),session_id:stamp.session_id.clone(),name,mime:if artifact.kind==BrowserArtifactKind::Csv{"text/csv"}else{"image/jpeg"}.into(),size:artifact.bytes,kind:if artifact.kind==BrowserArtifactKind::Csv{AttachmentKind::Text}else{AttachmentKind::Image},path:saved.path,created_at_ms:now_millis(),workspace_root:saved.workspace_root,sha256:saved.sha256};
+                    let row=AttachmentRecord{id:attachment_id,agent_id:stamp.agent_id.clone(),session_id:stamp.session_id.clone(),name,mime:artifact.kind.mime().into(),size:artifact.bytes,kind:match artifact.kind { BrowserArtifactKind::Screenshot | BrowserArtifactKind::Png | BrowserArtifactKind::Jpeg => AttachmentKind::Image, BrowserArtifactKind::Pdf => AttachmentKind::Document, _ => AttachmentKind::Text },path:saved.path,created_at_ms:now_millis(),workspace_root:saved.workspace_root,sha256:saved.sha256};
                     store.upsert_attachments(std::slice::from_ref(&row)).await.map_err(|_|browser_error(BrowserErrorCode::Unavailable))?;
                     drop(publication_transaction);
                     self.revalidate_dispatch(&stamp).await?;
-                    accepted.push(BrowserArtifactView{id:row.id,kind:if artifact.kind==BrowserArtifactKind::Csv{BrowserArtifactKindView::Csv}else{BrowserArtifactKindView::Screenshot},bytes:row.size,sha256:row.sha256});
+                    accepted.push(BrowserArtifactView{id:row.id,kind:BrowserArtifactKindView::from(artifact.kind),bytes:row.size,sha256:row.sha256});
                 }
                 {let mut rows=self.inner.scopes.lock().unwrap_or_else(|p|p.into_inner());let row=rows.get_mut(&stamp.run_id).ok_or_else(||browser_error(BrowserErrorCode::Stale))?;Self::check_row(row,&stamp)?;
                     if reply.counters.actions_used<=row.admitted_actions || reply.counters.actions_used>scope.limits.actions || reply.counters.requests_used>scope.limits.requests || reply.counters.wire_bytes_used>scope.limits.wire_bytes {return Err(browser_error(BrowserErrorCode::Protocol));}
@@ -1416,7 +1478,7 @@ impl BrowserService {
                     row.admitted_actions=reply.counters.actions_used;row.view.actions_used=row.view.actions_used.max(reply.counters.actions_used);row.view.requests_used=row.view.requests_used.max(reply.counters.requests_used);row.view.wire_bytes_used=row.view.wire_bytes_used.max(reply.counters.wire_bytes_used);row.view.document=Some(document_view(&reply.document));row.view.physical_lease_held=task.handle.snapshot().physical_lease_held;
                 }
                 let route=scope.routes.iter().find(|r|r.id==reply.observation.route_id).ok_or_else(||browser_error(BrowserErrorCode::Protocol))?;
-                let provenance=serde_json::json!({"scopeId":scope.id,"scopeRevision":scope.revision,"runId":stamp.run_id,"policyId":view.policy_id,"policyDigest":view.policy_digest,"installationId":view.installation_id,"profile":view.profile,"contextId":reply.context_id,"pageId":reply.page_id,"document":reply.document,"currentUrl":format!("{}{}",scope.origin,route.path),"artifacts":accepted});
+                let provenance=serde_json::json!({"scopeId":scope.id,"scopeRevision":scope.revision,"runId":stamp.run_id,"policyId":view.policy_id,"policyDigest":view.policy_digest,"installationId":view.installation_id,"profile":view.profile,"contextId":reply.context_id,"pageId":reply.page_id,"document":reply.document,"currentUrl":reply.observation.current_url.clone().unwrap_or_else(||format!("{}{}",scope.origin,route.path)),"artifacts":accepted});
                 let mut public_observation=reply.observation.clone();for (raw,public) in public_observation.artifacts.iter_mut().zip(&accepted){raw.id=public.id.clone();}
                 Ok(anima_core::Content{text:format!("Browser provenance: {}\nUntrusted page evidence: {}",provenance,serde_json::to_string(&public_observation).map_err(|_|browser_error(BrowserErrorCode::Protocol))?),..Default::default()})
             }.await;

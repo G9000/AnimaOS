@@ -230,3 +230,108 @@ pub(super) async fn revoke_profile(
     };
     profile_result(state.browser.revoke_profile(&agent, &id, input).await)
 }
+
+#[utoipa::path(get,path="/api/agents/{agent_id}/browser-setup",tag="browser",params(("agent_id"=String,Path)),responses((status=200,description="Maintained browser installation status",body=BrowserSetupView)))]
+pub(super) async fn setup(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, true) {
+        return r;
+    }
+    match state.browser.setup_status(&agent).await {
+        Ok(view) => no_store(json_response(StatusCode::OK, &view)),
+        Err(e) => error(e),
+    }
+}
+
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-destinations",tag="browser",params(("agent_id"=String,Path)),request_body=CreateBrowserDestination,responses((status=200,description="Owner reviewed destination pinned without opening a browser",body=BrowserDestinationEnvelope)))]
+pub(super) async fn create_destination(
+    State(state): State<AppState>,
+    Path(agent): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<CreateBrowserDestination>(&state, request).await {
+        Ok(input) => input,
+        Err(e) => return e,
+    };
+    match state.browser.create_destination(&agent, input).await {
+        Ok(policy) => no_store(json_response(
+            StatusCode::OK,
+            &BrowserDestinationEnvelope { policy },
+        )),
+        Err(e) => error(e),
+    }
+}
+
+#[utoipa::path(post,path="/api/agents/{agent_id}/browser-destinations/{destination_id}/revoke",tag="browser",params(("agent_id"=String,Path),("destination_id"=String,Path)),request_body=StopBrowserScope,responses((status=200,description="Destination revoked and owned scopes retired",body=BrowserDestinationRevoked)))]
+pub(super) async fn revoke_destination(
+    State(state): State<AppState>,
+    Path((agent, destination)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<StopBrowserScope>(&state, request).await {
+        Ok(input) => input,
+        Err(e) => return e,
+    };
+    match state
+        .browser
+        .revoke_destination(&agent, &destination, input.expected_version)
+        .await
+    {
+        Ok(()) => no_store(json_response(
+            StatusCode::OK,
+            &BrowserDestinationRevoked { revoked: true },
+        )),
+        Err(e) => error(e),
+    }
+}
+
+#[utoipa::path(post,path="/api/agents/{agent_id}/runs/{run_id}/browser-scope/takeover",tag="browser",params(("agent_id"=String,Path),("run_id"=String,Path)),request_body=StopBrowserScope,responses((status=200,description="Owner takes the same dedicated page at an action boundary",body=BrowserSavedScopeEnvelope)))]
+pub(super) async fn takeover(
+    State(state): State<AppState>,
+    Path((agent, run)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<StopBrowserScope>(&state, request).await {
+        Ok(input) => input,
+        Err(e) => return e,
+    };
+    saved(
+        state
+            .browser
+            .owner_control(&agent, &run, input.expected_version, true)
+            .await,
+    )
+}
+
+#[utoipa::path(post,path="/api/agents/{agent_id}/runs/{run_id}/browser-scope/resume",tag="browser",params(("agent_id"=String,Path),("run_id"=String,Path)),request_body=StopBrowserScope,responses((status=200,description="Owner returns page with fresh observation required",body=BrowserSavedScopeEnvelope)))]
+pub(super) async fn resume(
+    State(state): State<AppState>,
+    Path((agent, run)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(r) = authorize(&state, &request, false) {
+        return r;
+    }
+    let input = match body::<StopBrowserScope>(&state, request).await {
+        Ok(input) => input,
+        Err(e) => return e,
+    };
+    saved(
+        state
+            .browser
+            .owner_control(&agent, &run, input.expected_version, false)
+            .await,
+    )
+}

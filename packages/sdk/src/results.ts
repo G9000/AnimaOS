@@ -15,7 +15,21 @@ export interface CalculatorInput {
   min?: number;
   max?: number;
 }
-export type ChatResultPayload =
+export interface TrackerColumn {
+  key: string;
+  label: string;
+  kind: 'text' | 'number' | 'checkbox';
+}
+export interface TrackerRow {
+  id: string;
+  cells: Record<string, string | number | boolean>;
+}
+export interface TrackerPayload {
+  kind: 'tracker';
+  columns: TrackerColumn[];
+  rows: TrackerRow[];
+}
+export type ChatResultWidgetPayload =
   | {
       kind: 'chart';
       chartType: 'bar' | 'line';
@@ -29,6 +43,19 @@ export type ChatResultPayload =
       inputs: CalculatorInput[];
       expression: Calculation;
       outputLabel: string;
+    }
+  | TrackerPayload;
+
+/** A bounded composition of native widgets; dashboards cannot be nested. */
+export type ChatResultPayload =
+  | ChatResultWidgetPayload
+  | {
+      kind: 'dashboard';
+      widgets: {
+        id: string;
+        title: string;
+        payload: ChatResultWidgetPayload;
+      }[];
     };
 
 /** Display data and source provenance, never tool execution authority. */

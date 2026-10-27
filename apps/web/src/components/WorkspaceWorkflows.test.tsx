@@ -178,7 +178,7 @@ it('disables offline mutations and ignores pre-disconnect responses after reconn
   view.rerender(<WorkspaceWorkflows agents={agents} online={false} />);
   expect(screen.getByText(/Offline/)).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Create workflow' }),
+    screen.getByRole('button', { name: 'New workflow' }),
   ).toBeDisabled();
   expect(
     screen.getByRole('button', { name: 'Refresh workflows' }),
@@ -246,6 +246,7 @@ it('creates ordered tasks, checkpoints and questions without granting workflow t
   const create = vi.spyOn(daemon, 'createWorkflow').mockResolvedValue(run());
   render(<WorkspaceWorkflows agents={agents} online />);
   await screen.findByText('No workflows yet for this agent.');
+  fireEvent.click(screen.getByRole('button', { name: 'New workflow' }));
   fireEvent.change(screen.getByLabelText('Workflow title'), {
     target: { value: 'Launch' },
   });
@@ -315,6 +316,7 @@ it('replays an uncertain creation with its immutable definition and key after re
     .mockResolvedValue(run());
   const view = render(<WorkspaceWorkflows agents={agents} online />);
   await screen.findByText('No workflows yet for this agent.');
+  fireEvent.click(screen.getByRole('button', { name: 'New workflow' }));
   fireEvent.change(screen.getByLabelText('Workflow title'), {
     target: { value: 'Exact creation' },
   });
@@ -344,6 +346,7 @@ it('enforces UTF-8 prompt and owner input bounds, total definition size, and ord
     target: { value: '😀'.repeat(2049) },
   });
   expect(screen.getByRole('button', { name: 'Submit answer' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'New workflow' }));
   fireEvent.change(screen.getByLabelText('Workflow title'), {
     target: { value: 'Launch' },
   });
@@ -427,5 +430,5 @@ it('keeps completed and cancelled history plus template management under Work', 
   expect(
     screen.getByText('Reusable templates', { selector: 'summary' }),
   ).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Create workflow' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'New workflow' })).toBeVisible();
 });

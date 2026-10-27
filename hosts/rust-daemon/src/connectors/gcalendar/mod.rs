@@ -4,6 +4,7 @@
 //! expressed through ordinary scheduled prompts.
 
 pub(crate) mod client;
+mod search;
 pub(crate) mod store;
 #[cfg(test)]
 mod tests;
@@ -86,6 +87,8 @@ pub(crate) fn now_ms() -> u64 {
 pub(crate) struct GoogleCalendarConnectorRecord {
     pub(crate) id: String,
     pub(crate) agent_id: String,
+    #[serde(default)]
+    pub(crate) authorization_generation: String,
     /// Non-secret account label (usually the Google account email) shown in
     /// the console. Verified after OAuth completes; older records may lack it.
     #[serde(default)]
@@ -400,6 +403,7 @@ impl CalendarManager {
                 GoogleCalendarConnectorRecord {
                     id: format!("gcalendar-{now}-{sequence}"),
                     agent_id: agent_id.to_string(),
+                    authorization_generation: uuid::Uuid::new_v4().to_string(),
                     account_label: None,
                     calendar_ids: default_calendar_ids(),
                     pending_auth: Some(GooglePendingAuth {
@@ -415,6 +419,7 @@ impl CalendarManager {
                 }
             }
         };
+        record.authorization_generation = uuid::Uuid::new_v4().to_string();
         record.pending_auth = Some(GooglePendingAuth {
             nonce: uuid::Uuid::new_v4().to_string(),
             expires_at_ms: now + PENDING_AUTH_TTL_MS,

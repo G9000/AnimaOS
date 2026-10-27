@@ -11,8 +11,12 @@ import { daemon } from '../../lib/daemon-api';
 import { MessageAttachments } from '../attachments/MessageAttachments';
 import { useLatest } from '../../hooks/useLatest';
 import { useRenderScope } from '../../hooks/useRenderScope';
+import {
+  BrowserDestinationControls,
+  type BrowserDestinationApi,
+} from './BrowserDestinationControls';
 
-export interface BrowserControlsApi {
+export interface BrowserControlsApi extends BrowserDestinationApi {
   policies(
     agentId: string,
     options?: BrowserReadOptions,
@@ -23,6 +27,16 @@ export interface BrowserControlsApi {
     options?: BrowserReadOptions,
   ): Promise<BrowserScope | null>;
   stop(
+    agentId: string,
+    runId: string,
+    input: StopBrowserScopeInput,
+  ): Promise<BrowserScope>;
+  takeover(
+    agentId: string,
+    runId: string,
+    input: StopBrowserScopeInput,
+  ): Promise<BrowserScope>;
+  resume(
     agentId: string,
     runId: string,
     input: StopBrowserScopeInput,
@@ -50,8 +64,9 @@ export function BrowserTaskControls({
   onSelection,
   api = daemon.browserScopes,
 }: BrowserTaskControlsProps) {
-  const key = `${agentId}\u0000${runId ?? ''}`;
-  const { generation } = useRenderScope(key);
+  const selectionKey = `${agentId}\u0000${runId ?? ''}`;
+  const { generation } = useRenderScope(selectionKey);
+  const key = `${selectionKey}\u0000${generation}`;
   const boundary = useLatest({ key, generation });
   const mounted = useRef(true);
   const details = useRef<HTMLDetailsElement>(null);
@@ -68,6 +83,7 @@ export function BrowserTaskControls({
   );
   const [mutating, setMutating] = useState<string | null>(null);
   const mutation = useRef<string | null>(null);
+  const [needsRefresh, setNeedsRefresh] = useState<string | null>(null);
   const current = loaded?.key === key ? loaded : null;
   const scope = current?.scope ?? null;
   const reading = pending === key;
@@ -93,7 +109,10 @@ export function BrowserTaskControls({
           ? api.get(agentId, runId, { signal: request.signal })
           : Promise.resolve(null),
       ]);
-      if (active()) setLoaded({ key, policies, scope: selectedScope });
+      if (active()) {
+        setLoaded({ key, policies, scope: selectedScope });
+        setNeedsRefresh(null);
+      }
     } catch {
       if (active()) {
         setLoaded(null);
@@ -118,8 +137,15 @@ export function BrowserTaskControls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, api]);
 
-  const stop = async () => {
-    if (!scope || !runId || offline || mutation.current === key) return;
+  const changeControl = async (action: 'stop' | 'takeover' | 'resume') => {
+    if (
+      !scope ||
+      !runId ||
+      offline ||
+      needsRefresh === key ||
+      mutation.current === key
+    )
+      return;
     mutation.current = key;
     setMutating(key);
     setFailure(null);
@@ -127,17 +153,22 @@ export function BrowserTaskControls({
     ++sequence.current;
     setPending(null);
     try {
-      const stopped = await api.stop(agentId, runId, {
+      const stopped = await api[action](agentId, runId, {
         expectedVersion: scope.version,
       });
       if (mounted.current && boundary.current.generation === generation)
         setLoaded({ key, policies: current?.policies ?? [], scope: stopped });
     } catch {
-      if (mounted.current && boundary.current.generation === generation)
+      if (mounted.current && boundary.current.generation === generation) {
+        setNeedsRefresh(key);
         setFailure({
           key,
-          text: 'Browser Stop was not confirmed. Refresh its status before trying again.',
+          text:
+            action === 'stop'
+              ? 'Browser Stop was not confirmed. Refresh its status before trying again.'
+              : 'Browser control was not confirmed. Refresh its status before trying again.',
         });
+      }
     } finally {
       if (mutation.current === key) mutation.current = null;
       if (mounted.current && boundary.current.generation === generation)
@@ -211,28 +242,83 @@ export function BrowserTaskControls({
                     value={item.id}
                     disabled={!item.workerAvailable}
                   >
-                    {item.id} — {item.origin}
+                    {item.interactive
+                      ? `${item.origin}${item.authenticated ? ' (sign-in)' : ''}`
+                      : `${item.id} — ${item.origin}`}
                     {item.workerAvailable ? '' : ' (unavailable)'}
                   </option>
                 ))}
               </select>
             </label>
             {current.policies.length === 0 && (
-              <p>No browser policy is installed on this daemon.</p>
+              <p>Add a website below to use the browser.</p>
             )}
+            <BrowserDestinationControls
+              key={key}
+              agentId={agentId}
+              disabled={disabled || offline || busy || reading}
+              api={api}
+              policies={current.policies}
+              selection={selection}
+              onSelection={onSelection}
+              onRefresh={read}
+              onCreated={(created) =>
+                setLoaded((value) =>
+                  value?.key === key
+                    ? {
+                        ...value,
+                        policies: [
+                          ...value.policies.filter(
+                            (item) => item.id !== created.id,
+                          ),
+                          created,
+                        ],
+                      }
+                    : value,
+                )
+              }
+              onRevoked={(policyId) => {
+                setLoaded((value) =>
+                  value?.key === key
+                    ? {
+                        ...value,
+                        policies: value.policies.filter(
+                          (item) => item.id !== policyId,
+                        ),
+                      }
+                    : value,
+                );
+                if (selection?.policyId === policyId) onSelection(null);
+                if (scope?.policyId === policyId) {
+                  setNeedsRefresh(key);
+                  setFailure({
+                    key,
+                    text: 'Website access was removed. Refresh browser status to confirm cleanup.',
+                  });
+                }
+              }}
+            />
             {policy && (
               <>
                 <p>
                   {policy.origin} · {policy.limits.actions} actions ·{' '}
                   {policy.limits.scopeMs / 1000} seconds
                 </p>
-                <ul aria-label="Allowed browser routes">
-                  {policy.routes.map((route) => (
-                    <li key={route.id}>
-                      {route.method} {route.path}
-                    </li>
-                  ))}
-                </ul>
+                {policy.interactive ? (
+                  <ul aria-label="Allowed websites">
+                    {policy.allowedOrigins.map((origin) => (
+                      <li key={origin}>{origin}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul aria-label="Allowed browser routes">
+                    {policy.routes.map((route) => (
+                      <li key={route.id}>
+                        {route.method} {route.path}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {policy.origin.startsWith('https://') ? (
                   <p>Uploaded files aren’t shared with public pages.</p>
                 ) : (
@@ -275,6 +361,11 @@ export function BrowserTaskControls({
             )}
             {scope && (
               <div aria-label="Current browser scope">
+                {scope.ownerControl && (
+                  <p role="status">
+                    You control the browser. The agent is paused.
+                  </p>
+                )}
                 <p>
                   Browser scope: {scope.state} · {scope.actionsUsed} actions ·{' '}
                   {scope.requestsUsed} requests
@@ -299,22 +390,45 @@ export function BrowserTaskControls({
                     offline ||
                     busy ||
                     reading ||
+                    needsRefresh === key ||
                     (scope.state === 'closed' && !scope.physicalLeaseHeld)
                   }
-                  onClick={() => void stop()}
+                  onClick={() => void changeControl('stop')}
                 >
                   Stop browser
                 </button>
+                {(scope.ownerControl ||
+                  current.policies.find((item) => item.id === scope.policyId)
+                    ?.interactive) && (
+                  <button
+                    type="button"
+                    disabled={
+                      offline ||
+                      busy ||
+                      reading ||
+                      needsRefresh === key ||
+                      !scope.physicalLeaseHeld ||
+                      !['active', 'ownerControl'].includes(scope.state)
+                    }
+                    onClick={() =>
+                      void changeControl(
+                        scope.ownerControl ? 'resume' : 'takeover',
+                      )
+                    }
+                  >
+                    {scope.ownerControl
+                      ? 'Return control to agent'
+                      : 'Take control'}
+                  </button>
+                )}
                 <MessageAttachments
                   agentId={agentId}
                   attachments={scope.artifacts.map((artifact) => ({
                     id: artifact.id,
-                    type: artifact.kind === 'screenshot' ? 'image' : 'file',
-                    name:
-                      artifact.kind === 'csv'
-                        ? 'browser-output.csv'
-                        : 'browser-capture.jpg',
-                    mime: artifact.kind === 'csv' ? 'text/csv' : 'image/jpeg',
+                    type: ['screenshot', 'png', 'jpeg'].includes(artifact.kind)
+                      ? 'image'
+                      : 'file',
+                    ...artifactFile(artifact.kind),
                     size: artifact.bytes,
                   }))}
                 />
@@ -331,4 +445,17 @@ export function BrowserTaskControls({
       </div>
     </details>
   );
+}
+
+function artifactFile(kind: BrowserScope['artifacts'][number]['kind']) {
+  const files = {
+    screenshot: { name: 'browser-capture.jpg', mime: 'image/jpeg' },
+    csv: { name: 'browser-output.csv', mime: 'text/csv' },
+    text: { name: 'browser-output.txt', mime: 'text/plain' },
+    json: { name: 'browser-output.json', mime: 'application/json' },
+    pdf: { name: 'browser-output.pdf', mime: 'application/pdf' },
+    png: { name: 'browser-output.png', mime: 'image/png' },
+    jpeg: { name: 'browser-output.jpg', mime: 'image/jpeg' },
+  };
+  return files[kind];
 }

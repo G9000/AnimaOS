@@ -19,6 +19,7 @@
     "daemon": "bun run --filter rust-daemon dev",
     "rust:build": "cargo build --workspace",
     "rust:test": "bun run --sequential --filter rust-daemon --filter anima test",
+    "browser:setup": "node tools/browser/setup.mjs",
     "rust:lint": "cargo fmt --all --check && bun run rust:clippy",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D clippy::correctness",
     "rust:cache:status": "bun tools/workspace-dev/scripts/rust-cache.ts status",

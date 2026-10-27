@@ -44,7 +44,8 @@ mod chat_suite_upgrade_tests;
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 31;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 32;
+pub(crate) const PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX: &str = ".pre-connected-accounts.bak";
 pub(crate) const PRE_MCP_OAUTH_BACKUP_SUFFIX: &str = ".pre-mcp-oauth.bak";
 pub(crate) const PRE_CHAT_SUITE_BACKUP_SUFFIX: &str = ".pre-chat-suite.bak";
 pub(crate) const PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX: &str = ".pre-delegation-controls.bak";
@@ -218,6 +219,10 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) workflows: Vec<anima_core::workflows::WorkflowRun>,
     #[serde(default)]
     pub(crate) workflow_templates: Vec<anima_core::workflow_templates::WorkflowTemplate>,
+    #[serde(default)]
+    pub(crate) connected_search: crate::connected_search::SearchRegistry,
+    #[serde(default)]
+    pub(crate) account_workflows: crate::account_workflows::AccountWorkflowState,
     #[serde(default)]
     pub(crate) calendar_connectors: Vec<GoogleCalendarConnectorRecord>,
     #[serde(default)]
@@ -574,8 +579,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_CHAT_SUITE_BACKUP_SUFFIX
             } else if loaded_version < 30 {
                 PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 31 {
                 PRE_MCP_OAUTH_BACKUP_SUFFIX
+            } else {
+                PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -823,6 +830,8 @@ impl ControlPlaneSnapshot {
             goals: vec![],
             workflows: vec![],
             workflow_templates: vec![],
+            connected_search: Default::default(),
+            account_workflows: Default::default(),
             mail_drafts: vec![],
             calendar_connectors: vec![],
             calendar_writes: vec![],
@@ -1886,7 +1895,7 @@ mod mcp_oauth_migration_tests {
             .await
             .unwrap();
         let restored = load_control_plane_snapshot(&config).await.unwrap().unwrap();
-        assert_eq!(restored.version, 31);
+        assert_eq!(restored.version, CONTROL_PLANE_STORE_VERSION);
         assert_eq!(restored.mcp_connections[0].id, connection_id);
         assert_eq!(
             restored.mcp_connections[0].oauth_credential_ref.as_deref(),

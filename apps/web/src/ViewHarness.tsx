@@ -1180,6 +1180,9 @@ export function ViewHarness() {
     setBrowserChoice((current) => (current === captured ? null : current));
     return {
       policyId: captured.selection.policyId,
+      ...(captured.selection.profileId === undefined
+        ? {}
+        : { profileId: captured.selection.profileId }),
       selectedInputIds: [...captured.selection.selectedInputIds],
     };
   };
@@ -1234,6 +1237,9 @@ export function ViewHarness() {
         ? {
             browserSelection: {
               policyId: browserSelection.policyId,
+              ...(browserSelection.profileId === undefined
+                ? {}
+                : { profileId: browserSelection.profileId }),
               selectedInputIds: browserSelection.selectedInputIds.filter((id) =>
                 attachmentInput?.attachmentIds.includes(id),
               ),

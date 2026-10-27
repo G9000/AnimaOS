@@ -19,6 +19,96 @@ use tokio::sync::{RwLock, Semaphore};
 use tower::util::ServiceExt;
 
 #[tokio::test]
+async fn interactive_browser_owner_routes_deny_foreign_requests_without_opening_a_worker() {
+    let fixture =
+        crate::browser::tests::Fixture::with_model(120_000, ScriptedModel::new(vec![])).await;
+    let agent = &fixture.run.agent_id;
+    let run = &fixture.run.run_id;
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
+    for (method, path, payload) in [
+        ("GET", format!("/api/agents/{agent}/browser-setup"), "{}"),
+        (
+            "POST",
+            format!("/api/agents/{agent}/browser-destinations"),
+            r#"{"startUrl":"https://127.0.0.1/","allowedOrigins":[],"authenticated":false}"#,
+        ),
+        (
+            "POST",
+            format!("/api/agents/{agent}/browser-destinations/destination/revoke"),
+            r#"{"expectedVersion":1}"#,
+        ),
+        (
+            "POST",
+            format!("/api/agents/{agent}/runs/{run}/browser-scope/takeover"),
+            r#"{"expectedVersion":1}"#,
+        ),
+        (
+            "POST",
+            format!("/api/agents/{agent}/runs/{run}/browser-scope/resume"),
+            r#"{"expectedVersion":1}"#,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "https://foreign.invalid")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+    }
+    assert_eq!(fixture.port.opens.load(Ordering::SeqCst), 0);
+    assert!(fixture.service.list(agent).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn interactive_browser_setup_is_read_only_and_malformed_destination_starts_nothing() {
+    let fixture =
+        crate::browser::tests::Fixture::with_model(120_000, ScriptedModel::new(vec![])).await;
+    let agent = &fixture.run.agent_id;
+    let app = crate::app::app_with_state_for_owner_test(
+        fixture.state.clone(),
+        crate::DaemonConfig::default(),
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            crate::routes::owner_test_support::authenticate(
+                Request::builder()
+                    .uri(format!("/api/agents/{agent}/browser-setup"))
+                    .header("host", "127.0.0.1:8080")
+                    .header("origin", "http://localhost:4200"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await.unwrap()).unwrap();
+    assert_eq!(status["available"], false);
+    assert_eq!(status["setupCommand"], "bun run browser:setup");
+    let response = app.oneshot(crate::routes::owner_test_support::authenticate(Request::builder().method("POST")
+        .uri(format!("/api/agents/{agent}/browser-destinations")).header("host", "127.0.0.1:8080").header("origin", "http://localhost:4200"))
+        .header("content-type", "application/json").body(Body::from(r#"{"startUrl":"https://127.0.0.1/","allowedOrigins":"invalid","authenticated":false}"#)).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(fixture.port.opens.load(Ordering::SeqCst), 0);
+    assert!(fixture.service.list(agent).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn m46_owner_scope_save_for_live_ordinary_run_starts_no_worker() {
     let workspace = tempfile::tempdir().unwrap();
     let model = ScriptedModel::new(vec![]);

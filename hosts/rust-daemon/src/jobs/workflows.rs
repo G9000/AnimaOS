@@ -84,6 +84,11 @@ impl JobService {
     ) -> Result<WorkflowRun, JobError> {
         self.refuse_while_draining()?;
         self.workflow_persistence().await?;
+        if crate::account_workflows::reserved_request_key(&input.request_key) {
+            return Err(JobError::Validation(
+                "This workflow request-key prefix is reserved for account event admissions".into(),
+            ));
+        }
         let candidate = WorkflowRun::new(
             uuid::Uuid::new_v4().to_string(),
             agent_id,
@@ -299,6 +304,23 @@ impl JobService {
                 if !needs_reconciliation(state, &workflow) { continue; }
                 let now = now_ms().max(workflow.updated_at_ms);
                 let step = &workflow.steps[workflow.current_step];
+                if !crate::account_workflows::dispatch_allowed(state, &workflow) {
+                    // No running attempt is replayed or relabelled while its native
+                    // result is uncertain. Its existing completion path settles it.
+                    let running = step.job_id.as_ref().and_then(|id| state.jobs.get(id))
+                        .is_some_and(|job| matches!(job.status, AgentJobStatus::Running | AgentJobStatus::PendingDelegations));
+                    if running { continue; }
+                    if let Some(job) = step.job_id.as_ref().and_then(|id| state.jobs.get_mut(id)) {
+                        if job.status == AgentJobStatus::Queued {
+                            job.status = AgentJobStatus::Cancelled;
+                            advance(job);
+                            job.finished_at_ms = Some(job.updated_at_ms);
+                        }
+                    }
+                    workflow.needs_review("Account rule, saved template or connection permission changed; no further task was started", now).map_err(JobError::Conflict)?;
+                    state.workflows.insert(id, workflow);
+                    continue;
+                }
                 if let Some(job_id) = &step.job_id {
                     let job = state.jobs.get(job_id).ok_or_else(|| JobError::Conflict("Workflow task job is missing".into()))?;
                     let complete = job.status == AgentJobStatus::Completed && job.result.is_some()
@@ -384,6 +406,7 @@ pub(crate) fn dispatch_allowed(state: &DaemonState, job: &AgentJobRecord) -> boo
         None => job.workflow.is_none(),
         Some(w) => {
             w.status == WorkflowStatus::Running
+                && crate::account_workflows::dispatch_allowed(state, w)
                 && state.get_agent(&w.agent_id).is_some()
                 && w.steps.get(w.current_step).is_some_and(|s| {
                     s.status == WorkflowStepStatus::Running && s.job_id.as_deref() == Some(&job.id)
@@ -402,6 +425,18 @@ fn needs_reconciliation(state: &DaemonState, workflow: &WorkflowRun) -> bool {
     };
     if step.kind != WorkflowStepKind::Task {
         return false;
+    }
+    if !crate::account_workflows::dispatch_allowed(state, workflow) {
+        return step
+            .job_id
+            .as_ref()
+            .and_then(|id| state.jobs.get(id))
+            .is_none_or(|job| {
+                !matches!(
+                    job.status,
+                    AgentJobStatus::Running | AgentJobStatus::PendingDelegations
+                )
+            });
     }
     match &step.job_id {
         None => state.jobs.len() >= MAX_JOBS || ensure_capacity(&state.jobs).is_ok(),
