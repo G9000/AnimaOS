@@ -1,3 +1,8 @@
+//! Host-independent agent execution, policy, and durable state contracts.
+//!
+//! Hosts supply model adapters, capability executors, and persistence through the ports defined
+//! here; HTTP servers, database drivers, and runnable processes belong outside this crate.
+
 pub mod admission;
 pub mod agent_files;
 pub use admission::{HostRunAdmissionStore, MAX_HOST_RUN_ADMISSION_BYTES};

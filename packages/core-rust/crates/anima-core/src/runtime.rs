@@ -1311,10 +1311,7 @@ impl AgentRuntime {
                             let step_indices: Vec<i32> = tool_calls
                                 .iter()
                                 .enumerate()
-                                .map(|(i, _)| {
-                                    let idx = (self.step_counter + i as u64) as i32;
-                                    idx
-                                })
+                                .map(|(i, _)| (self.step_counter + i as u64) as i32)
                                 .collect();
                             self.step_counter += tool_calls.len() as u64;
 
@@ -1999,7 +1996,7 @@ impl AgentRuntime {
         tools_available: bool,
     ) -> Result<EvaluatorDecision, String> {
         let mut evaluators = self.evaluators.iter().collect::<Vec<_>>();
-        evaluators.sort_by(|left, right| right.priority().cmp(&left.priority()));
+        evaluators.sort_by_key(|evaluator| std::cmp::Reverse(evaluator.priority()));
 
         for evaluator in evaluators {
             if !tools_available && evaluator.requires_tool_budget() {

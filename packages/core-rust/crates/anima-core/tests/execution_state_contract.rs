@@ -312,6 +312,21 @@ fn approval_resume_requires_the_exact_pending_request_command_and_live_claim() {
         RuntimeCommand::resume_with_approval(id(50), id(2), id(1), claim.binding().clone())
             .unwrap();
 
+    let encoded = json!({
+        "id": id(50),
+        "session_id": id(2),
+        "payload": {
+            "kind": "resume_approval",
+            "run_id": id(1),
+            "binding": claim.binding(),
+        },
+    });
+    assert_eq!(serde_json::to_value(&command).unwrap(), encoded);
+    let restored: RuntimeCommand = serde_json::from_value(encoded).unwrap();
+    assert_eq!(restored, command);
+    assert_eq!(restored.payload_digest(), command.payload_digest());
+    assert_eq!(restored.approval_binding(), Some(claim.binding()));
+
     assert!(waiting
         .apply_resume_command(&command, Some(&claim), None)
         .is_ok());
@@ -359,7 +374,9 @@ fn approval_resume_claim_binds_live_grant_and_consumption_proposal() {
     .unwrap();
     let request = PolicyEngine::approval_request(&context, Some(&grant)).unwrap();
     let decision = ApprovalDecision::new_approved(request.clone(), 1_000).unwrap();
-    let claim = ApprovalResumeClaim::new(&request, &decision, &context, &[grant.clone()]).unwrap();
+    let claim =
+        ApprovalResumeClaim::new(&request, &decision, &context, std::slice::from_ref(&grant))
+            .unwrap();
     assert_eq!(
         claim.grant_consumption(),
         Some(&GrantConsumption::new("approval-grant", 1, context.logical_invocation_id).unwrap())
@@ -613,7 +630,7 @@ fn events_are_contiguous_and_token_deltas_are_live_not_checkpoint_semantic() {
         RuntimeEventKind::RunStarted,
     )
     .unwrap();
-    assert!(RuntimeEvent::validate_batch(4, &[start.clone()]).is_ok());
+    assert!(RuntimeEvent::validate_batch(4, std::slice::from_ref(&start)).is_ok());
     assert!(RuntimeEvent::validate_batch(4, &[start.clone(), start.clone()]).is_err());
     assert!(RuntimeEvent::validate_batch(1, &[start]).is_err());
 }

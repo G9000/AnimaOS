@@ -17,6 +17,100 @@ use anima_core::external_tools::ExternalToolDescriptor;
 
 const MAX_MCP_OWNER_BODY_BYTES: usize = 16 * 1024;
 
+#[utoipa::path(post, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/start", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)), request_body = McpOAuthStartRequest,
+    responses((status = 200, description = "Pending browser sign-in", body = crate::mcp::McpOAuthStart),
+    (status = 403, description = "Local owner required", body = ErrorBody)))]
+pub(super) async fn start_oauth(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpOAuthStartRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    match state
+        .mcp
+        .start_oauth(&agent, &id, input.expected_version, input.client_id)
+        .await
+    {
+        Ok(response) => no_store(json_response(StatusCode::OK, &response)),
+        Err(error) => service_error(error),
+    }
+}
+
+#[utoipa::path(get, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/status", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)),
+    responses((status = 200, description = "Redacted account sign-in state", body = crate::mcp::McpOAuthStatus),
+    (status = 403, description = "Local owner required", body = ErrorBody)))]
+pub(super) async fn oauth_status(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    match state.mcp.oauth_status(&agent, &id).await {
+        Ok(response) => no_store(json_response(StatusCode::OK, &response)),
+        Err(error) => service_error(error),
+    }
+}
+
+#[utoipa::path(post, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/cancel", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)), request_body = McpOAuthCancelRequest,
+    responses((status = 200, description = "Pending sign-in cancelled", body = McpConnectionEnvelope),
+    (status = 403, description = "Local owner required", body = ErrorBody)))]
+pub(super) async fn cancel_oauth(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpOAuthCancelRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    one(
+        StatusCode::OK,
+        state
+            .mcp
+            .cancel_oauth_attempt(&agent, &id, input.expected_version, &input.attempt_id)
+            .await,
+    )
+}
+
+#[utoipa::path(delete, path = "/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth", tag = "mcp",
+    params(("agent_id" = String, Path), ("connection_id" = String, Path)), request_body = McpVersionRequest,
+    responses((status = 200, description = "Local account credentials removed", body = McpConnectionEnvelope),
+    (status = 403, description = "Local owner required", body = ErrorBody)))]
+pub(super) async fn sign_out_oauth(
+    State(state): State<AppState>,
+    Path((agent, id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, false) {
+        return response;
+    }
+    let input: McpVersionRequest = match body(&state, request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    one(
+        StatusCode::OK,
+        state
+            .mcp
+            .sign_out_oauth(&agent, &id, input.expected_version)
+            .await,
+    )
+}
+
 async fn body<T: DeserializeOwned>(state: &AppState, request: Request) -> Result<T, Response> {
     let bytes = read_limited_body(
         request,
@@ -95,6 +189,7 @@ fn connection_response(view: McpConnectionView) -> McpConnectionResponse {
         }),
         enabled: view.record.enabled,
         has_bearer_credential: view.record.bearer_credential_ref.is_some(),
+        has_oauth_credential: view.record.oauth_credential_ref.is_some(),
         version: view.record.version,
         tool_access: view.tool_access.as_str().into(),
         reviewed_tools: view

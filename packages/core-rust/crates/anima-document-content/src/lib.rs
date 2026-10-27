@@ -1,12 +1,18 @@
-//! Portable bounded DOCX main-body, PDF text-layer and XLSX stored-cell extraction.
+//! Portable bounded DOCX/PDF/XLSX extraction and DOCX/XLSX/PPTX/PDF creation.
 //! No filesystem, process, network, OCR or password APIs are exposed here.
 //! PDF dependencies materialize internal objects: input/output bounds and panic
 //! containment do not bound their memory or wall time. Production callers must
 //! execute extraction in a physically limited, owned worker process.
 mod docx;
+mod generation;
 mod pdf;
 mod xlsx;
 pub use docx::extract_docx;
+pub use generation::{
+    document_schema, inspect_generated_document, render_document, CellValue, DocumentBlock,
+    DocumentSheet, DocumentSlide, DocumentSpec, GeneratedDocument, GeneratedFormat,
+    GenerationError, MAX_GENERATED_DOCUMENT_BYTES, MAX_GENERATED_SOURCE_BYTES,
+};
 pub use pdf::extract_pdf;
 pub use xlsx::extract_xlsx;
 

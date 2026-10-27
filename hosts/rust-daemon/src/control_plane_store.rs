@@ -40,10 +40,12 @@ mod chat_suite_upgrade_tests;
 /// 28 adds durable shared execution scopes and immutable run bindings;
 /// 29 adds conversation model preferences, reviews, results and viewer grants;
 /// 30 adds owner delegation policies, routed assignments and JSON output contracts.
+/// 31 adds endpoint-bound opaque MCP OAuth credential references.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 30;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 31;
+pub(crate) const PRE_MCP_OAUTH_BACKUP_SUFFIX: &str = ".pre-mcp-oauth.bak";
 pub(crate) const PRE_CHAT_SUITE_BACKUP_SUFFIX: &str = ".pre-chat-suite.bak";
 pub(crate) const PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX: &str = ".pre-delegation-controls.bak";
 pub(crate) const PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX: &str = ".pre-execution-budgets.bak";
@@ -570,8 +572,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_EXECUTION_BUDGETS_BACKUP_SUFFIX
             } else if loaded_version < 29 {
                 PRE_CHAT_SUITE_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 30 {
                 PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX
+            } else {
+                PRE_MCP_OAUTH_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -1223,6 +1227,8 @@ mod tests {
             (21, ".pre-discord-conversations.bak"),
             (22, ".pre-companion-interaction.bak"),
             (23, ".pre-workflows.bak"),
+            (29, ".pre-delegation-controls.bak"),
+            (30, ".pre-mcp-oauth.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1837,5 +1843,59 @@ mod turn_recovery_migration_tests {
             fs::read(path.with_file_name("state.json.pre-turn-recovery.bak")).unwrap(),
             original
         );
+    }
+}
+
+#[cfg(test)]
+mod mcp_oauth_migration_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn oauth_upgrade_preserves_version30_bytes_and_restores_only_an_opaque_reference() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("state.json");
+        let connection_id = uuid::Uuid::new_v4().to_string();
+        let original = serde_json::json!({
+            "version": 30,
+            "mcpConnections": [{
+                "id": connection_id, "agentId": "main", "label": "Account server",
+                "endpoint": "https://mcp.example/tools", "enabled": true,
+                "version": 7, "reviewedTools": []
+            }]
+        })
+        .to_string();
+        fs::write(&path, &original).unwrap();
+        let prior = pre_upgrade_backup_path(&path, 29);
+        fs::write(&prior, b"previous delegation backup").unwrap();
+        let config = ControlPlaneStoreConfig::Json(path.clone());
+        let mut snapshot = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(snapshot.mcp_connections.len(), 1);
+        assert!(snapshot.mcp_connections[0].oauth_credential_ref.is_none());
+        assert!(snapshot.mcp_connections[0].bearer_credential_ref.is_none());
+        let backup = PathBuf::from(
+            write_pre_upgrade_backup(&config, snapshot.version)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(backup, path.with_file_name("state.json.pre-mcp-oauth.bak"));
+        assert_eq!(fs::read(&backup).unwrap(), original.as_bytes());
+        let reference = uuid::Uuid::new_v4().to_string();
+        snapshot.version = CONTROL_PLANE_STORE_VERSION;
+        snapshot.mcp_connections[0].oauth_credential_ref = Some(reference.clone());
+        save_control_plane_snapshot(Some(&config), &snapshot)
+            .await
+            .unwrap();
+        let restored = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+        assert_eq!(restored.version, 31);
+        assert_eq!(restored.mcp_connections[0].id, connection_id);
+        assert_eq!(
+            restored.mcp_connections[0].oauth_credential_ref.as_deref(),
+            Some(reference.as_str())
+        );
+        assert_eq!(fs::read(backup).unwrap(), original.as_bytes());
+        assert_eq!(fs::read(prior).unwrap(), b"previous delegation backup");
+        let saved = fs::read_to_string(path).unwrap();
+        assert!(!saved.contains("access_token"));
+        assert!(!saved.contains("refresh_token"));
     }
 }

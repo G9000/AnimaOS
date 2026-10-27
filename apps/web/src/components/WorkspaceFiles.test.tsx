@@ -20,6 +20,80 @@ const files = [
   { path: 'plan.txt', name: 'plan.txt', sizeBytes: 2000, modifiedAtMs: 1000 },
 ];
 
+it.each(['docx', 'xlsx', 'pptx', 'pdf'])(
+  'shows the generated %s content preview and downloads only on request',
+  async (extension) => {
+    const path = `reports/finished.${extension}`;
+    vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({
+      files: [
+        {
+          path,
+          name: `finished.${extension}`,
+          sizeBytes: 800000,
+          modifiedAtMs: null,
+        },
+      ],
+      truncated: false,
+    });
+    vi.spyOn(daemon, 'readWorkspaceFile').mockResolvedValue({
+      path,
+      content:
+        '# Quarterly report\n\n| Region | Total |\n| --- | --- |\n| North | 42 |',
+      truncated: false,
+      previewKind: 'document',
+      sha256: 'a'.repeat(64),
+    });
+    const download = vi
+      .spyOn(daemon, 'downloadWorkspaceFile')
+      .mockResolvedValue(
+        new Blob(['finished file'], { type: 'application/octet-stream' }),
+      );
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<WorkspaceFiles online />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: new RegExp(`reports/finished\\.${extension}`),
+      }),
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'Quarterly report' }),
+    ).toBeVisible();
+    expect(screen.getByRole('table')).toHaveTextContent('North42');
+    expect(screen.getByText('Content preview')).toBeVisible();
+    expect(screen.getByText(/open the downloaded file.*layout/i)).toBeVisible();
+    expect(download).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Download current file' }),
+    );
+    await waitFor(() =>
+      expect(download).toHaveBeenCalledWith(path, expect.any(AbortSignal)),
+    );
+  },
+);
+
+it('keeps document preview content inert and does not load external images', async () => {
+  const path = 'reports/preview.docx';
+  vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({
+    files: [{ path, name: 'preview.docx', sizeBytes: 500, modifiedAtMs: null }],
+    truncated: false,
+  });
+  vi.spyOn(daemon, 'readWorkspaceFile').mockResolvedValue({
+    path,
+    content:
+      '# Preview\n\n<script>danger()</script>\n\n![tracking](https://example.invalid/pixel.png)',
+    truncated: false,
+    previewKind: 'document',
+  });
+  const view = render(<WorkspaceFiles online />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: /reports\/preview.docx/ }),
+  );
+  expect(await screen.findByRole('heading', { name: 'Preview' })).toBeVisible();
+  expect(view.container.querySelector('script')).toBeNull();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(screen.getByText('[Image: tracking]')).toBeVisible();
+});
+
 it('searches real paths and renders escaped, read-only truncated previews', async () => {
   vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({
     files,

@@ -1,6 +1,7 @@
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useLatest } from '../../hooks/useLatest';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { McpOAuthAccount } from './McpOAuthAccount';
 import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   mcpOwnerApi,
@@ -492,6 +493,26 @@ export function McpConnectionsPanel({
           lifetime={lifetime.token}
           toolNames={toolNames}
           blocked={blocked}
+          account={
+            row.transport !== 'stdio' && (
+              <McpOAuthAccount
+                connection={row}
+                api={api}
+                lifetime={lifetime.token}
+                blocked={
+                  blocked ||
+                  row.state === 'stopping' ||
+                  row.state === 'connecting' ||
+                  row.physicalCallsActive
+                }
+                stale={!online || loading || needsRefresh}
+                runAction={(action) => mutate(action, () => {})}
+                onSettled={() => {
+                  setTimeout(() => void refresh(), 0);
+                }}
+              />
+            )
+          }
           save={(patch, saved) =>
             void mutate(
               () =>
@@ -628,6 +649,7 @@ function ConnectionCard({
   lifetime,
   toolNames,
   blocked,
+  account,
   save,
   connect,
   discover,
@@ -644,6 +666,7 @@ function ConnectionCard({
   lifetime: object;
   toolNames: string[] | null;
   blocked: boolean;
+  account: ReactNode;
   save: (
     patch: { label?: string; endpoint?: string; enabled?: boolean },
     saved?: (row: McpConnection) => void,
@@ -752,7 +775,8 @@ function ConnectionCard({
           MCP tools are blocked by the agent’s execution policy.
         </p>
       )}
-      {bearerEligible && (
+      {account}
+      {bearerEligible && !row.hasOAuthCredential && (
         <div className="space-y-2 rounded-lg border border-line p-3 text-xs">
           <p>
             {row.hasBearerCredential

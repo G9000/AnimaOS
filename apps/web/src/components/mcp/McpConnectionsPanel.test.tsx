@@ -67,6 +67,10 @@ function api(
     remove: vi.fn(),
     saveBearerCredential: vi.fn(),
     clearBearerCredential: vi.fn(),
+    startOAuth: vi.fn(),
+    getOAuthStatus: vi.fn().mockResolvedValue({ state: 'signed_out' }),
+    cancelOAuth: vi.fn(),
+    signOutOAuth: vi.fn(),
     setGrant: vi.fn(),
   };
 }

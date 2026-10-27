@@ -101,13 +101,14 @@ export class WorkspaceClient {
     path: string,
     options: { signal?: AbortSignal } = {},
   ): Promise<Blob> {
+    const generatedDocument = /\.(?:docx|xlsx|pptx|pdf)$/i.test(path);
     return this.client.requestBoundedBlob(
       `/api/workspace/file/download?path=${encodeURIComponent(path)}`,
       { method: 'GET', signal: options.signal },
       {
-        maxBytes: 1024 * 1024,
+        maxBytes: (generatedDocument ? 4 : 1) * 1024 * 1024,
         contentType: 'application/octet-stream',
-        allowEmpty: true,
+        allowEmpty: !generatedDocument,
       },
     );
   }
@@ -177,4 +178,8 @@ export interface WorkspaceFileResponse {
   path: string;
   content: string;
   truncated: boolean;
+  /** Verified Anima-generated document content, rendered as safe Markdown. */
+  previewKind?: 'document';
+  /** Hash of the exact file bytes captured for the document preview. */
+  sha256?: string;
 }

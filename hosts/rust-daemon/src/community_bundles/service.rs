@@ -403,6 +403,7 @@ impl BundleService {
                         endpoint,
                         stdio,
                         bearer_credential_ref: None,
+                        oauth_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),

@@ -82,6 +82,20 @@ impl ConnectorManager {
             if manager.state.read().await.community_bundles.iter().any(|bundle|bundle.agent_id==agent_id) {
                 drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
             }
+            let (mcp, has_mcp_rows) = {
+                let state = manager.state.read().await;
+                (state.mcp_manager.clone(), state.mcp_registry.connections.values().any(|row| row.agent_id == agent_id))
+            };
+            let oauth_cleanup = match mcp {
+                Some(mcp) => mcp.prepare_agent_oauth_deletion(&agent_id).await.map_err(|_| ConnectorManagerError::Persistence),
+                None if has_mcp_rows => Err(ConnectorManagerError::Persistence),
+                None => Ok(()),
+            };
+            if let Err(error) = oauth_cleanup {
+                drop(_transaction);
+                manager.restore_agent_delete_configuration(&previous).await?;
+                return Err(error);
+            }
             let deletion = HistoryDeletion::agent(&agent_id);
             let (agent_snapshot, previous_connectors, previous_inbound, previous_outbound, previous_schedules, cancelled_queued, previous_runs, previous_sessions, previous_drive, persist) = {
                 let mut state = manager.state.write().await;

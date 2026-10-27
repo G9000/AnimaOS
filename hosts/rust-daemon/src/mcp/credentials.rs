@@ -10,6 +10,8 @@ use std::{
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "animaos.mcp.bearer";
+#[path = "oauth_vault.rs"]
+mod oauth_vault;
 pub(crate) const MAX_BEARER_BYTES: usize = 4096;
 
 #[derive(Clone)]
@@ -84,11 +86,53 @@ pub(crate) trait McpCredentialStore: Send + Sync {
         token: McpBearerToken,
     ) -> Result<(), McpCredentialError>;
     async fn delete(&self, connection: &str, reference: &str) -> Result<(), McpCredentialError>;
+    async fn load_oauth(
+        &self,
+        _connection: &str,
+        _endpoint: &str,
+        _reference: &str,
+    ) -> Result<Option<Zeroizing<String>>, McpCredentialError> {
+        Err(McpCredentialError::Unavailable)
+    }
+    /// `replace` requires an existing, identically bound slot. Callers serialize
+    /// rotation and deletion and await this operation in manager-owned work.
+    async fn put_oauth(
+        &self,
+        _connection: &str,
+        _endpoint: &str,
+        _reference: &str,
+        _payload: Zeroizing<String>,
+        _replace: bool,
+    ) -> Result<(), McpCredentialError> {
+        Err(McpCredentialError::Unavailable)
+    }
+    async fn delete_oauth(
+        &self,
+        _connection: &str,
+        _reference: &str,
+    ) -> Result<(), McpCredentialError> {
+        Err(McpCredentialError::Unavailable)
+    }
+    async fn recover_oauth(
+        &self,
+        _connection: &str,
+        _keep_reference: Option<&str>,
+    ) -> Result<(), McpCredentialError> {
+        Ok(())
+    }
+    async fn commit_oauth(
+        &self,
+        _connection: &str,
+        _reference: &str,
+    ) -> Result<(), McpCredentialError> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
 pub(crate) struct InMemoryMcpCredentialStore {
     values: RwLock<HashMap<String, (String, McpBearerToken)>>,
+    oauth: RwLock<HashMap<String, (String, Zeroizing<String>)>>,
 }
 #[async_trait]
 impl McpCredentialStore for InMemoryMcpCredentialStore {
@@ -142,6 +186,27 @@ impl McpCredentialStore for InMemoryMcpCredentialStore {
             .map_err(|_| McpCredentialError::Unavailable)?
             .remove(&account(connection, reference)?);
         Ok(())
+    }
+    async fn load_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+    ) -> Result<Option<Zeroizing<String>>, McpCredentialError> {
+        oauth_vault::memory_load(self, id, endpoint, reference)
+    }
+    async fn put_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+        payload: Zeroizing<String>,
+        replace: bool,
+    ) -> Result<(), McpCredentialError> {
+        oauth_vault::memory_put(self, id, endpoint, reference, payload, replace)
+    }
+    async fn delete_oauth(&self, id: &str, reference: &str) -> Result<(), McpCredentialError> {
+        oauth_vault::memory_delete(self, id, reference)
     }
 }
 
@@ -211,6 +276,20 @@ struct LoadedPayload {
 }
 #[async_trait]
 impl McpCredentialStore for OsKeyringMcpCredentialStore {
+    async fn recover_oauth(
+        &self,
+        connection: &str,
+        keep_reference: Option<&str>,
+    ) -> Result<(), McpCredentialError> {
+        oauth_vault::vault_recover(self, connection, keep_reference).await
+    }
+    async fn commit_oauth(
+        &self,
+        connection: &str,
+        reference: &str,
+    ) -> Result<(), McpCredentialError> {
+        oauth_vault::vault_commit(self, connection, reference).await
+    }
     async fn load(
         &self,
         connection: &str,
@@ -308,6 +387,27 @@ impl McpCredentialStore for OsKeyringMcpCredentialStore {
         })
         .await
         .map_err(|_| McpCredentialError::Uncertain)?
+    }
+    async fn load_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+    ) -> Result<Option<Zeroizing<String>>, McpCredentialError> {
+        oauth_vault::vault_load(self, id, endpoint, reference).await
+    }
+    async fn put_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+        payload: Zeroizing<String>,
+        replace: bool,
+    ) -> Result<(), McpCredentialError> {
+        oauth_vault::vault_put(self, id, endpoint, reference, payload, replace).await
+    }
+    async fn delete_oauth(&self, id: &str, reference: &str) -> Result<(), McpCredentialError> {
+        oauth_vault::vault_delete(self, id, reference).await
     }
 }
 

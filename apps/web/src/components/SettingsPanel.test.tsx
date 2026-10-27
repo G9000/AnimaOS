@@ -141,6 +141,19 @@ it('keeps tool chains unavailable without the existing shell grant', async () =>
 });
 afterEach(() => vi.restoreAllMocks());
 
+it('grants finished document creation only when the owner enables Files & documents', async () => {
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(agent({ toolNames: ['read_file', 'custom_permission'] }), {
+    sections: ['builtins'],
+    saveSettings,
+  });
+  fireEvent.click(await screen.findByRole('switch', { name: 'Files & documents' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+    tools: expect.arrayContaining(['read_file', 'custom_permission', 'write_document', 'read_document_source']),
+  })));
+});
+
 function agent(overrides: Partial<AgentDetail> = {}): AgentDetail {
   return {
     id: 'agent-main',

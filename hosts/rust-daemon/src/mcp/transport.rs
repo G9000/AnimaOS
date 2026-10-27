@@ -136,10 +136,20 @@ pub(crate) enum ValidatedMcpLaunch {
         endpoint: ValidatedMcpEndpoint,
         token: super::credentials::McpBearerToken,
     },
+    HttpOAuth {
+        endpoint: ValidatedMcpEndpoint,
+        provider: Arc<dyn McpAccessTokenProvider>,
+    },
     Stdio {
         spec: super::McpStdioSpec,
         connection_id: String,
     },
+}
+pub(crate) trait McpAccessTokenProvider: Send + Sync + std::fmt::Debug {
+    fn token(
+        &self,
+    ) -> BoxFuture<'static, Result<super::credentials::McpBearerToken, McpTransportError>>;
+    fn authentication_rejected(&self) {}
 }
 #[derive(Clone, Debug)]
 pub(crate) struct McpCall {
@@ -331,6 +341,7 @@ struct HttpBackend {
     workers: Arc<Activity>,
     stop: CancellationToken,
     bearer: Option<(String, super::credentials::McpBearerToken)>,
+    oauth: Option<(String, Arc<dyn McpAccessTokenProvider>)>,
 }
 impl HttpBackend {
     fn new(control: TransportControl) -> Result<Self, McpTransportError> {
@@ -357,6 +368,7 @@ impl HttpBackend {
             workers: Arc::new(Activity::default()),
             stop: CancellationToken::new(),
             bearer: None,
+            oauth: None,
         })
     }
     fn failure(&self, error: McpTransportError) -> StreamableHttpError<McpTransportError> {
@@ -374,12 +386,25 @@ impl HttpBackend {
         self.bearer = Some((endpoint.into(), token));
         Ok(self)
     }
-    fn authorize_request(
+    async fn authorize_request(
         &self,
         uri: &str,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::RequestBuilder, StreamableHttpError<McpTransportError>> {
-        let Some((endpoint, token)) = &self.bearer else {
+        let oauth_token;
+        let (endpoint, token) = if let Some((endpoint, provider)) = &self.oauth {
+            if uri != endpoint {
+                return Err(self.failure(McpTransportError::Unavailable));
+            }
+            let control = lock(&self.control).clone();
+            oauth_token = control
+                .run(provider.token())
+                .await
+                .map_err(|error| self.failure(error))?;
+            (endpoint, &oauth_token)
+        } else if let Some((endpoint, token)) = &self.bearer {
+            (endpoint, token)
+        } else {
             return Ok(request);
         };
         if uri != endpoint {
@@ -416,7 +441,7 @@ impl HttpBackend {
             .post(uri.as_ref())
             .header("accept", "application/json, text/event-stream")
             .json(&message);
-        request = self.authorize_request(&uri, request)?;
+        request = self.authorize_request(&uri, request).await?;
         if let Some(id) = session_id {
             request = request.header("mcp-session-id", id.as_ref());
         }
@@ -434,6 +459,11 @@ impl HttpBackend {
             value=control.run(async {request.send().await.map_err(|_|McpTransportError::Unavailable)})=>value.map_err(|e|self.failure(e))?,
         };
         if !response.status().is_success() {
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                if let Some((_, provider)) = &self.oauth {
+                    provider.authentication_rejected();
+                }
+            }
             return Err(self.failure(McpTransportError::Unavailable));
         }
         let id = response
@@ -605,7 +635,7 @@ impl StreamableHttpClient for HttpBackend {
             .http
             .delete(u.as_ref())
             .header("mcp-session-id", s.as_ref());
-        request = self.authorize_request(&u, request)?;
+        request = self.authorize_request(&u, request).await?;
         for (name, value) in h {
             if name.as_str() != "mcp-protocol-version" {
                 return Err(self.failure(McpTransportError::Malformed));
@@ -1124,6 +1154,7 @@ impl DefaultMcpTransportFactory {
         &self,
         endpoint: ValidatedMcpEndpoint,
         bearer: Option<super::credentials::McpBearerToken>,
+        oauth: Option<Arc<dyn McpAccessTokenProvider>>,
         control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         #[cfg(test)]
@@ -1139,10 +1170,13 @@ impl DefaultMcpTransportFactory {
                 }
                 backend
             };
-            let backend = match bearer {
+            let mut backend = match bearer {
                 Some(token) => backend.with_bearer(&endpoint.0, token)?,
                 None => backend,
             };
+            if let Some(provider) = oauth {
+                backend.oauth = Some((endpoint.0.clone(), provider));
+            }
             let mut config = StreamableHttpClientTransportConfig::with_uri(endpoint.0)
                 .reinit_on_expired_session(false)
                 .max_sse_event_size(RAW_EVENT);
@@ -1225,9 +1259,12 @@ impl McpTransportFactory for DefaultMcpTransportFactory {
         control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         match launch {
-            ValidatedMcpLaunch::Http(endpoint) => self.connect_http(endpoint, None, control),
+            ValidatedMcpLaunch::Http(endpoint) => self.connect_http(endpoint, None, None, control),
             ValidatedMcpLaunch::HttpBearer { endpoint, token } => {
-                self.connect_http(endpoint, Some(token), control)
+                self.connect_http(endpoint, Some(token), None, control)
+            }
+            ValidatedMcpLaunch::HttpOAuth { endpoint, provider } => {
+                self.connect_http(endpoint, None, Some(provider), control)
             }
             ValidatedMcpLaunch::Stdio {
                 spec,
@@ -1253,6 +1290,60 @@ mod tests {
             Instant::now() + Duration::from_secs(seconds),
             CancellationToken::new(),
         )
+    }
+    #[derive(Debug, Default)]
+    struct OAuthProbe {
+        tokens: AtomicUsize,
+        rejected: AtomicUsize,
+    }
+    impl McpAccessTokenProvider for OAuthProbe {
+        fn token(
+            &self,
+        ) -> BoxFuture<'static, Result<super::super::credentials::McpBearerToken, McpTransportError>>
+        {
+            self.tokens.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(wire_bearer_token()) })
+        }
+        fn authentication_rejected(&self) {
+            self.rejected.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    #[tokio::test]
+    async fn oauth_tool_unauthorized_notifies_account_once_without_replaying_effects() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let observed = requests.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route(
+                    "/mcp",
+                    post(move || {
+                        let observed = observed.clone();
+                        async move {
+                            observed.fetch_add(1, Ordering::SeqCst);
+                            axum::http::StatusCode::UNAUTHORIZED
+                        }
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let provider = Arc::new(OAuthProbe::default());
+        let mut backend = HttpBackend::new(control(3)).unwrap();
+        backend.oauth = Some((endpoint.clone(), provider.clone()));
+        let message:ClientJsonRpcMessage=serde_json::from_value(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"effect","arguments":{}}})).unwrap();
+        assert!(backend
+            .post(endpoint.into(), message, None, None, HashMap::new())
+            .await
+            .is_err());
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.tokens.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.rejected.load(Ordering::SeqCst), 1);
+        task.abort();
+        let _ = task.await;
     }
     #[tokio::test]
     #[ignore = "explicit opt-in anonymous metadata-only diagnostic; no search query"]
@@ -1375,6 +1466,7 @@ mod tests {
         for method in [reqwest::Method::POST, reqwest::Method::DELETE] {
             let request = backend
                 .authorize_request(endpoint, backend.http.request(method, endpoint))
+                .await
                 .unwrap()
                 .build()
                 .unwrap();
@@ -1390,6 +1482,7 @@ mod tests {
         ] {
             assert!(backend
                 .authorize_request(target, backend.http.post(target))
+                .await
                 .is_err());
         }
         assert!(HttpBackend::new(control(2))
@@ -1715,6 +1808,7 @@ mod tests {
             ] {
                 assert!(backend
                     .authorize_request(other, backend.http.post(other))
+                    .await
                     .is_err());
             }
             task.abort();

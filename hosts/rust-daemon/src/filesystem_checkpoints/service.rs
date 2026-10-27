@@ -340,7 +340,7 @@ impl NativeCheckpointService {
             let groups = self.groups(&store, &session).map_err(error)?;
             if !matches!(
                 call.name.as_str(),
-                "write_file" | "edit_file" | "multi_edit"
+                "write_file" | "write_document" | "edit_file" | "multi_edit"
             ) || call.id.is_empty()
                 || call.id.len() > 128
                 || call.id.chars().any(char::is_control)

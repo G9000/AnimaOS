@@ -17,6 +17,8 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::credentials::{InMemoryMcpCredentialStore, McpBearerToken, McpCredentialStore};
+#[path = "oauth.rs"]
+mod oauth;
 use super::records::*;
 use super::transport::{
     McpCall, McpDiscovery, McpTransportError, McpTransportFactory, McpTransportSession,
@@ -24,6 +26,7 @@ use super::transport::{
 };
 use crate::runs::{RunLink, RunStatus};
 use crate::state::DaemonState;
+pub(crate) use oauth::{McpOAuthStart, McpOAuthStatus};
 
 const DISCOVERY_TIME: Duration = Duration::from_secs(5);
 const CALL_TIME: Duration = Duration::from_secs(20);
@@ -53,6 +56,7 @@ struct Inner {
     publication: SharedMcpPublication,
     factory: Arc<dyn McpTransportFactory>,
     credentials: Arc<dyn McpCredentialStore>,
+    oauth: StdMutex<oauth::OAuthState>,
     live: StdMutex<LiveState>,
     generation: AtomicU64,
     slots: Arc<Semaphore>,
@@ -168,6 +172,7 @@ impl McpManager {
                 publication,
                 factory,
                 credentials,
+                oauth: StdMutex::new(Default::default()),
                 live: StdMutex::new(Default::default()),
                 generation: AtomicU64::new(1),
                 slots: Arc::new(Semaphore::new(2)),
@@ -293,7 +298,12 @@ impl McpManager {
             return self.view(old, &*state.read().await);
         }
         let version = next_version(old.version)?;
+        self.cancel_oauth(id);
         self.retire_and_join(id).await?;
+        if let Err(error) = self.delete_oauth_material(&old, false).await {
+            self.block_credential(id);
+            return Err(error);
+        }
         let fresh = if let Some(token) = token {
             let reference = uuid::Uuid::new_v4().to_string();
             if self
@@ -335,6 +345,7 @@ impl McpManager {
                 .ok_or(McpServiceError::NotFound)?;
             row.version = version;
             row.bearer_credential_ref = fresh.clone();
+            row.oauth_credential_ref = None;
             let persist = guard
                 .control_plane_persist_request()
                 .with_mcp_candidate(next.snapshot(), None)
@@ -762,6 +773,7 @@ impl McpManager {
                         endpoint: normalized_endpoint(&input.endpoint)?,
                         stdio: None,
                         bearer_credential_ref: None,
+                        oauth_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -783,6 +795,7 @@ impl McpManager {
                         endpoint: String::new(),
                         stdio: Some(spec),
                         bearer_credential_ref: None,
+                        oauth_credential_ref: None,
                         enabled: false,
                         version: 1,
                         reviewed_tools: Vec::new(),
@@ -837,6 +850,7 @@ impl McpManager {
                             }
                             if row.endpoint != old.endpoint {
                                 row.bearer_credential_ref = None;
+                                row.oauth_credential_ref = None;
                             }
                             if let Some(enabled) = input.enabled {
                                 row.enabled = enabled;
@@ -991,6 +1005,23 @@ impl McpManager {
         // Delete endpoint-bound material before a changed endpoint/deletion publishes.
         if let Some(id) = id {
             let old = self.record(agent, id, None).await?;
+            self.cancel_oauth(id);
+            if next
+                .connections
+                .get(id)
+                .is_none_or(|row| row.endpoint != old.endpoint)
+            {
+                // A published OAuth provider must stop before its vault slot is
+                // removed. Unpublished anchors have no provider; preserve the
+                // existing save-before-publication lifecycle for other rows.
+                if old.oauth_credential_ref.is_some() {
+                    self.retire_and_join(id).await?;
+                }
+                if let Err(error) = self.delete_oauth_material(&old, false).await {
+                    self.block_credential(id);
+                    return Err(error);
+                }
+            }
             if let Some(reference) = old.bearer_credential_ref.as_ref().filter(|_| {
                 next.connections
                     .get(id)
@@ -1223,6 +1254,17 @@ impl McpManager {
         expected: u64,
         connect: bool,
     ) -> Result<McpConnectionView, McpServiceError> {
+        self.discover_owned_with_oauth(agent, id, expected, connect, None)
+            .await
+    }
+    pub(super) async fn discover_owned_with_oauth(
+        &self,
+        agent: &str,
+        id: &str,
+        expected: u64,
+        connect: bool,
+        oauth_admission: Option<CancellationToken>,
+    ) -> Result<McpConnectionView, McpServiceError> {
         self.running()?;
         let deadline = Instant::now() + DISCOVERY_TIME;
         let transaction = tokio::time::timeout_at(deadline, self.inner.transactions.lock())
@@ -1231,6 +1273,12 @@ impl McpManager {
         let record = tokio::time::timeout_at(deadline, self.record(agent, id, Some(expected)))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
+        if oauth_admission
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(McpServiceError::Revoked);
+        }
         {
             let state = self.state()?;
             let guard = state.read().await;
@@ -1331,6 +1379,12 @@ impl McpManager {
                             spec,
                             connection_id: record.id.clone(),
                         },
+                        None if record.oauth_credential_ref.is_some() => {
+                            ValidatedMcpLaunch::HttpOAuth {
+                                endpoint: ValidatedMcpEndpoint(record.endpoint.clone()),
+                                provider: self.oauth_provider(&record, cancel.clone()),
+                            }
+                        }
                         None => match bearer {
                             Some(token) => ValidatedMcpLaunch::HttpBearer {
                                 endpoint: ValidatedMcpEndpoint(record.endpoint.clone()),
@@ -1450,6 +1504,7 @@ impl McpManager {
             let state = manager.state()?;
             let guard = state.read().await;
             manager.management_scope(&guard, &agent)?;
+            manager.cancel_oauth(&id);
             manager.retire(&id, None)?;
             manager.view(record, &guard)
         })
@@ -1613,6 +1668,7 @@ impl McpManager {
         }
     }
     pub(crate) fn retire_agent(&self, agent: &str) {
+        self.cancel_oauth_agent(Some(agent));
         self.note_agent_permissions_changed(agent);
         let ids = self
             .inner
@@ -1632,6 +1688,7 @@ impl McpManager {
     }
     pub(crate) fn request_shutdown(&self) {
         self.inner.stopping.store(true, Ordering::SeqCst);
+        self.cancel_oauth_agent(None);
         let ids = self
             .inner
             .live
@@ -1776,6 +1833,11 @@ impl McpManager {
             }
         }
         for row in rows {
+            self.cancel_oauth(&row.id);
+            if let Err(error) = self.delete_oauth_material(row, false).await {
+                self.block_credential(&row.id);
+                return Err(error);
+            }
             if let Some(reference) = &row.bearer_credential_ref {
                 if self
                     .inner

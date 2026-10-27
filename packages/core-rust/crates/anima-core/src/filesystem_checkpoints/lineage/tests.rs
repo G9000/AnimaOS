@@ -819,7 +819,7 @@ fn fp08_lineage_bounds_entire_input_before_object_resolution() {
     );
     declared.objects.clear();
     declared.reseal_authentic_fixture();
-    assert!(8 * MAX_CHECKPOINT_STREAM_BYTES > MAX_CHECKPOINT_CONTENT_BYTES);
+    const { assert!(8 * MAX_CHECKPOINT_STREAM_BYTES > MAX_CHECKPOINT_CONTENT_BYTES) };
     assert_eq!(
         declared.plan(),
         Err(CheckpointError::Budget),

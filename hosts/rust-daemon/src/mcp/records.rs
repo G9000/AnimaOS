@@ -124,6 +124,8 @@ pub(crate) struct McpConnectionRecord {
     pub(crate) stdio: Option<McpStdioSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) bearer_credential_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) oauth_credential_ref: Option<String>,
     pub(crate) enabled: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpTool>,
@@ -144,6 +146,14 @@ impl McpRegistry {
         let mut ids = HashSet::new();
         let mut aliases = HashSet::new();
         for row in rows {
+            if row.oauth_credential_ref.as_ref().is_some_and(|reference| {
+                !super::credentials::valid_reference(reference)
+                    || row.stdio.is_some()
+                    || row.bearer_credential_ref.is_some()
+                    || !credential_endpoint_valid(&row.endpoint)
+            }) {
+                return Err("Invalid MCP OAuth credential reference".into());
+            }
             if row.bearer_credential_ref.as_ref().is_some_and(|reference| {
                 !super::credentials::valid_reference(reference)
                     || row.stdio.is_some()
@@ -316,7 +326,7 @@ impl McpConnectionState {
         }
     }
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub(crate) struct StaticMcpError {
     pub(crate) code: &'static str,
     pub(crate) message: &'static str,

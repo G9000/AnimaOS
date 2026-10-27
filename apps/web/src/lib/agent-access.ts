@@ -71,6 +71,7 @@ const COMMON_TOOLS = [
 const OBSERVE_TOOLS = [
   ...COMMON_TOOLS,
   'read_file',
+  'read_document_source',
   'list_dir',
   'glob',
   'grep',
@@ -81,6 +82,7 @@ const COLLABORATE_TOOLS = [
   ...OBSERVE_TOOLS,
   'memory_update',
   'write_file',
+  'write_document',
   'edit_file',
   'multi_edit',
   'todo_write',

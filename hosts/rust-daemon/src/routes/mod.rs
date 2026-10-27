@@ -140,6 +140,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         mcp::list, mcp::create, mcp::get, mcp::update, mcp::connect,
         mcp::discover, mcp::review, mcp::set_grant, mcp::disconnect, mcp::delete,
         mcp::set_credential, mcp::clear_credential,
+        mcp::start_oauth, mcp::oauth_status, mcp::cancel_oauth, mcp::sign_out_oauth,
         jobs::list_jobs,
         jobs::create_job,
         jobs::cancel_job,
@@ -308,6 +309,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         self::contracts::mcp::ReviewMcpToolRequest, self::contracts::mcp::McpGrantRequest,
         self::contracts::mcp::McpGrantEnvelope,
         self::contracts::mcp::McpCredentialRequest,
+        self::contracts::mcp::McpOAuthStartRequest, self::contracts::mcp::McpOAuthCancelRequest,
+        crate::mcp::McpOAuthStart, crate::mcp::McpOAuthStatus,
         crate::browser::BrowserSelection,crate::browser::SaveBrowserScope,crate::browser::StopBrowserScope,crate::browser::BrowserScopeEnvelope,crate::browser::BrowserSavedScopeEnvelope,
         crate::browser::BrowserScopesEnvelope,crate::browser::BrowserPoliciesEnvelope,crate::browser::BrowserScopeView,
         crate::browser::BrowserProfileView,crate::browser::BrowserProfileMutation,crate::browser::CreateBrowserProfile,
@@ -1052,6 +1055,10 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/grants/{alias}", axum::routing::patch(mcp::set_grant))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect", axum::routing::post(mcp::disconnect))
         .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/credential", axum::routing::put(mcp::set_credential).delete(mcp::clear_credential))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/start", axum::routing::post(mcp::start_oauth))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/status", get(mcp::oauth_status))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/cancel", axum::routing::post(mcp::cancel_oauth))
+        .route("/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth", axum::routing::delete(mcp::sign_out_oauth))
         .route("/openapi.json", get(openapi_entry))
         .route("/docs", get(docs_entry))
         .route("/docs/", get(docs_entry))
@@ -3163,7 +3170,7 @@ async fn workspace_files_entry(
     tag = "workspace",
     params(("path" = String, Query, description = "Relative workspace file path")),
     responses(
-        (status = 200, description = "Bounded UTF-8 text preview", body = workspace_files::WorkspaceFileResponse),
+        (status = 200, description = "Bounded UTF-8 text or verified generated-document content preview", body = workspace_files::WorkspaceFileResponse),
         (status = 400, description = "Excluded path or unsupported content", body = ErrorBody),
         (status = 404, description = "File not found", body = ErrorBody),
         (status = 409, description = "No configured workspace", body = ErrorBody)
@@ -3205,9 +3212,9 @@ struct WorkspaceDownloadQuery {
     get,
     path = "/api/workspace/file/download",
     tag = "workspace",
-    params(("path" = String, Query, description = "Relative .txt, .md or .csv workspace path")),
+    params(("path" = String, Query, description = "Relative TXT, Markdown, CSV or verified Anima-generated DOCX, XLSX, PPTX or PDF workspace path")),
     responses(
-        (status = 200, description = "Current raw UTF-8 snapshot, at most 1 MiB including empty files", content_type = "application/octet-stream"),
+        (status = 200, description = "Current snapshot: UTF-8 reports up to 1 MiB, or verified Anima-generated documents up to 4 MiB", content_type = "application/octet-stream"),
         (status = 400, description = "Malformed query, excluded path or unsupported content", body = ErrorBody),
         (status = 403, description = "Local owner authorization required", body = ErrorBody),
         (status = 404, description = "File not found", body = ErrorBody),

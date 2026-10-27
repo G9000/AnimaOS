@@ -269,6 +269,43 @@ impl WorkspaceBytes {
         file.sync_all()?;
         Ok(())
     }
+    /// Publish a complete synchronized file without replacing a colliding name.
+    pub(crate) fn create_new_bytes_atomic<G>(
+        &self,
+        relative: &str,
+        bytes: &[u8],
+        authorize: impl FnOnce() -> io::Result<G>,
+    ) -> io::Result<()> {
+        let (directory, name) = self.parent(relative, true)?;
+        let temporary = format!(".anima-document-{}.tmp", uuid::Uuid::new_v4());
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No)
+            .nonblock(true);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let result: io::Result<()> = (|| {
+            let mut file = directory.open_with(&temporary, &options)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            let authority = authorize()?;
+            directory.hard_link(&temporary, &directory, &name)?;
+            drop(authority);
+            Ok(())
+        })();
+        let cleanup = directory.remove_file(&temporary);
+        result?;
+        cleanup?;
+        #[cfg(unix)]
+        directory.try_clone()?.into_std_file().sync_all()?;
+        Ok(())
+    }
     /// Replace an existing instruction through the retained parent capability.
     /// A synchronized exclusive sibling is published only after exact preimage,
     /// single-link, permission, and caller authority checks succeed.
@@ -332,6 +369,7 @@ impl WorkspaceBytes {
             same_preimage()?;
             ensure_same_instruction_permissions(&original, &file)?;
             let authority = authorize()?;
+            same_preimage()?;
             // Windows rename needs the temporary's writable handle closed first.
             drop(file);
             directory.rename(&temporary, &directory, &name)?;
@@ -486,6 +524,52 @@ pub(crate) fn open_regular_file(directory: &Dir, name: &str) -> io::Result<File>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finished_documents_atomic_publication_preserves_collisions_and_honors_final_authority() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceBytes::open(root.path()).unwrap();
+        let target = root.path().join("report.docx");
+        let result = workspace.create_new_bytes_atomic("report.docx", b"new document", || {
+            std::fs::write(&target, b"concurrent owner document")?;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"concurrent owner document"
+        );
+        std::fs::remove_file(&target).unwrap();
+        let cancelled = workspace.create_new_bytes_atomic("report.docx", b"new document", || {
+            Err::<(), _>(io::Error::new(io::ErrorKind::Interrupted, "cancelled"))
+        });
+        assert!(cancelled.is_err());
+        assert!(!target.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn finished_documents_revision_rechecks_preimage_after_final_authorization() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceBytes::open(root.path()).unwrap();
+        let target = root.path().join("report.docx");
+        std::fs::write(&target, b"original").unwrap();
+        let result = workspace.compare_replace_instruction_file(
+            "report.docx",
+            b"original",
+            b"revision",
+            || {
+                std::fs::write(&target, b"owner changed during authorization")?;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(target).unwrap(),
+            b"owner changed during authorization"
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
     #[cfg(windows)]
     #[test]
     fn personality_windows_acl_comparison_preserves_arbitrary_trustees_and_access_fields() {

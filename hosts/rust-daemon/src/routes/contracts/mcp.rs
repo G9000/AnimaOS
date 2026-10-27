@@ -40,6 +40,8 @@ pub(crate) struct McpConnectionResponse {
     pub(crate) enabled: bool,
     /// A saved reference exists; this does not probe the vault or remote service.
     pub(crate) has_bearer_credential: bool,
+    #[serde(rename = "hasOAuthCredential")]
+    pub(crate) has_oauth_credential: bool,
     pub(crate) version: u64,
     pub(crate) reviewed_tools: Vec<ReviewedMcpToolResponse>,
     /// Derived from the current agent permissions: automatic, review, or denied.
@@ -121,6 +123,20 @@ where
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct McpVersionRequest {
     pub(crate) expected_version: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpOAuthStartRequest {
+    pub(crate) expected_version: u64,
+    pub(crate) client_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct McpOAuthCancelRequest {
+    pub(crate) expected_version: u64,
+    pub(crate) attempt_id: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

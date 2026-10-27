@@ -617,7 +617,8 @@ fn approval_required_grants_bind_critical_approvals_and_fail_closed_after_change
             .effect,
         GrantEffect::ApprovalRequired
     );
-    let evaluation = PolicyEngine::evaluate(&context, &[approval_grant.clone()]).unwrap();
+    let evaluation =
+        PolicyEngine::evaluate(&context, std::slice::from_ref(&approval_grant)).unwrap();
     assert!(matches!(
         evaluation.decision,
         PolicyDecision::RequireApproval(_)
@@ -631,9 +632,12 @@ fn approval_required_grants_bind_critical_approvals_and_fail_closed_after_change
     let request = PolicyEngine::approval_request(&context, Some(&approval_grant)).unwrap();
     assert_eq!(request.grant_id.as_deref(), Some("approval-grant"));
     let approval = ApprovalDecision::new_approved(request, 1_000).unwrap();
-    let approved =
-        PolicyEngine::evaluate_with_approval(&context, &[approval_grant.clone()], Some(&approval))
-            .unwrap();
+    let approved = PolicyEngine::evaluate_with_approval(
+        &context,
+        std::slice::from_ref(&approval_grant),
+        Some(&approval),
+    )
+    .unwrap();
     assert!(matches!(approved.decision, PolicyDecision::Allow(_)));
     assert_eq!(
         approved.consumption,
@@ -690,7 +694,7 @@ fn approval_required_grants_bind_critical_approvals_and_fail_closed_after_change
         GrantEffect::AutoAllow
     );
     assert!(matches!(
-        PolicyEngine::evaluate(&context, &[auto_allow.clone()])
+        PolicyEngine::evaluate(&context, std::slice::from_ref(&auto_allow))
             .unwrap()
             .decision,
         PolicyDecision::Allow(_)

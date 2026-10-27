@@ -197,13 +197,36 @@ impl RunActionJournal {
         approved: bool,
         recovery: bool,
     ) -> Result<(), String> {
+        self.native_file_authority(workspace, Some(store), call, approved, recovery)
+            .map(drop)
+    }
+
+    /// Hold current native authority across the atomic publication of a document
+    /// when host checkpoint storage is disabled.
+    pub(crate) fn document_revalidate_now(
+        &self,
+        workspace: &std::path::Path,
+        call: &ToolCall,
+        approved: bool,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<DaemonState>, String> {
+        self.native_file_authority(workspace, None, call, approved, false)
+    }
+
+    fn native_file_authority(
+        &self,
+        workspace: &std::path::Path,
+        store: Option<&std::path::Path>,
+        call: &ToolCall,
+        approved: bool,
+        recovery: bool,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<DaemonState>, String> {
         self.check_liveness()?;
         let state = self
             .state
             .upgrade()
             .ok_or("Native action owner is unavailable")?;
         let guard = state
-            .try_read()
+            .try_read_owned()
             .map_err(|_| "Checkpoint authority is busy; no file effect was admitted")?;
         self.check_owner(&guard, true)?;
         // A worktree helper's checkpoints follow its own checkout; every
@@ -219,7 +242,7 @@ impl RunActionJournal {
                     .map(|value| value.root_path.clone())
             });
         if expected_workspace.as_deref() != Some(workspace)
-            || guard.checkpoint_root.as_deref() != Some(store)
+            || guard.checkpoint_root.as_deref() != store
         {
             return Err("Checkpoint workspace or host configuration changed".into());
         }
@@ -269,8 +292,9 @@ impl RunActionJournal {
         match guard.approval_verdict(&current, &self.run.session_id, call) {
             crate::approvals::Verdict::Allow => Ok(()),
             crate::approvals::Verdict::Ask if approved => Ok(()),
-            _ => Err("Checkpoint action is no longer approved".into()),
-        }
+            _ => Err("Checkpoint action is no longer approved".to_string()),
+        }?;
+        Ok(guard)
     }
 
     /// Recheck current execution authority at the actual selected transport boundary.

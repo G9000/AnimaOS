@@ -53,20 +53,15 @@ pub type AgentId = String;
 pub type RoomId = String;
 pub type MessageId = String;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum DataValue {
+    #[default]
     Null,
     Bool(bool),
     Number(f64),
     String(String),
     Array(Vec<DataValue>),
     Object(BTreeMap<String, DataValue>),
-}
-
-impl Default for DataValue {
-    fn default() -> Self {
-        Self::Null
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -178,6 +178,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/core-memory/{block}/{entry_id}`                                      |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}/credential`                          |
+| `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth`                               |
 | `DELETE` | `/api/agents/{agent_id}/schedules/{schedule_id}`                                             |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/voice/speech/{operation_id}`                   |
@@ -224,6 +225,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/learning-reviews/{review_id}`                                        |
 | `GET`    | `/api/agents/{agent_id}/mcp-connections`                                                     |
 | `GET`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
+| `GET`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/status`                        |
 | `GET`    | `/api/agents/{agent_id}/memories/recent`                                                     |
 | `GET`    | `/api/agents/{agent_id}/message-search`                                                      |
 | `GET`    | `/api/agents/{agent_id}/runs/{run_id}`                                                       |
@@ -363,6 +365,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/connect`                             |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/disconnect`                          |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/discover`                            |
+| `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/cancel`                        |
+| `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/oauth/start`                         |
 | `POST`   | `/api/agents/{agent_id}/mcp-connections/{connection_id}/review`                              |
 | `POST`   | `/api/agents/{agent_id}/messages`                                                            |
 | `POST`   | `/api/agents/{agent_id}/run`                                                                 |
@@ -700,7 +704,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 312 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 316 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 

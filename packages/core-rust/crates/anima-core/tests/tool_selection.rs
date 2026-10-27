@@ -105,9 +105,11 @@ async fn tool_selection_filters_only_each_provider_copy_and_hydrates_next_reques
         })
         .await;
     assert_eq!(result.status, TaskStatus::Success);
-    let configs = adapter.configs.lock().unwrap();
-    assert_eq!(configs[0].tools, Some(vec![descriptor("essential")]));
-    assert_eq!(configs[1].tools, config().tools);
+    {
+        let configs = adapter.configs.lock().unwrap();
+        assert_eq!(configs[0].tools, Some(vec![descriptor("essential")]));
+        assert_eq!(configs[1].tools, config().tools);
+    }
     assert_eq!(executed.lock().unwrap().as_slice(), ["essential", "hidden"]);
     assert_eq!(runtime.config(), &config());
     let restored_adapter = Arc::new(Capture::default());

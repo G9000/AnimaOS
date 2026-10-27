@@ -43,7 +43,7 @@ impl ToolOutputPruning {
                 continue;
             }
             let bytes = serde_json::to_vec(&message.content).map_or(0, |b| b.len());
-            if bytes < 2048 || bytes > 4 * 1024 * 1024 {
+            if !(2048..=4 * 1024 * 1024).contains(&bytes) {
                 continue;
             }
             let artifact = identity
@@ -402,22 +402,23 @@ mod tests {
             )
             .await;
         assert_eq!(result.status, crate::TaskStatus::Success);
-        let requests = adapter.0.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        for request in requests.iter() {
-            assert!(request.messages[1].content.text.contains("old-tool-output"));
+        {
+            let requests = adapter.0.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            for request in requests.iter() {
+                assert!(request.messages[1].content.text.contains("old-tool-output"));
+            }
+            assert!(requests[1]
+                .messages
+                .iter()
+                .any(|m| m.content.text == "current result".repeat(1000)));
+            assert_eq!(&runtime.messages()[..history.len()], history.as_slice());
+            assert!(
+                !serde_json::to_string(&runtime.run_delta_since(&base).messages)
+                    .unwrap()
+                    .contains("promptOutputPruned")
+            );
         }
-        assert!(requests[1]
-            .messages
-            .iter()
-            .any(|m| m.content.text == "current result".repeat(1000)));
-        assert_eq!(&runtime.messages()[..history.len()], history.as_slice());
-        assert!(
-            !serde_json::to_string(&runtime.run_delta_since(&base).messages)
-                .unwrap()
-                .contains("promptOutputPruned")
-        );
-        drop(requests);
         let fresh = std::sync::Arc::new(Capture::default());
         let mut restored = crate::AgentRuntime::from_snapshot(runtime.snapshot(), fresh.clone());
         restored

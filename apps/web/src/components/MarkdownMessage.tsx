@@ -14,6 +14,10 @@ import ReactMarkdown, {
 } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
+  WorkspaceFileDownload,
+  workspaceFileTarget,
+} from './WorkspaceFileDownload';
+import {
   ChatExportDownload,
   chatExportTarget,
 } from './sessions/ChatExportDownload';
@@ -210,6 +214,8 @@ const components: Components = {
   a: ({ children, href, className, node: _node, ...props }) =>
     chatExportTarget(href) ? (
       <ChatExportDownload url={href!}>{children}</ChatExportDownload>
+    ) : workspaceFileTarget(href) ? (
+      <WorkspaceFileDownload url={href!}>{children}</WorkspaceFileDownload>
     ) : (
       <a
         {...props}

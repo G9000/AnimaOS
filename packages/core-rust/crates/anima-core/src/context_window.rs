@@ -291,7 +291,7 @@ mod tests {
             message("u2", MessageRole::User, 4),
         ];
         assert_eq!(turn_starts(&messages).collect::<Vec<_>>(), [1, 4]);
-        assert_eq!(turn_starts(&messages).rev().next(), Some(4));
+        assert_eq!(turn_starts(&messages).next_back(), Some(4));
         let borrowed: Vec<&Message> = messages.iter().collect();
         assert_eq!(turn_starts(&borrowed).collect::<Vec<_>>(), [1, 4]);
     }

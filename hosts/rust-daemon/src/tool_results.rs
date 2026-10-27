@@ -646,6 +646,7 @@ pub(crate) fn project_result(
         || serde_json::to_vec(&result).is_ok_and(|bytes| bytes.len() <= INLINE_LIMIT)
         || bounded_helper_management(call, &result)
         || bounded_web_search(call, &result)
+        || crate::tools::generated_documents::bounded_source_result(call, &result)
     {
         return result;
     }

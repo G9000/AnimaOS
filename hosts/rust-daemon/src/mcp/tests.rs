@@ -25,6 +25,9 @@ mod chat_management_tests;
 #[path = "autonomy_tests.rs"]
 mod autonomy_tests;
 
+#[path = "oauth_tests.rs"]
+mod oauth_tests;
+
 fn candidate() -> anima_core::ExternalToolDescriptor {
     prepare_external_tool("echo_record","Read a synthetic record",json!({"type":"object",
         "properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}),None).unwrap()
@@ -37,6 +40,7 @@ struct FakeFactory {
     hold_calls: AtomicBool,
     sessions: StdMutex<Vec<Arc<FakeSession>>>,
     bearer_launches: StdMutex<Vec<(String, super::credentials::McpBearerToken)>>,
+    oauth_launches: StdMutex<Vec<Arc<dyn McpAccessTokenProvider>>>,
 }
 struct FakeSession {
     changed_schema: AtomicBool,
@@ -75,6 +79,9 @@ impl McpTransportFactory for FakeFactory {
         _control: TransportControl,
     ) -> BoxFuture<'static, Result<Arc<dyn McpTransportSession>, McpTransportError>> {
         self.connects.fetch_add(1, Ordering::SeqCst);
+        if let ValidatedMcpLaunch::HttpOAuth { provider, .. } = &launch {
+            self.oauth_launches.lock().unwrap().push(provider.clone());
+        }
         if let ValidatedMcpLaunch::HttpBearer { endpoint, token } = &launch {
             self.bearer_launches
                 .lock()
@@ -234,6 +241,51 @@ impl super::credentials::McpCredentialStore for TestCredentialStore {
             return Err(super::credentials::McpCredentialError::Unavailable);
         }
         self.inner.delete(id, reference).await
+    }
+    async fn load_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+    ) -> Result<Option<zeroize::Zeroizing<String>>, super::credentials::McpCredentialError> {
+        self.inner.load_oauth(id, endpoint, reference).await
+    }
+    async fn put_oauth(
+        &self,
+        id: &str,
+        endpoint: &str,
+        reference: &str,
+        payload: zeroize::Zeroizing<String>,
+        replace: bool,
+    ) -> Result<(), super::credentials::McpCredentialError> {
+        self.inner
+            .put_oauth(id, endpoint, reference, payload, replace)
+            .await?;
+        if self.uncertain_put.load(Ordering::SeqCst) {
+            Err(super::credentials::McpCredentialError::Uncertain)
+        } else {
+            Ok(())
+        }
+    }
+    async fn delete_oauth(
+        &self,
+        id: &str,
+        reference: &str,
+    ) -> Result<(), super::credentials::McpCredentialError> {
+        if self.fail_delete.load(Ordering::SeqCst) {
+            return Err(super::credentials::McpCredentialError::Unavailable);
+        }
+        self.inner.delete_oauth(id, reference).await
+    }
+    async fn recover_oauth(
+        &self,
+        id: &str,
+        keep: Option<&str>,
+    ) -> Result<(), super::credentials::McpCredentialError> {
+        if self.fail_delete.load(Ordering::SeqCst) {
+            return Err(super::credentials::McpCredentialError::Unavailable);
+        }
+        self.inner.recover_oauth(id, keep).await
     }
 }
 
@@ -2394,6 +2446,7 @@ fn reviewed_records_round_trip_validate_and_restore_only_known_ordinary_owners()
         endpoint: "https://example.com/mcp".into(),
         stdio: None,
         bearer_credential_ref: None,
+        oauth_credential_ref: None,
         enabled: true,
         version: 3,
         reviewed_tools: vec![ReviewedMcpTool {

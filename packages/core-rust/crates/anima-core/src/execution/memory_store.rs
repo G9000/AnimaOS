@@ -1147,7 +1147,7 @@ impl PersistenceProtection {
             .secrets
             .iter()
             .filter(|(locator, _)| {
-                scope.map_or(true, |(capability_id, manifest_version)| {
+                scope.is_none_or(|(capability_id, manifest_version)| {
                     locator.capability_id == capability_id
                         && locator.manifest_version == manifest_version
                 })
@@ -2777,7 +2777,7 @@ fn encode_snapshot_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_snapshot_hex(value: &str, maximum_bytes: usize) -> Result<Vec<u8>, ExecutionStoreError> {
-    if value.len() % 2 != 0 || value.len() > maximum_bytes.saturating_mul(2) {
+    if !value.len().is_multiple_of(2) || value.len() > maximum_bytes.saturating_mul(2) {
         return Err(invalid_snapshot());
     }
     let mut decoded = Vec::with_capacity(value.len() / 2);
@@ -4819,26 +4819,26 @@ fn build_commit_patch(
     {
         lease = None;
     }
-    if commit.target_run().state().is_terminal() {
-        if state
+    if commit.target_run().state().is_terminal()
+        && state
             .serial_claims
             .get(&(owner_id, commit.target_run().session_id()))
             == Some(&run_id)
-        {
-            let mut session = session.clone();
-            session.version = session.version.checked_add(1).ok_or_else(|| {
-                ExecutionStoreError::new(ExecutionStoreErrorCode::ArithmeticOverflow)
-            })?;
-            stored = StoredRun::new_with_initial_input(
-                owner_id,
-                commit.target_run().clone(),
-                run_version,
-                session.version,
-                aggregate.stored.initial_input().clone(),
-            )?;
-            session_update = Some(session);
-            release_serial_claim = true;
-        }
+    {
+        let mut session = session.clone();
+        session.version = session
+            .version
+            .checked_add(1)
+            .ok_or_else(|| ExecutionStoreError::new(ExecutionStoreErrorCode::ArithmeticOverflow))?;
+        stored = StoredRun::new_with_initial_input(
+            owner_id,
+            commit.target_run().clone(),
+            run_version,
+            session.version,
+            aggregate.stored.initial_input().clone(),
+        )?;
+        session_update = Some(session);
+        release_serial_claim = true;
     }
     let receipt = CommandReceipt::accepted(commit.command()).map_err(ExecutionStoreError::from)?;
     let approval_index_update = match commit.command().kind() {

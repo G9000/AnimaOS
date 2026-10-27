@@ -21,6 +21,7 @@ mod execution;
 #[cfg(test)]
 mod execution_policy_tests;
 mod filesystem;
+pub(crate) mod generated_documents;
 mod helper_batch;
 mod mail;
 mod main_chat_clear;
@@ -664,7 +665,9 @@ impl ToolExecutionContext {
             tool_call.name.as_str(),
             "read_file"
                 | "read_document"
+                | "read_document_source"
                 | "write_file"
+                | "write_document"
                 | "edit_file"
                 | "multi_edit"
                 | "grep"
@@ -1697,6 +1700,7 @@ impl ToolRegistry {
             ),
             workspace_document::read_document,
         );
+        generated_documents::register(&mut registry);
         registry.register(
             tool_descriptor(
                 "list_dir",

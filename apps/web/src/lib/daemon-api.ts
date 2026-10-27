@@ -25,6 +25,8 @@ import {
   type McpUpdateInput,
   type McpVersionInput,
   type McpBearerCredentialInput,
+  type McpOAuthStartInput,
+  type McpOAuthCancelInput,
   type McpReviewInput,
   type McpGrantInput,
   type BundleReviewInput,
@@ -98,6 +100,8 @@ export type {
   DriveConnectResult,
   ConnectDriveInput,
   McpConnection,
+  McpOAuthStart,
+  McpOAuthStatus,
   McpToolDescriptor,
   ReviewedMcpTool,
   McpGrantOutcome,
@@ -158,6 +162,17 @@ export const mcpOwnerApi = {
     id: string,
     input: McpVersionInput,
   ) => setupClient.mcp.clearBearerCredential(agentId, id, input),
+  startOAuth: (agentId: string, id: string, input: McpOAuthStartInput) =>
+    setupClient.mcp.startOAuth(agentId, id, input),
+  getOAuthStatus: (
+    agentId: string,
+    id: string,
+    options?: { signal?: AbortSignal },
+  ) => setupClient.mcp.getOAuthStatus(agentId, id, options),
+  cancelOAuth: (agentId: string, id: string, input: McpOAuthCancelInput) =>
+    setupClient.mcp.cancelOAuth(agentId, id, input),
+  signOutOAuth: (agentId: string, id: string, input: McpVersionInput) =>
+    setupClient.mcp.signOutOAuth(agentId, id, input),
   setGrant: (
     agentId: string,
     id: string,
@@ -1275,8 +1290,7 @@ export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
     id: state.id,
     name: state.name,
     ...(state.config.bio ? { bio: state.config.bio } : {}),
-    showInMainChat:
-      state.config.settings?.additional?.showInMainChat !== false,
+    showInMainChat: state.config.settings?.additional?.showInMainChat !== false,
     provider: state.config.provider ?? 'default',
     model: state.config.model,
     toolNames: state.config.tools?.map((tool) => tool.name) ?? [],

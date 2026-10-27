@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -7,6 +13,7 @@ import { daemon } from '../lib/daemon-api';
 
 /** Counts Markdown parses; the real renderer still renders. */
 const parses = vi.hoisted(() => vi.fn());
+const documentOwnerScope = { agentId: 'a', sessionId: 'current' };
 vi.mock('react-markdown', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-markdown')>();
   const Parsed = (props: Parameters<typeof actual.default>[0]) => {
@@ -17,6 +24,92 @@ vi.mock('react-markdown', async (importOriginal) => {
 });
 
 describe('MarkdownMessage', () => {
+  it('downloads a finished file through the owner transport only after a click', async () => {
+    const download = vi
+      .spyOn(daemon, 'downloadWorkspaceFile')
+      .mockResolvedValue(
+        new Blob(['document'], { type: 'application/octet-stream' }),
+      );
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    const revoke = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => {});
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:finished-chat-file');
+    render(
+      <ChatExportScope.Provider value={documentOwnerScope}>
+        <MarkdownMessage>
+          {
+            '[Download report](/api/workspace/file/download?path=reports%2Fannual%20plan.pdf)'
+          }
+        </MarkdownMessage>
+      </ChatExportScope.Provider>,
+    );
+    expect(download).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Download report' }));
+    await act(async () => {});
+    expect(download).toHaveBeenCalledWith(
+      'reports/annual plan.pdf',
+      expect.any(AbortSignal),
+    );
+    expect(click.mock.instances[0]).toHaveProperty(
+      'download',
+      'annual plan.pdf',
+    );
+    await waitFor(() =>
+      expect(revoke).toHaveBeenCalledWith('blob:finished-chat-file'),
+    );
+  });
+
+  it('leaves a finished-file link inert outside an owner conversation', () => {
+    const download = vi.spyOn(daemon, 'downloadWorkspaceFile');
+    render(
+      <MarkdownMessage>
+        {
+          '[Download report](/api/workspace/file/download?path=reports%2Fannual.pdf)'
+        }
+      </MarkdownMessage>,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Download report' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Download report' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Download report'));
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('aborts a finished-file download and ignores its bytes after the conversation closes', async () => {
+    let finish!: (blob: Blob) => void;
+    const download = vi
+      .spyOn(daemon, 'downloadWorkspaceFile')
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    const create = vi.spyOn(URL, 'createObjectURL');
+    const view = render(
+      <ChatExportScope.Provider value={documentOwnerScope}>
+        <MarkdownMessage>
+          {
+            '[Download report](/api/workspace/file/download?path=reports%2Fannual.pdf)'
+          }
+        </MarkdownMessage>
+      </ChatExportScope.Provider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Download report' }));
+    const signal = download.mock.calls[0][1]!;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => {
+      finish(new Blob(['late file']));
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
   it('keeps a forged export link to another conversation inert', () => {
     const read = vi.spyOn(daemon, 'exportSession');
     render(

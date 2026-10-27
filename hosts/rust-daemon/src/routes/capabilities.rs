@@ -79,7 +79,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             ("camera", "Camera observation", "planned", "Observe an authorized camera through a bounded perception module."),
             ("voice", "Voice", "partial", "Selected WAV transcription, local audio capture, and selected-reply speech output require explicit opt-in and configuration. Device coverage and provider quality remain unverified."),
             ("smart-home", "Smart home", "planned", "Connect devices, inspect their state, and verify authorized actions."),
-            ("document-engine", "Document processing", "partial", "Bounded read_document extraction supports PDF, DOCX, and XLSX with workspace access, explicit document opt-in, and a tool grant. Document creation, OCR, and other processing remain unavailable."),
+            ("document-engine", "Document processing", "partial", "Bounded read_document extraction supports PDF, DOCX and XLSX with explicit opt-in. Granted write_document and read_document_source create and revise verified Anima-generated DOCX, XLSX, PPTX and PDF; owner content previews and downloads are available. Arbitrary Office editing and OCR remain unavailable."),
             ("coding-agents", "External coding agents", "planned", "Connect an external coding worker through a bounded execution adapter."),
             ("community-bundles", "Community bundles", "partial", "Reviewed MCP and skill installation is implemented with explicit owner review and configuration. This does not provide an arbitrary execution bridge."),
         ].into_iter().map(|(id, label, status, description)| PlannedExtension { id, label, status, description }).collect(),
@@ -89,7 +89,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             "Storage labels describe configuration, not a successful storage health check.",
             "Saved tasks and memories do not imply automatic resumption of interrupted runs. Uncertain scheduled actions require review.",
             "Background shell processes are managed only while this daemon is running. Shell access is not an operating-system sandbox.",
-            "Native file tools handle text. read_document provides bounded PDF, DOCX, and XLSX extraction with explicit document opt-in, workspace access, and a tool grant; document creation, OCR, and other processing remain unavailable.",
+            "Native text tools and explicitly granted document tools retain workspace authority and approvals. Finished documents use a bounded structured subset; arbitrary Office editing, spreadsheet calculation and OCR remain unavailable.",
             "Community bundles support reviewed MCP and skill installation. A portable arbitrary execution bridge is not available.",
         ],
     }
@@ -103,6 +103,8 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             ("workspace", vec!["Workspace access and an explicit tool grant."]),
         "read_document" =>
             ("documents", vec!["A configured workspace, explicit document opt-in, and an explicit agent tool grant."]),
+        "write_document" | "read_document_source" =>
+            ("documents", vec!["A configured workspace and an explicit agent tool grant. Writes retain native approvals and configured checkpoints; revisions require the current generated-document hash."]),
         "todo_read" | "todo_write" =>
             ("workspace", vec!["An agent-owned task list in the workspace. Creating a task does not enable a schedule."]),
         "read_tool_result" => ("workspace", vec!["An explicit saved-result read grant, durable private result storage, and the current agent and workspace scope."]),

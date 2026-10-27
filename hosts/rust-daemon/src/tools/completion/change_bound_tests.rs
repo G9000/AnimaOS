@@ -473,6 +473,34 @@ async fn quality_change_bound_completion_snapshot_limits_leave_visible_gap() {
     assert!(fixture.pending().await);
 }
 
+#[tokio::test]
+async fn quality_change_bound_completion_generated_document_snapshots_keep_their_binary_limit() {
+    for extension in ["docx", "xlsx", "pptx", "PDF"] {
+        for (bytes, gap) in [
+            (1024 * 1024 + 1, false),
+            (anima_document_content::MAX_GENERATED_DOCUMENT_BYTES, false),
+            (
+                anima_document_content::MAX_GENERATED_DOCUMENT_BYTES + 1,
+                true,
+            ),
+        ] {
+            let fixture = Fixture::new(json!([contract("all", "cargo test", ".")]));
+            let path = format!("report.{extension}");
+            // Controlled successful native outcomes isolate completion byte
+            // evidence; format validation belongs to the native tool tests.
+            let write = Fixture::call("write_document", &path);
+            let prepared = fixture.review.prepare(Some(fixture.root.path()), &write);
+            std::fs::write(fixture.root.path().join(&path), vec![0; bytes]).unwrap();
+            fixture.review.settle(prepared, &write, &ok());
+            let read = Fixture::call("read_document_source", &path);
+            let prepared = fixture.review.prepare(Some(fixture.root.path()), &read);
+            fixture.review.settle(prepared, &read, &ok());
+            fixture.check("cargo test", ".");
+            assert_eq!(fixture.pending().await, gap, "{extension}: {bytes} bytes");
+        }
+    }
+}
+
 #[test]
 fn quality_change_bound_completion_contract_paths_are_relative_and_bounded() {
     for path in ["../a", "a/../b", "/a", "a*", "a//b", "a\\..\\b"] {

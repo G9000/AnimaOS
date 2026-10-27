@@ -130,7 +130,7 @@ fn application_scope_cannot_alias_another_owners_grant() {
     assert!(!PolicyEngine::grant_matches(&grant, &other_scope));
     assert!(!PolicyEngine::grant_matches(&grant, &other_owner));
     assert!(matches!(
-        PolicyEngine::evaluate(&other_scope, &[grant.clone()])
+        PolicyEngine::evaluate(&other_scope, std::slice::from_ref(&grant))
             .unwrap()
             .decision,
         anima_core::PolicyDecision::Deny(_)

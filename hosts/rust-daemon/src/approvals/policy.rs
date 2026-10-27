@@ -23,6 +23,7 @@ const READ_TOOLS: &[&str] = &[
     "read_file",
     "checkpoint_list",
     "read_document",
+    "read_document_source",
     "list_dir",
     "glob",
     "grep",
@@ -68,6 +69,7 @@ const WRITE_TOOLS: &[&str] = &[
     "compact_chat",
     "show_result",
     "write_file",
+    "write_document",
     "doctor_repair",
     "doctor_undo",
     "create_standing_intent",
@@ -266,7 +268,7 @@ pub(crate) fn matcher_kinds(tool: &str) -> &'static [MatcherKind] {
         "bash" | "bg_start" | "app_start" | "acp_start" | "acp_execute" => {
             &[MatcherKind::CommandPrefix, MatcherKind::Any]
         }
-        "write_file" | "edit_file" | "multi_edit" | "acp_edit" => {
+        "write_file" | "write_document" | "edit_file" | "multi_edit" | "acp_edit" => {
             &[MatcherKind::PathGlob, MatcherKind::Any]
         }
         "web_fetch" | "acp_fetch" => &[MatcherKind::Domain, MatcherKind::Any],

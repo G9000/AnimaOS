@@ -21,6 +21,7 @@ fn paired_devices_snapshot_restores_only_exact_owned_https_mcp_linkage() {
         endpoint: record.endpoint.clone(),
         stdio: None,
         bearer_credential_ref: None,
+        oauth_credential_ref: None,
         enabled: false,
         version: 1,
         reviewed_tools: vec![],

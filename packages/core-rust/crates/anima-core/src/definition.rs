@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -385,20 +385,24 @@ impl DefinitionPublisher {
             })?;
 
         let mut overrides = BTreeMap::new();
-        for override_config in draft.capability_overrides.iter().cloned() {
+        for override_config in std::mem::take(&mut draft.capability_overrides) {
             let capability_id = override_config.capability_id.clone();
-            if overrides
-                .insert(capability_id.clone(), override_config)
-                .is_some()
-            {
-                return Err(DefinitionValidationError::DuplicateCapabilityId { id: capability_id });
+            match overrides.entry(capability_id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(override_config);
+                }
+                Entry::Occupied(entry) => {
+                    return Err(DefinitionValidationError::DuplicateCapabilityId {
+                        id: entry.key().clone(),
+                    });
+                }
             }
         }
 
         let mut requested = Vec::with_capacity(profile.entries.len() + overrides.len());
         let mut capability_ids = BTreeSet::new();
         for entry in &profile.entries {
-            if !capability_ids.insert(entry.capability_id.clone()) {
+            if !capability_ids.insert(entry.capability_id.as_str()) {
                 return Err(DefinitionValidationError::DuplicateCapabilityId {
                     id: entry.capability_id.clone(),
                 });
@@ -537,7 +541,7 @@ fn validate_definition(definition: &AgentDefinition) -> Result<(), DefinitionVal
         previous_capability_id = Some(&capability.capability_id);
         if capability.capability_id.trim().is_empty()
             || capability.manifest_version == 0
-            || !capability_ids.insert(capability.capability_id.clone())
+            || !capability_ids.insert(capability.capability_id.as_str())
         {
             return Err(DefinitionValidationError::InvalidResolvedCapability {
                 id: capability.capability_id.clone(),
@@ -569,7 +573,7 @@ fn validate_definition(definition: &AgentDefinition) -> Result<(), DefinitionVal
 }
 
 fn canonicalize_host_requirements(
-    requirements: &mut Vec<HostRequirement>,
+    requirements: &mut [HostRequirement],
 ) -> Result<(), DefinitionValidationError> {
     validate_host_requirements(requirements)?;
     requirements.sort();
@@ -587,7 +591,7 @@ fn validate_host_requirements(
                 revision: requirement.revision,
             });
         }
-        if !unique.insert(requirement.clone()) {
+        if !unique.insert(requirement) {
             return Err(DefinitionValidationError::DuplicateHostRequirement {
                 id: requirement.id.clone(),
                 revision: requirement.revision,

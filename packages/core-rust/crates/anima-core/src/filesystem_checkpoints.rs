@@ -988,7 +988,8 @@ mod tests {
             serde_json::to_value(&decoded.entries[0].state).unwrap(),
             serde_json::json!({"kind":"absent"})
         );
-        validate_filesystem_checkpoint(&decoded, &scope(), &[original.clone()]).unwrap();
+        validate_filesystem_checkpoint(&decoded, &scope(), std::slice::from_ref(&original))
+            .unwrap();
         assert_eq!(original.bytes.as_slice(), bytes.as_slice());
         let empty = object(b"");
         assert_ne!(file(&empty, 128), FileState::Absent);
@@ -1016,7 +1017,7 @@ mod tests {
             &scope(),
             &[before, after],
             &current,
-            &[acknowledged.clone()],
+            std::slice::from_ref(&acknowledged),
         )
         .unwrap();
         assert_eq!(
@@ -1044,8 +1045,14 @@ mod tests {
             MutationDisposition::Created,
             current_state.clone(),
         );
-        let good =
-            prepare_safe_restore(&cp, &scope(), &[created.clone()], &current, &[creation]).unwrap();
+        let good = prepare_safe_restore(
+            &cp,
+            &scope(),
+            std::slice::from_ref(&created),
+            &current,
+            &[creation],
+        )
+        .unwrap();
         assert_eq!(
             good.operations,
             vec![RestoreOperation {
@@ -1150,26 +1157,37 @@ mod tests {
             let mut invalid = good.clone();
             invalid.entries[0].path = path.into();
             assert!(
-                validate_filesystem_checkpoint(&invalid, &scope(), &[blob.clone()]).is_err(),
+                validate_filesystem_checkpoint(&invalid, &scope(), std::slice::from_ref(&blob))
+                    .is_err(),
                 "accepted {path:?}"
             );
         }
         let mut aliases = good.clone();
         aliases.entries.push(entry("SRC/FILE.BIN", file(&blob, 0)));
-        assert!(validate_filesystem_checkpoint(&aliases, &scope(), &[blob.clone()]).is_err());
+        assert!(
+            validate_filesystem_checkpoint(&aliases, &scope(), std::slice::from_ref(&blob))
+                .is_err()
+        );
         let mut bad_scope = good.clone();
         bad_scope.scope.owner_id = "other-owner".into();
         bad_scope.scope_digest = scope_hash(&bad_scope.scope);
-        assert!(validate_filesystem_checkpoint(&bad_scope, &scope(), &[blob.clone()]).is_err());
+        assert!(
+            validate_filesystem_checkpoint(&bad_scope, &scope(), std::slice::from_ref(&blob))
+                .is_err()
+        );
         let mut bad_hash = good.clone();
         bad_hash.scope_digest = "0".repeat(64);
-        assert!(validate_filesystem_checkpoint(&bad_hash, &scope(), &[blob.clone()]).is_err());
+        assert!(
+            validate_filesystem_checkpoint(&bad_hash, &scope(), std::slice::from_ref(&blob))
+                .is_err()
+        );
         let mut corrupt = blob.clone();
         corrupt.bytes[0] ^= 1;
         assert!(validate_filesystem_checkpoint(&good, &scope(), &[corrupt]).is_err());
         assert!(validate_filesystem_checkpoint(&good, &scope(), &[]).is_err());
         let literal_percent = checkpoint(vec![entry("dir/100%literal%66ile.bin", file(&blob, 0))]);
-        validate_filesystem_checkpoint(&literal_percent, &scope(), &[blob.clone()]).unwrap();
+        validate_filesystem_checkpoint(&literal_percent, &scope(), std::slice::from_ref(&blob))
+            .unwrap();
         let mut posix_scope = scope();
         posix_scope.path_semantics = PathSemantics::PosixSensitive;
         assert_ne!(
@@ -1183,9 +1201,9 @@ mod tests {
         ]);
         posix.scope = posix_scope.clone();
         posix.scope_digest = scope_hash(&posix_scope);
-        validate_filesystem_checkpoint(&posix, &posix_scope, &[blob.clone()]).unwrap();
+        validate_filesystem_checkpoint(&posix, &posix_scope, std::slice::from_ref(&blob)).unwrap();
         assert!(
-            validate_filesystem_checkpoint(&posix, &scope(), &[blob.clone()]).is_err(),
+            validate_filesystem_checkpoint(&posix, &scope(), std::slice::from_ref(&blob)).is_err(),
             "a case-sensitive scope cannot impersonate the Windows scope"
         );
         let mut missing_metadata = good.clone();
@@ -1214,20 +1232,30 @@ mod tests {
         let empty = object(b"");
         let exact_path = format!("{}.bin", "x".repeat(MAX_CHECKPOINT_PATH_BYTES - 4));
         let cp = checkpoint(vec![entry(&exact_path, file(&empty, 0))]);
-        validate_filesystem_checkpoint(&cp, &scope(), &[empty.clone()]).unwrap();
+        validate_filesystem_checkpoint(&cp, &scope(), std::slice::from_ref(&empty)).unwrap();
         let mut too_long = cp.clone();
         too_long.entries[0].path.push('x');
-        assert!(validate_filesystem_checkpoint(&too_long, &scope(), &[empty.clone()]).is_err());
+        assert!(
+            validate_filesystem_checkpoint(&too_long, &scope(), std::slice::from_ref(&empty))
+                .is_err()
+        );
         let deep = checkpoint(vec![entry(
             &format!("{}x", "d/".repeat(MAX_CHECKPOINT_DEPTH)),
             file(&empty, 0),
         )]);
-        assert!(validate_filesystem_checkpoint(&deep, &scope(), &[empty.clone()]).is_err());
+        assert!(
+            validate_filesystem_checkpoint(&deep, &scope(), std::slice::from_ref(&empty)).is_err()
+        );
         let mut metadata_big = checkpoint(vec![entry("file", file(&empty, 0))]);
         if let FileState::File { metadata, .. } = &mut metadata_big.entries[0].state {
             metadata.attributes[0].bytes = vec![0; MAX_CHECKPOINT_METADATA_BYTES + 1];
         }
-        assert!(validate_filesystem_checkpoint(&metadata_big, &scope(), &[empty.clone()]).is_err());
+        assert!(validate_filesystem_checkpoint(
+            &metadata_big,
+            &scope(),
+            std::slice::from_ref(&empty)
+        )
+        .is_err());
         let too_many = checkpoint(
             (0..=MAX_CHECKPOINT_ENTRIES)
                 .map(|i| entry(&format!("f{i:06}"), FileState::Absent))
@@ -1295,7 +1323,7 @@ mod tests {
             &scope(),
             &[before.clone(), after.clone()],
             &current,
-            &[good.clone()],
+            std::slice::from_ref(&good),
         )
         .unwrap();
         assert_eq!(
@@ -1341,14 +1369,14 @@ mod tests {
             entry("a", file(&blob, 0)),
             entry("a-sibling/file", file(&blob, 0)),
         ]);
-        validate_filesystem_checkpoint(&ordinary, &scope(), &[blob.clone()]).unwrap();
+        validate_filesystem_checkpoint(&ordinary, &scope(), std::slice::from_ref(&blob)).unwrap();
         for (ancestor, descendant) in [("a", "a/b"), ("A", "a/b"), ("a/b", "A/B/c")] {
             let impossible = checkpoint(vec![
                 entry(ancestor, file(&blob, 0)),
                 entry(descendant, file(&blob, 0)),
             ]);
             assert_eq!(
-                validate_filesystem_checkpoint(&impossible, &scope(), &[blob.clone()]),
+                validate_filesystem_checkpoint(&impossible, &scope(), std::slice::from_ref(&blob)),
                 Err(CheckpointError::InvalidPath),
                 "a regular file cannot also be an ancestor: {ancestor}, {descendant}"
             );
@@ -1357,7 +1385,11 @@ mod tests {
                 entry(descendant, file(&blob, 0)),
             ]);
             assert_eq!(
-                validate_filesystem_checkpoint(&absent_ancestor, &scope(), &[blob.clone()]),
+                validate_filesystem_checkpoint(
+                    &absent_ancestor,
+                    &scope(),
+                    std::slice::from_ref(&blob)
+                ),
                 Err(CheckpointError::InvalidPath),
                 "an absent ancestor cannot contain a present child"
             );
@@ -1378,7 +1410,9 @@ mod tests {
             entry("a-sibling/file", file(&blob, 0)),
             entry("safe", FileState::Absent),
         ];
-        let valid = prepare_safe_restore(&cp, &scope(), &[blob.clone()], &ordinary, &[]).unwrap();
+        let valid =
+            prepare_safe_restore(&cp, &scope(), std::slice::from_ref(&blob), &ordinary, &[])
+                .unwrap();
         assert!(valid.operations.is_empty() && valid.conflicts.is_empty());
         for (ancestor, descendant) in [("a", "a/b"), ("A", "a/b"), ("a/b", "A/B/c")] {
             let current = vec![
@@ -1387,7 +1421,7 @@ mod tests {
                 entry(ancestor, file(&blob, 0)),
             ];
             assert_eq!(
-                prepare_safe_restore(&cp, &scope(), &[blob.clone()], &current, &[]),
+                prepare_safe_restore(&cp, &scope(), std::slice::from_ref(&blob), &current, &[]),
                 Err(CheckpointError::InvalidPath),
                 "unrelated impossible observations must be rejected too"
             );
@@ -1397,7 +1431,13 @@ mod tests {
                 entry(ancestor, FileState::Absent),
             ];
             assert_eq!(
-                prepare_safe_restore(&cp, &scope(), &[blob.clone()], &absent_ancestor, &[]),
+                prepare_safe_restore(
+                    &cp,
+                    &scope(),
+                    std::slice::from_ref(&blob),
+                    &absent_ancestor,
+                    &[]
+                ),
                 Err(CheckpointError::InvalidPath)
             );
             let both_absent = vec![
@@ -1413,7 +1453,7 @@ mod tests {
     fn fp08_windows_profile_refuses_unattested_unicode_comparison() {
         let blob = object(b"file");
         let ascii = checkpoint(vec![entry("Case/File.txt", file(&blob, 0))]);
-        validate_filesystem_checkpoint(&ascii, &scope(), &[blob.clone()]).unwrap();
+        validate_filesystem_checkpoint(&ascii, &scope(), std::slice::from_ref(&blob)).unwrap();
         // Unicode lowercase is not Windows filesystem identity: sigma/final
         // sigma can alias under Windows comparison while Rust keeps them apart.
         // This initial portable Windows profile must refuse non-ASCII paths.
@@ -1426,7 +1466,7 @@ mod tests {
                     .collect(),
             );
             assert_eq!(
-                validate_filesystem_checkpoint(&cp, &scope(), &[blob.clone()]),
+                validate_filesystem_checkpoint(&cp, &scope(), std::slice::from_ref(&blob)),
                 Err(CheckpointError::InvalidPath)
             );
         }
@@ -1439,7 +1479,7 @@ mod tests {
         ]);
         posix.scope = posix_scope.clone();
         posix.scope_digest = scope_hash(&posix_scope);
-        validate_filesystem_checkpoint(&posix, &posix_scope, &[blob.clone()]).unwrap();
+        validate_filesystem_checkpoint(&posix, &posix_scope, std::slice::from_ref(&blob)).unwrap();
         let current = [
             entry("σ.txt", file(&blob, 0)),
             entry("Case/File.txt", file(&blob, 0)),
@@ -1462,8 +1502,14 @@ mod tests {
             MutationDisposition::Uncertain,
             file(&blob, 0),
         );
-        let valid =
-            prepare_safe_restore(&cp, &scope(), &[blob.clone()], &entries, &[small]).unwrap();
+        let valid = prepare_safe_restore(
+            &cp,
+            &scope(),
+            std::slice::from_ref(&blob),
+            &entries,
+            &[small],
+        )
+        .unwrap();
         assert!(valid.operations.is_empty() && valid.conflicts.is_empty());
         let witnesses: Vec<_> = entries
             .iter()
@@ -1548,12 +1594,16 @@ mod tests {
                 retention("latest", 3, &shared, vec![]),
             ];
             let before = records.clone();
-            let plan =
-                plan_checkpoint_retention(&records, &objects, &[protected.clone()], &policy())
-                    .unwrap();
+            let plan = plan_checkpoint_retention(
+                &records,
+                &objects,
+                std::slice::from_ref(&protected),
+                &policy(),
+            )
+            .unwrap();
             assert_eq!(plan.prune_checkpoint_ids, ["old-unpinned"]);
             assert_eq!(plan.retained_checkpoint_ids, ["pinned", "latest"]);
-            assert_eq!(plan.prune_object_digests, [old_only.clone()]);
+            assert_eq!(plan.prune_object_digests, std::slice::from_ref(&old_only));
             assert_eq!(
                 plan.used_bytes_after, 145,
                 "shared blob counted once; protected recovery object retained"

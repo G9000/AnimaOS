@@ -1348,7 +1348,7 @@ enum RuntimeCommandPayload {
     },
     ResumeApproval {
         run_id: Uuid,
-        binding: ApprovalResumeBinding,
+        binding: Box<ApprovalResumeBinding>,
     },
     ResumeRecovery {
         run_id: Uuid,
@@ -1608,7 +1608,10 @@ impl RuntimeCommand {
         Self::new(
             id,
             session_id,
-            RuntimeCommandPayload::ResumeApproval { run_id, binding },
+            RuntimeCommandPayload::ResumeApproval {
+                run_id,
+                binding: Box::new(binding),
+            },
         )
     }
     pub fn resume_with_approval(
@@ -1969,7 +1972,7 @@ impl<'de> Deserialize<'de> for Usage {
         Ok(value)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Budget {
     pub max_wall_time_ms: Option<u64>,
     pub max_turns: Option<u64>,
@@ -1982,23 +1985,6 @@ pub struct Budget {
     pub max_artifact_bytes: Option<u64>,
     pub max_download_bytes: Option<u64>,
     pub require_approval_at_percent: Option<u8>,
-}
-impl Default for Budget {
-    fn default() -> Self {
-        Self {
-            max_wall_time_ms: None,
-            max_turns: None,
-            max_capability_steps: None,
-            max_input_tokens: None,
-            max_output_tokens: None,
-            max_total_tokens: None,
-            max_estimated_cost_micros: None,
-            max_concurrent_runs: None,
-            max_artifact_bytes: None,
-            max_download_bytes: None,
-            require_approval_at_percent: None,
-        }
-    }
 }
 impl Serialize for Budget {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

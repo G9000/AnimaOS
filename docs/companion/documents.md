@@ -1,4 +1,55 @@
-# Reading documents
+# Creating and reading documents
+
+## Create finished files
+
+Enable **Files & documents** in the agent's built-in tool settings, then ask for
+a Word document (`.docx`), Excel workbook (`.xlsx`), PowerPoint presentation
+(`.pptx`), or PDF. For example:
+
+> Create a quarterly report as a Word document and a PDF, with a summary,
+> headings, next steps, and a table of results. Save them under reports.
+
+> Create an Excel workbook with separate Budget and Owners sheets, then make a
+> short PowerPoint briefing from the same information.
+
+The native `write_document` tool creates the file from structured content without
+an Office installation, Python, a converter, or another service. Word documents
+and PDFs support headings, paragraphs, bullet lists, and tables. Workbooks
+support named sheets, column headings, and text, numeric, Boolean, or empty
+cells. Presentations support titled slides, text, bullets, and tables.
+
+The agent can return a **Download** link in the owner chat. Downloading starts
+only when you click it. You can also open **Files**, refresh, select the generated
+file, and choose **Download current file**. The **Content preview** shows readable
+text and tables; open the downloaded file in its usual application to inspect
+the final layout. Original text-file previews remain plain text.
+
+To revise an Anima-generated file, ask for the change and name its path. The
+agent uses `read_document_source` to read its complete source and current hash,
+then resubmits the revised document with that hash. Creating over an existing
+file without the hash, or revising a file that changed since it was read, is
+refused. Anima serializes its own document writes; external applications do not
+share that lock or its final file checks. Normal file-write approval,
+cancellation, and configured native file checkpoints still apply. Enabling a
+tool does not approve a particular write.
+Existing custom grants are preserved until you explicitly change them.
+
+This first version creates and revises Anima-generated files. Arbitrary Office
+imports, images, charts, spreadsheet formulas/calculation, and a visual Office
+editor are outside its scope. Text beginning with `=` stays literal spreadsheet
+text. The document source is limited to 48 KiB and the finished file to 4 MiB;
+oversized content is refused. PDF uses an embedded font for supported
+left-to-right text and refuses missing glyphs or scripts requiring complex
+shaping/bidirectional layout rather than silently rendering them incorrectly.
+Word, Excel, and PowerPoint use their applications' text rendering. Slide content
+must fit its slide; split a large table or long text across slides when requested.
+
+Generated files include versioned source metadata. A readable preview, editable
+source, and binary download require the whole file to match its deterministic
+rendered source. Externally modified files, unknown source versions, and files
+without matching metadata are refused by this delivery path. Workspace path,
+hidden-file, link, and credential-field exclusions remain in effect. These
+checks establish content consistency, not authorship or business correctness.
 
 ## Download a generated report
 
@@ -11,10 +62,12 @@ truncated. A preview can be shorter or unavailable independently of download.
 
 This captures current bytes at the click; it does not lock an earlier preview or
 create a chat attachment/artifact. Downloading leaves the workspace file intact.
-It supports `.txt`, `.md` and `.csv` only. Existing Files hidden/name/credential
-exclusions apply to the whole captured file, as heuristics rather than a complete
-secrecy guarantee. No PDF/Office conversion, public sharing or external spreadsheet
-formula-safety promise is added. See the [M68 plan](../superpowers/plans/2026-10-16-companion-report-downloads-m68.md).
+This text-report path supports `.txt`, `.md` and `.csv`. Verified Anima-generated
+Office/PDF files use the finished-file path above. Existing Files
+hidden/name/credential exclusions apply to the whole captured file, as
+heuristics rather than a complete secrecy guarantee. This adds no public
+sharing or general conversion of existing documents. See the
+[M68 plan](../superpowers/plans/2026-10-16-companion-report-downloads-m68.md).
 
 ## Documents already in the workspace
 

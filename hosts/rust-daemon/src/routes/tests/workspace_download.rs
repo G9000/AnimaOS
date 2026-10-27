@@ -73,6 +73,9 @@ async fn m68_owner_download_returns_exact_report_bytes_and_safe_headers() {
 async fn m68_download_query_and_path_refusals_are_not_cacheable() {
     let fixture = WorkspaceAvatarTemp::new("m68-query");
     std::fs::write(fixture.root.join("report.txt"), "ordinary report").unwrap();
+    for name in ["report.pdf", "report.xlsx"] {
+        std::fs::write(fixture.root.join(name), b"unsupported binary document").unwrap();
+    }
     let app = router(fixture.state(), DaemonConfig::default());
     for query in [
         "",
@@ -125,6 +128,206 @@ async fn m68_download_query_and_path_refusals_are_not_cacheable() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(response.headers()["cache-control"], "no-store");
+}
+
+fn finished_document_spec(format: &str, text: &str) -> serde_json::Value {
+    match format {
+        "xlsx" => serde_json::json!({"format":format,"title":"Report","sheets":[{
+            "name":"Summary","columns":["Note"],"rows":[[text]]
+        }]}),
+        "pptx" => serde_json::json!({"format":format,"title":"Report","slides":[{
+            "title":"Summary","blocks":[{"type":"paragraph","text":text}]
+        }]}),
+        _ => serde_json::json!({"format":format,"title":"Report","blocks":[{
+            "type":"paragraph","text":text
+        }]}),
+    }
+}
+
+fn render_finished(value: serde_json::Value) -> Vec<u8> {
+    anima_document_content::render_document(&serde_json::from_value(value).unwrap())
+        .unwrap()
+        .bytes
+}
+
+#[tokio::test]
+async fn finished_documents_owner_preview_and_download_verify_current_bytes() {
+    use sha2::{Digest, Sha256};
+    let fixture = WorkspaceAvatarTemp::new("finished-document-download");
+    let app = router(fixture.state(), DaemonConfig::default());
+    for format in ["docx", "xlsx", "pptx", "pdf"] {
+        let path = format!("report.{format}");
+        let expected = render_finished(finished_document_spec(format, "Original body"));
+        std::fs::write(fixture.root.join(&path), &expected).unwrap();
+        let preview = app
+            .clone()
+            .oneshot(owner_get(&format!("/api/workspace/file?path={path}")))
+            .await
+            .unwrap();
+        assert_eq!(preview.status(), StatusCode::OK, "{format}");
+        let preview: serde_json::Value =
+            serde_json::from_slice(&to_bytes(preview.into_body(), 128 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(preview["path"], path);
+        assert_eq!(preview["previewKind"], "document");
+        assert_eq!(preview["truncated"], false);
+        assert_eq!(preview["sha256"], hex::encode(Sha256::digest(&expected)));
+        assert!(preview["content"]
+            .as_str()
+            .unwrap()
+            .contains("Original body"));
+        let response = app
+            .clone()
+            .oneshot(owner_get(&format!(
+                "/api/workspace/file/download?path={path}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{format}");
+        assert_eq!(
+            response.headers()["content-type"],
+            "application/octet-stream"
+        );
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            response.headers()["content-length"].to_str().unwrap(),
+            expected.len().to_string()
+        );
+        assert!(response.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .contains(&path));
+        assert_eq!(
+            to_bytes(response.into_body(), 4 * 1024 * 1024 + 1)
+                .await
+                .unwrap()
+                .as_ref(),
+            expected
+        );
+        let mut tampered = expected;
+        tampered[0] ^= 1;
+        std::fs::write(fixture.root.join(&path), tampered).unwrap();
+        for endpoint in ["/api/workspace/file", "/api/workspace/file/download"] {
+            let response = app
+                .clone()
+                .oneshot(owner_get(&format!("{endpoint}?path={path}")))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{format} {endpoint}"
+            );
+            assert!(!response.headers().contains_key("content-disposition"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn finished_documents_scan_logical_source_before_markdown_escaping() {
+    let fixture = WorkspaceAvatarTemp::new("finished-document-secret");
+    let app = router(fixture.state(), DaemonConfig::default());
+    let mut specs = ["docx", "xlsx", "pptx", "pdf"]
+        .map(|format| finished_document_spec(format, "api_key = synthetic-fixture"))
+        .to_vec();
+    specs.push(
+        serde_json::json!({"format":"docx","title":"Table","blocks":[{
+            "type":"table","headers":["Value"],"rows":[["api_key: synthetic-fixture"]]
+        }]}),
+    );
+    for (index, spec) in specs.into_iter().enumerate() {
+        let path = format!("report-{index}.{}", spec["format"].as_str().unwrap());
+        std::fs::write(fixture.root.join(&path), render_finished(spec)).unwrap();
+        for endpoint in ["/api/workspace/file", "/api/workspace/file/download"] {
+            let response = app
+                .clone()
+                .oneshot(owner_get(&format!("{endpoint}?path={path}")))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{path} {endpoint}"
+            );
+            let body = to_bytes(response.into_body(), 128 * 1024).await.unwrap();
+            assert!(!String::from_utf8_lossy(&body).contains("synthetic-fixture"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn finished_documents_refuse_untrusted_oversized_and_excluded_files() {
+    let fixture = WorkspaceAvatarTemp::new("finished-document-boundaries");
+    let bytes = render_finished(finished_document_spec("xlsx", "Visible body"));
+    std::fs::write(fixture.root.join("report.xlsx"), &bytes).unwrap();
+    std::fs::create_dir(fixture.root.join(".hidden")).unwrap();
+    std::fs::write(fixture.root.join(".hidden/report.xlsx"), &bytes).unwrap();
+    std::fs::write(fixture.root.join("api_key.xlsx"), &bytes).unwrap();
+    std::fs::write(
+        fixture.root.join("oversized.xlsx"),
+        vec![b'a'; 4 * 1024 * 1024 + 1],
+    )
+    .unwrap();
+    let app = router(fixture.state(), DaemonConfig::default());
+    for endpoint in ["/api/workspace/file", "/api/workspace/file/download"] {
+        let mut request = owner_get(&format!("{endpoint}?path=report.xlsx"));
+        request
+            .headers_mut()
+            .insert("origin", "https://untrusted.example".parse().unwrap());
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        for path in [".hidden/report.xlsx", "api_key.xlsx", "oversized.xlsx"] {
+            let response = app
+                .clone()
+                .oneshot(owner_get(&format!("{endpoint}?path={path}")))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{path} {endpoint}"
+            );
+            assert!(!response.headers().contains_key("content-disposition"));
+        }
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn finished_documents_refuse_windows_junction_ancestors() {
+    let fixture = WorkspaceAvatarTemp::new("finished-document-junction");
+    let outside = tempfile::tempdir().unwrap();
+    let bytes = render_finished(finished_document_spec("xlsx", "Outside document"));
+    std::fs::write(outside.path().join("report.xlsx"), &bytes).unwrap();
+    let alias = fixture.root.join("reports");
+    let junction = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&alias)
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(
+        junction.status.success(),
+        "{}",
+        String::from_utf8_lossy(&junction.stderr)
+    );
+    let app = router(fixture.state(), DaemonConfig::default());
+    for endpoint in ["/api/workspace/file", "/api/workspace/file/download"] {
+        let response = app
+            .clone()
+            .oneshot(owner_get(&format!("{endpoint}?path=reports/report.xlsx")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    std::fs::remove_dir(alias).unwrap();
+    assert_eq!(
+        std::fs::read(outside.path().join("report.xlsx")).unwrap(),
+        bytes
+    );
 }
 
 #[tokio::test]

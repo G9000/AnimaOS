@@ -6,6 +6,67 @@ use tower::util::ServiceExt;
 
 const OWNER_ORIGIN: &str = "http://localhost:4200";
 
+#[tokio::test]
+async fn mcp_oauth_owner_routes_reject_foreign_origins_and_keep_status_redacted() {
+    let (app, _snapshot) = daemon_app();
+    let agent = create_ordinary_agent(&app, "OAuth route owner").await;
+    let base = format!("/api/agents/{agent}/mcp-connections");
+    let (status, _, created) = owner_json(
+        &app,
+        "POST",
+        &base,
+        Some(json!({"label":"OAuth route fixture","endpoint":"https://oauth.example.invalid/mcp"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["connection"]["hasOAuthCredential"], false);
+    let id = created["connection"]["id"].as_str().unwrap();
+    let path = format!("{base}/{id}/oauth");
+    for (method, suffix, body) in [
+        ("POST", "/start", Some(json!({"expectedVersion":1}))),
+        ("GET", "/status", None),
+        (
+            "POST",
+            "/cancel",
+            Some(json!({"expectedVersion":1,"attemptId":"synthetic"})),
+        ),
+        ("DELETE", "", Some(json!({"expectedVersion":1}))),
+    ] {
+        let (status, _, _) = owner_json_from(
+            &app,
+            "https://foreign.invalid",
+            method,
+            &format!("{path}{suffix}"),
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    let (status, cache, status_body) =
+        owner_json(&app, "GET", &format!("{path}/status"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    assert_eq!(status_body, json!({"state":"signed_out"}));
+    let (stale, cache, _) = owner_json(
+        &app,
+        "POST",
+        &format!("{path}/start"),
+        Some(json!({"expectedVersion":99})),
+    )
+    .await;
+    assert_eq!(stale, StatusCode::CONFLICT);
+    assert_eq!(cache, "no-store");
+    let (invalid, cache, _) = owner_json(
+        &app,
+        "POST",
+        &format!("{path}/start"),
+        Some(json!({"expectedVersion":1,"clientSecret":"never-accepted"})),
+    )
+    .await;
+    assert_eq!(invalid, StatusCode::BAD_REQUEST);
+    assert_eq!(cache, "no-store");
+}
+
 async fn owner_json(
     app: &Router,
     method: &str,

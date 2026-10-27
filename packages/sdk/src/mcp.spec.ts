@@ -38,6 +38,76 @@ function harness(respond: (url: string, init?: RequestInit) => Response) {
 }
 
 describe('MCP owner client', () => {
+  it('uses encoded owner OAuth routes, versioned bodies, abortable status reads and no mutation retries', async () => {
+    const signedIn = connection({ version: 4, hasOAuthCredential: true });
+    const started = {
+      authorizationUrl: 'https://auth.example/authorize?state=synthetic',
+      attemptId: 'attempt-1',
+      expiresAt: 1234567890,
+    };
+    const { mcp, requests } = harness((url) => {
+      if (url.endsWith('/oauth/start')) return Response.json(started);
+      if (url.endsWith('/oauth/status'))
+        return Response.json({ state: 'pending', attemptId: 'attempt-1' });
+      return Response.json({ connection: signedIn });
+    });
+    expect(
+      await mcp.startOAuth('agent/a', 'connection/1', {
+        expectedVersion: 3,
+        clientId: 'public-client',
+      }),
+    ).toEqual(started);
+    const controller = new AbortController();
+    expect(
+      await mcp.getOAuthStatus('agent/a', 'connection/1', {
+        signal: controller.signal,
+      }),
+    ).toMatchObject({ state: 'pending' });
+    expect(
+      await mcp.cancelOAuth('agent/a', 'connection/1', {
+        expectedVersion: 3,
+        attemptId: 'attempt-1',
+      }),
+    ).toEqual(signedIn);
+    expect(
+      await mcp.signOutOAuth('agent/a', 'connection/1', { expectedVersion: 4 }),
+    ).toEqual(signedIn);
+    expect(requests.map(({ url }) => url)).toEqual(
+      ['start', 'status', 'cancel', ''].map(
+        (action) =>
+          `/api/agents/agent%2Fa/mcp-connections/connection%2F1/oauth${action ? `/${action}` : ''}`,
+      ),
+    );
+    expect(requests.map(({ init }) => init?.method ?? 'GET')).toEqual([
+      'POST',
+      'GET',
+      'POST',
+      'DELETE',
+    ]);
+    expect(JSON.parse(requests[0].init!.body as string)).toEqual({
+      expectedVersion: 3,
+      clientId: 'public-client',
+    });
+    expect(requests[1].init?.signal).toBe(controller.signal);
+    expect(JSON.parse(requests[2].init!.body as string)).toEqual({
+      expectedVersion: 3,
+      attemptId: 'attempt-1',
+    });
+    expect(JSON.parse(requests[3].init!.body as string)).toEqual({
+      expectedVersion: 4,
+    });
+  });
+
+  it('never retries OAuth start after an uncertain response', async () => {
+    const { mcp, requests } = harness(
+      () => new Response(null, { status: 503 }),
+    );
+    await expect(
+      mcp.startOAuth('a', 'b', { expectedVersion: 1 }),
+    ).rejects.toBeDefined();
+    expect(requests).toHaveLength(1);
+  });
+
   it('saves a bearer credential through the versioned owner PUT without echoing the token', async () => {
     const saved = connection({ version: 4, hasBearerCredential: true });
     const token = 'synthetic-m65-token';

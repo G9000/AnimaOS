@@ -133,6 +133,7 @@ const BUILT_IN_TOOL_GROUPS = [
     tools: [
       'read_file', 'list_dir', 'glob', 'grep', 'write_file', 'edit_file',
       'multi_edit', 'todo_read', 'todo_write', 'read_document',
+      'write_document', 'read_document_source',
     ],
   },
   {

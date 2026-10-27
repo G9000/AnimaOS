@@ -157,11 +157,15 @@ fn fp08_basic_profile_accepts_real_permissions_without_synthetic_time_and_keeps_
     let object = blob(b"\xff\0exact\r\n");
     let cp = checkpoint(&object, PathSemantics::WindowsInsensitive);
     assert_eq!(
-        validate_content_basic_v1_filesystem_checkpoint(&cp, &cp.scope, &[object.clone()]),
+        validate_content_basic_v1_filesystem_checkpoint(
+            &cp,
+            &cp.scope,
+            std::slice::from_ref(&object)
+        ),
         Ok(())
     );
     assert_eq!(
-        validate_filesystem_checkpoint(&cp, &cp.scope, &[object.clone()]),
+        validate_filesystem_checkpoint(&cp, &cp.scope, std::slice::from_ref(&object)),
         Err(CheckpointError::InvalidMetadata)
     );
     assert_eq!(
@@ -188,7 +192,11 @@ fn fp08_basic_profile_rejects_extra_unknown_duplicate_or_noncanonical_metadata()
     let object = blob(b"content");
     let valid = checkpoint(&object, PathSemantics::WindowsInsensitive);
     assert_eq!(
-        validate_content_basic_v1_filesystem_checkpoint(&valid, &valid.scope, &[object.clone()]),
+        validate_content_basic_v1_filesystem_checkpoint(
+            &valid,
+            &valid.scope,
+            std::slice::from_ref(&object)
+        ),
         Ok(())
     );
     for variation in 0..7 {
@@ -214,7 +222,11 @@ fn fp08_basic_profile_rejects_extra_unknown_duplicate_or_noncanonical_metadata()
             _ => metadata.required.clear(),
         }
         assert_eq!(
-            validate_content_basic_v1_filesystem_checkpoint(&bad, &bad.scope, &[object.clone()]),
+            validate_content_basic_v1_filesystem_checkpoint(
+                &bad,
+                &bad.scope,
+                std::slice::from_ref(&object)
+            ),
             Err(CheckpointError::InvalidMetadata)
         );
     }
@@ -236,7 +248,7 @@ fn fp08_basic_profile_binds_permission_platform_to_authentic_expected_scope() {
             validate_content_basic_v1_filesystem_checkpoint(
                 &valid,
                 &valid.scope,
-                &[object.clone()]
+                std::slice::from_ref(&object)
             ),
             Ok(())
         );
@@ -247,13 +259,21 @@ fn fp08_basic_profile_binds_permission_platform_to_authentic_expected_scope() {
         })
         .unwrap();
         assert_eq!(
-            validate_content_basic_v1_filesystem_checkpoint(&bad, &valid.scope, &[object.clone()]),
+            validate_content_basic_v1_filesystem_checkpoint(
+                &bad,
+                &valid.scope,
+                std::slice::from_ref(&object)
+            ),
             Err(CheckpointError::InvalidMetadata)
         );
         let mut foreign = valid.scope.clone();
         foreign.policy_digest = checkpoint_digest(b"different configured profile");
         assert_eq!(
-            validate_content_basic_v1_filesystem_checkpoint(&valid, &foreign, &[object.clone()]),
+            validate_content_basic_v1_filesystem_checkpoint(
+                &valid,
+                &foreign,
+                std::slice::from_ref(&object)
+            ),
             Err(CheckpointError::InvalidScope)
         );
     }

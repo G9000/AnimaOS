@@ -6,7 +6,7 @@ mod stdio;
 pub(crate) mod transport;
 
 pub(crate) use records::*;
-pub(crate) use service::{McpDispatchStamp, McpManager};
+pub(crate) use service::{McpDispatchStamp, McpManager, McpOAuthStart, McpOAuthStatus};
 
 #[cfg(test)]
 mod tests;

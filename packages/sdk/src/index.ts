@@ -177,6 +177,10 @@ export type {
   McpUpdateInput,
   McpVersionInput,
   McpBearerCredentialInput,
+  McpOAuthStartInput,
+  McpOAuthStart,
+  McpOAuthStatus,
+  McpOAuthCancelInput,
   ReviewedMcpTool,
 } from './mcp.js';
 export type {

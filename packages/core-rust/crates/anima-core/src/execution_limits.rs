@@ -777,8 +777,10 @@ mod tests {
         let mut limits = ExecutionLimits::default();
         limits.budget.max_wall_time_ms = None;
         assert!(ExecutionScope::new("x".into(), "root".into(), limits, 100).is_err());
-        let mut limits = ExecutionLimits::default();
-        limits.max_model_attempts = 0;
+        let limits = ExecutionLimits {
+            max_model_attempts: 0,
+            ..ExecutionLimits::default()
+        };
         assert!(ExecutionScope::new("x".into(), "root".into(), limits, 100).is_err());
         assert!(
             ExecutionScope::new("".into(), "root".into(), ExecutionLimits::default(), 100).is_err()

@@ -169,7 +169,7 @@ mod tests {
             skill_package_hash(bytes, &[b.clone(), a.clone()])
         );
         assert_ne!(
-            skill_package_hash(bytes, &[a.clone()]),
+            skill_package_hash(bytes, std::slice::from_ref(&a)),
             skill_package_hash(bytes, &[file("templates/a.md", "changed")])
         );
         assert_ne!(

@@ -36,6 +36,10 @@ pub(super) struct WorkspaceFileResponse {
     path: String,
     content: String,
     truncated: bool,
+    #[serde(rename = "previewKind", skip_serializing_if = "Option::is_none")]
+    preview_kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 async fn configured_root(state: &SharedDaemonState) -> Result<PathBuf, ApiError> {
@@ -89,6 +93,7 @@ pub(super) async fn download(
         .header("content-type", "application/octet-stream")
         .header("content-disposition", disposition)
         .header("x-content-type-options", "nosniff")
+        .header("cache-control", "no-store")
         .header("content-length", bytes.len().to_string())
         .body(axum::body::Body::from(bytes))
         .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))
@@ -110,11 +115,11 @@ fn validate_download_path(path: &str) -> Result<(), ApiError> {
     if !path.rsplit_once('.').is_some_and(|(_, extension)| {
         matches!(
             extension.to_ascii_lowercase().as_str(),
-            "txt" | "md" | "csv"
+            "txt" | "md" | "csv" | "docx" | "xlsx" | "pptx" | "pdf"
         )
     }) {
         return Err(ApiError::bad_request_static(
-            "Only TXT, Markdown and CSV reports can be downloaded",
+            "Only TXT, Markdown, CSV and verified Anima-generated DOCX, XLSX, PPTX or PDF files can be downloaded",
         ));
     }
     Ok(())
@@ -122,6 +127,9 @@ fn validate_download_path(path: &str) -> Result<(), ApiError> {
 
 fn capture_download(root: &Path, relative: &str) -> Result<Vec<u8>, ApiError> {
     use crate::tools::workspace_bytes::{InstructionReadError, WorkspaceBytes};
+    if crate::tools::generated_documents::format_from_path(relative).is_some() {
+        return capture_generated(root, relative).map(|(bytes, _)| bytes);
+    }
     let workspace = WorkspaceBytes::open(root).map_err(io_error)?;
     let bytes = workspace
         .read_file_snapshot_with_policy(
@@ -154,6 +162,43 @@ fn capture_download(root: &Path, relative: &str) -> Result<Vec<u8>, ApiError> {
     Ok(bytes)
 }
 
+fn capture_generated(
+    root: &Path,
+    relative: &str,
+) -> Result<(Vec<u8>, anima_document_content::DocumentSpec), ApiError> {
+    use crate::tools::{
+        generated_documents,
+        workspace_bytes::{InstructionReadError, WorkspaceBytes},
+    };
+    use anima_document_content::{inspect_generated_document, MAX_GENERATED_DOCUMENT_BYTES};
+    validate_download_path(relative)?;
+    let format = generated_documents::format_from_path(relative)
+        .ok_or_else(|| ApiError::bad_request_static("Unsupported generated document format"))?;
+    let workspace = WorkspaceBytes::open(root).map_err(io_error)?;
+    let bytes = workspace
+        .read_file_snapshot_with_policy(relative, MAX_GENERATED_DOCUMENT_BYTES, |name, metadata| {
+            !excluded(name) && !hidden(metadata)
+        })
+        .map_err(|error| match error {
+            InstructionReadError::Missing => ApiError::not_found(),
+            InstructionReadError::Oversized => {
+                ApiError::bad_request_static("Generated document exceeds the 4 MiB limit")
+            }
+            _ => ApiError::bad_request_static("Generated document is unavailable or excluded"),
+        })?;
+    let document = inspect_generated_document(format, &bytes).map_err(|_| {
+        ApiError::bad_request_static(
+            "Only verified Anima-generated documents can be previewed or downloaded",
+        )
+    })?;
+    if generated_documents::source_has_credentials(&document) {
+        return Err(ApiError::bad_request_static(
+            "Documents containing credential fields cannot be previewed or downloaded",
+        ));
+    }
+    Ok((bytes, document))
+}
+
 fn download_disposition(path: &str) -> String {
     use std::fmt::Write;
     let basename = path.rsplit('/').next().expect("validated nonempty path");
@@ -183,33 +228,7 @@ fn linked(metadata: &Metadata) -> bool {
 }
 
 fn excluded(name: &str) -> bool {
-    let name = name.to_lowercase();
-    name.starts_with('.')
-        || matches!(
-            name.as_str(),
-            "node_modules"
-                | "target"
-                | "dist"
-                | "build"
-                | "vendor"
-                | "control-plane.json"
-                | "id_rsa"
-                | "id_ed25519"
-        )
-        || [
-            "secret",
-            "credential",
-            "token",
-            "api-key",
-            "api_key",
-            "private-key",
-            "private_key",
-        ]
-        .iter()
-        .any(|part| name.contains(part))
-        || [".pem", ".key", ".p12", ".pfx", ".keystore"]
-            .iter()
-            .any(|extension| name.ends_with(extension))
+    crate::tools::generated_documents::excluded_component(name)
 }
 
 fn hidden(metadata: &Metadata) -> bool {
@@ -330,6 +349,20 @@ fn list_files(root: &Path) -> Result<WorkspaceFilesResponse, ApiError> {
 }
 
 fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, ApiError> {
+    if crate::tools::generated_documents::format_from_path(relative).is_some() {
+        use sha2::{Digest, Sha256};
+        let (bytes, document) = capture_generated(root, relative)?;
+        let generated = anima_document_content::render_document(&document).map_err(|_| {
+            ApiError::bad_request_static("Generated document preview is unavailable")
+        })?;
+        return Ok(WorkspaceFileResponse {
+            path: relative.to_owned(),
+            content: generated.preview,
+            truncated: false,
+            preview_kind: Some("document"),
+            sha256: Some(hex::encode(Sha256::digest(&bytes))),
+        });
+    }
     if relative.is_empty()
         || relative.contains(['\\', ':'])
         || Path::new(relative)
@@ -406,38 +439,13 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
         path: relative.to_string(),
         content: text.to_string(),
         truncated,
+        preview_kind: None,
+        sha256: None,
     })
 }
 
 fn credential_fields(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    let compact: String = lower
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect();
-    [
-        "private key-----",
-        "api_key=",
-        "api_key:",
-        "\"api_key\":",
-        "apikey=",
-        "\"apikey\":",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "bearer ",
-        "sk-proj-",
-        "github_pat_",
-        "ghp_",
-        "password=",
-        "password:",
-        "\"password\":",
-        "token=",
-        "\"token\":",
-        "\"secret\":",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker) || compact.contains(marker))
+    crate::tools::generated_documents::credential_fields(text)
 }
 
 fn open_regular_file(directory: &Dir, name: &str) -> Result<cap_std::fs::File, ApiError> {

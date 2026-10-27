@@ -176,6 +176,73 @@ fn publisher_applies_profile_capability_overrides_and_pins_the_effective_manifes
 }
 
 #[test]
+fn publisher_preserves_owned_overrides_and_snapshots_across_versions() {
+    let mut catalog = catalog();
+    catalog
+        .register_manifest(manifest("knowledge.search", 2, CapabilityKind::Knowledge))
+        .unwrap();
+    catalog
+        .register_manifest(manifest("knowledge.extra", 1, CapabilityKind::Knowledge))
+        .unwrap();
+    let mut first = draft(1);
+    first.capability_overrides = vec![
+        CapabilityOverride {
+            capability_id: "knowledge.search".into(),
+            manifest_version: 2,
+            configuration: json!({"nested": {"items": [1, "original", null]}}),
+        },
+        CapabilityOverride {
+            capability_id: "knowledge.extra".into(),
+            manifest_version: 1,
+            configuration: json!({"extra": true}),
+        },
+    ];
+    let mut second = first.clone();
+    second.version = 2;
+    second.capability_overrides[0].configuration["nested"]["items"][1] = json!("updated");
+    let mut publisher = publisher();
+    let mut published = publisher.publish(&catalog, first).unwrap();
+    let saved = serde_json::to_value(&published).unwrap();
+    let newer = publisher.publish(&catalog, second).unwrap();
+
+    assert_eq!(
+        published
+            .resolved_capabilities
+            .iter()
+            .map(|capability| capability.capability_id.as_str())
+            .collect::<Vec<_>>(),
+        ["knowledge.extra", "knowledge.search", "workspace.files"]
+    );
+    assert_eq!(
+        published.resolved_capabilities[0]
+            .override_config
+            .as_ref()
+            .unwrap()
+            .configuration,
+        json!({"extra": true})
+    );
+    assert_eq!(published.resolved_capabilities[1].manifest_version, 2);
+    assert_eq!(
+        newer.resolved_capabilities[1]
+            .override_config
+            .as_ref()
+            .unwrap()
+            .configuration["nested"]["items"][1],
+        "updated"
+    );
+    published.resolved_capabilities[1]
+        .override_config
+        .as_mut()
+        .unwrap()
+        .configuration["nested"]["items"][1] = json!("caller edit");
+    assert_eq!(
+        serde_json::to_value(publisher.definition("research-agent", 1).unwrap()).unwrap(),
+        saved
+    );
+    assert_eq!(publisher.definition("research-agent", 2), Some(&newer));
+}
+
+#[test]
 fn drafts_and_published_definitions_round_trip_through_serde_with_pins_intact() {
     let mut catalog = catalog();
     catalog

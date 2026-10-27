@@ -223,7 +223,7 @@ fn catalog_rejects_a_legacy_arbitrary_schema_digest_before_execution() {
         wire
     });
 
-    assert!(matches!(legacy, Err(_)));
+    assert!(legacy.is_err());
 }
 
 #[test]

@@ -223,7 +223,7 @@ mod tests {
         };
         assert_eq!(
             normalize_answers(&questions, vec![answer.clone()]).unwrap(),
-            [answer.clone()]
+            std::slice::from_ref(&answer)
         );
         let mut wrong = answer;
         wrong.choice_ids = vec!["c9".into()];

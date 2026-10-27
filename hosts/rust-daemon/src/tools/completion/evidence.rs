@@ -128,7 +128,7 @@ impl HostCompletionReview {
                     }
                 }
             }
-        } else if call.name == "read_file" {
+        } else if matches!(call.name.as_str(), "read_file" | "read_document_source") {
             let mut budget = MAX_SNAPSHOT_BYTES;
             read = workspace
                 .as_ref()
@@ -157,7 +157,7 @@ impl HostCompletionReview {
     ) {
         let success = result.status == TaskStatus::Success;
         match call.name.as_str() {
-            "write_file" | "edit_file" | "multi_edit" if success => {
+            "write_file" | "write_document" | "edit_file" | "multi_edit" if success => {
                 let mut budget = MAX_SNAPSHOT_BYTES;
                 let snapshot = prepared
                     .workspace
@@ -179,7 +179,9 @@ impl HostCompletionReview {
                     self.core.note_gap();
                 }
             }
-            "read_file" if success && call.args.get("limit") != Some(&DataValue::Number(0.0)) => {
+            "read_file" | "read_document_source"
+                if success && call.args.get("limit") != Some(&DataValue::Number(0.0)) =>
+            {
                 let mut budget = MAX_SNAPSHOT_BYTES;
                 let after = prepared
                     .workspace
@@ -227,7 +229,12 @@ impl HostCompletionReview {
                     }
                 }
             }
-            "write_file" | "edit_file" | "multi_edit" | "read_file" => {}
+            "write_file"
+            | "write_document"
+            | "edit_file"
+            | "multi_edit"
+            | "read_file"
+            | "read_document_source" => {}
             _ => super::observe(&self.core, prepared.checkpoint, call, result),
         }
     }
@@ -297,7 +304,12 @@ fn snapshot_digest(
     if *budget == 0 {
         return None;
     }
-    let allowance = MAX_FILE_BYTES.min(*budget);
+    let file_limit = if super::super::generated_documents::format_from_path(relative).is_some() {
+        anima_document_content::MAX_GENERATED_DOCUMENT_BYTES
+    } else {
+        MAX_FILE_BYTES
+    };
+    let allowance = file_limit.min(*budget);
     *budget -= allowance;
     let bytes = workspace.read_file_snapshot(relative, allowance).ok()?;
     *budget += allowance.saturating_sub(bytes.len().max(1));

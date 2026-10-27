@@ -5,6 +5,7 @@ import type {
   WorkspaceFilesResponse,
 } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
+import { MarkdownMessage } from './MarkdownMessage';
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -31,7 +32,7 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
   const downloadController = useRef<AbortController | null>(null);
   const downloadUrls = useRef(new Map<string, number>());
   const selectedSupportsDownload = Boolean(
-    selected && /\.(?:txt|md|csv)$/i.test(selected),
+    selected && /\.(?:txt|md|csv|docx|xlsx|pptx|pdf)$/i.test(selected),
   );
 
   useResetOnChange([online, refresh], () => {
@@ -237,7 +238,11 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
             <section aria-label="File preview" className="files-preview">
               <div className="files-preview-head">
                 <h2>{selected ?? 'File preview'}</h2>
-                <span>Read only</span>
+                <span>
+                  {preview?.previewKind === 'document'
+                    ? 'Content preview'
+                    : 'Read only'}
+                </span>
               </div>
               {selected && selectedSupportsDownload && (
                 <div className="space-y-2 p-4">
@@ -300,9 +305,18 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
                         : 'Open the file locally to see its full contents.'}
                     </p>
                   )}
-                  <pre className="files-preview-body">
-                    {preview.content || '(Empty file)'}
-                  </pre>
+                  {preview.previewKind === 'document' ? (
+                    <div className="max-h-[65vh] space-y-4 overflow-auto p-4">
+                      <p className="text-xs text-ink-3">
+                        Open the downloaded file to see its final layout.
+                      </p>
+                      <MarkdownMessage>{preview.content}</MarkdownMessage>
+                    </div>
+                  ) : (
+                    <pre className="files-preview-body">
+                      {preview.content || '(Empty file)'}
+                    </pre>
+                  )}
                 </>
               )}
             </section>

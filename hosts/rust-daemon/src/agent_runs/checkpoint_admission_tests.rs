@@ -34,7 +34,13 @@ impl Fixture {
         let mut state = crate::skills::test_support::with_workspace(DaemonState::new(), &workspace);
         state.checkpoint_root = Some(store.clone());
         let mut config = companion_config("checkpoint-owner");
-        let mut tools = vec!["write_file", "edit_file", "multi_edit"];
+        let mut tools = vec![
+            "write_file",
+            "edit_file",
+            "multi_edit",
+            "write_document",
+            "read_document_source",
+        ];
         if checkpoint_grants {
             tools.extend(["checkpoint_list", "checkpoint_restore"]);
         }
@@ -98,6 +104,272 @@ fn call(id: &str, name: &str, args: &[(&str, &str)]) -> ToolCall {
             .map(|(k, v)| (k.to_string(), DataValue::String(v.to_string())))
             .collect(),
     }
+}
+
+fn document_call(id: &str, title: &str, expected: Option<&str>) -> ToolCall {
+    let mut call = call(id, "write_document", &[("file_path", "report.docx")]);
+    call.args.insert(
+        "document".into(),
+        crate::tools::generated_documents::schema_data(serde_json::json!({
+            "format":"docx", "title":title,
+            "blocks":[{"type":"paragraph", "text":"Checkpoint body"}]
+        })),
+    );
+    if let Some(expected) = expected {
+        call.args
+            .insert("expected_sha256".into(), DataValue::String(expected.into()));
+    }
+    call
+}
+
+#[tokio::test]
+async fn finished_documents_binary_create_revise_and_undo_are_checkpointed() {
+    use sha2::{Digest, Sha256};
+    let fixture = Fixture::new(true).await;
+    let created = fixture
+        .execute(document_call("document-create", "Draft", None))
+        .await;
+    assert_eq!(created.status, TaskStatus::Success, "{:?}", created.error);
+    let original = std::fs::read(fixture.workspace.join("report.docx")).unwrap();
+    assert!(original.starts_with(b"PK"));
+    let hash = hex::encode(Sha256::digest(&original));
+    let revised = fixture
+        .execute(document_call("document-revise", "Revision", Some(&hash)))
+        .await;
+    assert_eq!(revised.status, TaskStatus::Success, "{:?}", revised.error);
+    let list = fixture
+        .execute(call("document-list", "checkpoint_list", &[]))
+        .await;
+    let rows: serde_json::Value = serde_json::from_str(&list.data.unwrap().text).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    let id = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["native_tool_call_id"] == "document-revise")
+        .unwrap()["checkpoint_id"]
+        .as_str()
+        .unwrap();
+    let restored = fixture
+        .execute(call(
+            "document-undo",
+            "checkpoint_restore",
+            &[("checkpoint_id", id)],
+        ))
+        .await;
+    assert_eq!(restored.status, TaskStatus::Success, "{:?}", restored.error);
+    assert_eq!(
+        std::fs::read(fixture.workspace.join("report.docx")).unwrap(),
+        original
+    );
+    let creation = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["native_tool_call_id"] == "document-create")
+        .unwrap()["checkpoint_id"]
+        .as_str()
+        .unwrap();
+    let removed = fixture
+        .execute(call(
+            "document-undo-create",
+            "checkpoint_restore",
+            &[("checkpoint_id", creation)],
+        ))
+        .await;
+    assert_eq!(removed.status, TaskStatus::Success, "{:?}", removed.error);
+    assert!(!fixture.workspace.join("report.docx").exists());
+}
+
+#[tokio::test]
+async fn finished_documents_hash_is_checked_at_checkpoint_capture() {
+    use sha2::{Digest, Sha256};
+    let mut fixture = Fixture::new(true).await;
+    let target = fixture.workspace.join("report.docx");
+    assert_eq!(
+        fixture
+            .execute(document_call("initial-document", "Draft", None))
+            .await
+            .status,
+        TaskStatus::Success
+    );
+    let hash = hex::encode(Sha256::digest(std::fs::read(&target).unwrap()));
+    let drift = b"owner concurrent replacement";
+    fixture.context = fixture
+        .context
+        .clone()
+        .with_checkpoint_preimage_hook(move || {
+            std::fs::write(target, drift).unwrap();
+        });
+    let refused = fixture
+        .execute(document_call("raced-document", "Revision", Some(&hash)))
+        .await;
+    assert_eq!(refused.status, TaskStatus::Error);
+    assert_eq!(
+        std::fs::read(fixture.workspace.join("report.docx")).unwrap(),
+        drift
+    );
+}
+
+#[tokio::test]
+async fn finished_documents_creation_collision_at_checkpoint_capture_is_preserved() {
+    let mut fixture = Fixture::new(true).await;
+    let target = fixture.workspace.join("report.docx");
+    fixture.context = fixture
+        .context
+        .clone()
+        .with_checkpoint_preimage_hook(move || {
+            std::fs::write(target, b"owner concurrent creation").unwrap();
+        });
+    let refused = fixture
+        .execute(document_call("new-raced-document", "Draft", None))
+        .await;
+    assert_eq!(refused.status, TaskStatus::Error);
+    assert_eq!(
+        std::fs::read(fixture.workspace.join("report.docx")).unwrap(),
+        b"owner concurrent creation"
+    );
+}
+
+#[tokio::test]
+async fn finished_documents_strict_write_approval_precedes_any_file_or_checkpoint() {
+    use super::test_support::{decision, pending_approvals};
+    use crate::approvals::ApprovalDecisionKind;
+    let fixture = Fixture::new(true).await;
+    fixture.coordinator.state.write().await.autonomy.set(
+        crate::approvals::autonomy::AgentAutonomy {
+            agent_id: fixture.run.agent_id.clone(),
+            mode: crate::approvals::autonomy::AutonomyMode::Strict,
+            smart_check: false,
+            deny_patterns: Vec::new(),
+            smart_policy: String::new(),
+        },
+    );
+    fixture
+        .coordinator
+        .state
+        .write()
+        .await
+        .approvals
+        .set_policy(
+            &fixture.run.agent_id,
+            ApprovalPolicy::default().with(RiskClass::Write, PolicyAction::Ask),
+        );
+    let context = fixture.context.clone();
+    let agent = fixture
+        .coordinator
+        .state
+        .read()
+        .await
+        .get_agent(&fixture.run.agent_id)
+        .unwrap()
+        .state;
+    let pending = tokio::spawn(async move {
+        context
+            .execute_tool(
+                agent.clone(),
+                tool_input(&agent.id, "chat:a6"),
+                document_call("strict-document", "Draft", None),
+            )
+            .await
+    });
+    let approval = pending_approvals(&fixture.coordinator, 1).await.remove(0);
+    assert_eq!(approval.tool, "write_document");
+    assert!(!fixture.workspace.join("report.docx").exists());
+    assert!(!fixture.store.exists());
+    fixture
+        .coordinator
+        .decide_approval(
+            &approval.id,
+            decision(ApprovalDecisionKind::Deny, approval.revision),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pending.await.unwrap().status, TaskStatus::Error);
+    assert!(!fixture.workspace.join("report.docx").exists());
+}
+
+#[tokio::test]
+async fn finished_documents_default_publication_rechecks_current_run_grant_and_workspace() {
+    for change in ["grant", "stop", "root"] {
+        let mut fixture = Fixture::new(false).await;
+        fixture.coordinator.state.write().await.checkpoint_root = None;
+        fixture.context = fixture.context.clone().with_checkpoint_root(None);
+        let state = fixture.coordinator.state.clone();
+        let run = fixture.run.clone();
+        let replacement = fixture._temp.path().join("other-workspace");
+        std::fs::create_dir(&replacement).unwrap();
+        let replacement_hook = replacement.clone();
+        fixture.context = fixture
+            .context
+            .clone()
+            .with_checkpoint_validation_hook(move || {
+                let mut guard = state.try_write().unwrap();
+                match change {
+                    "grant" => {
+                        let agent = guard.agents.get_mut(&run.agent_id).unwrap();
+                        let mut config = agent.config().clone();
+                        config
+                            .tools
+                            .as_mut()
+                            .unwrap()
+                            .retain(|tool| tool.name != "write_document");
+                        agent.replace_config(config);
+                    }
+                    "stop" => {
+                        guard.runs.get_mut(&run.run_id).unwrap().stop =
+                            Some(crate::runs::RunStopRequest {
+                                requested_at_ms: anima_core::primitives::now_millis(),
+                            })
+                    }
+                    "root" => guard.workspace.as_mut().unwrap().root_path = replacement_hook,
+                    _ => unreachable!(),
+                }
+            });
+        let refused = fixture
+            .execute(document_call("default-raced-document", "Draft", None))
+            .await;
+        assert_eq!(refused.status, TaskStatus::Error, "{change}");
+        assert!(!fixture.workspace.join("report.docx").exists());
+        assert!(!replacement.join("report.docx").exists());
+        assert!(!fixture.store.exists());
+    }
+}
+
+#[tokio::test]
+async fn finished_documents_concurrent_default_revisions_cannot_both_publish_the_same_hash() {
+    use sha2::{Digest, Sha256};
+    let mut fixture = Fixture::new(false).await;
+    fixture.coordinator.state.write().await.checkpoint_root = None;
+    fixture.context = fixture.context.clone().with_checkpoint_root(None);
+    let created = fixture
+        .execute(document_call("default-original", "Draft", None))
+        .await;
+    assert_eq!(created.status, TaskStatus::Success, "{:?}", created.error);
+    let hash = hex::encode(Sha256::digest(
+        std::fs::read(fixture.workspace.join("report.docx")).unwrap(),
+    ));
+    let (first, second) = tokio::join!(
+        fixture.execute(document_call("default-first", "First", Some(&hash))),
+        fixture.execute(document_call("default-second", "Second", Some(&hash))),
+    );
+    assert_eq!(
+        [first.status, second.status]
+            .iter()
+            .filter(|status| **status == TaskStatus::Success)
+            .count(),
+        1,
+        "{:?} {:?}",
+        first.error,
+        second.error
+    );
+    let bytes = std::fs::read(fixture.workspace.join("report.docx")).unwrap();
+    let source = anima_document_content::inspect_generated_document(
+        anima_document_content::GeneratedFormat::Docx,
+        &bytes,
+    )
+    .unwrap();
+    assert!(matches!(source.title.as_str(), "First" | "Second"));
 }
 
 #[tokio::test]

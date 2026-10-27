@@ -84,7 +84,7 @@ pub(crate) fn capture(
 ) -> Result<Option<ProtectedWrite>, &'static str> {
     if !matches!(
         call.name.as_str(),
-        "write_file" | "edit_file" | "multi_edit"
+        "write_file" | "write_document" | "edit_file" | "multi_edit"
     ) {
         return Ok(None);
     }

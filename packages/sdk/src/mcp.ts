@@ -44,6 +44,8 @@ export interface McpConnection {
   version: number;
   /** Saved credential reference only; not vault availability or remote validity. */
   hasBearerCredential: boolean;
+  /** Saved account reference; validity is checked separately through OAuth status. */
+  hasOAuthCredential?: boolean;
   reviewedTools: ReviewedMcpTool[];
   /** Current agent policy; older daemons require manual review and grants. */
   toolAccess?: 'automatic' | 'review' | 'denied';
@@ -73,6 +75,24 @@ export interface McpVersionInput {
 
 export interface McpBearerCredentialInput extends McpVersionInput {
   bearerToken: string;
+}
+
+export interface McpOAuthStartInput extends McpVersionInput {
+  clientId?: string;
+}
+export interface McpOAuthStart {
+  authorizationUrl: string;
+  attemptId: string;
+  expiresAt: number;
+}
+export interface McpOAuthStatus {
+  state: 'signed_out' | 'pending' | 'connected' | 'needs_sign_in' | 'failed';
+  attemptId?: string | null;
+  expiresAt?: number | null;
+  error?: McpStaticError | null;
+}
+export interface McpOAuthCancelInput extends McpVersionInput {
+  attemptId: string;
 }
 
 export interface McpReviewInput extends McpVersionInput {
@@ -225,6 +245,59 @@ export class McpClient {
       `${connectionPath(agentId, connectionId)}/grants/${encodeURIComponent(alias)}`,
       { method: 'PATCH', body: input },
     );
+  }
+
+  async startOAuth(
+    agentId: string,
+    connectionId: string,
+    input: McpOAuthStartInput,
+  ): Promise<McpOAuthStart> {
+    return this.client.requestJson<McpOAuthStart>(
+      `${connectionPath(agentId, connectionId)}/oauth/start`,
+      {
+        method: 'POST',
+        body: input,
+      },
+    );
+  }
+
+  async getOAuthStatus(
+    agentId: string,
+    connectionId: string,
+    options: McpReadOptions = {},
+  ): Promise<McpOAuthStatus> {
+    return this.client.requestJson<McpOAuthStatus>(
+      `${connectionPath(agentId, connectionId)}/oauth/status`,
+      options,
+    );
+  }
+
+  async cancelOAuth(
+    agentId: string,
+    connectionId: string,
+    input: McpOAuthCancelInput,
+  ): Promise<McpConnection> {
+    const response = await this.client.requestJson<{
+      connection: McpConnection;
+    }>(`${connectionPath(agentId, connectionId)}/oauth/cancel`, {
+      method: 'POST',
+      body: input,
+    });
+    return response.connection;
+  }
+
+  async signOutOAuth(
+    agentId: string,
+    connectionId: string,
+    input: McpVersionInput,
+  ): Promise<McpConnection> {
+    const response = await this.client.requestJson<{
+      connection: McpConnection;
+    }>(`${connectionPath(agentId, connectionId)}/oauth`, {
+      method: 'DELETE',
+      body: input,
+    });
+    return response.connection;
   }
 
   private async connectionAction(

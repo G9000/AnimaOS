@@ -1,6 +1,54 @@
 import { expect, it, vi } from 'vitest';
 import { createDaemonClient } from './index.js';
 
+it.each(['docx', 'xlsx', 'pptx', 'PDF'])(
+  'downloads generated %s files above the text-report limit without changing bytes',
+  async (extension) => {
+    const bytes = new Uint8Array(1024 * 1024 + 17).fill(137);
+    const received = vi.fn(
+      async () =>
+        new Response(bytes, {
+          headers: {
+            'content-type': 'application/octet-stream',
+            'content-length': String(bytes.length),
+          },
+        }),
+    );
+    const client = createDaemonClient({ baseUrl: '', fetch: received });
+    const blob = await client.workspace.downloadFile(
+      `reports/result.${extension}`,
+    );
+    expect(blob.size).toBe(bytes.length);
+    expect(
+      new Uint8Array(await blob.arrayBuffer()).every(
+        (byte, index) => byte === bytes[index],
+      ),
+    ).toBe(true);
+    expect(received).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(['docx', 'xlsx', 'pptx', 'pdf'])(
+  'rejects empty and oversized %s downloads before saving a file',
+  async (extension) => {
+    for (const size of [0, 4 * 1024 * 1024 + 1]) {
+      const client = createDaemonClient({
+        baseUrl: '',
+        fetch: async () =>
+          new Response('', {
+            headers: {
+              'content-type': 'application/octet-stream',
+              'content-length': String(size),
+            },
+          }),
+      });
+      await expect(
+        client.workspace.downloadFile(`report.${extension}`),
+      ).rejects.toThrow('Invalid bounded response length');
+    }
+  },
+);
+
 it('lists workspace files and encodes relative paths for text preview', async () => {
   const urls: string[] = [];
   const client = createDaemonClient({

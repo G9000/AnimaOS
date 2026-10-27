@@ -29,14 +29,18 @@ pub(super) fn observe(
 ) {
     let success = result.status == TaskStatus::Success;
     let observation = match call.name.as_str() {
-        "write_file" | "edit_file" | "multi_edit" if success => path(call).map(|path| {
-            let requires_check = requires_check(&path);
-            CompletionObservation::Edited {
-                path,
-                requires_check,
-            }
-        }),
-        "read_file" if success && call.args.get("limit") != Some(&DataValue::Number(0.0)) => {
+        "write_file" | "write_document" | "edit_file" | "multi_edit" if success => {
+            path(call).map(|path| {
+                let requires_check = requires_check(&path);
+                CompletionObservation::Edited {
+                    path,
+                    requires_check,
+                }
+            })
+        }
+        "read_file" | "read_document_source"
+            if success && call.args.get("limit") != Some(&DataValue::Number(0.0)) =>
+        {
             path(call).map(|path| CompletionObservation::ReadBack { path })
         }
         "bash" => Some(

@@ -42,6 +42,330 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock as AsyncRwLock;
 
 #[test]
+fn finished_documents_are_native_strict_and_classified() {
+    let registry = ToolRegistry::new();
+    for (name, risk) in [
+        ("write_document", crate::approvals::RiskClass::Write),
+        ("read_document_source", crate::approvals::RiskClass::Read),
+    ] {
+        let descriptor = registry
+            .descriptor(name)
+            .expect("finished document native tool");
+        assert!(registry.lookup(name).is_some());
+        assert_eq!(
+            descriptor.parameters_schema["additionalProperties"],
+            DataValue::Bool(false)
+        );
+        assert_eq!(crate::approvals::policy::risk_class(name), risk);
+    }
+    assert!(crate::approvals::policy::matcher_kinds("write_document")
+        .contains(&crate::approvals::MatcherKind::PathGlob));
+}
+
+mod finished_documents {
+    use super::*;
+
+    fn write(path: &str, title: &str, expected: Option<&str>) -> ToolCall {
+        let mut args = BTreeMap::from([
+            ("file_path".into(), DataValue::String(path.into())),
+            (
+                "document".into(),
+                crate::tools::generated_documents::schema_data(json!({
+                    "format":"docx", "title":title,
+                    "blocks":[{"type":"paragraph", "text":"Original body"}]
+                })),
+            ),
+        ]);
+        if let Some(expected) = expected {
+            args.insert("expected_sha256".into(), DataValue::String(expected.into()));
+        }
+        ToolCall {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "write_document".into(),
+            args,
+        }
+    }
+
+    fn fixture(root: &std::path::Path) -> (ToolExecutionContext, AgentState, Message) {
+        let (mut context, mut agent, message) = memory_correction_fixture(None);
+        context.workspace_root = Some(root.to_owned());
+        context.cancel = Some(anima_core::CancelSignal::new());
+        agent.config.tools = Some(
+            context
+                .tool_registry
+                .resolve_descriptors(["write_document", "read_document_source"])
+                .unwrap(),
+        );
+        (context, agent, message)
+    }
+
+    #[tokio::test]
+    async fn create_read_and_revision_preserve_stale_and_collision_targets() {
+        use sha2::{Digest, Sha256};
+        let root = tempfile::tempdir().unwrap();
+        let (context, agent, message) = fixture(root.path());
+        let target = root.path().join("report.docx");
+        let created = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                write("report.docx", "Draft", None),
+            )
+            .await;
+        assert_eq!(created.status, TaskStatus::Success, "{:?}", created.error);
+        let original = fs::read(&target).unwrap();
+        assert!(original.starts_with(b"PK"));
+        let hash = hex::encode(Sha256::digest(&original));
+        let read = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                ToolCall {
+                    id: "read-source".into(),
+                    name: "read_document_source".into(),
+                    args: BTreeMap::from([(
+                        "file_path".into(),
+                        DataValue::String("report.docx".into()),
+                    )]),
+                },
+            )
+            .await;
+        assert_eq!(read.status, TaskStatus::Success, "{:?}", read.error);
+        let source: serde_json::Value = serde_json::from_str(&read.data.unwrap().text).unwrap();
+        assert_eq!(source["sha256"], hash);
+        assert_eq!(source["document"]["title"], "Draft");
+        for expected in [
+            None,
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        ] {
+            let refused = context
+                .clone()
+                .execute_tool(
+                    agent.clone(),
+                    message.clone(),
+                    write("report.docx", "Changed", expected),
+                )
+                .await;
+            assert_eq!(refused.status, TaskStatus::Error);
+            assert_eq!(fs::read(&target).unwrap(), original);
+        }
+        let revised = context
+            .execute_tool(agent, message, write("report.docx", "Revised", Some(&hash)))
+            .await;
+        assert_eq!(revised.status, TaskStatus::Success, "{:?}", revised.error);
+        assert_ne!(fs::read(&target).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn denied_paths_cancelled_calls_and_missing_grants_have_no_effect() {
+        let root = tempfile::tempdir().unwrap();
+        let (context, mut agent, message) = fixture(root.path());
+        for path in [
+            "../outside.docx",
+            "C:/outside.docx",
+            "/outside.docx",
+            "x\\report.docx",
+            ".hidden/report.docx",
+            "credentials/report.docx",
+            "report.pdf",
+            "report.docx ",
+            " report.docx",
+        ] {
+            let result = context
+                .clone()
+                .execute_tool(agent.clone(), message.clone(), write(path, "Draft", None))
+                .await;
+            assert_eq!(result.status, TaskStatus::Error, "{path}");
+        }
+        agent.config.tools = Some(vec![]);
+        let denied = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                write("report.docx", "Draft", None),
+            )
+            .await;
+        assert_eq!(denied.status, TaskStatus::Error);
+        agent.config.tools = Some(
+            context
+                .tool_registry
+                .resolve_descriptors(["write_document"])
+                .unwrap(),
+        );
+        context.cancel.as_ref().unwrap().cancel();
+        let cancelled = context
+            .execute_tool(agent, message, write("report.docx", "Draft", None))
+            .await;
+        assert_eq!(cancelled.status, TaskStatus::Error);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn source_reads_refuse_tampered_oversized_and_credential_documents() {
+        let root = tempfile::tempdir().unwrap();
+        let (context, agent, message) = fixture(root.path());
+        let read = || ToolCall {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "read_document_source".into(),
+            args: BTreeMap::from([("file_path".into(), DataValue::String("report.docx".into()))]),
+        };
+        let spec = |text: &str| {
+            serde_json::from_value(json!({
+                "format":"docx","title":"Report","blocks":[{"type":"paragraph","text":text}]
+            }))
+            .unwrap()
+        };
+        let mut tampered = anima_document_content::render_document(&spec("Ordinary body"))
+            .unwrap()
+            .bytes;
+        tampered[0] ^= 1;
+        let credential =
+            anima_document_content::render_document(&spec("api_key = synthetic-fixture"))
+                .unwrap()
+                .bytes;
+        for bytes in [tampered, credential, vec![b'a'; 4 * 1024 * 1024 + 1]] {
+            fs::write(root.path().join("report.docx"), &bytes).unwrap();
+            let refused = context
+                .clone()
+                .execute_tool(agent.clone(), message.clone(), read())
+                .await;
+            assert_eq!(refused.status, TaskStatus::Error);
+            assert!(!refused.error.unwrap().contains("synthetic-fixture"));
+            assert_eq!(fs::read(root.path().join("report.docx")).unwrap(), bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_large_source_roundtrips_through_native_dispatch_without_a_result_reader() {
+        let root = tempfile::tempdir().unwrap();
+        let (context, agent, message) = fixture(root.path());
+        assert!(!agent.config.allows_tool("read_tool_result"));
+        let document = json!({"format":"docx","title":"Large document","blocks":[
+            {"type":"paragraph","text":"A".repeat(8000)},
+            {"type":"paragraph","text":"B".repeat(8000)},
+            {"type":"paragraph","text":"C".repeat(8000)}
+        ]});
+        let mut create = write("report.docx", "Large document", None);
+        create.args.insert(
+            "document".into(),
+            crate::tools::generated_documents::schema_data(document.clone()),
+        );
+        let created = context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), create)
+            .await;
+        assert_eq!(created.status, TaskStatus::Success, "{:?}", created.error);
+        let source = context
+            .clone()
+            .execute_tool(
+                agent.clone(),
+                message.clone(),
+                ToolCall {
+                    id: "large-source-read".into(),
+                    name: "read_document_source".into(),
+                    args: BTreeMap::from([(
+                        "file_path".into(),
+                        DataValue::String("report.docx".into()),
+                    )]),
+                },
+            )
+            .await;
+        assert_eq!(source.status, TaskStatus::Success, "{:?}", source.error);
+        let text = source.data.unwrap().text;
+        assert!(text.len() > 16 * 1024);
+        let source: serde_json::Value =
+            serde_json::from_str(&text).expect("full source stays inline");
+        assert_eq!(source["document"]["blocks"], document["blocks"]);
+        let mut revised = write(
+            "report.docx",
+            "Revision",
+            Some(source["sha256"].as_str().unwrap()),
+        );
+        let mut document = source["document"].clone();
+        document["title"] = "Revision".into();
+        revised.args.insert(
+            "document".into(),
+            crate::tools::generated_documents::schema_data(document),
+        );
+        let saved = context.execute_tool(agent, message, revised).await;
+        assert_eq!(saved.status, TaskStatus::Success, "{:?}", saved.error);
+    }
+
+    #[tokio::test]
+    async fn native_write_and_read_refuse_source_that_output_redaction_would_change() {
+        let root = tempfile::tempdir().unwrap();
+        let (context, agent, message) = fixture(root.path());
+        let spec = json!({"format":"docx","title":"Report","blocks":[{"type":"paragraph","text":"cookie=session-value"}]});
+        let mut create = write("report.docx", "Report", None);
+        create.args.insert(
+            "document".into(),
+            crate::tools::generated_documents::schema_data(spec.clone()),
+        );
+        let refused = context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), create)
+            .await;
+        assert_eq!(refused.status, TaskStatus::Error);
+        assert!(!root.path().join("report.docx").exists());
+        let bytes = anima_document_content::render_document(&serde_json::from_value(spec).unwrap())
+            .unwrap()
+            .bytes;
+        fs::write(root.path().join("report.docx"), bytes).unwrap();
+        let refused = context
+            .execute_tool(
+                agent,
+                message,
+                ToolCall {
+                    id: "cookie-source-read".into(),
+                    name: "read_document_source".into(),
+                    args: BTreeMap::from([(
+                        "file_path".into(),
+                        DataValue::String("report.docx".into()),
+                    )]),
+                },
+            )
+            .await;
+        assert_eq!(refused.status, TaskStatus::Error);
+        assert!(!refused.error.unwrap().contains("session-value"));
+    }
+
+    #[tokio::test]
+    async fn native_paths_and_download_urls_survive_redaction_or_fail_before_creation() {
+        let root = tempfile::tempdir().unwrap();
+        let (context, agent, message) = fixture(root.path());
+        let name = "AnnualFinancialPerformanceReport2026.docx";
+        let refused = context
+            .clone()
+            .execute_tool(agent.clone(), message.clone(), write(name, "Report", None))
+            .await;
+        assert_eq!(refused.status, TaskStatus::Error);
+        assert!(refused.error.unwrap().contains("shorter"));
+        assert!(!root.path().join(name).exists());
+        for path in ["short report.docx", "账本.docx"] {
+            let saved = context
+                .clone()
+                .execute_tool(agent.clone(), message.clone(), write(path, "Report", None))
+                .await;
+            assert_eq!(saved.status, TaskStatus::Success, "{:?}", saved.error);
+            let saved: serde_json::Value = serde_json::from_str(&saved.data.unwrap().text).unwrap();
+            assert_eq!(saved["path"], path);
+            let url = reqwest::Url::parse(&format!(
+                "http://localhost{}",
+                saved["download_url"].as_str().unwrap()
+            ))
+            .unwrap();
+            let pairs = url.query_pairs().collect::<Vec<_>>();
+            assert_eq!(pairs.len(), 1);
+            assert_eq!(pairs[0].0, "path");
+            assert_eq!(pairs[0].1, path);
+        }
+    }
+}
+
+#[test]
 fn chat_controls_are_native_and_cannot_target_arbitrary_chats() {
     let registry = ToolRegistry::new();
     for name in ["rename_chat", "compact_chat", "export_chat"] {
@@ -620,10 +944,16 @@ fn registry_defines_every_registered_tool_schema() {
         ("snooze_reminder", &["id", "minutes"][..], &[][..]),
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
         ("read_document", &["file_path"][..], &[][..]),
+        ("read_document_source", &["file_path"][..], &[][..]),
         ("list_dir", &["path"][..], &[][..]),
         ("glob", &["pattern"][..], &["path"][..]),
         ("grep", &["pattern"][..], &["path", "include"][..]),
         ("write_file", &["file_path", "content"][..], &[][..]),
+        (
+            "write_document",
+            &["file_path", "document"][..],
+            &["expected_sha256"][..],
+        ),
         (
             "edit_file",
             &["file_path", "old_string", "new_string"][..],

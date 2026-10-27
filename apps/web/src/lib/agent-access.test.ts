@@ -26,6 +26,7 @@ const COMMON_TOOLS = [
 const OBSERVE_TOOLS = [
   ...COMMON_TOOLS,
   'read_file',
+  'read_document_source',
   'list_dir',
   'glob',
   'grep',
@@ -36,6 +37,7 @@ const COLLABORATE_TOOLS = [
   ...OBSERVE_TOOLS,
   'memory_update',
   'write_file',
+  'write_document',
   'edit_file',
   'multi_edit',
   'todo_write',
@@ -88,6 +90,16 @@ function agent(id: string, createdAtMs: number): AgentDetail {
 }
 
 describe('workspace access profiles', () => {
+  it('offers generated document writes only with a write profile and preserves old grants as custom', () => {
+    expect(toolNamesForProfile('observe')).toContain('read_document_source');
+    expect(toolNamesForProfile('observe')).not.toContain('write_document');
+    expect(toolNamesForProfile('collaborate')).toContain('write_document');
+    expect(
+      deriveAccessProfile(
+        OBSERVE_TOOLS.filter((name) => name !== 'read_document_source'),
+      ),
+    ).toBe('custom');
+  });
   it('grants correction only to write profiles and keeps existing tool sets custom', () => {
     expect(toolNamesForProfile('observe')).not.toContain('memory_update');
     expect(toolNamesForProfile('collaborate')).toContain('memory_update');
