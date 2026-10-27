@@ -70,6 +70,9 @@ const OPERATE_TOOLS = [
   'acp_cancel',
   'acp_stop',
   'acp_list',
+  'web_search',
+  'search_tools',
+  'describe_tool',
 ];
 
 function agent(id: string, createdAtMs: number): AgentDetail {
@@ -133,6 +136,14 @@ describe('workspace access profiles', () => {
     expect(toolNamesForProfile('collaborate')).toEqual(COLLABORATE_TOOLS);
   });
 
+  it('includes web search and discovery in the highest access profile only', () => {
+    for (const name of ['web_search', 'search_tools', 'describe_tool']) {
+      expect(toolNamesForProfile('operate')).toContain(name);
+      expect(toolNamesForProfile('observe')).not.toContain(name);
+      expect(toolNamesForProfile('collaborate')).not.toContain(name);
+    }
+  });
+
   it('returns the exact Operate tools', () => {
     expect(toolNamesForProfile('operate')).toEqual(OPERATE_TOOLS);
   });
@@ -159,7 +170,7 @@ describe('workspace access profiles', () => {
       expect(toolNamesForProfile('collaborate')).not.toContain(tool);
     }
     expect(ACCESS_PROFILES.operate.summary).toBe(
-      'Edits files, runs commands and uses any app on this computer.',
+      'Edits files, runs commands, uses apps and searches the web.',
     );
   });
 

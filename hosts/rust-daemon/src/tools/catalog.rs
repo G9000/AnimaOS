@@ -156,11 +156,7 @@ impl RunToolCatalog {
             entries,
             mcp,
             hydrated: Mutex::new(VecDeque::new()),
-            discovery_enabled: original
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.additional.get("toolDiscovery"))
-                == Some(&DataValue::Bool(true)),
+            discovery_enabled: crate::agent_runs::tool_scope::discovery_configured(original),
             delegated_parent: None,
             peer_sources: Vec::new(),
             discord_thread: None,
@@ -371,10 +367,15 @@ impl RunToolCatalog {
         let guard = state.read().await;
         self.scope_current(&guard).map_err(str::to_string)?;
         if matches!(name, SEARCH | DESCRIBE) {
-            return self
-                .discovery_enabled
-                .then_some(())
-                .ok_or_else(|| REFUSED.into());
+            let current = guard
+                .agents
+                .get(&self.run.agent_id)
+                .ok_or(REFUSED)?
+                .config();
+            return (self.discovery_enabled
+                && crate::agent_runs::tool_scope::discovery_configured(current))
+            .then_some(())
+            .ok_or_else(|| REFUSED.into());
         }
         self.entry_current(&guard, name).map_err(str::to_string)
     }
@@ -566,6 +567,9 @@ impl ModelToolSelector for RunToolCatalog {
         names.retain(|name| {
             if matches!(name.as_str(), SEARCH | DESCRIBE) {
                 self.discovery_enabled
+                    && guard.agents.get(&self.run.agent_id).is_some_and(|agent| {
+                        crate::agent_runs::tool_scope::discovery_configured(agent.config())
+                    })
             } else {
                 self.entry_current(&guard, name).is_ok()
             }

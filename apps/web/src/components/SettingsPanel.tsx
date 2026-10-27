@@ -60,7 +60,7 @@ const ACCESS_PROFILE_COPY: Record<
   },
   operate: {
     label: 'Run commands',
-    summary: 'Edits files, runs commands and uses any app on this computer.',
+    summary: 'Edits files, runs commands, uses apps and searches the web.',
     kicker: 'RULES STILL APPLY',
   },
 };
@@ -262,15 +262,17 @@ export function SettingsPanel({
     (tool) => agent.toolNames.includes(tool),
   );
   const hasToolResultRead = agent.toolNames.includes(TOOL_RESULT_ACCESS.name);
-  const derivedAccess = deriveAccessProfile(
-    agent.toolNames.filter(
+  const derivedAccess = deriveAccessProfile([
+    ...agent.toolNames.filter(
       (tool) =>
         tool !== 'memory_remove' &&
         tool !== 'memory_consolidate' &&
         !isBrowserTool(tool) &&
         tool !== 'read_conversation_window' &&
         tool !== 'read_document' &&
-        tool !== 'web_search' &&
+        (tool !== 'web_search' ||
+          (agent.toolNames.includes('search_tools') &&
+            agent.toolNames.includes('describe_tool'))) &&
         tool !== 'web_fetch' &&
         !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool) &&
         !BACKGROUND_HELPER_TOOL_ACCESS.tools.some((name) => name === tool) &&
@@ -278,7 +280,8 @@ export function SettingsPanel({
         tool !== TOOL_RESULT_ACCESS.name &&
         tool !== 'execute_code',
     ),
-  );
+    'read_conversation_window',
+  ]);
 
   const [name, setName] = useState(agent.name);
   const [bio, setBio] = useState(agent.bio ?? '');
@@ -1022,7 +1025,7 @@ export function SettingsPanel({
                               setAllowMemoryConsolidate(false);
                               setAllowConversationRead(false);
                               setAllowDocumentRead(false);
-                              setAllowWebSearch(false);
+                              setAllowWebSearch(profileName === 'operate');
                               setAllowWebFetch(false);
                               setAllowToolChains(false);
                               setBrowserGrants([]);
@@ -1398,7 +1401,7 @@ export function SettingsPanel({
                         setAllowMemoryConsolidate(false);
                         setAllowConversationRead(false);
                         setAllowDocumentRead(false);
-                        setAllowWebSearch(false);
+                        setAllowWebSearch(profileName === 'operate');
                         setAllowWebFetch(false);
                         setAllowToolChains(false);
                         setBrowserGrants([]);

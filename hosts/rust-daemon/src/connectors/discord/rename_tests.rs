@@ -250,6 +250,38 @@ async fn discord_rename_tool_updates_a_primary_selected_thread() {
 }
 
 #[tokio::test]
+async fn discord_discovers_granted_web_search_from_profile_controls() {
+    let call = ToolCall {
+        id: "find-web-search".into(),
+        name: "search_tools".into(),
+        args: BTreeMap::from([("query".into(), DataValue::String("web_search".into()))]),
+    };
+    let (manager, _, c, model) = rename_fixture(call).await;
+    {
+        let mut state = manager.state.write().await;
+        let mut config = state.agents[&c.agent_id].config().clone();
+        config
+            .settings
+            .as_mut()
+            .unwrap()
+            .additional
+            .remove("toolDiscovery");
+        config.tools = Some(
+            crate::tools::ToolRegistry::new()
+                .resolve_descriptors(["web_search", "search_tools", "describe_tool"])
+                .unwrap(),
+        );
+        state.restore_agent_config(&c.agent_id, config);
+    }
+    request_rename(&manager, &c).await;
+    processed(&manager, &c, "201").await;
+    assert!(model.configs()[1].allows_tool("search_tools"));
+    assert!(model.configs()[2].allows_tool("web_search"));
+    assert!(rename_result(&model).contains("web_search"));
+    manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn discord_rename_tool_is_available_with_tool_discovery_enabled() {
     let (manager, transport, c, model) = rename_fixture(rename_call("Take Two")).await;
     {

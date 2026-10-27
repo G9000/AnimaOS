@@ -449,6 +449,22 @@ describe('model resilience settings', () => {
 });
 
 describe('m83 independent owner web permissions', () => {
+  it('recognizes the saved Run commands profile with search', () => {
+    renderPanel(agent({ toolNames: toolNamesForProfile('operate') }));
+    expect(screen.getByRole('radio', { name: /^Run commands/ })).toBeChecked();
+  });
+
+  it('includes search and discovery when choosing Run commands', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: ['read_file'] }), { saveSettings });
+    fireEvent.click(screen.getByRole('radio', { name: /^Run commands/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      const names = saveSettings.mock.calls[0][0].tools ?? [];
+      expect(names).toEqual(expect.arrayContaining(['web_search', 'search_tools', 'describe_tool']));
+    });
+  });
+
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
@@ -524,8 +540,11 @@ describe('m83 independent owner web permissions', () => {
         tools: ['custom_permission', 'web_search', 'web_fetch'],
       }),
     );
-    for (const profile of ['observe', 'collaborate', 'operate'] as const) {
+    for (const profile of ['observe', 'collaborate'] as const) {
       expect(toolNamesForProfile(profile)).not.toContain('web_search');
+    }
+    expect(toolNamesForProfile('operate')).toContain('web_search');
+    for (const profile of ['observe', 'collaborate', 'operate'] as const) {
       expect(toolNamesForProfile(profile)).not.toContain('web_fetch');
     }
   });

@@ -52,13 +52,17 @@ pub(crate) struct Scope {
     pub automatic_mcp: bool,
 }
 
+pub(crate) fn discovery_configured(config: &AgentConfig) -> bool {
+    config
+        .settings
+        .as_ref()
+        .and_then(|s| s.additional.get("toolDiscovery"))
+        == Some(&DataValue::Bool(true))
+        || (config.allows_tool("search_tools") && config.allows_tool("describe_tool"))
+}
+
 pub(crate) fn discovery(config: &AgentConfig, scope: Scope) -> bool {
-    !scope.reminder_verification
-        && config
-            .settings
-            .as_ref()
-            .and_then(|s| s.additional.get("toolDiscovery"))
-            == Some(&DataValue::Bool(true))
+    !scope.reminder_verification && discovery_configured(config)
 }
 
 pub(crate) fn select(

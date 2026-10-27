@@ -18,7 +18,7 @@ This first version supports direct same-origin sign-in. It refuses redirects, SS
 
 ## Deferred tool discovery
 
-Set settings.toolDiscovery to true on an agent to opt in. The first model request exposes the permitted essentials and search_tools/describe_tool. Search or describe hydrates exact selected schemas into the next request. A run retains at most eight hydrated names and 64 KiB of schema data. Discovery results are bounded to 4 KiB.
+Set settings.toolDiscovery to true or grant both search_tools and describe_tool on an agent to opt in. The Run commands access profile includes both discovery controls and web search. The first model request exposes the permitted essentials and search_tools/describe_tool. Search or describe hydrates exact selected schemas into the next request. A run retains at most eight hydrated names and 64 KiB of schema data. Discovery results are bounded to 4 KiB.
 
 The canonical grants remain intact. Actual calls still pass ordinary native or MCP permission, approval, generation and receipt checks. Reconnection, changed schemas and revoked grants invalidate captured catalog entries. Disabled discovery preserves the existing direct-tool behavior; no universal token or cost saving is promised.
 

@@ -115,6 +115,9 @@ const OPERATE_TOOLS = [
   'acp_cancel',
   'acp_stop',
   'acp_list',
+  'web_search',
+  'search_tools',
+  'describe_tool',
 ] as const;
 
 export const ACCESS_PROFILES = {
@@ -132,7 +135,7 @@ export const ACCESS_PROFILES = {
   },
   operate: {
     label: 'Operate',
-    summary: 'Edits files, runs commands and uses any app on this computer.',
+    summary: 'Edits files, runs commands, uses apps and searches the web.',
     risk: 'Can run shell commands, background work and apps such as coding agents. Rules still apply.',
     tools: OPERATE_TOOLS,
   },

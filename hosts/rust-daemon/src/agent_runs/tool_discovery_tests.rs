@@ -20,6 +20,13 @@ async fn configure(coordinator: &AgentRunCoordinator, id: &str, enabled: bool) -
         .config;
     let registry = crate::tools::ToolRegistry::new();
     config.tools = Some(registry.resolve_descriptors(registry.tool_names()).unwrap());
+    if !enabled {
+        config
+            .tools
+            .as_mut()
+            .unwrap()
+            .retain(|tool| !matches!(tool.name.as_str(), "search_tools" | "describe_tool"));
+    }
     config
         .settings
         .as_mut()
@@ -36,6 +43,41 @@ async fn configure(coordinator: &AgentRunCoordinator, id: &str, enabled: bool) -
 fn bytes(config: &AgentConfig) -> usize {
     serde_json::to_vec(&config.tools).unwrap().len()
 }
+#[tokio::test]
+async fn explicit_discovery_tool_grants_enable_catalog() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("search", "search_tools", "query", "memory_add")]),
+        Step::Tools(vec![call(
+            "save",
+            "memory_add",
+            "content",
+            "discovered through grants",
+        )]),
+        Step::Text(vec!["saved"]),
+    ]);
+    let (coordinator, id) = coordinator_with(model.clone()).await;
+    let mut config = configure(&coordinator, &id, true).await;
+    config
+        .settings
+        .as_mut()
+        .unwrap()
+        .additional
+        .remove("toolDiscovery");
+    coordinator
+        .state
+        .write()
+        .await
+        .restore_agent_config(&id, config);
+    let result = coordinator
+        .run(chat_request(&id, "chat:explicit-discovery", "save"))
+        .await
+        .unwrap();
+    assert_eq!(result.result.status, "success");
+    assert!(model.configs()[0].allows_tool("search_tools"));
+    assert!(!model.configs()[0].allows_tool("memory_add"));
+    assert!(model.configs()[1].allows_tool("memory_add"));
+}
+
 #[tokio::test]
 async fn tool_discovery_provider_request_is_compact_then_exact_native_schema_and_receipts() {
     let model = ScriptedModel::new(vec![
