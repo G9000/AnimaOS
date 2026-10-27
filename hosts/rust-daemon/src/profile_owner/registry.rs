@@ -18,7 +18,7 @@ use super::{
 };
 
 const VERSION: u32 = 1;
-const MAX_ENTRIES: usize = 8192;
+const MAX_ACTIVE_CLAIMS: usize = 8192;
 const MAX_RESOURCES: usize = 64;
 const MAX_ANCESTORS: usize = 256;
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
@@ -125,11 +125,13 @@ impl Claim {
         let lease = open_lease(&lease_path)?;
         lease.try_lock().map_err(|_| ownership_lost_error())?;
         let lease_identity = identity(&lease)?;
-        let mut entries = 0usize;
+        let mut active_claims = 0usize;
+        let scan_deadline = Instant::now() + GATE_WAIT;
         for entry in std::fs::read_dir(&root_path)? {
             let entry = entry?;
-            entries += 1;
-            if entries > MAX_ENTRIES {
+            // Stable inactive sidecars accumulate across restarts. Bound scan
+            // time and active metadata, rather than counting inert files as owners.
+            if Instant::now() >= scan_deadline {
                 return Err(ownership_lost_error());
             }
             let name = entry.file_name();
@@ -147,6 +149,10 @@ impl Claim {
                 Ok(()) => continue, // Inactive metadata confers no authority.
                 Err(std::fs::TryLockError::WouldBlock) => {}
                 Err(_) => return Err(ownership_lost_error()),
+            }
+            active_claims += 1;
+            if active_claims > MAX_ACTIVE_CLAIMS {
+                return Err(ownership_lost_error());
             }
             if !digest_string(other_primary) {
                 return Err(ownership_lost_error());
@@ -667,6 +673,33 @@ impl Drop for TestRootOverride {
 mod tests {
     use super::*;
     use crate::profile_owner::ProfileOwner;
+
+    #[test]
+    fn profile_owner_inactive_sidecars_do_not_exhaust_active_claim_capacity() {
+        let registry = tempfile::tempdir().unwrap();
+        let _override = TestRootOverride::set(registry.path().to_path_buf());
+        for index in 0..=MAX_ACTIVE_CLAIMS {
+            std::fs::write(
+                registry
+                    .path()
+                    .join(format!("{index:016x}.v1.payload.lock")),
+                b"",
+            )
+            .unwrap();
+        }
+        let workspace = tempfile::tempdir().unwrap();
+        let resource = workspace.path().join("profile.json");
+        let owner =
+            ProfileOwner::acquire([resource.clone()]).expect("inactive sidecars are not owners");
+        owner.ensure_owned().unwrap();
+        assert!(
+            ProfileOwner::acquire([resource]).is_err(),
+            "active owners still exclude contenders"
+        );
+        let independent = ProfileOwner::acquire([workspace.path().join("independent.json")])
+            .expect("independent owners remain admissible");
+        independent.ensure_owned().unwrap();
+    }
 
     #[cfg(windows)]
     #[test]
