@@ -1547,14 +1547,13 @@ export function Composer({
             </div>
           </div>
         </AttachmentDropZone>
-        {commands && !(steerable || offline || sending || runActive) && (
+        {commands && (
           <p className="composer-keys" aria-hidden>
             <span>/ commands</span>
             <span>{isMacPlatform() ? '⌘K' : 'Ctrl K'} search</span>
           </p>
         )}
-        {/* One line under the bar, only when there is something to know: the
-            keys that apply now, and what the companion is doing. */}
+        {/* A hint only when there is something to know. */}
         {(steerable || offline || sending || runActive) && (
           <div className="composer-hints">
             {steerable && (
@@ -1563,10 +1562,7 @@ export function Composer({
                 {`⏎ queue · ${isMacPlatform() ? '⌘⏎' : 'Ctrl+Enter'} steer · ⇧⏎ new line`}
               </span>
             )}
-            <span
-              className="composer-status"
-              data-tone={offline ? 'offline' : 'live'}
-            >
+            <span>
               {offline
                 ? 'Offline · your draft stays here'
                 : sending
