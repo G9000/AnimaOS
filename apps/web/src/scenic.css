@@ -2544,17 +2544,66 @@ button.scenic-thread[aria-expanded='true'] {
   color: rgb(236 230 218 / 0.35);
 }
 
-.scenic-shell .composer-hints {
+/* The hint line is the container's last child, which the rule near the
+ * textarea sizes for phones, so it names its own size here. */
+.scenic-shell .studio-composer > div > div.composer-hints {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  padding: 0 4px;
+  gap: 4px 12px;
+  margin-top: 10px;
+  padding: 0 2px;
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgb(236 230 218 / 0.35);
+}
+
+/* What the companion is doing, marked with a small square. */
+.scenic-shell .composer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.scenic-shell .composer-status::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent);
+}
+
+.scenic-shell .composer-status[data-tone='offline']::before {
+  background: var(--color-danger);
+}
+
+/* The composer you are writing in is the live item: selection handles on
+ * its corners, as on any selected frame. */
+.scenic-shell .studio-composer-box.composer-bar::after {
+  --handle: linear-gradient(var(--color-accent), var(--color-accent));
+  content: '';
+  position: absolute;
+  inset: -3px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  background:
+    var(--handle) top left / 6px 6px no-repeat,
+    var(--handle) top right / 6px 6px no-repeat,
+    var(--handle) bottom left / 6px 6px no-repeat,
+    var(--handle) bottom right / 6px 6px no-repeat;
+}
+
+.scenic-shell .studio-composer-box.composer-bar:focus-within::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scenic-shell .studio-composer-box.composer-bar::after {
+    transition: none;
+  }
 }
 
 @media (max-width: 767px) {
@@ -6997,7 +7046,7 @@ details.settings-item > :not(summary) {
   gap: 12px;
   padding: 14px 14px 10px;
   border-color: rgb(255 255 255 / 0.14);
-  border-radius: 12px;
+  border-radius: 4px;
   background: #141413f2;
   box-shadow: 0 16px 44px rgb(0 0 0 / 0.5);
 }
@@ -7030,14 +7079,14 @@ details.settings-item > :not(summary) {
 
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-chip {
   height: 28px;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-controls .composer-icon,
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-controls .composer-send {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-send {
@@ -7822,7 +7871,7 @@ details.settings-item > :not(summary) {
   min-height: 26px;
   padding: 0 9px;
   border: 1px solid rgb(236 230 218 / 0.16);
-  border-radius: 6px;
+  border-radius: 3px;
   background: rgb(236 230 218 / 0.04);
   color: var(--color-ink-2);
   font-size: 10px;
