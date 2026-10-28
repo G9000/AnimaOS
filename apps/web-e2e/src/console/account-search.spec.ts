@@ -114,6 +114,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(accountPanel.getByText('Attachment text: 0 indexed · 2 waiting')).toBeVisible();
 
     const microsoft = page.getByRole('region', { name: 'Microsoft files' });
+    await microsoft.getByRole('button', { name: 'Microsoft files', exact: true }).click();
     await microsoft.getByRole('button', { name: 'Choose OneDrive files' }).click();
     for (let number = 1; number <= 17; number++)
       await microsoft.getByRole('checkbox', { name: `Document ${String(number).padStart(2, '0')}.txt` }).check();

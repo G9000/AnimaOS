@@ -4,7 +4,8 @@ use std::io::{self, Read, Write};
 
 use anima_core::CancelSignal;
 use anima_service_adapters::document_content::{
-    validate_document_extraction, DocumentFormat, ExtractedDocumentText,
+    validate_document_extraction, validate_knowledge_document_extraction, DocumentFormat,
+    ExtractedDocumentText, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
 };
 use async_trait::async_trait;
 use tokio::time::Instant;
@@ -13,7 +14,33 @@ const READY: &[u8] = b"ANIMA-DOCUMENT-READY-v2\n";
 const MAX_INPUT: usize = 2 * 1024 * 1024;
 const MAX_STDOUT: usize = 64 * 1024;
 const MAX_FRAME: usize = MAX_STDOUT - READY.len() - 4;
+// JSON may escape one text byte as six bytes. Metadata remains separately bounded
+// by the same 2,000 blocks, 100 pages, 16 sheets, and cell/paragraph validators.
+const MAX_KNOWLEDGE_FRAME: usize = 6 * MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES + 256 * 1024;
 const MAX_STDERR: usize = 4 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractionMode {
+    Preview,
+    Knowledge,
+}
+
+impl ExtractionMode {
+    fn frame_limit(self) -> usize {
+        match self {
+            Self::Preview => MAX_FRAME,
+            Self::Knowledge => MAX_KNOWLEDGE_FRAME,
+        }
+    }
+
+    fn validate(self, value: &ExtractedDocumentText) -> io::Result<()> {
+        match self {
+            Self::Preview => validate_document_extraction(value),
+            Self::Knowledge => validate_knowledge_document_extraction(value),
+        }
+        .map_err(|_| invalid())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorkerFailure {
@@ -33,6 +60,18 @@ pub(crate) trait DocumentExtractor: Send + Sync {
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure>;
+
+    /// Separate indexing envelope; preview-only test extractors fail closed.
+    async fn extract_knowledge(
+        &self,
+        format: DocumentFormat,
+        bytes: Vec<u8>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        let _ = (format, bytes, cancel, deadline);
+        Err(WorkerFailure::Unavailable)
+    }
 }
 
 #[derive(Default)]
@@ -62,6 +101,31 @@ impl DocumentExtractor for DocumentWorker {
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        self.extract_mode(format, ExtractionMode::Preview, bytes, cancel, deadline)
+            .await
+    }
+
+    async fn extract_knowledge(
+        &self,
+        format: DocumentFormat,
+        bytes: Vec<u8>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        self.extract_mode(format, ExtractionMode::Knowledge, bytes, cancel, deadline)
+            .await
+    }
+}
+
+impl DocumentWorker {
+    async fn extract_mode(
+        &self,
+        format: DocumentFormat,
+        mode: ExtractionMode,
+        bytes: Vec<u8>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
         if cancel.is_cancelled() {
             return Err(WorkerFailure::Cancelled);
         }
@@ -73,12 +137,12 @@ impl DocumentExtractor for DocumentWorker {
         }
         #[cfg(not(windows))]
         {
-            let _ = (format, bytes);
+            let _ = (format, mode, bytes);
             Err(WorkerFailure::Unavailable)
         }
         #[cfg(windows)]
         {
-            physical::extract(format, bytes, cancel, deadline).await
+            physical::extract(format, mode, bytes, cancel, deadline).await
         }
     }
 }
@@ -87,13 +151,27 @@ fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid document worker frame")
 }
 
+#[cfg(test)]
 fn read_request(reader: &mut impl Read) -> io::Result<(DocumentFormat, Vec<u8>)> {
+    let (mode, format, bytes) = read_request_mode(reader)?;
+    if mode != ExtractionMode::Preview {
+        return Err(invalid());
+    }
+    Ok((format, bytes))
+}
+
+fn read_request_mode(
+    reader: &mut impl Read,
+) -> io::Result<(ExtractionMode, DocumentFormat, Vec<u8>)> {
     let mut format = [0; 1];
     reader.read_exact(&mut format)?;
-    let format = match format[0] {
-        0 => DocumentFormat::Docx,
-        1 => DocumentFormat::Pdf,
-        2 => DocumentFormat::Xlsx,
+    let (mode, format) = match format[0] {
+        0 => (ExtractionMode::Preview, DocumentFormat::Docx),
+        1 => (ExtractionMode::Preview, DocumentFormat::Pdf),
+        2 => (ExtractionMode::Preview, DocumentFormat::Xlsx),
+        3 => (ExtractionMode::Knowledge, DocumentFormat::Docx),
+        4 => (ExtractionMode::Knowledge, DocumentFormat::Pdf),
+        5 => (ExtractionMode::Knowledge, DocumentFormat::Xlsx),
         _ => return Err(invalid()),
     };
     let mut header = [0; 4];
@@ -108,13 +186,22 @@ fn read_request(reader: &mut impl Read) -> io::Result<(DocumentFormat, Vec<u8>)>
     if reader.read(&mut trailing)? != 0 {
         return Err(invalid());
     }
-    Ok((format, bytes))
+    Ok((mode, format, bytes))
 }
 
+#[cfg(test)]
 fn write_result(writer: &mut impl Write, value: &ExtractedDocumentText) -> io::Result<()> {
-    validate_document_extraction(value).map_err(|_| invalid())?;
+    write_result_mode(writer, value, ExtractionMode::Preview)
+}
+
+fn write_result_mode(
+    writer: &mut impl Write,
+    value: &ExtractedDocumentText,
+    mode: ExtractionMode,
+) -> io::Result<()> {
+    mode.validate(value)?;
     let json = serde_json::to_vec(value).map_err(|_| invalid())?;
-    if json.len() > MAX_FRAME {
+    if json.len() > mode.frame_limit() {
         return Err(invalid());
     }
     writer.write_all(&(json.len() as u32).to_le_bytes())?;
@@ -135,10 +222,15 @@ pub fn document_worker_entry() -> io::Result<()> {
         let mut output = io::stdout().lock();
         output.write_all(READY)?;
         output.flush()?;
-        let (format, bytes) = read_request(&mut io::stdin().lock())?;
+        let (mode, format, bytes) = read_request_mode(&mut io::stdin().lock())?;
         // Synchronous Rust parser: no runtime, threads, converter, or subprocess.
-        let extracted = anima_document_content::extract_document(format, &bytes);
-        write_result(&mut output, &extracted)
+        let extracted = match mode {
+            ExtractionMode::Preview => anima_document_content::extract_document(format, &bytes),
+            ExtractionMode::Knowledge => {
+                anima_document_content::extract_knowledge_document(format, &bytes)
+            }
+        };
+        write_result_mode(&mut output, &extracted, mode)
     }
 }
 
@@ -159,9 +251,20 @@ fn install_resource_limits() -> io::Result<()> {
     resource_job.assign_current_process()
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 async fn exchange(
     format: DocumentFormat,
+    stdin: impl tokio::io::AsyncWrite + Unpin,
+    stdout: impl tokio::io::AsyncRead + Unpin,
+    bytes: Vec<u8>,
+) -> Result<Option<ExtractedDocumentText>, WorkerFailure> {
+    exchange_mode(format, ExtractionMode::Preview, stdin, stdout, bytes).await
+}
+
+#[cfg(any(windows, test))]
+async fn exchange_mode(
+    format: DocumentFormat,
+    mode: ExtractionMode,
     mut stdin: impl tokio::io::AsyncWrite + Unpin,
     mut stdout: impl tokio::io::AsyncRead + Unpin,
     bytes: Vec<u8>,
@@ -180,6 +283,10 @@ async fn exchange(
         DocumentFormat::Docx => 0,
         DocumentFormat::Pdf => 1,
         DocumentFormat::Xlsx => 2,
+    } + if mode == ExtractionMode::Knowledge {
+        3
+    } else {
+        0
     };
     stdin
         .write_all(&[format_code])
@@ -204,7 +311,7 @@ async fn exchange(
         .await
         .map_err(|_| WorkerFailure::InvalidOutput)?;
     let length = u32::from_le_bytes(length) as usize;
-    if length > MAX_FRAME {
+    if length > mode.frame_limit() {
         return Err(WorkerFailure::InvalidOutput);
     }
     let mut json = vec![0; length];
@@ -223,7 +330,8 @@ async fn exchange(
     }
     let result: ExtractedDocumentText =
         serde_json::from_slice(&json).map_err(|_| WorkerFailure::InvalidOutput)?;
-    validate_document_extraction(&result).map_err(|_| WorkerFailure::InvalidOutput)?;
+    mode.validate(&result)
+        .map_err(|_| WorkerFailure::InvalidOutput)?;
     if result.format != format {
         return Err(WorkerFailure::InvalidOutput);
     }
@@ -321,15 +429,36 @@ mod physical {
 
     pub(super) async fn extract(
         format: DocumentFormat,
+        mode: ExtractionMode,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure> {
-        extract_with_program(format, bytes, cancel, deadline, Program::Daemon).await
+        extract_with_program_mode(format, mode, bytes, cancel, deadline, Program::Daemon).await
     }
 
+    #[cfg(test)]
     async fn extract_with_program(
         format: DocumentFormat,
+        bytes: Vec<u8>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+        program: Program,
+    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+        extract_with_program_mode(
+            format,
+            ExtractionMode::Preview,
+            bytes,
+            cancel,
+            deadline,
+            program,
+        )
+        .await
+    }
+
+    async fn extract_with_program_mode(
+        format: DocumentFormat,
+        mode: ExtractionMode,
         bytes: Vec<u8>,
         cancel: CancelSignal,
         deadline: Option<Instant>,
@@ -365,7 +494,7 @@ mod physical {
         let (sender, receiver) = oneshot::channel();
         tokio::spawn(owner(
             lease,
-            (format, bytes),
+            (format, mode, bytes),
             cancel,
             stop,
             deadline,
@@ -378,6 +507,7 @@ mod physical {
     fn launch(
         resources: &mut Resources,
         format: DocumentFormat,
+        mode: ExtractionMode,
         bytes: Vec<u8>,
         program: Program,
     ) -> Result<(), WorkerFailure> {
@@ -425,21 +555,23 @@ mod physical {
         let stdin = child.stdin().take().ok_or(WorkerFailure::Unavailable)?;
         let stdout = child.stdout().take().ok_or(WorkerFailure::Unavailable)?;
         let stderr = child.stderr().take().ok_or(WorkerFailure::Unavailable)?;
-        resources.io = Some(tokio::spawn(exchange(format, stdin, stdout, bytes)));
+        resources.io = Some(tokio::spawn(exchange_mode(
+            format, mode, stdin, stdout, bytes,
+        )));
         resources.stderr = Some(tokio::spawn(drain_stderr(stderr)));
         Ok(())
     }
 
     async fn owner(
         mut lease: Lease,
-        request: (DocumentFormat, Vec<u8>),
+        request: (DocumentFormat, ExtractionMode, Vec<u8>),
         cancel: CancelSignal,
         stop: CancellationToken,
         deadline: Instant,
         sender: oneshot::Sender<Result<ExtractedDocumentText, WorkerFailure>>,
         program: Program,
     ) {
-        let (format, bytes) = request;
+        let (format, mode, bytes) = request;
         let mut sender = Some(sender);
         if cancel.is_cancelled() || stop.is_cancelled() || Instant::now() >= deadline {
             let failure = if Instant::now() >= deadline {
@@ -452,7 +584,7 @@ mod physical {
             return;
         }
         let resources = lease.resources.as_mut().expect("owner resources");
-        if let Err(failure) = launch(resources, format, bytes, program) {
+        if let Err(failure) = launch(resources, format, mode, bytes, program) {
             let _ = sender.take().expect("response exists").send(Err(failure));
             // Failed containment/spawn is permanently quarantined, including
             // any owned child and pipe handles, even if cleanup later succeeds.
@@ -607,6 +739,81 @@ mod physical {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             panic!("physical slot was not retired within two seconds");
+        }
+
+        #[tokio::test]
+        #[ignore = "root builds the finite peer and runs physical knowledge extraction acceptance explicitly"]
+        async fn knowledge_physical_worker_retains_late_passages_and_retires_the_shared_job() {
+            let mut blocks = (0..24)
+                .map(|index| {
+                    serde_json::json!({
+                        "type": "paragraph",
+                        "text": format!("Paragraph {index}: {}", "ordinary padding ".repeat(63)),
+                    })
+                })
+                .collect::<Vec<_>>();
+            blocks.push(serde_json::json!({
+                "type": "paragraph", "text": "LATE_KNOWLEDGE_ANCHOR_7319",
+            }));
+            let spec: anima_document_content::DocumentSpec = serde_json::from_value(
+                serde_json::json!({"format":"docx","title":"Knowledge passage regression","blocks":blocks}),
+            ).unwrap();
+            let bytes = anima_document_content::render_document(&spec)
+                .unwrap()
+                .bytes;
+            for mode in [ExtractionMode::Preview, ExtractionMode::Knowledge] {
+                let mut result = Err(WorkerFailure::Busy);
+                for _ in 0..100 {
+                    result = extract_with_program_mode(
+                        DocumentFormat::Docx,
+                        mode,
+                        bytes.clone(),
+                        CancelSignal::new(),
+                        None,
+                        peer("real"),
+                    )
+                    .await;
+                    if result != Err(WorkerFailure::Busy) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                let extraction = result.expect("bounded real worker completed");
+                let text = extraction
+                    .blocks
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert_eq!(
+                    text.contains("LATE_KNOWLEDGE_ANCHOR_7319"),
+                    mode == ExtractionMode::Knowledge
+                );
+                match mode {
+                    ExtractionMode::Preview => {
+                        validate_document_extraction(&extraction).unwrap();
+                    }
+                    ExtractionMode::Knowledge => {
+                        assert!(text.len() > 16 * 1024);
+                        validate_knowledge_document_extraction(&extraction).unwrap();
+                    }
+                }
+                // A success response follows whole-Job and both-pipes retirement.
+                // Give the independent owner its final permit-drop scheduling step.
+                let mut retired = false;
+                for _ in 0..100 {
+                    if let Ok(permit) = shared_physical_slot().try_acquire_owned() {
+                        drop(permit);
+                        retired = true;
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                assert!(
+                    retired,
+                    "the exact shared physical slot must retire after {mode:?}"
+                );
+            }
         }
 
         #[tokio::test]

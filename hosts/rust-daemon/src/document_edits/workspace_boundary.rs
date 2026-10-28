@@ -114,6 +114,9 @@ pub(crate) fn ensure_state_separate(
     state: &crate::state::DaemonState,
     configured_workspace: Option<&Path>,
 ) -> Result<(), String> {
+    if let Some(root) = state.project_knowledge.cache_root()? {
+        ensure_separate(&root, configured_workspace)?;
+    }
     if let Some(store) = &state.document_edit_store {
         state
             .ensure_profile_owned()

@@ -156,8 +156,9 @@ export class WorkspaceClient {
     });
   }
 
-  pickFolder(): Promise<WorkspacePickFolderResponse> {
-    return this.client.requestJson('/api/workspace/pick-folder', {
+  pickFolder(options: { purpose?: 'project_knowledge' } = {}): Promise<WorkspacePickFolderResponse> {
+    const query = options.purpose ? `?${new URLSearchParams({ purpose: options.purpose })}` : '';
+    return this.client.requestJson(`/api/workspace/pick-folder${query}`, {
       method: 'POST',
     });
   }

@@ -337,3 +337,11 @@ export const MaximizeIcon = (p: IconProps) =>
   base(p, <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />);
 export const MinimizeIcon = (p: IconProps) =>
   base(p, <path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5" />);
+export const AtSignIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" />
+    </>,
+  );

@@ -7,15 +7,18 @@ export interface ProjectSummary {
   members: ProjectMember[]; createdAtMs: number; updatedAtMs: number;
   chatCount: number; resourceCount: number;
 }
-export type ProjectTarget =
+/** Targets accepted by the ordinary resource-link endpoint. */
+export type ProjectLinkTarget =
   | { kind: 'workspace_file'; path: string }
   | { kind: 'chat_excerpt'; ownerAgentId: string; sessionId: string; clearGeneration: number; messageIds: string[] }
   | { kind: 'chat_result'; ownerAgentId: string; sessionId: string; clearGeneration: number; resultId: string }
   | { kind: 'workflow'; ownerAgentId: string; workflowId: string }
   | { kind: 'workflow_template'; ownerAgentId: string; slug: string };
+export type ProjectTarget = ProjectLinkTarget
+  | { kind: 'knowledge_folder'; rootPath: string; rootIdentity: string };
 export type ProjectResourceState = 'ready' | 'missing' | 'not_in_project' | 'access_removed'
   | 'source_changed' | 'workspace_changed' | 'excluded' | 'unsafe_content' | 'unsupported'
-  | 'unavailable' | 'budget_omitted' | 'already_in_current_chat';
+  | 'unavailable' | 'no_matches' | 'budget_omitted' | 'already_in_current_chat';
 export interface ProjectResource {
   id: string; target: ProjectTarget | null; state: ProjectResourceState;
   role: 'reference' | 'output'; label: string | null; useInContext: boolean; createdAtMs: number;
@@ -46,7 +49,7 @@ export interface ProjectPatchInput {
   expectedRevision: number; title?: string; instructions?: string; status?: ProjectStatus;
 }
 export interface ProjectAddResourceInput {
-  expectedRevision: number; requestKey: string; asAgentId: string; target: ProjectTarget;
+  expectedRevision: number; requestKey: string; asAgentId: string; target: ProjectLinkTarget;
   role: 'reference' | 'output'; label?: string; useInContext: boolean;
 }
 export interface ProjectResourcePatch {
@@ -56,6 +59,22 @@ export interface ProjectResourcePatch {
 export interface ProjectMembersResult {
   projectSummary: ProjectSummary; accessEpoch: number; detachedChats: number; stopRequestedRunIds: string[];
 }
+export interface ProjectKnowledgeBinding {
+  projectRevision: number; accessEpoch: number; memberGeneration: number;
+}
+export interface ProjectAddKnowledgeFolderInput {
+  expectedRevision: number; requestKey: string; asAgentId: string; rootPath: string; label?: string;
+}
+export interface ProjectKnowledgeSource {
+  resourceId: string; status: 'indexing' | 'ready' | 'partial' | 'unavailable';
+  documentCount: number; indexedAtMs: number | null; generation: number; omittedCount: number; error?: string;
+}
+export interface ProjectKnowledgeStatus extends ProjectKnowledgeBinding { sources: ProjectKnowledgeSource[] }
+export interface ProjectKnowledgeHit {
+  citationId: string; resourceId: string; documentId: string; title: string; locator: string; excerpt: string;
+}
+export interface ProjectKnowledgeSearch extends ProjectKnowledgeStatus { hits: ProjectKnowledgeHit[] }
+export interface ProjectKnowledgeCitation extends ProjectKnowledgeBinding, ProjectKnowledgeHit { text: string }
 
 /** Profile-owned groupings. Member selectors never replace owner authentication. */
 export class ProjectsClient {
@@ -121,6 +140,30 @@ export class ProjectsClient {
 
   context(id: string, asAgentId: string, options: { signal?: AbortSignal } = {}): Promise<ProjectContextReport> {
     return this.client.requestJson(`${path(id)}/context?${new URLSearchParams({ asAgentId })}`, options);
+  }
+
+  /** Explicit owner grant. Root identities are issued and verified by the host. */
+  async addKnowledgeFolder(id: string, input: ProjectAddKnowledgeFolderInput): Promise<Project> {
+    const result = await this.client.requestJson<{ project: Project }>(`${path(id)}/knowledge/sources`, { method: 'POST', body: input });
+    return result.project;
+  }
+
+  knowledgeStatus(id: string, asAgentId: string, options: { signal?: AbortSignal } = {}): Promise<ProjectKnowledgeStatus> {
+    return this.client.requestJson(`${path(id)}/knowledge/status?${new URLSearchParams({ asAgentId })}`, options);
+  }
+
+  refreshKnowledge(id: string, input: { asAgentId: string; resourceId?: string }, options: { signal?: AbortSignal } = {}): Promise<ProjectKnowledgeStatus> {
+    return this.client.requestJson(`${path(id)}/knowledge/refresh`, { ...options, method: 'POST', body: input });
+  }
+
+  searchKnowledge(id: string, asAgentId: string, options: { query: string; limit?: number; signal?: AbortSignal }): Promise<ProjectKnowledgeSearch> {
+    const query = new URLSearchParams({ asAgentId, query: options.query });
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    return this.client.requestJson(`${path(id)}/knowledge/search?${query}`, { signal: options.signal });
+  }
+
+  openKnowledgeCitation(id: string, citationId: string, asAgentId: string, options: { signal?: AbortSignal } = {}): Promise<ProjectKnowledgeCitation> {
+    return this.client.requestJson(`${path(id)}/knowledge/citations/${encodeURIComponent(citationId)}?${new URLSearchParams({ asAgentId })}`, options);
   }
 
   chats(id: string, asAgentId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal } = {}): Promise<ProjectChatPage> {

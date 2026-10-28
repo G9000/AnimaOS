@@ -34,6 +34,8 @@ pub const MAX_DOCUMENT_SNAPSHOTS: usize = 10;
 /// At most two status rows may carry extracted text.
 pub const MAX_USABLE_DOCUMENT_SNAPSHOTS: usize = 2;
 pub const MAX_DOCUMENT_RENDERED_BYTES: usize = 16 * 1024;
+/// Knowledge indexing uses a separate validated envelope from attachment previews.
+pub const MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_DOCUMENT_PARAGRAPHS: usize = 2_000;
 pub const MAX_PDF_PAGES: usize = 100;
 pub const MAX_XLSX_SHEETS: usize = 16;
@@ -188,6 +190,23 @@ pub struct DocumentContentError;
 pub fn validate_document_extraction(
     value: &ExtractedDocumentText,
 ) -> Result<(), DocumentContentError> {
+    validate_extraction_with_text_limit(value, MAX_DOCUMENT_RENDERED_BYTES)
+}
+
+/// Validates indexing text without expanding the attachment preview envelope.
+///
+/// Locators, coverage, omission reasons, and structural limits retain the same
+/// validation rules as previews; only the retained text allowance is larger.
+pub fn validate_knowledge_document_extraction(
+    value: &ExtractedDocumentText,
+) -> Result<(), DocumentContentError> {
+    validate_extraction_with_text_limit(value, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES)
+}
+
+fn validate_extraction_with_text_limit(
+    value: &ExtractedDocumentText,
+    text_limit: usize,
+) -> Result<(), DocumentContentError> {
     let usable = matches!(
         value.status,
         DocumentExtractionStatus::Ready | DocumentExtractionStatus::Partial
@@ -267,7 +286,7 @@ pub fn validate_document_extraction(
                 None => {}
             }
         }
-        DocumentFormat::Xlsx => return validate_xlsx_extraction(value),
+        DocumentFormat::Xlsx => return validate_xlsx_extraction(value, text_limit),
     }
     let mut previous = 0;
     let mut bytes = 0usize;
@@ -286,7 +305,7 @@ pub fn validate_document_extraction(
         if position <= previous
             || position > limit
             || block.text.trim().is_empty()
-            || bytes > MAX_DOCUMENT_RENDERED_BYTES
+            || bytes > text_limit
             || block.text.contains('\0')
         {
             return Err(DocumentContentError);
@@ -303,7 +322,10 @@ fn valid_xml_text(text: &str) -> bool {
     })
 }
 
-fn validate_xlsx_extraction(value: &ExtractedDocumentText) -> Result<(), DocumentContentError> {
+fn validate_xlsx_extraction(
+    value: &ExtractedDocumentText,
+    text_limit: usize,
+) -> Result<(), DocumentContentError> {
     if value.pdf_coverage.is_some()
         || value.status == DocumentExtractionStatus::Ready
         || value.omissions.iter().any(|omission| {
@@ -385,7 +407,7 @@ fn validate_xlsx_extraction(value: &ExtractedDocumentText) -> Result<(), Documen
         text_bytes = text_bytes
             .checked_add(block.text.len())
             .ok_or(DocumentContentError)?;
-        if text_bytes > MAX_DOCUMENT_RENDERED_BYTES {
+        if text_bytes > text_limit {
             return Err(DocumentContentError);
         }
         counts[sheet as usize - 1] += 1;

@@ -23,12 +23,32 @@ pub use generation::{
 pub use pdf::extract_pdf;
 pub use xlsx::extract_xlsx;
 
-use anima_service_adapters::document_content::{DocumentFormat, ExtractedDocumentText};
+use anima_service_adapters::document_content::{
+    DocumentFormat, ExtractedDocumentText, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
+};
 
 pub fn extract_document(format: DocumentFormat, bytes: &[u8]) -> ExtractedDocumentText {
     match format {
         DocumentFormat::Docx => extract_docx(bytes),
         DocumentFormat::Pdf => extract_pdf(bytes),
         DocumentFormat::Xlsx => extract_xlsx(bytes),
+    }
+}
+
+/// Extracts bounded indexing text inside the same physically owned document worker.
+///
+/// Production callers must retain the owned process limits described by this crate.
+/// This function preserves every format's input, structure, and literal-data policies.
+pub fn extract_knowledge_document(format: DocumentFormat, bytes: &[u8]) -> ExtractedDocumentText {
+    match format {
+        DocumentFormat::Docx => {
+            docx::extract_docx_with_text_limit(bytes, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES)
+        }
+        DocumentFormat::Pdf => {
+            pdf::extract_pdf_with_text_limit(bytes, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES)
+        }
+        DocumentFormat::Xlsx => {
+            xlsx::extract_xlsx_with_text_limit(bytes, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES)
+        }
     }
 }

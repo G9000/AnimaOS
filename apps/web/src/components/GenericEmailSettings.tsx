@@ -141,9 +141,8 @@ export function GenericEmailSettings({
       }}
     >
       <p className="text-xs leading-relaxed text-ink-3">
-        No OAuth app registration is needed. Setup checks receiving and sending
-        credentials without sending a message. Passwords are stored in the
-        daemon's operating system credential vault.
+        Works with any mailbox. Connecting only checks your login; it sends
+        nothing. Passwords stay in your system’s credential vault.
       </p>
       <fieldset className="min-w-0 space-y-4" disabled={busy || !online}>
         <label className="block text-xs text-ink-2">
@@ -157,6 +156,7 @@ export function GenericEmailSettings({
             autoComplete="off"
           />
         </label>
+        <div className="grid min-w-0 gap-4">
         {(
           [
             ['IMAP', imap, setImap, imapPassword, setImapPassword],
@@ -168,10 +168,10 @@ export function GenericEmailSettings({
             className="grid min-w-0 gap-3 rounded-xl border border-line p-3 sm:grid-cols-2"
           >
             <legend className="px-1 text-xs font-medium text-ink">
-              {name === 'IMAP' ? 'Receiving (IMAP)' : 'Sending (SMTP)'}
+              {name === 'IMAP' ? 'Incoming mail (IMAP)' : 'Outgoing mail (SMTP)'}
             </legend>
             <label className="block min-w-0 text-xs text-ink-2 sm:col-span-2">
-              Host
+              Server
               <input
                 aria-label={`${name} host`}
                 className="field mt-1 w-full"
@@ -197,7 +197,7 @@ export function GenericEmailSettings({
               />
             </label>
             <label className="block min-w-0 text-xs text-ink-2">
-              Security
+              Encryption
               <select
                 aria-label={`${name} security`}
                 className="field mt-1 w-full"
@@ -209,8 +209,8 @@ export function GenericEmailSettings({
                   })
                 }
               >
-                <option value="tls">TLS</option>
-                <option value="starttls">STARTTLS (required)</option>
+                <option value="tls">SSL/TLS</option>
+                <option value="starttls">STARTTLS</option>
               </select>
             </label>
             <label className="block min-w-0 text-xs text-ink-2 sm:col-span-2">
@@ -226,7 +226,7 @@ export function GenericEmailSettings({
               />
             </label>
             <label className="block min-w-0 text-xs text-ink-2 sm:col-span-2">
-              Password or app password
+              Password
               <input
                 aria-label={`${name} password`}
                 className="field mt-1 w-full"
@@ -238,20 +238,22 @@ export function GenericEmailSettings({
             </label>
           </fieldset>
         ))}
-        <div className="space-y-3 rounded-xl border border-line p-3">
+        </div>
+        <details className="space-y-3 rounded-xl border border-line p-3">
+          <summary className="cursor-pointer text-xs font-medium text-ink">
+            Automatic replies (advanced)
+          </summary>
           <label className="flex items-start gap-2 text-xs text-ink-2">
             <input
               type="checkbox"
               checked={automatic}
               onChange={(event) => setAutomatic(event.target.checked)}
             />
-            Automatically reply to allowed senders
+            Reply automatically to the senders below
           </label>
           <p className="text-xs leading-relaxed text-ink-3">
-            Only new mail received after connecting can receive automatic
-            replies. Historical messages are never automatically answered.
-            Allowed senders must pass your receiving server's authenticated
-            sender checks. Automatic replies send without individual approval.
+            Replies go out without asking you first, and only to mail that
+            arrives after you connect.
           </p>
           <label className="block text-xs text-ink-2">
             Allowed senders
@@ -264,7 +266,7 @@ export function GenericEmailSettings({
             />
           </label>
           <label className="block text-xs text-ink-2">
-            Receiving mail server ID
+            Mail server ID
             <input
               aria-label="Receiving mail server ID"
               className="field mt-1 w-full"
@@ -277,12 +279,10 @@ export function GenericEmailSettings({
             id={`email-authserv-${agentId}`}
             className="text-xs leading-relaxed text-ink-3"
           >
-            Authentication-Results authserv-id stamped by your receiving mail
-            server (for example mx.google.com). Enable automatic replies only
-            when your provider confirms it removes forged authentication headers
-            claiming this server ID.
+            Your provider’s authentication server ID, such as mx.google.com.
+            Only turn this on if your provider removes forged sender headers.
           </p>
-        </div>
+        </details>
         <button type="submit" className={primaryBtnCls}>
           {connected ? 'Reconnect Email' : 'Connect Email'}
         </button>

@@ -434,3 +434,59 @@ fn empty_body_has_explicit_no_text_and_raw_input_limit_is_closed() {
     assert_eq!(result.status, Status::TooLarge);
     assert!(result.blocks.is_empty());
 }
+
+#[test]
+fn knowledge_extraction_retains_late_passages_without_expanding_attachment_preview() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::{
+        validate_knowledge_document_extraction, DocumentFormat,
+    };
+    let body = format!(
+        "{}<w:p><w:r><w:t>LATE_KNOWLEDGE_ANCHOR_7319</w:t></w:r></w:p>",
+        "<w:p><w:r><w:t>Repeated ordinary paragraph padding 4096.</w:t></w:r></w:p>".repeat(800)
+    );
+    let bytes = doc(&body, false);
+    let preview = extract_docx(&bytes);
+    assert!(!preview
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_KNOWLEDGE_ANCHOR_7319")));
+    validate_document_extraction(&preview).unwrap();
+    let knowledge = extract_knowledge_document(DocumentFormat::Docx, &bytes);
+    assert!(knowledge
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_KNOWLEDGE_ANCHOR_7319")));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            > 16 * 1024
+    );
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+    assert!(validate_document_extraction(&knowledge).is_err());
+}
+
+#[test]
+fn knowledge_extraction_stops_at_one_mib_and_remains_an_honest_partial() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::{
+        validate_knowledge_document_extraction, DocumentFormat, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
+    };
+    let paragraph = format!("<w:p><w:r><w:t>{}</w:t></w:r></w:p>", "x".repeat(1024));
+    let knowledge =
+        extract_knowledge_document(DocumentFormat::Docx, &doc(&paragraph.repeat(1200), false));
+    assert_eq!(knowledge.status, Status::Partial);
+    assert!(knowledge.omissions.contains(&Omission::TextLimit));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            <= MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES
+    );
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+}

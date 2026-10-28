@@ -732,3 +732,74 @@ fn m66_escaped_terminator_cdata_and_ncname_pi_targets_remain_valid() {
         );
     }
 }
+
+#[test]
+fn knowledge_xlsx_retains_late_cells_beyond_the_attachment_preview() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::{
+        validate_document_extraction, validate_knowledge_document_extraction,
+    };
+    let mut body = (1..=40)
+        .map(|row| {
+            format!(
+                "<row r=\"{row}\"><c r=\"A{row}\" t=\"inlineStr\"><is><t>{}</t></is></c></row>",
+                "x".repeat(512)
+            )
+        })
+        .collect::<String>();
+    body.push_str("<row r=\"41\"><c r=\"A41\" t=\"inlineStr\"><is><t>LATE_XLSX_KNOWLEDGE_ANCHOR_7319</t></is></c></row>");
+    let bytes = package(&parts(&[("Knowledge", "visible", &body)], ""), false);
+    let preview = extract_document(DocumentFormat::Xlsx, &bytes);
+    validate_document_extraction(&preview).unwrap();
+    assert!(!preview
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_XLSX_KNOWLEDGE_ANCHOR_7319")));
+    let knowledge = extract_knowledge_document(DocumentFormat::Xlsx, &bytes);
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+    assert!(knowledge
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_XLSX_KNOWLEDGE_ANCHOR_7319")));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            > 16 * 1024
+    );
+    assert_eq!(knowledge.xlsx_coverage.unwrap().included_cell_count, 41);
+}
+
+#[test]
+fn knowledge_xlsx_caps_one_mib_with_honest_observed_cell_coverage() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::{
+        validate_knowledge_document_extraction, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
+    };
+    let body = (1..=1100)
+        .map(|row| {
+            format!(
+                "<row r=\"{row}\"><c r=\"A{row}\" t=\"inlineStr\"><is><t>{}</t></is></c></row>",
+                "x".repeat(1024)
+            )
+        })
+        .collect::<String>();
+    let bytes = package(&parts(&[("Bounds", "visible", &body)], ""), false);
+    let knowledge = extract_knowledge_document(DocumentFormat::Xlsx, &bytes);
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+    assert_eq!(knowledge.status, Status::Partial);
+    assert!(knowledge.omissions.contains(&Omission::TextLimit));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            <= MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES
+    );
+    let coverage = knowledge.xlsx_coverage.unwrap();
+    assert_eq!(coverage.observed_cell_count, 1100);
+    assert_eq!(coverage.included_cell_count, 1024);
+}

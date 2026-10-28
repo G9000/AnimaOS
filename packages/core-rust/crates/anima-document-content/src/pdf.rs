@@ -2,9 +2,10 @@ use std::io::{self, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use anima_service_adapters::document_content::{
-    fit_document_snapshots, DocumentBlock, DocumentExtractionStatus as Status, DocumentFormat,
-    DocumentLocator, DocumentOmission as Omission, DocumentSnapshot, ExtractedDocumentText,
-    PdfCoverage, MAX_DOCUMENT_RENDERED_BYTES, MAX_PDF_PAGES,
+    fit_document_snapshots, validate_knowledge_document_extraction, DocumentBlock,
+    DocumentExtractionStatus as Status, DocumentFormat, DocumentLocator,
+    DocumentOmission as Omission, DocumentSnapshot, ExtractedDocumentText, PdfCoverage,
+    MAX_DOCUMENT_RENDERED_BYTES, MAX_PDF_PAGES,
 };
 use flate2::{Decompress, FlushDecompress, Status as InflateStatus};
 use pdf_extract::{Document, LoadOptions, Object, ObjectId, PlainTextOutput, Stream};
@@ -14,17 +15,24 @@ const MAX_INPUT: usize = 2 * 1024 * 1024;
 /// Extract accepted PDF page text in a host-owned physically limited worker.
 /// Any reported page error or panic discards the entire document's prefix.
 pub fn extract_pdf(bytes: &[u8]) -> ExtractedDocumentText {
+    extract_pdf_with_text_limit(bytes, MAX_DOCUMENT_RENDERED_BYTES)
+}
+
+pub(crate) fn extract_pdf_with_text_limit(
+    bytes: &[u8],
+    text_limit: usize,
+) -> ExtractedDocumentText {
     if bytes.len() > MAX_INPUT {
         return ExtractedDocumentText::empty_for(DocumentFormat::Pdf, Status::TooLarge);
     }
-    match catch_unwind(AssertUnwindSafe(|| extract(bytes))) {
+    match catch_unwind(AssertUnwindSafe(|| extract(bytes, text_limit))) {
         Ok(Ok(value)) => value,
         Ok(Err(status)) => ExtractedDocumentText::empty_for(DocumentFormat::Pdf, status),
         Err(_) => ExtractedDocumentText::empty_for(DocumentFormat::Pdf, Status::Malformed),
     }
 }
 
-fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
+fn extract(bytes: &[u8], text_limit: usize) -> Result<ExtractedDocumentText, Status> {
     let document = Document::load_mem_with_options(
         bytes,
         LoadOptions {
@@ -60,7 +68,7 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
         let mut sink = CappedText::new(if text_limited {
             0
         } else {
-            MAX_DOCUMENT_RENDERED_BYTES - retained_bytes
+            text_limit - retained_bytes
         });
         {
             let writer: &mut dyn Write = &mut sink;
@@ -100,6 +108,10 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
     };
     if text_limited {
         value.omissions.push(Omission::TextLimit);
+    }
+    if text_limit != MAX_DOCUMENT_RENDERED_BYTES {
+        validate_knowledge_document_extraction(&value).map_err(|_| Status::Malformed)?;
+        return Ok(value);
     }
     // Account for JSON quoting and the largest admitted parent attachment ID.
     // This is an extraction text bound, not a request-specific context decision.

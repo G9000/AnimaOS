@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChatResult, Project, ProjectChatLink, ProjectTarget, SessionMessage, WorkflowRun, WorkflowTemplate, WorkspaceFileEntry } from '@animaos/sdk';
+import type { ChatResult, Project, ProjectChatLink, ProjectLinkTarget, SessionMessage, WorkflowRun, WorkflowTemplate, WorkspaceFileEntry } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 /** Explicit owner selection; previews here do not grant access until the pin is saved. */
 export function ProjectSourcePicker({ agentId, project, chats, workflowsOnly, onAdd, onClose }: {
   agentId: string; project: Project; chats: readonly ProjectChatLink[]; workflowsOnly: boolean;
-  onAdd: (target: ProjectTarget, label: string, useInContext: boolean, requestKey: string) => Promise<void>;
+  onAdd: (target: ProjectLinkTarget, label: string, useInContext: boolean, requestKey: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [kind, setKind] = useState<'file' | 'excerpt' | 'result' | 'workflow' | 'workflow_template'>(workflowsOnly ? 'workflow' : 'file');
@@ -65,7 +65,7 @@ export function ProjectSourcePicker({ agentId, project, chats, workflowsOnly, on
     })();
     return () => control.abort();
   }, [kind, agentId, chatOwner, chatSession]);
-  const target: ProjectTarget | null = kind === 'file' && path ? { kind: 'workspace_file', path }
+  const target: ProjectLinkTarget | null = kind === 'file' && path ? { kind: 'workspace_file', path }
     : kind === 'workflow' && workflowId ? { kind: 'workflow', ownerAgentId: agentId, workflowId }
     : kind === 'workflow_template' && workflowId ? { kind: 'workflow_template', ownerAgentId: agentId, slug: workflowId }
     : chat && selected.length && kind === 'excerpt' ? { kind: 'chat_excerpt', ownerAgentId: chat.ownerAgentId,

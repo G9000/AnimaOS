@@ -104,6 +104,15 @@ pub(crate) fn ownership_lost_error() -> io::Error {
 }
 
 impl ProfileOwner {
+    /// Canonical profile payloads excluded from read-only project knowledge grants.
+    pub(crate) fn protected_paths(&self) -> Vec<PathBuf> {
+        self.0
+            .files
+            .iter()
+            .map(|lease| lease.resource.clone())
+            .collect()
+    }
+
     pub(crate) fn acquire(resources: impl IntoIterator<Item = PathBuf>) -> io::Result<Self> {
         Self::acquire_resources(resources.into_iter().map(ProfileResource::File))
     }

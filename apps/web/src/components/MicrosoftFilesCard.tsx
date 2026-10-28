@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { createDaemonClient } from '@animaos/sdk';
 import { ownerFetch } from '../lib/owner-fetch';
 import { useRenderScope } from '../hooks/useRenderScope';
+import { ServiceRow } from './ServiceRow';
+import { BrandIcon } from './BrandIcon';
+import { OAuthSetupLink } from './OAuthSetupLink';
+
+const FILES_SUMMARY = 'OneDrive and SharePoint';
 
 type Mode = 'oneDrive' | 'sharePoint';
 interface Connection { id: string; mode: Mode; status: string; generation: string; selectionRevision: number; accountLabel: string | null; approvedSiteUrl: string | null; selectedFiles: { key: string; name: string }[] }
@@ -20,10 +25,9 @@ export function MicrosoftFilesCard({ agentId, online = true, epoch = 0, disabled
   agentId: string; online?: boolean; epoch?: number; disabled?: boolean; api?: MicrosoftFilesApi;
 }) {
   const scope = useRenderScope(agentId, online, epoch);
-  return <section className="connections-card space-y-3" aria-label="Microsoft files">
-    <h3 className="text-sm font-semibold">Microsoft files</h3>
-    {online ? <MicrosoftFilesContents key={scope.generation} agentId={agentId} disabled={disabled} api={api} /> : <p role="status">Reconnect to review files.</p>}
-  </section>;
+  return online
+    ? <MicrosoftFilesContents key={scope.generation} agentId={agentId} disabled={disabled} api={api} />
+    : <ServiceRow id="microsoft-files" group="microsoft" title="Microsoft files" summary={FILES_SUMMARY} icon={<BrandIcon brand="onedrive" />} status="Offline"><p role="status">Reconnect to review files.</p></ServiceRow>;
 }
 
 function MicrosoftFilesContents({ agentId, disabled, api }: { agentId: string; disabled: boolean; api: MicrosoftFilesApi }) {
@@ -61,11 +65,16 @@ function MicrosoftFilesContents({ agentId, disabled, api }: { agentId: string; d
   function validConsent(value: string): string | null {
     try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === 'login.microsoftonline.com' && !url.username && !url.password && !url.port ? url.href : null; } catch { return null; }
   }
-  return <div className="space-y-3 text-xs">
-    <p className="text-ink-3">Choose files to include in account search. SharePoint requires your organization to approve the selected site.</p>
+  const label = !status ? (error ? 'Status unavailable' : '')
+    : !status.configured ? 'Setup required'
+    : status.connectors.some((record) => record.status === 'active') ? 'Connected'
+    : status.connectors.some((record) => record.status !== 'disconnected') ? 'Awaiting authorization'
+    : 'Not connected';
+  return <ServiceRow id="microsoft-files" group="microsoft" title="Microsoft files" summary={FILES_SUMMARY} icon={<BrandIcon brand="onedrive" />} status={label}><div className="space-y-3 text-xs">
+    <p className="text-ink-3">Pick OneDrive or SharePoint files to search. SharePoint needs a site your organization has approved.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {!status && !error && <p role="status">Loading Microsoft files…</p>}
-    {status && !status.configured && <p>Set up the Microsoft account connection above first.</p>}
+    {status && !status.configured && <OAuthSetupLink provider="microsoft" />}
     {status?.connectors.filter((record) => record.status !== 'disconnected').map((record) => <article key={record.id} className="space-y-2 border-t border-line pt-2">
       <p><strong>{record.mode === 'oneDrive' ? 'OneDrive' : 'SharePoint'}</strong> · {record.accountLabel || 'Account'} · {record.status === 'active' ? 'Connected' : record.status === 'pairing' ? 'Awaiting authorization' : 'Reconnect required'}</p>
       {record.selectedFiles.length > 0 && <p className="text-ink-3">Selected: {record.selectedFiles.map((file) => file.name).join(', ')}</p>}
@@ -86,5 +95,5 @@ function MicrosoftFilesContents({ agentId, disabled, api }: { agentId: string; d
       {consent && <a className="block text-accent underline" href={consent} target="_blank" rel="noopener noreferrer">Continue to Microsoft</a>}
       <button type="button" className={button} disabled={busy || disabled} onClick={() => void run(reload)}>Refresh Microsoft files</button>
     </div>}
-  </div>;
+  </div></ServiceRow>;
 }

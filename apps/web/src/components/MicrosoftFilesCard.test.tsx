@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
+import { render } from '../test/render-open';
 import { expect, it, vi } from 'vitest';
 import { MicrosoftFilesCard, type MicrosoftFilesApi } from './MicrosoftFilesCard';
 

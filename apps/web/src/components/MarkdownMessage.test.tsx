@@ -11,6 +11,7 @@ import { MarkdownMessage } from './MarkdownMessage';
 import { WorkspaceArtifactLayout } from './artifacts/WorkspaceArtifactPreview';
 import { ChatExportScope } from './sessions/ChatExportDownload';
 import { daemon } from '../lib/daemon-api';
+import { ProjectKnowledgeScope } from './projects/ProjectKnowledgeLink';
 
 /** Counts Markdown parses; the real renderer still renders. */
 const parses = vi.hoisted(() => vi.fn());
@@ -25,6 +26,32 @@ vi.mock('react-markdown', async (importOriginal) => {
 });
 
 describe('MarkdownMessage', () => {
+  it('opens a knowledge citation through the authoritative in-app callback only after a click', () => {
+    const open = vi.fn();
+    render(<ProjectKnowledgeScope.Provider value={{ agentId: 'a', projectId: 'project_one', onOpen: open }}>
+      <MarkdownMessage>{'[Annual plan](/api/projects/project_one/knowledge/citations/citation_one?asAgentId=a)'}</MarkdownMessage>
+    </ProjectKnowledgeScope.Provider>);
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Annual plan' }));
+    expect(open).toHaveBeenCalledWith('citation_one');
+    expect(screen.queryByRole('link', { name: 'Annual plan' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    '/api/projects/other/knowledge/citations/citation_one?asAgentId=a',
+    '/api/projects/project_one/knowledge/citations/citation_one?asAgentId=b',
+    '/api/projects/project_one/knowledge/citations/citation_one?asAgentId=a&asAgentId=b',
+    '/api/projects/project_one/knowledge/citations/%2E%2E?asAgentId=a',
+    'https://elsewhere.example/api/projects/project_one/knowledge/citations/citation_one?asAgentId=a',
+  ])('keeps an unauthorized or malformed citation inert: %s', (url) => {
+    const open = vi.fn();
+    render(<ProjectKnowledgeScope.Provider value={{ agentId: 'a', projectId: 'project_one', onOpen: open }}>
+      <MarkdownMessage>{`[Source passage](${url})`}</MarkdownMessage>
+    </ProjectKnowledgeScope.Provider>);
+    expect(screen.queryByRole('button', { name: 'Source passage' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Source passage' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Source passage')); expect(open).not.toHaveBeenCalled();
+  });
   it('turns an inline HTML artifact path into an openable file reference', () => {
     render(
       <WorkspaceArtifactLayout

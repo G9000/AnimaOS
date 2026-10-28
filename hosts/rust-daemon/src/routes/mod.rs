@@ -58,6 +58,7 @@ mod document_edits;
 mod oauth_apps;
 mod personality;
 mod profile;
+mod project_knowledge;
 mod projects;
 mod provider_keys;
 mod run_recovery;
@@ -158,6 +159,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         projects::members, projects::remove, projects::add_resource, projects::patch_resource,
         projects::remove_resource, projects::resource_order, projects::preview_resource,
         projects::context, projects::chats, projects::set_chat_project,
+        project_knowledge::add_source, project_knowledge::status, project_knowledge::refresh,
+        project_knowledge::search, project_knowledge::citation,
         workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
         account_workflow_rules::list, account_workflow_rules::create, account_workflow_rules::update, account_workflow_rules::delete, account_workflow_rules::events,
         tool_results::get_tool_result, tool_results::download_tool_result,
@@ -1061,6 +1064,11 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/projects/{project_id}/resource-order", axum::routing::put(projects::resource_order))
         .route("/api/projects/{project_id}/resources/{resource_id}/preview", get(projects::preview_resource))
         .route("/api/projects/{project_id}/context", get(projects::context))
+        .route("/api/projects/{project_id}/knowledge/sources", axum::routing::post(project_knowledge::add_source))
+        .route("/api/projects/{project_id}/knowledge/status", get(project_knowledge::status))
+        .route("/api/projects/{project_id}/knowledge/refresh", axum::routing::post(project_knowledge::refresh))
+        .route("/api/projects/{project_id}/knowledge/search", get(project_knowledge::search))
+        .route("/api/projects/{project_id}/knowledge/citations/{citation_id}", get(project_knowledge::citation))
         .route("/api/projects/{project_id}/chats", get(projects::chats))
         .route("/api/agents/{agent_id}/sessions/{session_id}/project", axum::routing::put(projects::set_chat_project))
         .route("/api/agents/{agent_id}/connectors/microsoft-files", get(microsoft_files::status))

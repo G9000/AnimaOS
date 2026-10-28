@@ -65,6 +65,8 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
         &run.error,
         run.recovery_attempt,
         &run.turn,
+        &run.project_witness,
+        &run.project_context,
     ))
     .expect("run evidence serializes");
     RecoverySummary {
@@ -161,6 +163,34 @@ mod tests {
         );
         r.recovery_attempt = MAX_RECOVERY_ATTEMPTS;
         assert!(!summary(&r).eligible);
+    }
+
+    #[test]
+    fn recovery_fingerprint_binds_admitted_project_evidence() {
+        let mut run = interrupted();
+        let before = summary(&run).fingerprint;
+        run.project_context = Some(crate::projects::ProjectContextManifest {
+            version: 1,
+            run_id: run.id.clone(),
+            agent_id: run.agent_id.clone(),
+            session_id: run.session_id.clone(),
+            session_binding_revision: 1,
+            project: crate::projects::RunProjectBinding {
+                project_id: format!("project_{}", uuid::Uuid::new_v4()),
+                project_revision: 1,
+                access_epoch: 1,
+                member_generation: 1,
+            },
+            captured_at_ms: 2,
+            instructions_sha256: "a".repeat(64),
+            rendered_sha256: "b".repeat(64),
+            estimated_tokens: 10,
+            sources: vec![],
+        });
+        assert_ne!(summary(&run).fingerprint, before);
+        let admitted = summary(&run).fingerprint;
+        run.project_context.as_mut().unwrap().rendered_sha256 = "c".repeat(64);
+        assert_ne!(summary(&run).fingerprint, admitted);
     }
 
     #[test]

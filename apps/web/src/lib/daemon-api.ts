@@ -594,6 +594,8 @@ export const daemon = {
   chatModels: setupClient.chatModels,
   chatResults: setupClient.chatResults,
   projects: setupClient.projects,
+  // Reuse the native picker without changing the configured workspace.
+  pickKnowledgeFolder: () => setupClient.workspace.pickFolder({ purpose: 'project_knowledge' }),
   documentEdits: setupClient.documentEdits,
   runs: setupClient.runs,
   interactions: setupClient.interactions,

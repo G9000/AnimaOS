@@ -98,6 +98,118 @@ async fn call(
 const OWNER: &str = "http://localhost:4200";
 
 #[tokio::test]
+async fn knowledge_routes_require_explicit_owner_grants_and_current_project_membership() {
+    let (app, state, a, _, outsider) = fixture().await;
+    let private = crate::document_edits::store::test_support::private_directory();
+    state.write().await.project_knowledge =
+        crate::projects::knowledge::KnowledgeService::open(private.path().to_owned(), None)
+            .unwrap();
+    let documents = tempfile::Builder::new()
+        .prefix("anima-knowledge-routes-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(
+        documents.path().join("brief.md"),
+        "Cobalt harbour requirements.",
+    )
+    .unwrap();
+    let (_, created) = call(
+        &app,
+        "POST",
+        "/api/projects",
+        OWNER,
+        json!({"requestKey":"knowledge-route","title":"Read-only knowledge","memberAgentIds":[a]}),
+    )
+    .await;
+    let id = created["project"]["id"].as_str().unwrap();
+    for (method, suffix) in [
+        ("POST", "sources"),
+        ("GET", "status"),
+        ("POST", "refresh"),
+        ("GET", "search"),
+        ("GET", "citations/cite_test"),
+    ] {
+        assert_eq!(
+            call(
+                &app,
+                method,
+                &format!("/api/projects/{id}/knowledge/{suffix}?asAgentId={a}&query=cobalt"),
+                "https://untrusted.example",
+                json!({})
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    let (status, added) = call(&app,"POST",&format!("/api/projects/{id}/knowledge/sources"),OWNER,json!({"expectedRevision":1,"requestKey":"folder-grant","asAgentId":a,"rootPath":documents.path().to_string_lossy()})).await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert_eq!(
+        added["project"]["resources"][0]["target"]["kind"],
+        "knowledge_folder"
+    );
+    let target = added["project"]["resources"][0]["target"].clone();
+    let resource_id = added["project"]["resources"][0]["id"].as_str().unwrap();
+    assert_eq!(call(&app,"POST",&format!("/api/projects/{id}/resources"),OWNER,json!({"expectedRevision":2,"requestKey":"forged-grant","asAgentId":a,"target":target,"role":"reference","useInContext":true})).await.0,StatusCode::BAD_REQUEST);
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &format!("/api/projects/{id}/knowledge/search?asAgentId={outsider}&query=cobalt"),
+            OWNER,
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, found) = call(
+        &app,
+        "GET",
+        &format!("/api/projects/{id}/knowledge/search?asAgentId={a}&query=cobalt"),
+        OWNER,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let citation = found["hits"][0]["citationId"].as_str().unwrap();
+    let (status, opened) = call(
+        &app,
+        "GET",
+        &format!("/api/projects/{id}/knowledge/citations/{citation}?asAgentId={a}"),
+        OWNER,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    assert!(opened["text"].as_str().unwrap().contains("Cobalt harbour"));
+    assert_eq!(
+        call(
+            &app,
+            "DELETE",
+            &format!("/api/projects/{id}/resources/{resource_id}"),
+            OWNER,
+            json!({"expectedRevision":2,"asAgentId":a})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &format!("/api/projects/{id}/knowledge/citations/{citation}?asAgentId={a}"),
+            OWNER,
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
 async fn shared_project_routes_enforce_owner_and_members_and_keep_deleted_creation_receipts() {
     let (app, state, a, b, c) = fixture().await;
     let input = json!({"requestKey":"create-once","title":"Shared research","memberAgentIds":[a,b],"instructions":"Owner-only selected brief"});
