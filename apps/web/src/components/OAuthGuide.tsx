@@ -50,13 +50,13 @@ const GUIDES: Record<
       <>
         On that Google page, find Authorized redirect URIs and click Add URI.
         Click the empty box that appears and paste with Ctrl+V. The URIs to
-        paste are in the Redirect URIs list just below this guide: press Copy
-        next to one, paste it, then click Add URI again for the next. When
+        paste are in the Redirect URIs list just below this guide: press the
+        copy icon next to one, paste it, then click Add URI again for the next. When
         every URI in that list is in, click Create.
       </>,
       <>Copy the client ID and client secret, paste them here and save.</>,
     ],
-    tip: 'Google can expire connections for apps left in Testing after about a week. Publish the app to avoid reconnecting.',
+    tip: 'If you sign in and get “access_denied”, add that Google account under Audience, then Test users, in the consent screen, and try again. If Google says it has not verified the app, choose Advanced and continue. Apps left in Testing also expire after about a week; publish the app to avoid reconnecting.',
   },
   microsoft: {
     title: 'Get these from Microsoft Entra',
@@ -75,8 +75,8 @@ const GUIDES: Record<
       <>
         On the registration form, under Redirect URI, set the type to Web, click
         the box next to it and paste with Ctrl+V. The URI to paste is in the
-        Redirect URI list just below this guide: press Copy next to it. Then
-        choose Register.
+        Redirect URI list just below this guide: press the copy icon next to it.
+        Then choose Register.
       </>,
       <>
         Open Certificates and secrets and create a client secret. Copy its{' '}

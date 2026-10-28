@@ -31,7 +31,15 @@ import {
   OAuthSetupLink,
   type OAuthProvider,
 } from './OAuthSetupLink';
-import { AtSignIcon, PlusIcon, SearchIcon, XIcon } from './icons';
+import {
+  AtSignIcon,
+  CheckIcon,
+  CopyIcon,
+  PlusIcon,
+  RefreshIcon,
+  SearchIcon,
+  XIcon,
+} from './icons';
 import { GoogleDriveCard } from './GoogleDriveCard';
 import { MicrosoftFilesCard } from './MicrosoftFilesCard';
 import { ConnectedAccountsPanel } from './connected-accounts/ConnectedAccountsPanel';
@@ -248,52 +256,79 @@ function ConnectionControls({
   onDisconnect: () => void;
   onRefresh: () => void;
 }) {
+  const provName = provider === 'google' ? 'Google' : 'Microsoft';
+  const expired = /reconnect/i.test(status);
+  const unfinished = /awaiting/i.test(status);
+  const needsAction = !connected || expired || unfinished;
   return (
-    <>
-      {account && <p className="break-all text-xs text-ink-2">{account}</p>}
+    <div className="conn-panel">
+      {account && (
+        <p className="conn-account">
+          <span>Account</span>
+          <strong>{account}</strong>
+        </p>
+      )}
       {status === 'Setup required' && !loading && (
         <OAuthSetupLink
           provider={provider === 'google' ? 'google' : 'microsoft'}
         />
       )}
-      <div className="flex flex-wrap gap-2">
+      {consent ? (
+        <div className="conn-next">
+          <p>One more step: finish signing in with {provName}.</p>
+          <a
+            href={consent}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="conn-btn conn-btn--primary"
+          >
+            Continue to {provName}
+          </a>
+        </div>
+      ) : (expired || unfinished) && !loading ? (
+        <p className="conn-note">
+          {expired
+            ? `${provName} needs you to sign in again.`
+            : `Signing in with ${provName} was not finished. Reconnect to start again.`}
+        </p>
+      ) : null}
+      <div className="conn-actions">
         <button
-          className={primaryBtnCls}
+          type="button"
+          className={`conn-btn${needsAction && !consent ? ' conn-btn--primary' : ''}`}
           disabled={busy || loading || !configured}
           onClick={onConnect}
         >
           {connected ? `Reconnect ${name}` : `Connect ${name}`}
         </button>
         {connected && (
-          <button className={button} disabled={busy} onClick={onDisconnect}>
+          <button
+            type="button"
+            className="conn-btn"
+            disabled={busy}
+            onClick={onDisconnect}
+          >
             Disconnect {name}
           </button>
         )}
         <button
-          className={button}
+          type="button"
+          className="conn-btn conn-btn--icon"
           disabled={busy || loading}
+          data-loading={loading || undefined}
           onClick={onRefresh}
           aria-label={`Refresh ${name}`}
+          title="Refresh"
         >
-          {loading ? 'Refreshing…' : 'Refresh'}
+          <RefreshIcon size={15} />
         </button>
       </div>
-      {consent && (
-        <a
-          href={consent}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex text-sm text-accent underline"
-        >
-          Continue to {provider === 'google' ? 'Google' : 'Microsoft'}
-        </a>
-      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
         </p>
       )}
-    </>
+    </div>
   );
 }
 function MailCard({
@@ -373,18 +408,19 @@ function MailCard({
     >
       {provider === 'email' ? (
         <>
-          <div className="space-y-1 text-xs">
-            {connection?.accountLabel && (
-              <p className="break-all text-ink-2">{connection.accountLabel}</p>
-            )}
-            {connection?.email?.autoReply.enabled && (
-              <p className="text-ink-3">
-                Automatic replies enabled for{' '}
-                {connection.email.autoReply.allowedSenders.length} allowed
-                sender(s).
-              </p>
-            )}
-          </div>
+          {connection?.accountLabel && (
+            <p className="conn-account">
+              <span>Account</span>
+              <strong>{connection.accountLabel}</strong>
+            </p>
+          )}
+          {connection?.email?.autoReply.enabled && (
+            <p className="conn-note">
+              Automatic replies enabled for{' '}
+              {connection.email.autoReply.allowedSenders.length} allowed
+              sender(s).
+            </p>
+          )}
           <GenericEmailSettings
             agentId={agentId}
             online={context.online}
@@ -398,10 +434,11 @@ function MailCard({
               );
             }}
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="conn-actions">
             {connection && (
               <button
-                className={button}
+                type="button"
+                className="conn-btn"
                 disabled={resource.busy}
                 onClick={() => {
                   void resource.run(() =>
@@ -413,12 +450,15 @@ function MailCard({
               </button>
             )}
             <button
-              className={button}
+              type="button"
+              className="conn-btn conn-btn--icon"
               disabled={resource.busy || resource.loading}
+              data-loading={resource.loading || undefined}
               aria-label="Refresh Email"
+              title="Refresh"
               onClick={() => void resource.refresh(true, true)}
             >
-              {resource.loading ? 'Refreshing…' : 'Refresh'}
+              <RefreshIcon size={15} />
             </button>
           </div>
           {resource.error && (
@@ -462,151 +502,165 @@ function MailCard({
           {connection.error}
         </p>
       )}
-      <p className="text-xs leading-relaxed text-ink-3">
+      <p className="conn-foot">
         {provider === 'email'
           ? 'Drafts wait for your approval before sending.'
           : 'Nothing is sent until you approve it.'}
       </p>
       {connection && (
         <>
-          <div className="space-y-3 border-t border-line pt-4">
-            <h3 className="text-sm font-medium text-ink">Recent inbox</h3>
-            {resource.data?.inboxError && (
-              <p role="alert" className="text-xs text-danger">
-                Could not load recent inbox. Refresh to try again.
-              </p>
-            )}
-            {!resource.data?.inboxError &&
-              resource.data?.messages.length === 0 && (
-                <p className="text-xs text-ink-3">
-                  {connection.status === 'active'
-                    ? 'No recent messages.'
-                    : 'Reconnect to read recent messages.'}
+          {connection.status === 'active' && (
+            <section className="conn-section">
+              <h3 className="conn-title">Recent inbox</h3>
+              {resource.data?.inboxError && (
+                <p role="alert" className="text-xs text-danger">
+                  Could not load recent inbox. Refresh to try again.
                 </p>
               )}
-            {resource.data?.messages.map((message) => (
-              <article
-                key={message.id}
-                className="min-w-0 rounded-xl border border-line p-3 text-xs"
-              >
-                <p className="break-words font-medium text-ink">
-                  {message.subject || '(No subject)'}
+              {!resource.data?.inboxError &&
+                resource.data?.messages.length === 0 && (
+                  <p className="conn-empty">No recent messages.</p>
+                )}
+              <div className="conn-messages">
+                {resource.data?.messages.map((message) => (
+                  <article key={message.id} className="conn-message">
+                    <p className="conn-message-subject">
+                      {message.subject || '(No subject)'}
+                    </p>
+                    <p className="conn-message-meta">
+                      {message.from} · {message.receivedAt}
+                    </p>
+                    <p className="conn-message-preview">{message.preview}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          {(connection.status === 'active' ||
+            Boolean(resource.data?.drafts.length) ||
+            resource.data?.draftsError) && (
+            <section className="conn-section">
+              {connection.status === 'active' && (
+                <details className="conn-compose">
+                  <summary>
+                    <PlusIcon size={14} />
+                    New local draft
+                  </summary>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void resource
+                        .run(() =>
+                          client.createMailDraft(
+                            agentId,
+                            provider,
+                            connection.id,
+                            {
+                              to: to
+                                .split(',')
+                                .map((value) => value.trim())
+                                .filter(Boolean),
+                              subject,
+                              body,
+                            },
+                          ),
+                        )
+                        .then((ok) => {
+                          if (ok) {
+                            setTo('');
+                            setSubject('');
+                            setBody('');
+                          }
+                        });
+                    }}
+                  >
+                    <label className="conn-field">
+                      To (comma-separated)
+                      <input
+                        className="field"
+                        aria-label={`${name} draft recipients`}
+                        value={to}
+                        onChange={(e) => setTo(e.target.value)}
+                        required
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <label className="conn-field">
+                      Subject
+                      <input
+                        className="field"
+                        aria-label={`${name} draft subject`}
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        maxLength={998}
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <label className="conn-field">
+                      Message
+                      <textarea
+                        className="field min-h-28 resize-y"
+                        aria-label={`${name} draft message`}
+                        value={body}
+                        onChange={(e) => setBody(e.target.value)}
+                        required
+                        maxLength={100000}
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <div className="conn-actions">
+                      <button
+                        className="conn-btn conn-btn--primary"
+                        type="submit"
+                        disabled={resource.busy || !to.trim() || !body.trim()}
+                      >
+                        Save local draft
+                      </button>
+                    </div>
+                  </form>
+                </details>
+              )}
+              <h3 className="conn-title">Saved drafts</h3>
+              {resource.data?.draftsError && (
+                <p role="alert" className="text-xs text-danger">
+                  Could not load saved drafts. Refresh to try again.
                 </p>
-                <p className="mt-1 break-all text-ink-3">
-                  {message.from} · {message.receivedAt}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-ink-2">
-                  {message.preview}
-                </p>
-              </article>
-            ))}
-          </div>
-          <form
-            className="space-y-3 border-t border-line pt-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void resource
-                .run(() =>
-                  client.createMailDraft(agentId, provider, connection.id, {
-                    to: to
-                      .split(',')
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                    subject,
-                    body,
-                  }),
-                )
-                .then((ok) => {
-                  if (ok) {
-                    setTo('');
-                    setSubject('');
-                    setBody('');
-                  }
-                });
-            }}
-          >
-            <h3 className="text-sm font-medium text-ink">New local draft</h3>
-            <label className="block text-xs text-ink-2">
-              To (comma-separated)
-              <input
-                className="field mt-1 w-full"
-                aria-label={`${name} draft recipients`}
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                required
-                disabled={resource.busy}
-              />
-            </label>
-            <label className="block text-xs text-ink-2">
-              Subject
-              <input
-                className="field mt-1 w-full"
-                aria-label={`${name} draft subject`}
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                maxLength={998}
-                disabled={resource.busy}
-              />
-            </label>
-            <label className="block text-xs text-ink-2">
-              Message
-              <textarea
-                className="field mt-1 min-h-28 w-full resize-y"
-                aria-label={`${name} draft message`}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                required
-                maxLength={100000}
-                disabled={resource.busy}
-              />
-            </label>
-            <button
-              className={button}
-              type="submit"
-              disabled={resource.busy || !to.trim() || !body.trim()}
-            >
-              Save local draft
-            </button>
-          </form>
-          <div className="space-y-3 border-t border-line pt-4">
-            <h3 className="text-sm font-medium text-ink">Saved drafts</h3>
-            {resource.data?.draftsError && (
-              <p role="alert" className="text-xs text-danger">
-                Could not load saved drafts. Refresh to try again.
-              </p>
-            )}
-            {!resource.data?.draftsError && !resource.data?.drafts.length && (
-              <p className="text-xs text-ink-3">No saved drafts yet.</p>
-            )}
-            {resource.data?.drafts.map((draft) => (
-              <DraftReview
-                key={draft.id}
-                draft={draft}
-                busy={resource.busy}
-                canSend={connection.status === 'active'}
-                approve={() =>
-                  void resource.run(() =>
-                    client.approveMailDraft(
-                      agentId,
-                      provider,
-                      connection.id,
-                      draft.id,
-                    ),
-                  )
-                }
-                reject={() =>
-                  void resource.run(() =>
-                    client.rejectMailDraft(
-                      agentId,
-                      provider,
-                      connection.id,
-                      draft.id,
-                    ),
-                  )
-                }
-              />
-            ))}
-          </div>
+              )}
+              {!resource.data?.draftsError && !resource.data?.drafts.length && (
+                <p className="conn-empty">No saved drafts yet.</p>
+              )}
+              <div className="flex flex-col gap-2">
+                {resource.data?.drafts.map((draft) => (
+                  <DraftReview
+                    key={draft.id}
+                    draft={draft}
+                    busy={resource.busy}
+                    canSend={connection.status === 'active'}
+                    approve={() =>
+                      void resource.run(() =>
+                        client.approveMailDraft(
+                          agentId,
+                          provider,
+                          connection.id,
+                          draft.id,
+                        ),
+                      )
+                    }
+                    reject={() =>
+                      void resource.run(() =>
+                        client.rejectMailDraft(
+                          agentId,
+                          provider,
+                          connection.id,
+                          draft.id,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
     </Card>
@@ -626,8 +680,8 @@ function DraftReview({
   reject: () => void;
 }) {
   return (
-    <article className="min-w-0 space-y-2 rounded-xl border border-line p-3 text-xs">
-      <p className="break-words font-medium text-ink">
+    <article className="conn-draft">
+      <p className="break-words text-[13px] font-medium text-ink">
         {draft.subject || '(No subject)'}
       </p>
       <p className="break-all text-ink-3">To: {draft.to.join(', ')}</p>
@@ -649,13 +703,19 @@ function DraftReview({
       {draft.state === 'pending' && (
         <div className="flex flex-wrap gap-2">
           <button
-            className={primaryBtnCls}
+            type="button"
+            className="conn-btn conn-btn--primary"
             disabled={busy || !canSend}
             onClick={approve}
           >
             Send saved draft
           </button>
-          <button className={button} disabled={busy} onClick={reject}>
+          <button
+            type="button"
+            className="conn-btn"
+            disabled={busy}
+            onClick={reject}
+          >
             Reject draft
           </button>
         </div>
@@ -910,7 +970,8 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       className="oauth-copy"
-      aria-label={`Copy ${text}`}
+      aria-label={done ? 'Copied' : `Copy ${text}`}
+      title={done ? 'Copied' : 'Copy'}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -922,7 +983,7 @@ function CopyButton({ text }: { text: string }) {
         }
       }}
     >
-      {done ? 'Copied' : 'Copy'}
+      {done ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
     </button>
   );
 }

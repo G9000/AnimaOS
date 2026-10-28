@@ -104,10 +104,11 @@ pub(super) async fn gcalendar_oauth_callback(
     let code = query.get("code").cloned().unwrap_or_default();
     let nonce = query.get("state").cloned().unwrap_or_default();
     if code.is_empty() || nonce.is_empty() {
-        return callback_page(
-            StatusCode::BAD_REQUEST,
-            "Google authorization was not completed. Try connecting again from Connectors.",
-        );
+        let message = super::oauth_callback::denial_hint("Google", &uri).unwrap_or_else(|| {
+            "Google authorization was not completed. Try connecting again from Connectors."
+                .to_string()
+        });
+        return callback_page(StatusCode::BAD_REQUEST, &message);
     }
     match state.calendar.complete_connect(&nonce, &code).await {
         Ok(_) => callback_page(
@@ -117,6 +118,14 @@ pub(super) async fn gcalendar_oauth_callback(
         Err(CalendarError::PairingNotFound) => callback_page(
             StatusCode::BAD_REQUEST,
             "This connection attempt expired. Start a new one from Connectors.",
+        ),
+        Err(CalendarError::Transport) => callback_page(
+            StatusCode::BAD_REQUEST,
+            "Google did not accept the sign-in code, or could not be reached. Check that the client ID and client secret in OAuth app setup match the app in Google Cloud, then reconnect from Connectors.",
+        ),
+        Err(CalendarError::AccountLookup) => callback_page(
+            StatusCode::BAD_REQUEST,
+            "Google signed you in, but Anima could not read your calendar. Make sure the Google Calendar API is turned on for your Google Cloud project, then reconnect from Connectors.",
         ),
         Err(_) => callback_page(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -326,7 +335,7 @@ fn calendar_error(error: CalendarError) -> AxumResponse {
             "calendar_draft_invalid",
             "calendar event draft is invalid",
         ),
-        CalendarError::Transport => error_response(
+        CalendarError::Transport | CalendarError::AccountLookup => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             "connector_upstream_unavailable",
             "Google Calendar is unavailable",

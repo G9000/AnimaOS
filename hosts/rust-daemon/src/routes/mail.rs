@@ -35,7 +35,7 @@ use super::{
     http::{json_response, request_query},
     AppState,
 };
-use crate::connectors::mail::{DraftInput, GenericEmailSetup, MailError, Provider};
+use crate::connectors::mail::{ConnectStage, DraftInput, GenericEmailSetup, MailError, Provider};
 use axum::{
     extract::{Path, Request, State},
     http::{header, HeaderValue, StatusCode},
@@ -318,6 +318,36 @@ async fn resolve(
         Err(e) => error(e),
     }
 }
+/// What to check, in fixed words, for the step of finishing a sign-in that failed.
+fn failure_hint(provider: &str, stage: ConnectStage, error: MailError) -> String {
+    let (console, mailbox_fix) = if provider == "Google" {
+        (
+            "Google Cloud",
+            "Make sure the Gmail API is turned on for your Google Cloud project",
+        )
+    } else {
+        (
+            "Microsoft Entra",
+            "Check that the app has permission to read your mail",
+        )
+    };
+    match (stage, error) {
+        (ConnectStage::Setup, _) => format!(
+            "Anima could not read the {provider} app credentials. Check OAuth app setup in Connectors, then reconnect."
+        ),
+        (ConnectStage::Attempt, _) => "This sign-in attempt is no longer valid. It may have expired, been used already, been replaced by a newer attempt, or Anima may have restarted. Start again with Reconnect in Connectors and finish in that same flow.".to_string(),
+        (ConnectStage::Exchange | ConnectStage::Profile, MailError::Upstream) => format!(
+            "{provider} could not be reached, or had a problem. Wait a moment, then reconnect from Connectors."
+        ),
+        (ConnectStage::Exchange, _) => format!(
+            "{provider} did not accept the sign-in code. Check that the client ID and client secret in OAuth app setup match the app in {console}, and that its redirect URI matches exactly. Then reconnect."
+        ),
+        (ConnectStage::Profile, _) => format!(
+            "{provider} signed you in, but Anima could not read your mailbox. {mailbox_fix}, then reconnect."
+        ),
+        (ConnectStage::Save, _) => "Anima could not save the connection. Check that the credential vault is available, then reconnect.".to_string(),
+    }
+}
 #[utoipa::path(get, path = "/api/connectors/mail/{provider}/callback", tag = "connectors",
  params(("provider" = String, Path, description = "gmail, outlook or email")),
  responses((status = 200, description = "OAuth connection completed"), (status = 400, description = "Invalid, expired or unsuccessful OAuth callback")))]
@@ -336,15 +366,27 @@ pub(super) async fn callback(
     };
     let code = query.get("code").map(String::as_str).unwrap_or("");
     let nonce = query.get("state").map(String::as_str).unwrap_or("");
-    let result = s.mail.complete_connect(p, nonce, code).await;
+    let result = s.mail.complete_connect_staged(p, nonce, code).await;
+    let provider_name = match p {
+        Provider::Gmail => Some("Google"),
+        Provider::Outlook => Some("Microsoft"),
+        Provider::Email => None,
+    };
     let (status, message) = match result {
         Ok(_) => (
             StatusCode::OK,
-            "Mail connected. Close this tab and return to Connectors.",
+            "Mail connected. Close this tab and return to Connectors.".to_string(),
         ),
-        Err(_) => (
+        Err((stage, error)) => (
             StatusCode::BAD_REQUEST,
-            "Authorization could not be completed. Reconnect from the Connectors tab.",
+            // The provider's own refusal comes first; then the step that failed.
+            provider_name
+                .and_then(|name| super::oauth_callback::denial_hint(name, &uri))
+                .or_else(|| provider_name.map(|name| failure_hint(name, stage, error)))
+                .unwrap_or_else(|| {
+                    "Authorization could not be completed. Reconnect from the Connectors tab."
+                        .to_string()
+                }),
         ),
     };
     let mut r = (
@@ -417,6 +459,125 @@ mod generic_email_tests {
             crate::routes::http::ApiKeyPolicy::for_test(None),
             crate::system::SupervisorRelay::unsupervised(),
         )
+    }
+
+    /// The page a browser lands on after the provider's sign-in, for a callback
+    /// with no code: it explains a refusal in fixed words and never echoes the URL.
+    #[tokio::test]
+    async fn callback_explains_a_provider_refusal_without_echoing_the_url() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let (state, manager, _fake, _credentials, _agent) = fixture(false).await;
+        let app = router(state, manager.clone());
+        let page = |uri: &'static str| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri(uri)
+                            .header("host", "127.0.0.1:8080")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), 32_768)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8_lossy(&bytes).into_owned())
+            }
+        };
+
+        let (status, body) =
+            page("/api/connectors/mail/gmail/callback?error=access_denied&state=nonce-sentinel")
+                .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("Google did not give access."), "{body}");
+        assert!(body.contains("test user"), "{body}");
+        assert!(!body.contains("nonce-sentinel"), "{body}");
+
+        let (_, body) =
+            page("/api/connectors/mail/outlook/callback?error=access_denied&state=abc").await;
+        assert!(body.contains("Microsoft did not give access."), "{body}");
+
+        // An unknown value falls back to the step that failed (here, no app
+        // credentials) and shows nothing from the URL.
+        let (status, body) = page(
+            "/api/connectors/mail/gmail/callback?error=%3Cscript%3Ealert(1)%3C%2Fscript%3E&state=abc",
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body.contains("could not read the Google app credentials"),
+            "{body}"
+        );
+        assert!(!body.contains("script"), "{body}");
+        manager.shutdown().await;
+    }
+
+    /// A callback that reaches Anima with a code says which step failed.
+    #[tokio::test]
+    async fn callback_names_the_step_that_failed_when_finishing_sign_in() {
+        use crate::connectors::oauth_apps::{OAuthAppCredentials, OAuthProvider};
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let (state, manager, _fake, _credentials, _agent) = fixture(false).await;
+        let app = router(state, manager.clone());
+        let page = |uri: &'static str| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri(uri)
+                            .header("host", "127.0.0.1:8080")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), 32_768)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8_lossy(&bytes).into_owned())
+            }
+        };
+
+        // No app credentials saved: the first step fails.
+        let (status, body) =
+            page("/api/connectors/mail/gmail/callback?code=abc&state=unknown").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body.contains("could not read the Google app credentials"),
+            "{body}"
+        );
+
+        // With credentials, an attempt this daemon never started is named as such.
+        manager
+            .oauth_apps
+            .put(
+                OAuthProvider::Google,
+                OAuthAppCredentials::new(OAuthProvider::Google, "client", "secret", None).unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) =
+            page("/api/connectors/mail/gmail/callback?code=abc&state=unknown").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("no longer valid"), "{body}");
+        assert!(!body.contains("unknown"), "{body}");
+        manager.shutdown().await;
     }
 
     #[tokio::test]

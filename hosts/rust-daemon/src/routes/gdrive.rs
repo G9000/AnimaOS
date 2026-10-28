@@ -145,11 +145,13 @@ fn callback_query(uri: &Uri) -> Result<(String, Option<String>), DriveError> {
     };
     Ok((nonce, code))
 }
-fn callback_page(success: bool) -> Response {
+fn callback_page(success: bool, hint: Option<String>) -> Response {
     let text = if success {
         "Anima Drive connected. You can close this page and refresh Connectors."
     } else {
-        "Anima Drive connection was not completed. Return to Connectors and start a new consent attempt."
+        hint.as_deref().unwrap_or(
+            "Anima Drive connection was not completed. Return to Connectors and start a new consent attempt.",
+        )
     };
     let mut response = no_store(
         (
@@ -177,8 +179,16 @@ fn callback_page(success: bool) -> Response {
 #[utoipa::path(get,path="/api/connectors/gdrive/callback",tag="connectors",params(("state"=String,Query),("code"=Option<String>,Query),("error"=Option<String>,Query)),responses((status=200,description="Private pending consent completed"),(status=400,description="Consent was not completed")))]
 pub(super) async fn callback(State(state): State<AppState>, uri: Uri) -> Response {
     match callback_query(&uri) {
-        Ok((nonce, code)) => callback_page(state.drive.complete_connect(nonce, code).await.is_ok()),
-        Err(_) => callback_page(false),
+        Ok((nonce, code)) => {
+            let connected = state.drive.complete_connect(nonce, code).await.is_ok();
+            let hint = if connected {
+                None
+            } else {
+                super::oauth_callback::denial_hint("Google", &uri)
+            };
+            callback_page(connected, hint)
+        }
+        Err(_) => callback_page(false, None),
     }
 }
 pub(super) async fn protect_cache(request: Request, next: axum::middleware::Next) -> Response {

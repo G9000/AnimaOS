@@ -223,11 +223,13 @@ fn callback_query(uri: &Uri) -> Result<(String, Option<String>), MicrosoftFileEr
     };
     Ok((nonce, code))
 }
-fn callback_page(success: bool) -> Response {
+fn callback_page(success: bool, hint: Option<String>) -> Response {
     let text = if success {
         "Microsoft files connected. You can close this page and return to Connections."
     } else {
-        "Microsoft files could not be connected. Return to Connections to try again or check your organization's site approval."
+        hint.as_deref().unwrap_or(
+            "Microsoft files could not be connected. Return to Connections to try again or check your organization's site approval.",
+        )
     };
     let mut response = no_store((if success { StatusCode::OK } else { StatusCode::BAD_REQUEST }, Html(format!("<!doctype html><meta charset=\"utf-8\"><title>Microsoft files</title><p>{text}</p>"))).into_response());
     response.headers_mut().insert(
@@ -243,14 +245,20 @@ fn callback_page(success: bool) -> Response {
 #[utoipa::path(get,path="/api/connectors/microsoft-files/callback",tag="connectors",params(("state"=String,Query),("code"=Option<String>,Query),("error"=Option<String>,Query)),responses((status=200),(status=400)))]
 pub(super) async fn callback(State(state): State<AppState>, uri: Uri) -> Response {
     match callback_query(&uri) {
-        Ok((nonce, code)) => callback_page(
-            state
+        Ok((nonce, code)) => {
+            let connected = state
                 .microsoft_files
                 .complete_connect(nonce, code)
                 .await
-                .is_ok(),
-        ),
-        Err(_) => callback_page(false),
+                .is_ok();
+            let hint = if connected {
+                None
+            } else {
+                super::oauth_callback::denial_hint("Microsoft", &uri)
+            };
+            callback_page(connected, hint)
+        }
+        Err(_) => callback_page(false, None),
     }
 }
 pub(super) async fn protect_cache(request: Request, next: axum::middleware::Next) -> Response {

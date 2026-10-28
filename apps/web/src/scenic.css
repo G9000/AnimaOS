@@ -8643,6 +8643,11 @@ details.settings-item > :not(summary) {
 .oauth-save:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-accent) 26%, transparent);
 }
+/* The copy button is an icon: a square the height of the box beside it. */
+.oauth-copy {
+  width: 36px;
+  padding: 0;
+}
 .oauth-remove:hover:not(:disabled),
 .oauth-copy:hover:not(:disabled) {
   border-color: var(--color-ink-2);
@@ -8652,6 +8657,240 @@ details.settings-item > :not(summary) {
 .oauth-copy:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* Mail and calendar drawers: one account panel, then the work. */
+.conn-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.conn-account {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.conn-account span {
+  flex: none;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+.conn-account strong {
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.conn-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.conn-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+.conn-next p {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}
+.conn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.conn-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  background: none;
+  color: var(--color-ink);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.conn-btn:hover:not(:disabled) {
+  border-color: var(--color-ink-2);
+}
+.conn-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.conn-btn--primary {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.conn-btn--primary:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+.conn-btn--icon {
+  width: 34px;
+  padding: 0;
+}
+.conn-btn--icon[data-loading] svg {
+  animation: conn-spin 900ms linear infinite;
+}
+@keyframes conn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-btn--icon[data-loading] svg {
+    animation: none;
+  }
+}
+.conn-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+.conn-title {
+  margin: 0;
+  color: rgb(236 230 218 / 0.45);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.conn-empty {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.5);
+}
+.conn-messages {
+  display: flex;
+  flex-direction: column;
+}
+.conn-message {
+  padding: 10px 0;
+  border-bottom: 1px solid rgb(236 230 218 / 0.08);
+}
+.conn-message:first-child {
+  padding-top: 0;
+}
+.conn-message:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.conn-message:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.conn-message-subject {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.conn-message-meta {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+  overflow-wrap: anywhere;
+}
+.conn-message-preview {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.conn-compose {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+}
+.conn-compose > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.conn-compose > summary::-webkit-details-marker {
+  display: none;
+}
+.conn-compose > summary:hover,
+.conn-compose[open] > summary {
+  color: var(--color-ink);
+}
+.conn-compose[open] > summary {
+  border-bottom: 1px solid rgb(236 230 218 / 0.1);
+}
+.conn-compose > form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+}
+.conn-field .field {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.conn-field input.field {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.conn-foot {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.45);
+}
+.conn-draft {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.03);
+  font-size: 12px;
 }
 
 /* Missing provider credentials: say so once, and offer the way there. */

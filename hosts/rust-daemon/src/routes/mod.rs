@@ -56,6 +56,7 @@ mod chat_reviews;
 mod conversation_shares;
 mod document_edits;
 mod oauth_apps;
+mod oauth_callback;
 mod personality;
 mod profile;
 mod project_knowledge;
