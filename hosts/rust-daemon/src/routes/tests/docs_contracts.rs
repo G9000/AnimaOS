@@ -42,7 +42,23 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 355, "complete registered operation count");
+    assert_eq!(actual.len(), 360, "complete registered operation count");
+    let knowledge_additions = [
+        ("POST", "/api/projects/{project_id}/knowledge/sources"),
+        ("GET", "/api/projects/{project_id}/knowledge/status"),
+        ("POST", "/api/projects/{project_id}/knowledge/refresh"),
+        ("GET", "/api/projects/{project_id}/knowledge/search"),
+        (
+            "GET",
+            "/api/projects/{project_id}/knowledge/citations/{citation_id}",
+        ),
+    ];
+    for (method, path) in knowledge_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "project knowledge operation must be registered"
+        );
+    }
     let document_edit_additions = [
         ("GET", "/api/document-edits/{proposal_id}"),
         ("DELETE", "/api/document-edits/{proposal_id}"),
@@ -654,6 +670,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                    && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
                     && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
                     && !project_additions.contains(&(method.as_str(), path.as_str()))
                     && !document_edit_additions.contains(&(method.as_str(), path.as_str()))
@@ -715,6 +732,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| !connected_account_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
                 && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
                 && !project_additions.contains(&(method.as_str(), path.as_str()))
                 && !document_edit_additions.contains(&(method.as_str(), path.as_str()))

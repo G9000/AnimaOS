@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import { render } from '../test/render-open';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemon } from '../lib/daemon-api';
@@ -45,9 +51,9 @@ describe('GoogleDriveCard', () => {
       ).toBeDisabled(),
     );
     expect(
-      screen.getByText(/Google grants read\/download access across your Drive/),
+      screen.getByText(/Google gives this app read access to your whole Drive/),
     ).toBeVisible();
-    expect(screen.getByText(/other formats return metadata/)).toBeVisible();
+    expect(screen.getByText(/other formats return details only/)).toBeVisible();
     const input = screen.getByLabelText('Selected Drive files');
     await user.type(
       input,

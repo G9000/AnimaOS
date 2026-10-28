@@ -123,6 +123,10 @@ pub(crate) enum ProjectResourceRole {
     deny_unknown_fields
 )]
 pub(crate) enum ProjectResourceTarget {
+    KnowledgeFolder {
+        root_path: String,
+        root_identity: String,
+    },
     WorkspaceFile {
         path: String,
     },
@@ -151,7 +155,7 @@ pub(crate) enum ProjectResourceTarget {
 impl ProjectResourceTarget {
     pub(crate) fn owner_agent_id(&self) -> Option<&str> {
         match self {
-            Self::WorkspaceFile { .. } => None,
+            Self::WorkspaceFile { .. } | Self::KnowledgeFolder { .. } => None,
             Self::ChatExcerpt { owner_agent_id, .. }
             | Self::ChatResult { owner_agent_id, .. }
             | Self::Workflow { owner_agent_id, .. }
@@ -175,6 +179,18 @@ impl ProjectResourceTarget {
             ));
         }
         match self {
+            Self::KnowledgeFolder {
+                root_path,
+                root_identity,
+            } if !std::path::Path::new(root_path).is_absolute()
+                || root_path.len() > 4096
+                || root_path.chars().any(char::is_control)
+                || !valid_hash(root_identity) =>
+            {
+                Err(ProjectError::InvalidRecord(
+                    "selected knowledge folder grant is invalid",
+                ))
+            }
             Self::WorkspaceFile { path } if !valid_relative_path(path) => Err(
                 ProjectError::InvalidRecord("select a regular workspace file without traversal"),
             ),
@@ -253,6 +269,11 @@ impl ProjectResourceRecord {
             ));
         }
         let valid_shape = match &self.target {
+            ProjectResourceTarget::KnowledgeFolder { .. } => {
+                self.donor.is_none()
+                    && self.source_project_binding_revision.is_none()
+                    && self.workspace_key.is_none()
+            }
             ProjectResourceTarget::WorkspaceFile { .. } => {
                 self.donor.is_none()
                     && self.source_project_binding_revision.is_none()
@@ -394,6 +415,11 @@ pub(crate) struct RunProjectBinding {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum ProjectSourceWitness {
+    KnowledgeFolder {
+        root_identity: String,
+        query_sha256: String,
+        passages: Vec<ProjectKnowledgePassageWitness>,
+    },
     WorkspaceFile {
         workspace_key: String,
         path: String,
@@ -418,10 +444,22 @@ pub(crate) enum ProjectSourceWitness {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProjectKnowledgePassageWitness {
+    pub(crate) citation_id: String,
+    pub(crate) document_id: String,
+    pub(crate) source_sha256: String,
+    pub(crate) chunk_sha256: String,
+    pub(crate) locator: String,
+    pub(crate) included_sha256: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProjectSourceState {
     Ready,
+    NoMatches,
     Missing,
     NotInProject,
     AccessRemoved,
@@ -545,4 +583,24 @@ pub(crate) fn next_revision(value: u64) -> Result<u64, ProjectError> {
         .ok_or(ProjectError::InvalidRecord(
             "project revision limit reached",
         ))
+}
+
+#[cfg(test)]
+mod knowledge_record_tests {
+    use super::*;
+
+    #[test]
+    fn knowledge_folder_is_a_valid_bounded_persisted_read_grant() {
+        let target: ProjectResourceTarget = serde_json::from_value(serde_json::json!({
+            "kind":"knowledge_folder", "rootPath":std::env::temp_dir().to_string_lossy(),
+            "rootIdentity":"a".repeat(64)
+        }))
+        .unwrap();
+        target.validate().unwrap();
+        assert_eq!(target.owner_agent_id(), None);
+        let mut value = serde_json::to_value(&target).unwrap();
+        value["rootIdentity"] = serde_json::json!("not-an-identity");
+        let malformed: ProjectResourceTarget = serde_json::from_value(value).unwrap();
+        assert!(malformed.validate().is_err());
+    }
 }

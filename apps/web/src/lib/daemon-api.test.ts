@@ -252,6 +252,16 @@ describe('daemon agent requests', () => {
 });
 
 describe('daemon workspace requests', () => {
+  it('requests the project-knowledge picker purpose without changing the workspace picker', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ rootPath: 'D:\\Research' }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await daemon.pickWorkspaceFolder()).toEqual({ rootPath: 'D:\\Research' });
+    expect(await daemon.pickKnowledgeFolder()).toEqual({ rootPath: 'D:\\Research' });
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ['/api/workspace/pick-folder', 'POST', undefined],
+      ['/api/workspace/pick-folder?purpose=project_knowledge', 'POST', undefined],
+    ]);
+  });
   const workspaceState = {
     configured: true,
     workspace: {

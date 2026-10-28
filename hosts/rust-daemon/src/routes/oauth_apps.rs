@@ -65,7 +65,10 @@ pub(super) async fn get_oauth_app(
     Path(provider): Path<String>,
     request: AxumRequest,
 ) -> AxumResponse {
-    if let Err(rejection) = state.local_owner.authorize(request.headers()) {
+    // A same-origin browser GET carries no `Origin` header, so the read check
+    // (console session plus fetch metadata) is the one that fits, as for the
+    // other connector status reads.
+    if let Err(rejection) = state.local_owner.authorize_read(request.headers()) {
         return local_owner_error(rejection);
     }
     let provider = match parse_provider(&provider) {
@@ -399,6 +402,47 @@ mod tests {
 
     async fn json(response: axum::response::Response) -> serde_json::Value {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    /// What a browser sends for a same-origin read: no `Origin` header, but
+    /// fetch metadata, a referrer from the console and the console session.
+    fn browser_read(uri: &str) -> Request<Body> {
+        let token = crate::routes::owner_test_support::ADMIN_TOKEN;
+        let session = crate::console_session::open_session(
+            token,
+            &crate::console_session::launch_code(token),
+            &crate::console_session::SpentLaunchCodes::default(),
+        )
+        .expect("fixture launch code is valid");
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", "127.0.0.1:8080")
+            .header("sec-fetch-site", "same-origin")
+            .header("referer", "http://localhost:4200/")
+            .header("cookie", format!("anima_console_8080={}", session.cookie))
+            .header(crate::console_session::SESSION_HEADER, session.token)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn status_read_accepts_a_same_origin_browser_fetch_without_an_origin_header() {
+        let app = app(OAuthAppService::in_memory(), 512);
+        for provider in ["google", "microsoft"] {
+            let response = app
+                .clone()
+                .oneshot(browser_read(&format!(
+                    "/api/connectors/oauth-apps/{provider}"
+                )))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{provider}");
+            assert_eq!(response.headers()["cache-control"], "no-store");
+            let body = json(response).await;
+            assert_eq!(body["provider"], provider);
+            assert_eq!(body["configured"], false);
+        }
     }
 
     #[test]

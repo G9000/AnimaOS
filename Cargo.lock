@@ -145,6 +145,7 @@ dependencies = [
  "anima-acp",
  "anima-core",
  "anima-document-content",
+ "anima-document-store-sqlite",
  "anima-execution-store-sqlite",
  "anima-harness",
  "anima-mcp-oauth",
@@ -220,6 +221,16 @@ dependencies = [
  "serde_json",
  "ttf-parser",
  "unicode-normalization",
+]
+
+[[package]]
+name = "anima-document-store-sqlite"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]

@@ -1,11 +1,11 @@
 import {
   act,
   fireEvent,
-  render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
+import { render } from '../test/render-open';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorsView } from './ConnectorsView';
@@ -84,7 +84,7 @@ it('connects generic email without OAuth, clearing secrets before setup settles'
   await waitFor(() =>
     expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
   );
-  expect(card.getByText(/No OAuth app registration/)).toBeVisible();
+  expect(card.getByText(/Works with any mailbox/)).toBeVisible();
   fireEvent.click(card.getByRole('button', { name: 'Connect Email' }));
   expect(api.connectGenericEmail).toHaveBeenCalledWith('main', {
     address: 'agent@example.com',
@@ -119,7 +119,7 @@ it('requires explicit allowed senders and the receiving server ID for automatic 
     expect(card.getByRole('button', { name: 'Connect Email' })).toBeEnabled(),
   );
   const automatic = card.getByRole('checkbox', {
-    name: 'Automatically reply to allowed senders',
+    name: 'Reply automatically to the senders below',
   });
   expect(automatic).not.toBeChecked();
   fireEvent.click(automatic);
@@ -162,7 +162,7 @@ it('requires explicit allowed senders and the receiving server ID for automatic 
     ),
   );
   expect(
-    card.getByText(/Only new mail received after connecting/),
+    card.getByText(/only to mail that arrives after you connect/),
   ).toBeVisible();
 });
 
@@ -489,7 +489,7 @@ it('shows mail services with honest OAuth setup state', async () => {
   render(
     <ConnectorsView agentId="main" telegram={<div>Telegram management</div>} />,
   );
-  expect(screen.getByText('Telegram')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Telegram' })).toBeVisible();
   for (const name of [
     'Google Calendar',
     'Google Drive',
@@ -498,9 +498,12 @@ it('shows mail services with honest OAuth setup state', async () => {
     'Outlook',
   ])
     expect(screen.getByRole('heading', { name })).toBeVisible();
-  await waitFor(() =>
-    expect(screen.getAllByText('Setup required')).toHaveLength(5),
-  );
+  await waitFor(() => {
+    // The two OAuth app cards still say what setup is missing; every
+    // connection reads simply as not connected.
+    expect(screen.getAllByText('Not set up')).toHaveLength(2);
+    expect(screen.getAllByText('Not connected')).toHaveLength(7);
+  });
   expect(screen.getByRole('button', { name: 'Connect Gmail' })).toBeDisabled();
   expect(api.approveMailDraft).not.toHaveBeenCalled();
 });
@@ -687,9 +690,12 @@ it('ignores an old account response after the main agent changes', async () => {
   const view = render(<ConnectorsView agentId="old" telegram={null} />);
   view.rerender(<ConnectorsView agentId="new" telegram={null} />);
   resolve({ configured: true, connector });
-  await waitFor(() =>
-    expect(screen.getAllByText('Setup required')).toHaveLength(5),
-  );
+  await waitFor(() => {
+    // The two OAuth app cards still say what setup is missing; every
+    // connection reads simply as not connected.
+    expect(screen.getAllByText('Not set up')).toHaveLength(2);
+    expect(screen.getAllByText('Not connected')).toHaveLength(7);
+  });
   expect(screen.queryByText('owner@example.com')).not.toBeInTheDocument();
 });
 
@@ -1136,7 +1142,7 @@ it('keeps provider failures independent and validates credentials locally', asyn
     await screen.findByText('Could not refresh this connection. Try again.'),
   ).toBeVisible();
   expect(screen.getByText('Microsoft OAuth app')).toBeVisible();
-  expect(screen.getByText('Telegram')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Telegram' })).toBeVisible();
   await user.type(screen.getByLabelText('Microsoft client ID'), 'id-only');
   await user.click(
     screen.getByRole('button', { name: 'Save Microsoft OAuth app' }),
@@ -1185,4 +1191,173 @@ it('removes vault credentials and treats environment credentials as managed outs
   expect(
     screen.queryByText(/connector_conflict secret/),
   ).not.toBeInTheDocument();
+});
+
+it('lists only what is connected and opens a service from the catalogue', async () => {
+  api.mailStatus.mockImplementation(async (_agent: string, provider: string) =>
+    provider === 'gmail'
+      ? { configured: true, connector }
+      : { configured: true, connector: null },
+  );
+  api.mailMessages.mockResolvedValue([]);
+  api.mailDrafts.mockResolvedValue([]);
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole('region', { name: 'Gmail' })).getByRole('status'),
+    ).toHaveTextContent('Connected'),
+  );
+  const listed = (name: string) =>
+    screen.getByRole('region', { name }).hasAttribute('data-listed');
+  expect(listed('Gmail')).toBe(true);
+  expect(listed('Email')).toBe(false);
+  expect(listed('Google Calendar')).toBe(false);
+
+  const catalog = screen.getByLabelText('Add a connection');
+  expect(
+    within(catalog).getByRole('button', {
+      name: 'Manage Gmail',
+      hidden: true,
+    }),
+  ).toBeInTheDocument();
+  expect(
+    within(catalog).getByRole('button', {
+      name: 'Add WhatsApp (not available yet)',
+      hidden: true,
+    }),
+  ).toBeDisabled();
+  fireEvent.click(
+    within(catalog).getByRole('button', { name: 'Add Email', hidden: true }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('region', { name: 'Email' }).hasAttribute('data-open'),
+    ).toBe(true),
+  );
+});
+
+it('groups the catalogue by provider and searches it by name or provider', async () => {
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  const catalog = within(screen.getByLabelText('Add a connection'));
+  const groups = () =>
+    catalog
+      .getAllByRole('heading', { level: 3, hidden: true })
+      .map((heading) => heading.textContent);
+  expect(groups()).toEqual([
+    'Google Workspace',
+    'Microsoft 365',
+    'Email',
+    'Chat apps',
+  ]);
+
+  const search = catalog.getByLabelText('Search integrations');
+  fireEvent.change(search, { target: { value: 'google' } });
+  expect(groups()).toEqual(['Google Workspace']);
+  expect(
+    catalog.getByRole('button', { name: 'Add Google Drive', hidden: true }),
+  ).toBeInTheDocument();
+
+  fireEvent.change(search, { target: { value: 'slack' } });
+  expect(groups()).toEqual(['Chat apps']);
+
+  fireEvent.change(search, { target: { value: 'zzz' } });
+  expect(catalog.getByText('Nothing matches “zzz”.')).toBeInTheDocument();
+});
+
+it('takes the owner to the provider credentials when a service needs them', async () => {
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  const setup = document.querySelector<HTMLDetailsElement>(
+    '.connections-oauth-setup',
+  )!;
+  expect(setup.open).toBe(false);
+  const gmail = within(screen.getByRole('region', { name: 'Gmail' }));
+  fireEvent.click(
+    await gmail.findByRole('button', { name: 'Add Google credentials' }),
+  );
+  expect(setup.open).toBe(true);
+  await waitFor(() =>
+    expect(screen.getByLabelText('Google client ID')).toHaveFocus(),
+  );
+
+  setup.open = false;
+  const files = within(screen.getByRole('region', { name: 'Microsoft files' }));
+  fireEvent.click(
+    await files.findByRole('button', { name: 'Add Microsoft credentials' }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText('Microsoft client ID')).toHaveFocus(),
+  );
+});
+
+it('explains where to get credentials, opened until the provider is set up', async () => {
+  api.oauthAppStatus.mockImplementation((provider) =>
+    Promise.resolve({
+      provider,
+      configured: provider === 'microsoft',
+      source: provider === 'microsoft' ? 'vault' : null,
+      clientIdHint: provider === 'microsoft' ? 'mic…456' : null,
+      redirectUris: [`https://daemon.test/${provider}/callback`],
+      tenant: provider === 'microsoft' ? 'common' : null,
+    }),
+  );
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  fireEvent.click(screen.getByText('OAuth app setup'));
+
+  const google = within(screen.getByRole('region', { name: 'Google OAuth app' }));
+  const microsoft = within(
+    screen.getByRole('region', { name: 'Microsoft OAuth app' }),
+  );
+  await waitFor(() =>
+    expect(google.getByText('Get these from Google Cloud').closest('details')).toHaveProperty('open', true),
+  );
+  expect(google.getByRole('link', { name: 'Google Cloud Console' })).toHaveAttribute(
+    'href',
+    'https://console.cloud.google.com/projectcreate',
+  );
+  expect(
+    google.getByText(/Redirect URIs list just below this guide/),
+  ).toBeInTheDocument();
+  // Already set up: the how-to stays folded away.
+  expect(
+    microsoft.getByText('Get these from Microsoft Entra').closest('details'),
+  ).toHaveProperty('open', false);
+  expect(
+    google.getByRole('button', {
+      name: 'Copy https://daemon.test/google/callback',
+    }),
+  ).toBeInTheDocument();
+});
+
+it('still shows the redirect URIs when the daemon cannot give them', async () => {
+  api.oauthAppStatus.mockRejectedValue(new Error('vault unavailable'));
+  render(<ConnectorsView agentId="main" telegram={null} />);
+  fireEvent.click(screen.getByText('OAuth app setup'));
+
+  const google = within(screen.getByRole('region', { name: 'Google OAuth app' }));
+  expect(
+    await google.findByText(
+      'http://127.0.0.1:8080/api/connectors/mail/gmail/callback',
+    ),
+  ).toBeInTheDocument();
+  expect(
+    google.getByText('http://127.0.0.1:8080/api/connectors/gcalendar/callback'),
+  ).toBeInTheDocument();
+  expect(
+    google.getByText('http://127.0.0.1:8080/api/connectors/gdrive/callback'),
+  ).toBeInTheDocument();
+  expect(google.getByText(/default addresses/)).toBeInTheDocument();
+
+  const microsoft = within(
+    screen.getByRole('region', { name: 'Microsoft OAuth app' }),
+  );
+  expect(
+    microsoft.getByText(
+      'http://127.0.0.1:8080/api/connectors/mail/outlook/callback',
+    ),
+  ).toBeInTheDocument();
+  expect(
+    microsoft.getByText(
+      'http://127.0.0.1:8080/api/connectors/microsoft-files/callback',
+    ),
+  ).toBeInTheDocument();
 });

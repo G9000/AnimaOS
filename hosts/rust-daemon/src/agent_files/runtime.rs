@@ -139,7 +139,7 @@ where
     let deadline = std::time::Instant::now() + super::DEFAULT_LOAD_DEADLINE;
     let deadline = helper_deadline.map_or(deadline, |helper| deadline.min(helper.into_std()));
     for attempt in 0..2 {
-        let (scope, budget, project_scope, available_tokens, calibration_permille) = {
+        let (scope, budget, project_scope, project_query, available_tokens, calibration_permille) = {
             let guard = state.read().await;
             let mut scope = capture_scope(&guard, agent_id, session_id, Some(run_id));
             if let Some(scope) = &mut scope {
@@ -166,6 +166,14 @@ where
             let run = guard.runs.get(run_id).ok_or_else(ApiError::not_found)?;
             let project_scope = crate::projects::capture_context_scope(&guard, run)
                 .map_err(|error| ApiError::conflict(error.to_string()))?;
+            let project_query = if run.recovery_of.is_some() {
+                run.turn.as_ref().map_or(input.text.as_str(), |turn| {
+                    turn.original_input.text.as_str()
+                })
+            } else {
+                &input.text
+            }
+            .to_owned();
             (
                 scope,
                 AgentFileRenderBudget {
@@ -174,6 +182,7 @@ where
                     max_total_chars: chars,
                 },
                 project_scope,
+                project_query,
                 available,
                 (factor.max(1.0) * 1000.0).round() as u32,
             )
@@ -194,10 +203,11 @@ where
                 calibration_permille,
             );
             Some(
-                crate::projects::load_context(
+                crate::projects::load_context_for_query(
                     state,
                     project_scope,
                     budget,
+                    &project_query,
                     cancel.clone(),
                     deadline,
                 )
@@ -211,6 +221,15 @@ where
             cancel.cancel_with(anima_core::CancelCause::HelperDeadline);
         }
         let transaction = transactions.clone().lock_owned().await;
+        if let Some(loaded) = &project_loaded {
+            loaded
+                .recheck_knowledge(state)
+                .await
+                .map_err(|error| ApiError::conflict(error.to_string()))?;
+        }
+        if helper_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            cancel.cancel_with(anima_core::CancelCause::HelperDeadline);
+        }
         let (build, previous, previous_project, persist) = {
             let mut guard = state.write().await;
             if !guard.agents.contains_key(agent_id)

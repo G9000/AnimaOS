@@ -29,6 +29,7 @@ pub(crate) struct PersistencePreflight {
     control_plane: Option<PathBuf>,
     history: Option<PathBuf>,
     document_edits: Option<PathBuf>,
+    project_knowledge: Option<PathBuf>,
 }
 
 enum DocumentEditsStartup<'a> {
@@ -80,6 +81,14 @@ pub(crate) fn prepare_persistence_with_durable(
         checkpoint.as_deref(),
         explicit_tool_root.as_deref(),
     );
+    let project_knowledge = canonical_control_plane
+        .as_deref()
+        .and_then(default_project_knowledge_root)
+        .map(|path| ProfileOwner::resolve_path(&path))
+        .transpose()?;
+    if let Some(root) = &project_knowledge {
+        resources.push(ProfileResource::Directory(root.clone()));
+    }
     if let Some(root) = &document_edits {
         resources.push(ProfileResource::Directory(root.clone()));
     }
@@ -113,6 +122,7 @@ pub(crate) fn prepare_persistence_with_durable(
         control_plane,
         history,
         document_edits,
+        project_knowledge,
     })
 }
 
@@ -127,6 +137,7 @@ pub(crate) async fn configure_persistence(
         control_plane,
         history,
         document_edits,
+        project_knowledge,
     } = preflight;
     let postgres_pool = configure_database(state, config, &owner).await?;
     let memory_store = memory
@@ -162,6 +173,27 @@ pub(crate) async fn configure_persistence(
             .and_then(|store| store.with_owner(owner.clone()))
             .map_err(io::Error::other)?;
         install_document_edit_store(&mut *state.write().await, store)?;
+    }
+    if let Some(root) = project_knowledge {
+        owner
+            .with_directory(&root, || {
+                crate::document_edits::store::initialize_owned_directory(&root)
+            })?
+            .map_err(io::Error::other)?;
+        crate::document_edits::workspace_boundary::ensure_separate(
+            &root.canonicalize()?,
+            state
+                .read()
+                .await
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.as_path()),
+        )
+        .map_err(io::Error::other)?;
+        let knowledge =
+            crate::projects::knowledge::KnowledgeService::open(root, Some(owner.clone()))
+                .map_err(io::Error::other)?;
+        state.write().await.project_knowledge = knowledge;
     }
     write_core_memory_copies(state).await?;
     Ok(())
@@ -840,6 +872,12 @@ pub(crate) fn default_tool_results_root(control_plane: &Path) -> Option<PathBuf>
 
 fn default_document_edits_root(control_plane: &Path) -> Option<PathBuf> {
     Some(control_plane.parent()?.join("document-edits"))
+}
+
+fn default_project_knowledge_root(control_plane: &Path) -> Option<PathBuf> {
+    let mut name = control_plane.file_name()?.to_os_string();
+    name.push(".project-knowledge");
+    Some(control_plane.with_file_name(name))
 }
 
 /// Explicit JSON or SQLite file wins, then Postgres, then `memory.sqlite` next to the

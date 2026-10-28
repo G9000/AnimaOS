@@ -99,10 +99,11 @@ import {
   loadLiteralDraft,
   storeLiteralDraft,
 } from './lib/drafts';
-import { safeIntegrationError } from './lib/telegram';
+import { connectorStatusLabel, safeIntegrationError } from './lib/telegram';
 import {
   discordCanReply,
   discordHasRoom,
+  discordStatusLabel,
   safeDiscordError,
 } from './lib/discord';
 import { useAttachmentSession } from './hooks/useAttachmentSession';
@@ -2154,6 +2155,20 @@ export function ViewHarness() {
                   'External tool permissions need a fresh read. Refresh status in Connections before saving changes.',
                 );
               }}
+              telegramStatus={
+                telegramConnector
+                  ? connectorStatusLabel(telegramConnector.status)
+                  : null
+              }
+              discordStatus={
+                discordIntegrations.connectors.length === 0
+                  ? null
+                  : discordIntegrations.connectors.some(
+                        (item) => item.status === 'ready',
+                      )
+                    ? 'Connected'
+                    : discordStatusLabel(discordIntegrations.connectors[0].status)
+              }
               telegram={
                 <TelegramSettings
                   online={connection === 'online'}

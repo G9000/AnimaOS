@@ -305,3 +305,67 @@ async fn pre_cancelled_and_expired_calls_never_need_a_worker() {
         Err(WorkerFailure::InvalidOutput)
     );
 }
+
+#[test]
+fn knowledge_worker_request_and_output_use_a_separate_bounded_envelope() {
+    for (code, format) in [
+        (3, DocumentFormat::Docx),
+        (4, DocumentFormat::Pdf),
+        (5, DocumentFormat::Xlsx),
+    ] {
+        let (mode, parsed, bytes) =
+            read_request_mode(&mut Cursor::new(request(code, b"knowledge"))).unwrap();
+        assert_eq!(mode, ExtractionMode::Knowledge);
+        assert_eq!(parsed, format);
+        assert_eq!(bytes, b"knowledge");
+    }
+    let mut value = ExtractedDocumentText::empty(DocumentExtractionStatus::Ready);
+    value
+        .blocks
+        .push(anima_service_adapters::document_content::DocumentBlock {
+            locator: anima_service_adapters::document_content::DocumentLocator::DocxParagraph {
+                paragraph: 1,
+            },
+            text: "x".repeat(32 * 1024),
+        });
+    assert!(write_result(&mut Vec::new(), &value).is_err());
+    let mut output = Vec::new();
+    write_result_mode(&mut output, &value, ExtractionMode::Knowledge).unwrap();
+    assert!(output.len() > 16 * 1024);
+    value.blocks[0].text =
+        "x".repeat(anima_service_adapters::document_content::MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES + 1);
+    assert!(write_result_mode(&mut Vec::new(), &value, ExtractionMode::Knowledge).is_err());
+}
+
+#[tokio::test]
+async fn knowledge_exchange_rejects_oversize_frames_before_allocating_the_body() {
+    let (parent, peer) = tokio::io::duplex(256);
+    let (parent_read, parent_write) = tokio::io::split(parent);
+    let (mut peer_read, mut peer_write) = tokio::io::split(peer);
+    let peer = tokio::spawn(async move {
+        peer_write.write_all(READY).await.unwrap();
+        let mut request = Vec::new();
+        peer_read.read_to_end(&mut request).await.unwrap();
+        assert_eq!(request, [3, 0, 0, 0, 0]);
+        peer_write
+            .write_all(&((MAX_KNOWLEDGE_FRAME + 1) as u32).to_le_bytes())
+            .await
+            .unwrap();
+        // Deliberately hold stdout open: rejecting a length must not need EOF.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    });
+    let result = tokio::time::timeout(
+        Duration::from_millis(50),
+        exchange_mode(
+            DocumentFormat::Docx,
+            ExtractionMode::Knowledge,
+            parent_write,
+            parent_read,
+            Vec::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result, Err(WorkerFailure::InvalidOutput));
+    peer.await.unwrap();
+}

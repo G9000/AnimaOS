@@ -219,7 +219,9 @@ impl GoogleOAuthConfig {
     }
 
     pub(crate) fn consent_url(&self, nonce: &str) -> String {
-        let scope = "https://www.googleapis.com/auth/calendar.events";
+        // Events for reading and proposing changes; calendar details to read the
+        // primary calendar's ID, which names the connected account.
+        let scope = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendars.readonly";
         format!(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
             url_encode(&self.client_id),
@@ -271,6 +273,9 @@ pub(crate) enum CalendarError {
     /// Too many pending writes await approval.
     Conflict,
     Transport,
+    /// Google signed the owner in, but the primary calendar could not be read,
+    /// for example because the Calendar API is off for the project.
+    AccountLookup,
     Credential,
     Persistence,
     InvalidDraft,
@@ -510,7 +515,7 @@ impl CalendarManager {
             .transport
             .primary_calendar(tokens.access_token())
             .await
-            .map_err(|_| CalendarError::Transport)?;
+            .map_err(|_| CalendarError::AccountLookup)?;
         if original_account
             .as_ref()
             .is_some_and(|original| original != &account_label)

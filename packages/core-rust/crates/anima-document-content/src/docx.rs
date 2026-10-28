@@ -23,7 +23,14 @@ const MAIN_TYPE: &str =
 /// Extract transitional WordprocessingML main-body text. Full selected XML and
 /// its CRC are validated before any bounded prefix is returned.
 pub fn extract_docx(bytes: &[u8]) -> ExtractedDocumentText {
-    match extract(bytes) {
+    extract_docx_with_text_limit(bytes, MAX_DOCUMENT_RENDERED_BYTES)
+}
+
+pub(crate) fn extract_docx_with_text_limit(
+    bytes: &[u8],
+    text_limit: usize,
+) -> ExtractedDocumentText {
+    match extract(bytes, text_limit) {
         Ok(value) => value,
         Err(status) => ExtractedDocumentText::empty(status),
     }
@@ -41,7 +48,7 @@ pub(super) fn extras_ok(mut extras: ExtraFields<'_>) -> Result<(), Status> {
     Ok(())
 }
 
-fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
+fn extract(bytes: &[u8], text_limit: usize) -> Result<ExtractedDocumentText, Status> {
     if bytes.len() > MAX_INPUT {
         return Err(Status::TooLarge);
     }
@@ -176,7 +183,7 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
     validate_types(&types_xml)?;
     let (main_entry, main_method) = main.ok_or(Status::Malformed)?;
     let xml = read_part(&archive, main_entry, main_method, MAX_XML)?;
-    parse_main(&xml)
+    parse_main(&xml, text_limit)
 }
 
 /// rawzip owns parsing/offset discovery. Its public API omits multi-disk and
@@ -339,7 +346,7 @@ struct Element {
     skip: bool,
 }
 
-fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
+fn parse_main(xml: &[u8], text_limit: usize) -> Result<ExtractedDocumentText, Status> {
     validate_xml_characters(xml)?;
     let mut reader = NsReader::from_reader(xml);
     reader.config_mut().expand_empty_elements = true;
@@ -459,7 +466,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                         b"br" | b"cr" => "\n",
                         _ => "",
                     };
-                    append_text(&mut text, added, &mut overflow);
+                    append_text(&mut text, added, &mut overflow, text_limit);
                 }
                 stack.push(Element {
                     local: if word { local.to_vec() } else { Vec::new() },
@@ -470,8 +477,12 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                 let depth = stack.len();
                 if paragraph_depth == Some(depth) {
                     if !text.trim().is_empty() && !text_limited && !paragraph_limited {
-                        let cost = serde_text_cost(&text) + 240;
-                        if overflow || stored_bytes + cost > MAX_DOCUMENT_RENDERED_BYTES {
+                        let cost = if text_limit == MAX_DOCUMENT_RENDERED_BYTES {
+                            serde_text_cost(&text) + 240
+                        } else {
+                            text.len()
+                        };
+                        if overflow || stored_bytes + cost > text_limit {
                             text_limited = true;
                         } else {
                             stored_bytes += cost;
@@ -496,7 +507,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                     && paragraph_depth.is_some()
                     && field_depth == 0
                 {
-                    append_text(&mut text, &decoded, &mut overflow);
+                    append_text(&mut text, &decoded, &mut overflow, text_limit);
                 } else if stack.is_empty() && !decoded.trim().is_empty() {
                     return Err(Status::Malformed);
                 }
@@ -510,7 +521,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                     && paragraph_depth.is_some()
                     && field_depth == 0
                 {
-                    append_text(&mut text, &decoded, &mut overflow);
+                    append_text(&mut text, &decoded, &mut overflow, text_limit);
                 }
             }
             Event::GeneralRef(value) => {
@@ -539,7 +550,7 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
                     && paragraph_depth.is_some()
                     && field_depth == 0
                 {
-                    append_text(&mut text, &decoded, &mut overflow);
+                    append_text(&mut text, &decoded, &mut overflow, text_limit);
                 }
             }
             Event::DocType(_) => return Err(Status::Malformed),
@@ -588,11 +599,11 @@ fn parse_main(xml: &[u8]) -> Result<ExtractedDocumentText, Status> {
     })
 }
 
-fn append_text(text: &mut String, value: &str, overflow: &mut bool) {
+fn append_text(text: &mut String, value: &str, overflow: &mut bool, text_limit: usize) {
     if *overflow {
         return;
     }
-    if text.len().saturating_add(value.len()) > MAX_DOCUMENT_RENDERED_BYTES {
+    if text.len().saturating_add(value.len()) > text_limit {
         *overflow = true;
     } else {
         text.push_str(value);

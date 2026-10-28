@@ -94,7 +94,7 @@ pub(crate) fn validate_run_project_fields(
             .ok_or(ProjectError::InvalidRecord(
                 "saved project context has no turn witness",
             ))?;
-        if manifest.version != 1
+        if !matches!(manifest.version, 1 | 2)
             || manifest.run_id != run.id
             || manifest.agent_id != run.agent_id
             || manifest.session_id != run.session_id
@@ -143,6 +143,36 @@ fn validate_sources(manifest: &ProjectContextManifest) -> Result<(), ProjectErro
         }
         if let Some(witness) = &source.witness {
             let valid = match witness {
+                ProjectSourceWitness::KnowledgeFolder {
+                    root_identity,
+                    query_sha256,
+                    passages,
+                } => {
+                    manifest.version == 2
+                        && valid_hash(root_identity)
+                        && valid_hash(query_sha256)
+                        && !passages.is_empty()
+                        && passages.len() <= 8
+                        && passages.iter().all(|passage| {
+                            passage
+                                .citation_id
+                                .strip_prefix("cite_")
+                                .is_some_and(valid_hash)
+                                && valid_message_id(&passage.document_id)
+                                && valid_hash(&passage.source_sha256)
+                                && valid_hash(&passage.chunk_sha256)
+                                && valid_hash(&passage.included_sha256)
+                                && !passage.locator.is_empty()
+                                && passage.locator.len() <= 256
+                                && !passage.locator.chars().any(char::is_control)
+                        })
+                        && passages
+                            .iter()
+                            .map(|p| &p.citation_id)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == passages.len()
+                }
                 ProjectSourceWitness::WorkspaceFile {
                     workspace_key,
                     path,

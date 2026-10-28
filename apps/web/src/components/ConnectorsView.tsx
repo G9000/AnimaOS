@@ -2,6 +2,7 @@ import { ownerFetch } from '../lib/owner-fetch';
 import {
   createContext,
   useContext,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -14,6 +15,31 @@ import {
   type OAuthAppProvider,
 } from '@animaos/sdk';
 import { primaryBtnCls } from './ui-bits';
+import { ServiceRow } from './ServiceRow';
+import {
+  SERVICE_GROUPS,
+  ServiceDirectoryContext,
+  isListed,
+  isSettled,
+  useServiceDirectory,
+  type ServiceGroup,
+} from './ServiceDirectory';
+import { BrandIcon } from './BrandIcon';
+import { OAuthGuide } from './OAuthGuide';
+import {
+  OAuthSetupContext,
+  OAuthSetupLink,
+  type OAuthProvider,
+} from './OAuthSetupLink';
+import {
+  AtSignIcon,
+  CheckIcon,
+  CopyIcon,
+  PlusIcon,
+  RefreshIcon,
+  SearchIcon,
+  XIcon,
+} from './icons';
 import { GoogleDriveCard } from './GoogleDriveCard';
 import { MicrosoftFilesCard } from './MicrosoftFilesCard';
 import { ConnectedAccountsPanel } from './connected-accounts/ConnectedAccountsPanel';
@@ -172,22 +198,33 @@ function authorizationUrl(value: string, provider: 'google' | 'outlook') {
   return url.href;
 }
 function Card({
+  id,
+  group,
   title,
   description,
+  status,
+  icon,
   children,
 }: {
+  id: string;
+  group: ServiceGroup;
   title: string;
   description: string;
+  status: string;
+  icon: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section aria-label={title} className="min-w-0 space-y-4 connections-card">
-      <div>
-        <h2 className="text-base font-semibold text-ink">{title}</h2>
-        <p className="mt-1 text-xs leading-relaxed text-ink-3">{description}</p>
-      </div>
+    <ServiceRow
+      id={id}
+      group={group}
+      title={title}
+      summary={description}
+      status={status}
+      icon={icon}
+    >
       {children}
-    </section>
+    </ServiceRow>
   );
 }
 function ConnectionControls({
@@ -219,59 +256,79 @@ function ConnectionControls({
   onDisconnect: () => void;
   onRefresh: () => void;
 }) {
+  const provName = provider === 'google' ? 'Google' : 'Microsoft';
+  const expired = /reconnect/i.test(status);
+  const unfinished = /awaiting/i.test(status);
+  const needsAction = !connected || expired || unfinished;
   return (
-    <>
-      <div className="space-y-1 text-xs">
-        <p role="status" className="font-medium text-accent">
-          {loading && !status ? 'Loading connection…' : status}
-        </p>
-        {account && <p className="break-all text-ink-2">{account}</p>}
-      </div>
-      {status === 'Setup required' && !loading && (
-        <p className="text-xs leading-relaxed text-ink-3">
-          OAuth is not configured on this daemon. Ask the workspace owner to
-          configure {provider === 'google' ? 'Google' : 'Microsoft'}{' '}
-          credentials, then refresh.
+    <div className="conn-panel">
+      {account && (
+        <p className="conn-account">
+          <span>Account</span>
+          <strong>{account}</strong>
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
+      {status === 'Setup required' && !loading && (
+        <OAuthSetupLink
+          provider={provider === 'google' ? 'google' : 'microsoft'}
+        />
+      )}
+      {consent ? (
+        <div className="conn-next">
+          <p>One more step: finish signing in with {provName}.</p>
+          <a
+            href={consent}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="conn-btn conn-btn--primary"
+          >
+            Continue to {provName}
+          </a>
+        </div>
+      ) : (expired || unfinished) && !loading ? (
+        <p className="conn-note">
+          {expired
+            ? `${provName} needs you to sign in again.`
+            : `Signing in with ${provName} was not finished. Reconnect to start again.`}
+        </p>
+      ) : null}
+      <div className="conn-actions">
         <button
-          className={primaryBtnCls}
+          type="button"
+          className={`conn-btn${needsAction && !consent ? ' conn-btn--primary' : ''}`}
           disabled={busy || loading || !configured}
           onClick={onConnect}
         >
           {connected ? `Reconnect ${name}` : `Connect ${name}`}
         </button>
         {connected && (
-          <button className={button} disabled={busy} onClick={onDisconnect}>
+          <button
+            type="button"
+            className="conn-btn"
+            disabled={busy}
+            onClick={onDisconnect}
+          >
             Disconnect {name}
           </button>
         )}
         <button
-          className={button}
+          type="button"
+          className="conn-btn conn-btn--icon"
           disabled={busy || loading}
+          data-loading={loading || undefined}
           onClick={onRefresh}
           aria-label={`Refresh ${name}`}
+          title="Refresh"
         >
-          {loading ? 'Refreshing…' : 'Refresh'}
+          <RefreshIcon size={15} />
         </button>
       </div>
-      {consent && (
-        <a
-          href={consent}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex text-sm text-accent underline"
-        >
-          Continue to {provider === 'google' ? 'Google' : 'Microsoft'}
-        </a>
-      )}
       {error && (
         <p role="alert" className="text-xs text-danger">
           {error}
         </p>
       )}
-    </>
+    </div>
   );
 }
 function MailCard({
@@ -328,26 +385,42 @@ function MailCard({
             : 'Awaiting authorization';
   return (
     <Card
+      id={provider}
+      group={
+        provider === 'gmail'
+          ? 'google'
+          : provider === 'outlook'
+            ? 'microsoft'
+            : 'email'
+      }
       title={name}
-      description="Read recent mail and prepare messages for your review."
+      description={
+        provider === 'email' ? 'Any mailbox (IMAP/SMTP)' : 'Read mail, draft replies'
+      }
+      icon={
+        provider === 'email' ? (
+          <AtSignIcon size={18} />
+        ) : (
+          <BrandIcon brand={provider} />
+        )
+      }
+      status={resource.loading && !status ? 'Loading connection…' : status}
     >
       {provider === 'email' ? (
         <>
-          <div className="space-y-1 text-xs">
-            <p role="status" className="font-medium text-accent">
-              {resource.loading && !status ? 'Loading connection…' : status}
+          {connection?.accountLabel && (
+            <p className="conn-account">
+              <span>Account</span>
+              <strong>{connection.accountLabel}</strong>
             </p>
-            {connection?.accountLabel && (
-              <p className="break-all text-ink-2">{connection.accountLabel}</p>
-            )}
-            {connection?.email?.autoReply.enabled && (
-              <p className="text-ink-3">
-                Automatic replies enabled for{' '}
-                {connection.email.autoReply.allowedSenders.length} allowed
-                sender(s).
-              </p>
-            )}
-          </div>
+          )}
+          {connection?.email?.autoReply.enabled && (
+            <p className="conn-note">
+              Automatic replies enabled for{' '}
+              {connection.email.autoReply.allowedSenders.length} allowed
+              sender(s).
+            </p>
+          )}
           <GenericEmailSettings
             agentId={agentId}
             online={context.online}
@@ -361,10 +434,11 @@ function MailCard({
               );
             }}
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="conn-actions">
             {connection && (
               <button
-                className={button}
+                type="button"
+                className="conn-btn"
                 disabled={resource.busy}
                 onClick={() => {
                   void resource.run(() =>
@@ -376,12 +450,15 @@ function MailCard({
               </button>
             )}
             <button
-              className={button}
+              type="button"
+              className="conn-btn conn-btn--icon"
               disabled={resource.busy || resource.loading}
+              data-loading={resource.loading || undefined}
               aria-label="Refresh Email"
+              title="Refresh"
               onClick={() => void resource.refresh(true, true)}
             >
-              {resource.loading ? 'Refreshing…' : 'Refresh'}
+              <RefreshIcon size={15} />
             </button>
           </div>
           {resource.error && (
@@ -425,151 +502,165 @@ function MailCard({
           {connection.error}
         </p>
       )}
-      <p className="text-xs leading-relaxed text-ink-3">
+      <p className="conn-foot">
         {provider === 'email'
-          ? 'Manual drafts stay in animaOS until you approve Send. Automatic replies require the separate opt-in above.'
-          : 'Drafts stay in animaOS until you approve Send. Connecting an account never sends mail.'}
+          ? 'Drafts wait for your approval before sending.'
+          : 'Nothing is sent until you approve it.'}
       </p>
       {connection && (
         <>
-          <div className="space-y-3 border-t border-line pt-4">
-            <h3 className="text-sm font-medium text-ink">Recent inbox</h3>
-            {resource.data?.inboxError && (
-              <p role="alert" className="text-xs text-danger">
-                Could not load recent inbox. Refresh to try again.
-              </p>
-            )}
-            {!resource.data?.inboxError &&
-              resource.data?.messages.length === 0 && (
-                <p className="text-xs text-ink-3">
-                  {connection.status === 'active'
-                    ? 'No recent messages.'
-                    : 'Reconnect to read recent messages.'}
+          {connection.status === 'active' && (
+            <section className="conn-section">
+              <h3 className="conn-title">Recent inbox</h3>
+              {resource.data?.inboxError && (
+                <p role="alert" className="text-xs text-danger">
+                  Could not load recent inbox. Refresh to try again.
                 </p>
               )}
-            {resource.data?.messages.map((message) => (
-              <article
-                key={message.id}
-                className="min-w-0 rounded-xl border border-line p-3 text-xs"
-              >
-                <p className="break-words font-medium text-ink">
-                  {message.subject || '(No subject)'}
+              {!resource.data?.inboxError &&
+                resource.data?.messages.length === 0 && (
+                  <p className="conn-empty">No recent messages.</p>
+                )}
+              <div className="conn-messages">
+                {resource.data?.messages.map((message) => (
+                  <article key={message.id} className="conn-message">
+                    <p className="conn-message-subject">
+                      {message.subject || '(No subject)'}
+                    </p>
+                    <p className="conn-message-meta">
+                      {message.from} · {message.receivedAt}
+                    </p>
+                    <p className="conn-message-preview">{message.preview}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          {(connection.status === 'active' ||
+            Boolean(resource.data?.drafts.length) ||
+            resource.data?.draftsError) && (
+            <section className="conn-section">
+              {connection.status === 'active' && (
+                <details className="conn-compose">
+                  <summary>
+                    <PlusIcon size={14} />
+                    New local draft
+                  </summary>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void resource
+                        .run(() =>
+                          client.createMailDraft(
+                            agentId,
+                            provider,
+                            connection.id,
+                            {
+                              to: to
+                                .split(',')
+                                .map((value) => value.trim())
+                                .filter(Boolean),
+                              subject,
+                              body,
+                            },
+                          ),
+                        )
+                        .then((ok) => {
+                          if (ok) {
+                            setTo('');
+                            setSubject('');
+                            setBody('');
+                          }
+                        });
+                    }}
+                  >
+                    <label className="conn-field">
+                      To (comma-separated)
+                      <input
+                        className="field"
+                        aria-label={`${name} draft recipients`}
+                        value={to}
+                        onChange={(e) => setTo(e.target.value)}
+                        required
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <label className="conn-field">
+                      Subject
+                      <input
+                        className="field"
+                        aria-label={`${name} draft subject`}
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        maxLength={998}
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <label className="conn-field">
+                      Message
+                      <textarea
+                        className="field min-h-28 resize-y"
+                        aria-label={`${name} draft message`}
+                        value={body}
+                        onChange={(e) => setBody(e.target.value)}
+                        required
+                        maxLength={100000}
+                        disabled={resource.busy}
+                      />
+                    </label>
+                    <div className="conn-actions">
+                      <button
+                        className="conn-btn conn-btn--primary"
+                        type="submit"
+                        disabled={resource.busy || !to.trim() || !body.trim()}
+                      >
+                        Save local draft
+                      </button>
+                    </div>
+                  </form>
+                </details>
+              )}
+              <h3 className="conn-title">Saved drafts</h3>
+              {resource.data?.draftsError && (
+                <p role="alert" className="text-xs text-danger">
+                  Could not load saved drafts. Refresh to try again.
                 </p>
-                <p className="mt-1 break-all text-ink-3">
-                  {message.from} · {message.receivedAt}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-ink-2">
-                  {message.preview}
-                </p>
-              </article>
-            ))}
-          </div>
-          <form
-            className="space-y-3 border-t border-line pt-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void resource
-                .run(() =>
-                  client.createMailDraft(agentId, provider, connection.id, {
-                    to: to
-                      .split(',')
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                    subject,
-                    body,
-                  }),
-                )
-                .then((ok) => {
-                  if (ok) {
-                    setTo('');
-                    setSubject('');
-                    setBody('');
-                  }
-                });
-            }}
-          >
-            <h3 className="text-sm font-medium text-ink">New local draft</h3>
-            <label className="block text-xs text-ink-2">
-              To (comma-separated)
-              <input
-                className="field mt-1 w-full"
-                aria-label={`${name} draft recipients`}
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                required
-                disabled={resource.busy}
-              />
-            </label>
-            <label className="block text-xs text-ink-2">
-              Subject
-              <input
-                className="field mt-1 w-full"
-                aria-label={`${name} draft subject`}
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                maxLength={998}
-                disabled={resource.busy}
-              />
-            </label>
-            <label className="block text-xs text-ink-2">
-              Message
-              <textarea
-                className="field mt-1 min-h-28 w-full resize-y"
-                aria-label={`${name} draft message`}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                required
-                maxLength={100000}
-                disabled={resource.busy}
-              />
-            </label>
-            <button
-              className={button}
-              type="submit"
-              disabled={resource.busy || !to.trim() || !body.trim()}
-            >
-              Save local draft
-            </button>
-          </form>
-          <div className="space-y-3 border-t border-line pt-4">
-            <h3 className="text-sm font-medium text-ink">Saved drafts</h3>
-            {resource.data?.draftsError && (
-              <p role="alert" className="text-xs text-danger">
-                Could not load saved drafts. Refresh to try again.
-              </p>
-            )}
-            {!resource.data?.draftsError && !resource.data?.drafts.length && (
-              <p className="text-xs text-ink-3">No saved drafts yet.</p>
-            )}
-            {resource.data?.drafts.map((draft) => (
-              <DraftReview
-                key={draft.id}
-                draft={draft}
-                busy={resource.busy}
-                canSend={connection.status === 'active'}
-                approve={() =>
-                  void resource.run(() =>
-                    client.approveMailDraft(
-                      agentId,
-                      provider,
-                      connection.id,
-                      draft.id,
-                    ),
-                  )
-                }
-                reject={() =>
-                  void resource.run(() =>
-                    client.rejectMailDraft(
-                      agentId,
-                      provider,
-                      connection.id,
-                      draft.id,
-                    ),
-                  )
-                }
-              />
-            ))}
-          </div>
+              )}
+              {!resource.data?.draftsError && !resource.data?.drafts.length && (
+                <p className="conn-empty">No saved drafts yet.</p>
+              )}
+              <div className="flex flex-col gap-2">
+                {resource.data?.drafts.map((draft) => (
+                  <DraftReview
+                    key={draft.id}
+                    draft={draft}
+                    busy={resource.busy}
+                    canSend={connection.status === 'active'}
+                    approve={() =>
+                      void resource.run(() =>
+                        client.approveMailDraft(
+                          agentId,
+                          provider,
+                          connection.id,
+                          draft.id,
+                        ),
+                      )
+                    }
+                    reject={() =>
+                      void resource.run(() =>
+                        client.rejectMailDraft(
+                          agentId,
+                          provider,
+                          connection.id,
+                          draft.id,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
     </Card>
@@ -589,8 +680,8 @@ function DraftReview({
   reject: () => void;
 }) {
   return (
-    <article className="min-w-0 space-y-2 rounded-xl border border-line p-3 text-xs">
-      <p className="break-words font-medium text-ink">
+    <article className="conn-draft">
+      <p className="break-words text-[13px] font-medium text-ink">
         {draft.subject || '(No subject)'}
       </p>
       <p className="break-all text-ink-3">To: {draft.to.join(', ')}</p>
@@ -612,13 +703,19 @@ function DraftReview({
       {draft.state === 'pending' && (
         <div className="flex flex-wrap gap-2">
           <button
-            className={primaryBtnCls}
+            type="button"
+            className="conn-btn conn-btn--primary"
             disabled={busy || !canSend}
             onClick={approve}
           >
             Send saved draft
           </button>
-          <button className={button} disabled={busy} onClick={reject}>
+          <button
+            type="button"
+            className="conn-btn"
+            disabled={busy}
+            onClick={reject}
+          >
             Reject draft
           </button>
         </div>
@@ -626,6 +723,20 @@ function DraftReview({
     </article>
   );
 }
+
+/** The addresses the daemon registers at its default origin. Shown only when
+ *  the daemon cannot answer, so the owner is never left without them. */
+const DEFAULT_REDIRECT_URIS: Record<OAuthAppProvider, readonly string[]> = {
+  google: [
+    'http://127.0.0.1:8080/api/connectors/mail/gmail/callback',
+    'http://127.0.0.1:8080/api/connectors/gcalendar/callback',
+    'http://127.0.0.1:8080/api/connectors/gdrive/callback',
+  ],
+  microsoft: [
+    'http://127.0.0.1:8080/api/connectors/mail/outlook/callback',
+    'http://127.0.0.1:8080/api/connectors/microsoft-files/callback',
+  ],
+};
 
 function OAuthAppCard({
   provider,
@@ -680,74 +791,116 @@ function OAuthAppCard({
       });
   };
 
+  const assumed = !status && Boolean(resource.error);
+  const uris = status?.redirectUris ?? (assumed ? DEFAULT_REDIRECT_URIS[provider] : []);
+  const statusText =
+    resource.loading && !status
+      ? 'Loading setup…'
+      : status?.configured
+        ? 'Configured'
+        : resource.error
+          ? 'Status unavailable'
+          : 'Not set up';
   return (
-    <section
-      aria-label={`${name} OAuth app`}
-      className="min-w-0 space-y-3 rounded-xl border border-line p-4"
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-ink">{name} OAuth app</h3>
-        <p className="mt-1 text-xs leading-relaxed text-ink-3">
-          {provider === 'google'
-            ? 'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.'
-            : 'Enables Outlook and Microsoft files.'}
-        </p>
-      </div>
-      <p role="status" className="text-xs font-medium text-accent">
-        {resource.loading && !status
-          ? 'Loading setup…'
-          : status?.configured
-            ? 'Configured'
-            : resource.error
-              ? 'Status unavailable'
-              : 'Setup required'}
-      </p>
-      {status?.source && (
-        <p className="text-xs text-ink-3">
-          Source: {status.source === 'vault' ? 'Daemon vault' : 'Environment'}
-        </p>
+    <section aria-label={`${name} OAuth app`} className="oauth-card">
+      <header className="oauth-head">
+        <div>
+          <h3>{name} OAuth app</h3>
+          <p>
+            {provider === 'google'
+              ? 'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.'
+              : 'Enables Outlook and Microsoft files.'}
+          </p>
+        </div>
+        <span
+          role="status"
+          className="connections-row-status"
+          data-tone={
+            status?.configured
+              ? 'ok'
+              : resource.error
+                ? 'attention'
+                : 'idle'
+          }
+        >
+          {statusText}
+        </span>
+      </header>
+      {(status?.source || status?.clientIdHint) && (
+        <dl className="oauth-facts">
+          {status.source && (
+            <div>
+              <dt>Stored in</dt>
+              <dd>{status.source === 'vault' ? 'Daemon vault' : 'Environment'}</dd>
+            </div>
+          )}
+          {status.clientIdHint && (
+            <div>
+              <dt>Client ID</dt>
+              <dd>
+                <code>{status.clientIdHint}</code>
+              </dd>
+            </div>
+          )}
+        </dl>
       )}
-      {status?.clientIdHint && (
-        <p className="break-all text-xs text-ink-2">{status.clientIdHint}</p>
+      <OAuthGuide
+        provider={provider}
+        configured={status ? status.configured : null}
+      />
+      {uris.length > 0 && (
+        <div className="oauth-uris">
+          <p className="oauth-label">
+            Redirect {uris.length === 1 ? 'URI' : 'URIs'}
+          </p>
+          {uris.map((uri) => (
+            <div className="oauth-uri" key={uri}>
+              <code>{uri}</code>
+              <CopyButton text={uri} />
+            </div>
+          ))}
+          {assumed && (
+            <p className="oauth-hint">
+              These are the default addresses. The daemon could not confirm
+              them, so a custom public address would differ.{' '}
+              <button
+                type="button"
+                className="oauth-inline"
+                onClick={() => void resource.refresh(true, true)}
+              >
+                Try again
+              </button>
+            </p>
+          )}
+        </div>
       )}
-      <div className="space-y-1 text-xs text-ink-2">
-        <p>Redirect {status?.redirectUris.length === 1 ? 'URI' : 'URIs'}</p>
-        {status?.redirectUris.map((uri) => (
-          <code
-            key={uri}
-            className="block overflow-x-auto rounded-lg bg-black/20 px-2 py-1.5 text-ink-3"
-          >
-            {uri}
-          </code>
-        ))}
-      </div>
       {environmentManaged && (
-        <div className="space-y-1 text-xs leading-relaxed text-ink-3">
+        <div className="oauth-note">
           <p>Managed through the daemon environment.</p>
           <p>These credentials cannot be replaced or removed in the UI.</p>
         </div>
       )}
       <form
-        className="grid min-w-0 gap-3 sm:grid-cols-2"
+        className="oauth-form"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
         }}
       >
-        <label className="block min-w-0 text-xs text-ink-2">
+        <label className="oauth-field">
           Client ID
           <input
-            className="field mt-1 w-full"
+            className="field"
             aria-label={`${name} client ID`}
             value={clientId}
             onChange={(event) => setClientId(event.target.value)}
             disabled={resource.busy || environmentManaged}
           />
         </label>
-        <label className="block min-w-0 text-xs text-ink-2">
+        <label className="oauth-field">
           Client secret
           <input
-            className="field mt-1 w-full"
+            className="field"
             aria-label={`${name} client secret`}
             type="password"
             autoComplete="new-password"
@@ -757,20 +910,23 @@ function OAuthAppCard({
           />
         </label>
         {provider === 'microsoft' && (
-          <label className="block min-w-0 text-xs text-ink-2 sm:col-span-2">
+          <label className="oauth-field oauth-wide">
             Tenant
             <input
-              className="field mt-1 w-full"
+              className="field"
               aria-label="Microsoft tenant"
               value={tenant}
               onChange={(event) => setTenant(event.target.value)}
               disabled={resource.busy || environmentManaged}
             />
+            <span className="oauth-hint">
+              “common” works for work and personal accounts.
+            </span>
           </label>
         )}
-        <div className="flex flex-wrap gap-2 sm:col-span-2">
+        <div className="oauth-actions oauth-wide">
           <button
-            className={primaryBtnCls}
+            className="oauth-save"
             type="submit"
             disabled={resource.busy || resource.loading || environmentManaged}
           >
@@ -778,7 +934,7 @@ function OAuthAppCard({
           </button>
           {status?.source === 'vault' && (
             <button
-              className={button}
+              className="oauth-remove"
               type="button"
               disabled={resource.busy}
               onClick={() => {
@@ -802,6 +958,33 @@ function OAuthAppCard({
         </p>
       )}
     </section>
+  );
+}
+
+/** Copies a value and says so for a moment. */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <button
+      type="button"
+      className="oauth-copy"
+      aria-label={done ? 'Copied' : `Copy ${text}`}
+      title={done ? 'Copied' : 'Copy'}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setDone(true);
+          window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setDone(false), 1500);
+        } catch {
+          // Without clipboard access the URI is still there to select.
+        }
+      }}
+    >
+      {done ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
+    </button>
   );
 }
 
@@ -844,8 +1027,12 @@ function CalendarCard({ agentId }: { agentId: string }) {
   });
   return (
     <Card
+      id="calendar"
+      group="google"
       title="Google Calendar"
-      description="See your schedule. Review calendar changes before they are applied."
+      description="See your schedule, review changes"
+      icon={<BrandIcon brand="google-calendar" />}
+      status={resource.loading && !status ? 'Loading connection…' : status}
     >
       <ConnectionControls
         name="Google Calendar"
@@ -956,12 +1143,25 @@ function CalendarCard({ agentId }: { agentId: string }) {
     </Card>
   );
 }
+function openCatalog(element: HTMLDialogElement | null) {
+  if (!element || element.open) return;
+  if (typeof element.showModal === 'function') element.showModal();
+  else element.setAttribute('open', '');
+  element.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
+}
+function closeCatalog(element: HTMLDialogElement | null) {
+  if (!element) return;
+  if (typeof element.close === 'function') element.close();
+  else element.removeAttribute('open');
+}
 export function ConnectorsView({
   agentId,
   agentName = 'anima',
   mode = 'all',
   telegram,
+  telegramStatus = null,
   discord,
+  discordStatus = null,
   disabled = false,
   online = true,
   epoch = 0,
@@ -975,7 +1175,11 @@ export function ConnectorsView({
   agentName?: string;
   mode?: 'all' | 'connections' | 'tools';
   telegram: ReactNode;
+  /** Where Telegram stands, or null when it is not connected. */
+  telegramStatus?: string | null;
   discord?: ReactNode;
+  /** Where Discord stands, or null when it is not connected. */
+  discordStatus?: string | null;
   disabled?: boolean;
   online?: boolean;
   epoch?: number;
@@ -987,13 +1191,31 @@ export function ConnectorsView({
 }) {
   const lifetime = useConnectorLifetime(agentId, online, epoch);
   const [ownerBusy, setOwnerBusy] = useState(false);
-  const [telegramDetail, setTelegramDetail] = useState(false);
+  const directory = useServiceDirectory();
+  const catalog = useRef<HTMLDialogElement>(null);
+  const oauthSetup = useRef<HTMLDetailsElement>(null);
+  /** Opens OAuth app setup and puts the cursor in this provider's first field,
+   *  once a closing drawer has handed focus back. */
+  const openOAuthSetup = (provider: OAuthProvider) => {
+    const element = oauthSetup.current;
+    if (!element) return;
+    element.open = true;
+    const name = provider === 'google' ? 'Google' : 'Microsoft';
+    requestAnimationFrame(() => {
+      element.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+      element
+        .querySelector<HTMLInputElement>(`input[aria-label="${name} client ID"]`)
+        ?.focus({ preventScroll: true });
+    });
+  };
+  const [query, setQuery] = useState('');
+  const settled = directory.entries.length > 0 && directory.entries.every((entry) => isSettled(entry.status));
+  const nothingListed = !directory.entries.some((entry) => isListed(entry.status));
   const busyClaims = useRef(0);
   const [mcpRefreshRequired, setMcpRefreshRequired] = useState(false);
   useResetOnChange([lifetime.token], () => {
     setOwnerBusy(false);
     setMcpRefreshRequired(false);
-    setTelegramDetail(false);
   });
   useLayoutEffect(() => {
     busyClaims.current = 0;
@@ -1019,6 +1241,8 @@ export function ConnectorsView({
     <ConnectorContext.Provider
       value={{ owner: agentId, online, epoch, disabled }}
     >
+      <ServiceDirectoryContext.Provider value={directory}>
+      <OAuthSetupContext.Provider value={openOAuthSetup}>
       <section aria-label="Connectors" className="connections-page">
         <div className="connections-stack">
           <h1 className="sr-only">Connectors</h1>
@@ -1027,22 +1251,6 @@ export function ConnectorsView({
               Offline — reconnect to review current connection status.
             </p>
           )}
-          {mode === 'connections' && telegramDetail ? (
-            <section className="connections-telegram-detail" aria-labelledby="telegram-settings-title">
-              <button type="button" className="connections-back" onClick={() => setTelegramDetail(false)}>
-                <span aria-hidden="true">←</span> Connections
-              </button>
-              <header>
-                <h2 id="telegram-settings-title">Telegram</h2>
-                <p>
-                  Talk to {agentName} from Telegram. Your private chat joins the
-                  main chat; groups get their own thread.
-                </p>
-              </header>
-              <div className="connections-card">{telegram}</div>
-            </section>
-          ) : (
-          <>
           {(mode === 'all' || mode === 'tools') && (
             <section className="connections-section" aria-labelledby="mcp-tools-heading">
               <div className="connections-section-heading">
@@ -1094,13 +1302,13 @@ export function ConnectorsView({
           )}
           {(mode === 'all' || mode === 'connections') && (
             <>
-              <details className="connections-oauth-setup">
+              <details className="connections-oauth-setup" ref={oauthSetup}>
                 <summary>OAuth app setup</summary>
                 <p>
                   Add the daemon credentials used to start Google and Microsoft
                   account connections.
                 </p>
-                <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
+                <div className="oauth-grid">
                   <OAuthAppCard
                     key={`${agentId}:google`}
                     provider="google"
@@ -1114,11 +1322,20 @@ export function ConnectorsView({
                 </div>
               </details>
               <section className="connections-section" aria-labelledby="service-connections-heading">
-                <div className="connections-section-heading">
+                <div className="connections-section-heading connections-section-bar">
                   <div>
-                    <h2 id="service-connections-heading">Services</h2>
-                    <p>Accounts and services this agent can work with.</p>
+                    <h2 id="service-connections-heading">Connections</h2>
+                    <p>What {agentName} is connected to.</p>
                   </div>
+                  <button
+                    type="button"
+                    className="connections-add"
+                    aria-haspopup="dialog"
+                    onClick={() => openCatalog(catalog.current)}
+                  >
+                    <PlusIcon size={14} />
+                    Add connection
+                  </button>
                 </div>
                 <div className="connections-service-list">
                   <MailCard
@@ -1154,7 +1371,39 @@ export function ConnectorsView({
                     epoch={epoch}
                     disabled={disabled || ownerBusy}
                   />
+                  <ServiceRow
+                    id="telegram"
+                    group="chat"
+                    title="Telegram"
+                    summary="Chat from your phone"
+                    status={telegramStatus ?? 'Not connected'}
+                    icon={<BrandIcon brand="telegram" />}
+                  >
+                    <p className="text-xs leading-relaxed text-ink-3">
+                      Private chats join your main chat; groups get their own
+                      thread.
+                    </p>
+                    {telegram}
+                  </ServiceRow>
+                  {discord && (
+                    <ServiceRow
+                      id="discord"
+                      group="chat"
+                      title="Discord"
+                      summary="Chat from your servers"
+                      status={discordStatus ?? 'Not connected'}
+                      icon={<BrandIcon brand="discord" />}
+                    >
+                      {discord}
+                    </ServiceRow>
+                  )}
                 </div>
+                {settled && nothingListed && (
+                  <p className="connections-empty">
+                    Nothing is connected yet. Use Add connection to link an
+                    account or a chat app.
+                  </p>
+                )}
               </section>
               <ConnectedAccountsPanel
                 agentId={agentId}
@@ -1163,48 +1412,138 @@ export function ConnectorsView({
                 disabled={disabled || ownerBusy}
                 onGrantsChanged={onMcpGrantsChanged}
               />
-              <section className="connections-section" aria-labelledby="chat-app-connections-heading">
-                <div className="connections-section-heading">
+              <dialog
+                ref={catalog}
+                className="connections-catalog"
+                aria-label="Add a connection"
+                onClose={() => setQuery('')}
+                onClick={(event) => {
+                  if (event.target === event.currentTarget)
+                    closeCatalog(catalog.current);
+                }}
+              >
+                <header className="connections-catalog-head">
                   <div>
-                    <h2 id="chat-app-connections-heading">Chat apps</h2>
-                    <p>
-                      Talk to {agentName} from apps you already use. Same memory
-                      everywhere.
-                    </p>
+                    <p className="connections-drawer-title">Add a connection</p>
+                    <p>Pick what {agentName} can use.</p>
                   </div>
+                  <button
+                    type="button"
+                    className="connections-drawer-close"
+                    aria-label="Close the catalogue"
+                    onClick={() => closeCatalog(catalog.current)}
+                  >
+                    <XIcon size={16} />
+                  </button>
+                </header>
+                <label className="connections-catalog-search">
+                  <SearchIcon size={14} />
+                  <input
+                    type="search"
+                    aria-label="Search integrations"
+                    placeholder="Search integrations"
+                    autoComplete="off"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+                <div className="connections-catalog-body">
+                  {(() => {
+                    const needle = query.trim().toLowerCase();
+                    const all = [
+                      ...directory.entries.map((entry) => ({
+                        ...entry,
+                        unavailable: false,
+                      })),
+                      {
+                        id: 'whatsapp',
+                        title: 'WhatsApp',
+                        summary: 'Not available yet',
+                        group: 'chat' as const,
+                        status: '',
+                        icon: <BrandIcon brand="whatsapp" />,
+                        unavailable: true,
+                      },
+                      {
+                        id: 'slack',
+                        title: 'Slack',
+                        summary: 'Not available yet',
+                        group: 'chat' as const,
+                        status: '',
+                        icon: <BrandIcon brand="slack" />,
+                        unavailable: true,
+                      },
+                    ];
+                    const groups = SERVICE_GROUPS.map((group) => ({
+                      ...group,
+                      items: all.filter(
+                        (entry) =>
+                          entry.group === group.id &&
+                          `${entry.title} ${entry.summary} ${group.label}`
+                            .toLowerCase()
+                            .includes(needle),
+                      ),
+                    })).filter((group) => group.items.length > 0);
+                    if (groups.length === 0)
+                      return (
+                        <p className="connections-empty">
+                          Nothing matches “{query.trim()}”.
+                        </p>
+                      );
+                    return groups.map((group) => (
+                      <section key={group.id} aria-label={group.label}>
+                        <h3 className="connections-catalog-group">
+                          {group.label}
+                        </h3>
+                        <ul>
+                          {group.items.map((entry) => (
+                            <li
+                              key={entry.id}
+                              className={
+                                entry.unavailable ? 'is-unavailable' : undefined
+                              }
+                            >
+                              <span className="connections-row-icon">
+                                {entry.icon}
+                              </span>
+                              <div>
+                                <strong>{entry.title}</strong>
+                                <p>{entry.summary}</p>
+                              </div>
+                              {entry.unavailable ? (
+                                <button
+                                  type="button"
+                                  disabled
+                                  aria-label={`Add ${entry.title} (not available yet)`}
+                                >
+                                  Soon
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  aria-label={`${isListed(entry.status) ? 'Manage' : 'Add'} ${entry.title}`}
+                                  onClick={() => {
+                                    closeCatalog(catalog.current);
+                                    directory.ask(entry.id);
+                                  }}
+                                >
+                                  {isListed(entry.status) ? 'Manage' : 'Add'}
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ));
+                  })()}
                 </div>
-                <div className="connections-chat-list">
-                  <div className="connections-app-row">
-                    <div>
-                      <strong>Telegram</strong>
-                      <p>Private chats join your main chat; groups get their own thread.</p>
-                    </div>
-                    <button type="button" onClick={() => setTelegramDetail(true)}>
-                      Manage
-                    </button>
-                  </div>
-                  {discord && (
-                    <div className="min-w-0 connections-card">{discord}</div>
-                  )}
-                  {(['WhatsApp', 'Slack'] as const).map((app) => (
-                    <div key={app} className="connections-app-row is-unavailable">
-                      <div>
-                        <strong>{app}</strong>
-                        <p>Not connected · setup is not available yet</p>
-                      </div>
-                      <button type="button" disabled aria-label={`Connect ${app} (not available yet)`}>
-                        Connect
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              </dialog>
             </>
-          )}
-          </>
           )}
         </div>
       </section>
+      </OAuthSetupContext.Provider>
+      </ServiceDirectoryContext.Provider>
     </ConnectorContext.Provider>
   );
 }

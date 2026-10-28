@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Project, ProjectSummary, ProjectTarget } from '@animaos/sdk';
+import type { Project, ProjectSummary, ProjectLinkTarget } from '@animaos/sdk';
 import { useProjects } from '../../hooks/useProjects';
 import { daemon } from '../../lib/daemon-api';
 import type { Navigate } from '../../lib/hash-route';
 import { ProjectSourcePicker } from './ProjectSourcePicker';
+import { ProjectKnowledge } from './ProjectKnowledge';
+import { ProjectFolderGrant } from './ProjectFolderGrant';
 import { useLatest } from '../../hooks/useLatest';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import './projects.css';
@@ -24,6 +26,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
+  const [addingFolder, setAddingFolder] = useState(false);
   // Owner edits survive a conflict or access invalidation, without retaining source payloads.
   const [drafts, setDrafts] = useState(new Map<string, Draft>());
   const storeDraft = (id: string, value: Draft | null) => setDrafts((old) => {
@@ -39,7 +42,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const isCurrent = () => mounted.current && lifetime.current === token;
-  useResetOnChange([scope], () => { setPicker(false); setMessage(null); setTab('Chats'); setManage(null); setBusy(false); });
+  useResetOnChange([scope], () => { setPicker(false); setAddingFolder(false); setMessage(null); setTab('Chats'); setManage(null); setBusy(false); });
   const project = view.project;
   const draftKey = projectId ?? '';
   const draft = drafts.get(draftKey) ?? (project ? draftOf(project) : undefined);
@@ -58,7 +61,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
     onSelectAgent(ownerAgentId);
     navigate({ kind: 'session', agentId: ownerAgentId, sessionId });
   };
-  const addSource = async (target: ProjectTarget, label: string, useInContext: boolean, requestKey: string) => {
+  const addSource = async (target: ProjectLinkTarget, label: string, useInContext: boolean, requestKey: string) => {
     if (!project) return;
     await view.mutate((api) => api.addResource(project.id, { expectedRevision: project.revision,
       requestKey, asAgentId: agentId, target, role: tab === 'Outputs' ? 'output' : 'reference',
@@ -75,6 +78,13 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
       </select></label>
     </div>
     {(view.error || message) && <p role="alert" className="project-notice">{message ?? view.error}</p>}
+    {addingFolder && <ProjectFolderGrant key={scope} canGrant={Boolean(project && project.status === 'active' && view.live)} onClose={() => setAddingFolder(false)}
+      onAdd={async (rootPath, label, requestKey) => {
+        if (!project || !view.live) throw new Error('Wait for current project access before granting this folder.');
+        await view.mutate((api) => api.addKnowledgeFolder(project.id,
+          { expectedRevision: project.revision, asAgentId: agentId, rootPath, requestKey, ...(label ? { label } : {}) }));
+        if (isCurrent()) setAddingFolder(false);
+      }} />}
     {!projectId ? <>
       <p>Give selected agents a shared brief and selected sources. Each agent keeps its own chats, memory, and permissions.</p>
       <form className="project-card project-create" onSubmit={(event) => { event.preventDefault(); void perform(async (current) => {
@@ -117,7 +127,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
     </div> : <>
       <p className="project-members-line">Shared with {project.members.map((member) => name(member.agentId)).join(', ')} · {project.status}</p>
       <div className="project-tabs" role="tablist" aria-label="Project sections">{(['Chats', 'Sources', 'Outputs', 'Workflows', 'Members'] as const).map((item) =>
-        <button role="tab" aria-selected={tab === item} key={item} onClick={() => { setTab(item); setPicker(false); }}>{item}</button>)}</div>
+        <button role="tab" aria-selected={tab === item} key={item} onClick={() => { setTab(item); setPicker(false); setAddingFolder(false); }}>{item}</button>)}</div>
       {tab === 'Chats' && <div className="project-card"><div className="project-row"><h2>Project chats</h2>
         <button disabled={busy || project.status !== 'active'} onClick={() => void perform(async (current) => {
           const member = project.members.find((row) => row.agentId === agentId)!;
@@ -145,13 +155,17 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
             <button type="button" onClick={() => storeDraft(draftKey, { ...draft, baseRevision: project.revision })}>Use latest revision with my draft</button>
             <button type="button" onClick={() => storeDraft(draftKey, null)}>Reset draft</button></div>
         </form>}
+        {tab === 'Sources' && <ProjectKnowledge key={`${scope}:${project.revision}:${project.accessEpoch}`} agentId={agentId} project={project} api={view.api} invalidate={view.refresh}
+          onChooseFolder={() => setAddingFolder(true)}
+          onRemove={(resourceId) => view.mutate((api) => api.removeResource(project.id, resourceId, { expectedRevision: project.revision, asAgentId: agentId }))}
+          onUseInContext={(resourceId, useInContext) => view.mutate((api) => api.updateResource(project.id, resourceId, { expectedRevision: project.revision, asAgentId: agentId, useInContext }))} />}
         <div className="project-card"><div className="project-row"><h2>{tab === 'Workflows' ? 'Linked workflows' : 'Selected sources'}</h2>
           <button disabled={busy || project.status !== 'active'} onClick={() => setPicker((old) => !old)}>Link {tab === 'Workflows' ? 'workflow' : 'source'}</button>
           {tab !== 'Workflows' && <button onClick={() => void perform(view.readCoverage)}>Context coverage</button>}</div>
           {picker && <ProjectSourcePicker key={scope} agentId={agentId} project={project} chats={view.chats}
             workflowsOnly={tab === 'Workflows'} onAdd={addSource} onClose={() => setPicker(false)} />}
           {project.resources.filter((resource) => tab === 'Workflows' ? resource.target?.kind === 'workflow' || resource.target?.kind === 'workflow_template'
-            : resource.role === (tab === 'Outputs' ? 'output' : 'reference') && resource.target?.kind !== 'workflow' && resource.target?.kind !== 'workflow_template')
+            : resource.role === (tab === 'Outputs' ? 'output' : 'reference') && resource.target?.kind !== 'knowledge_folder' && resource.target?.kind !== 'workflow' && resource.target?.kind !== 'workflow_template')
             .map((resource) => <div key={resource.id} className="project-source">
               <div className="project-row"><strong>{resource.label ?? (resource.target?.kind === 'workspace_file' ? resource.target.path : resource.state === 'ready' ? 'Selected source' : 'Unavailable source')}</strong>
                 <span>{resource.state.replaceAll('_', ' ')}</span>

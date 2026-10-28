@@ -3,6 +3,7 @@
 mod access;
 mod agent_removal;
 mod context;
+pub(crate) mod knowledge;
 mod records;
 mod registry;
 mod restore;
@@ -16,7 +17,7 @@ pub(crate) use access::{bind_model_adapter, ProjectAccessLease, ProjectAccessReg
 pub(crate) use agent_removal::ProjectAgentRemovalCandidate;
 pub(crate) use context::{
     capture_context_scope, capture_run_witness, context_change_summary, current_authorized_witness,
-    load_context, member_read_lease, preview_context, preview_source, recheck_context,
+    load_context_for_query, member_read_lease, preview_context, preview_source, recheck_context,
     validate_active_lease, validate_project_chat_selection, validate_queued_witness,
     AdmittedProjectContext, CapturedProjectScope, LoadedProjectContext, ProjectChangeReason,
     ProjectContextChange, ProjectContextReport, ProjectRenderBudget,
@@ -36,5 +37,7 @@ pub(crate) use restore::{
     RestoredProjects,
 };
 pub(crate) use service::publish_project_invalidation;
-pub(crate) use service::{AddResourceRequest, MoveChatRequest, ProjectMutation, ProjectService};
+pub(crate) use service::{
+    AddKnowledgeFolderRequest, AddResourceRequest, MoveChatRequest, ProjectMutation, ProjectService,
+};
 pub(crate) use source_changes::ProjectSourceChange;

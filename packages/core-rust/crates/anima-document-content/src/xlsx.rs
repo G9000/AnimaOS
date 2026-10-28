@@ -37,7 +37,14 @@ type Entry = (ZipArchiveEntryWayfinder, CompressionMethod);
 /// relationships fetched, or visual/style semantics inferred. A late failure
 /// discards the entire result, including previously parsed sheets.
 pub fn extract_xlsx(bytes: &[u8]) -> ExtractedDocumentText {
-    match extract(bytes) {
+    extract_xlsx_with_text_limit(bytes, MAX_DOCUMENT_RENDERED_BYTES)
+}
+
+pub(crate) fn extract_xlsx_with_text_limit(
+    bytes: &[u8],
+    text_limit: usize,
+) -> ExtractedDocumentText {
+    match extract(bytes, text_limit) {
         Ok(value) => value,
         Err(status) => ExtractedDocumentText::empty_for(DocumentFormat::Xlsx, status),
     }
@@ -762,6 +769,7 @@ fn worksheet(
     value: &mut ExtractedDocumentText,
     total: &mut usize,
     text_bytes: &mut usize,
+    text_limit: usize,
 ) -> Result<(), Status> {
     if !root.is(S, "worksheet") {
         return Err(Status::Unsupported);
@@ -805,7 +813,7 @@ fn worksheet(
                 // JSON/source metadata accounting and whole-cell fitting.
                 if text_bytes
                     .checked_add(text.value.len())
-                    .is_none_or(|n| n > MAX_DOCUMENT_RENDERED_BYTES)
+                    .is_none_or(|n| n > text_limit)
                 {
                     if !value.omissions.contains(&Omission::TextLimit) {
                         value.omissions.push(Omission::TextLimit);
@@ -828,7 +836,7 @@ fn worksheet(
     Ok(())
 }
 
-fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
+fn extract(bytes: &[u8], text_limit: usize) -> Result<ExtractedDocumentText, Status> {
     if bytes.len() > MAX_INPUT {
         return Err(Status::TooLarge);
     }
@@ -999,6 +1007,7 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
             &mut value,
             &mut total,
             &mut text_bytes,
+            text_limit,
         )?;
         coverage.observed_cell_count += sheet.observed_cell_count;
         coverage.included_cell_count += sheet.included_cell_count;
@@ -1015,6 +1024,11 @@ fn extract(bytes: &[u8]) -> Result<ExtractedDocumentText, Status> {
     value.xlsx_coverage = Some(coverage);
     if !value.blocks.is_empty() {
         value.status = Status::Partial;
+    }
+    if text_limit != MAX_DOCUMENT_RENDERED_BYTES {
+        anima_service_adapters::document_content::validate_knowledge_document_extraction(&value)
+            .map_err(|_| Status::Malformed)?;
+        return Ok(value);
     }
     // Match PDF's extraction-side allowance for the largest admitted source ID.
     let snapshot = DocumentSnapshot {

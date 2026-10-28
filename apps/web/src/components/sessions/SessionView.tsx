@@ -50,6 +50,7 @@ import {
   type ConversationControlProps,
 } from './ConversationControls';
 import { ChatExportScope } from './ChatExportDownload';
+import { ProjectKnowledgeChatScope } from '../projects/ProjectKnowledgeChatScope';
 import {
   ChatExtensions,
   type ChatPanelRequest,
@@ -814,6 +815,8 @@ export function SessionView({
   );
   return (
     <ChatExportScope.Provider value={exportScope}>
+      <ProjectKnowledgeChatScope agentId={session?.agentId ?? agent.id} projectId={session?.projectId ?? null} sessionId={sessionId ?? ''}
+        clearGeneration={session?.clearGeneration ?? 0} bindingRevision={session?.projectBindingRevision ?? 0}>
       {session?.kind === 'chat' ? (
         <WorkspaceArtifactLayout
           agentId={session.agentId}
@@ -825,6 +828,7 @@ export function SessionView({
       ) : (
         view
       )}
+      </ProjectKnowledgeChatScope>
     </ChatExportScope.Provider>
   );
 }

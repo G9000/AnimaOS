@@ -61,6 +61,7 @@ struct FakeGoogleTransport {
     apply_error: Mutex<Option<GoogleTransportError>>,
     exchange_entered: Mutex<Option<Arc<Semaphore>>>,
     exchange_gate: Mutex<Option<Arc<Semaphore>>>,
+    primary_error: Mutex<Option<GoogleTransportError>>,
 }
 
 impl FakeGoogleTransport {
@@ -81,6 +82,7 @@ impl FakeGoogleTransport {
             apply_error: Mutex::new(None),
             exchange_entered: Mutex::new(None),
             exchange_gate: Mutex::new(None),
+            primary_error: Mutex::new(None),
         }
     }
 }
@@ -121,6 +123,9 @@ impl GoogleCalendarTransport for FakeGoogleTransport {
     }
 
     async fn primary_calendar(&self, _access_token: &str) -> Result<String, GoogleTransportError> {
+        if let Some(error) = self.primary_error.lock().unwrap().take() {
+            return Err(error);
+        }
         Ok(self.account.lock().unwrap().clone())
     }
 
@@ -504,6 +509,9 @@ async fn begin_connect_creates_pairing_record_and_consent_url() {
     assert!(consent_url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?"));
     assert!(consent_url.contains("access_type=offline"));
     assert!(consent_url.contains("state="));
+    // Reading the primary calendar's ID needs calendar details, not only events.
+    assert!(consent_url.contains("calendar.events"));
+    assert!(consent_url.contains("calendar.calendars.readonly"));
 
     let duplicate = fixture.manager.begin_connect(&fixture.agent_id).await;
     let duplicate = duplicate.expect("pairing can restart").0;
@@ -657,6 +665,26 @@ async fn reconnect_cannot_transfer_pending_writes_to_another_account() {
             .await
             .unwrap_err(),
         CalendarError::ReauthRequired
+    );
+}
+
+#[tokio::test]
+async fn unreadable_primary_calendar_is_reported_apart_from_a_failed_exchange() {
+    let fixture = fixture(Some(GoogleOAuthConfig::for_tests())).await;
+    let (pairing, _) = fixture
+        .manager
+        .begin_connect(&fixture.agent_id)
+        .await
+        .unwrap();
+    *fixture.transport.primary_error.lock().unwrap() = Some(GoogleTransportError::Unavailable);
+    let nonce = pairing.pending_auth.unwrap().nonce;
+    assert_eq!(
+        fixture
+            .manager
+            .complete_connect(&nonce, "code")
+            .await
+            .unwrap_err(),
+        CalendarError::AccountLookup
     );
 }
 

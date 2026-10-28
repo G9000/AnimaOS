@@ -45,6 +45,113 @@ fn fixture() -> (DaemonState, String, String, String) {
         .unwrap();
     (state, a, b, project.id)
 }
+
+#[tokio::test]
+async fn knowledge_query_admits_cited_late_passages_and_keeps_immutable_evidence() {
+    let (mut daemon, agent, _, project_id) = fixture();
+    let private = crate::document_edits::store::test_support::private_directory();
+    daemon.project_knowledge =
+        super::super::knowledge::KnowledgeService::open(private.path().to_owned(), None).unwrap();
+    let folder = tempfile::Builder::new()
+        .prefix("anima-knowledge-context-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(
+        folder.path().join("research.md"),
+        format!(
+            "{}\nCobalt harbour launch requirements.",
+            "Earlier unrelated notes.\n".repeat(2000)
+        ),
+    )
+    .unwrap();
+    let grant = super::super::knowledge::capture_folder(folder.path(), &[]).unwrap();
+    let resource_id = format!("resource_{}", uuid::Uuid::new_v4());
+    let revision = daemon.projects.get(&project_id).unwrap().revision;
+    daemon
+        .projects
+        .add_resource(
+            &project_id,
+            revision,
+            ProjectResourceRecord {
+                id: resource_id.clone(),
+                target: ProjectResourceTarget::KnowledgeFolder {
+                    root_path: grant.root_path,
+                    root_identity: grant.root_identity,
+                },
+                role: ProjectResourceRole::Reference,
+                label: None,
+                use_in_context: true,
+                created_at_ms: 2,
+                add_replay: ProjectMutationReplay {
+                    request_key: "knowledge-context".into(),
+                    request_sha256: text_digest("grant"),
+                },
+                donor: None,
+                source_project_binding_revision: None,
+                workspace_key: None,
+            },
+            2,
+        )
+        .unwrap();
+    daemon
+        .project_access
+        .publish_records(&daemon.projects)
+        .unwrap();
+    let mut selected_run = run(&daemon, &agent, "chat:a");
+    let scope = capture_context_scope(&daemon, &selected_run)
+        .unwrap()
+        .unwrap();
+    let shared = Arc::new(tokio::sync::RwLock::new(daemon));
+    let loaded = load_context_for_query(
+        &shared,
+        &scope,
+        ProjectRenderBudget::from_remaining(20_000, 1000),
+        "cobalt\nharbour",
+        CancelSignal::new(),
+        Instant::now() + std::time::Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
+    let captured_bytes = std::fs::read(folder.path().join("research.md")).unwrap();
+    std::fs::write(
+        folder.path().join("research.md"),
+        "Changed before context admission.",
+    )
+    .unwrap();
+    assert!(loaded.recheck_knowledge(&shared).await.is_err());
+    std::fs::write(folder.path().join("research.md"), captured_bytes).unwrap();
+    loaded.recheck_knowledge(&shared).await.unwrap();
+    let accepted = recheck_context(&*shared.read().await, &selected_run, &scope, loaded).unwrap();
+    assert!(accepted.text().contains("Cobalt harbour"));
+    assert!(accepted.text().contains("/knowledge/citations/cite_"));
+    assert_eq!(accepted.manifest().version, 2);
+    assert!(accepted.manifest().estimated_tokens <= 3000);
+    assert!(accepted.manifest().sources[0].included_chars <= 2000);
+    assert!(
+        matches!(&accepted.manifest().sources[0].witness,Some(ProjectSourceWitness::KnowledgeFolder {passages,..}) if !passages.is_empty())
+    );
+    selected_run.project_context = Some(accepted.manifest().clone());
+    super::super::validate_run_project_fields(&selected_run).unwrap();
+    let admitted = accepted.for_selected_history(&[]);
+    std::fs::write(
+        folder.path().join("research.md"),
+        "The source changed after admission.",
+    )
+    .unwrap();
+    assert_eq!(admitted.text(), accepted.text());
+    assert!(admitted.text().contains("Cobalt harbour"));
+    let mut state = shared.write().await;
+    let revision = state.projects.get(&project_id).unwrap().revision;
+    state
+        .projects
+        .remove_resource(&project_id, revision, &resource_id, 5)
+        .unwrap();
+    state
+        .project_access
+        .publish_records(&state.projects)
+        .unwrap();
+    assert!(admitted.lease().check().is_err());
+}
 fn run(state: &DaemonState, agent: &str, session: &str) -> RunRecord {
     let mut run = RunRecord::running(
         RunStart {

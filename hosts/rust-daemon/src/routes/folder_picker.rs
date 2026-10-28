@@ -32,19 +32,28 @@ pub(super) async fn pick_folder(State(state): State<AppState>, request: Request)
             },
         );
     }
-    match select_folder().await {
+    let knowledge = request.uri().query().is_some_and(|query| {
+        query
+            .split('&')
+            .any(|part| part == "purpose=project_knowledge")
+    });
+    match select_folder(knowledge).await {
         Ok(root_path) => json_response(StatusCode::OK, &FolderPickerResponse { root_path }),
         Err(error) => error.into_response(),
     }
 }
 
 #[cfg(windows)]
-async fn select_folder() -> Result<Option<String>, ApiError> {
+async fn select_folder(knowledge: bool) -> Result<Option<String>, ApiError> {
     static DIALOG: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(1)));
-    run_dialog(std::sync::Arc::clone(&DIALOG), || {
+    run_dialog(std::sync::Arc::clone(&DIALOG), move || {
         rfd::FileDialog::new()
-            .set_title("Choose your animaOS workspace folder")
+            .set_title(if knowledge {
+                "Choose a read-only project knowledge folder"
+            } else {
+                "Choose your animaOS workspace folder"
+            })
             .pick_folder()
             .map(|path| {
                 path.into_os_string().into_string().map_err(|_| {
@@ -74,7 +83,7 @@ async fn run_dialog(
 }
 
 #[cfg(not(windows))]
-async fn select_folder() -> Result<Option<String>, ApiError> {
+async fn select_folder(_knowledge: bool) -> Result<Option<String>, ApiError> {
     Err(ApiError::service_unavailable(
         "Folder browsing is available on Windows. Enter the folder path instead.",
     ))

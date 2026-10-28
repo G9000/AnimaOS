@@ -523,6 +523,11 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT` | `/api/projects/{project_id}/resource-order` |
 | `GET` | `/api/projects/{project_id}/resources/{resource_id}/preview` |
 | `GET` | `/api/projects/{project_id}/context` |
+| `POST` | `/api/projects/{project_id}/knowledge/sources` |
+| `GET` | `/api/projects/{project_id}/knowledge/status` |
+| `POST` | `/api/projects/{project_id}/knowledge/refresh` |
+| `GET` | `/api/projects/{project_id}/knowledge/search` |
+| `GET` | `/api/projects/{project_id}/knowledge/citations/{citation_id}` |
 | `GET` | `/api/projects/{project_id}/chats` |
 | `PUT` | `/api/agents/{agent_id}/sessions/{session_id}/project` |
 | `GET` | `/api/document-edits/{proposal_id}` |
@@ -765,7 +770,9 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 355 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 360 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+
+Project Sources also supports explicit read-only folder grants outside the workspace. The project knowledge endpoints add grants, report index coverage, refresh selected folders, search local document passages and open citations after rechecking access and current source bytes. Shared project chats retrieve relevant quoted passages within their existing context budget. The SQLite keyword index is a private, derived cache; folder grants remain in durable project records. Removal and membership changes revoke access, and stale citations refuse changed files. PDF extraction uses text layers; OCR and spreadsheet recalculation are not included.
 
 ### Agents
 

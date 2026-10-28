@@ -24,3 +24,18 @@
 .project-move { padding: 24px; width: min(500px, calc(100vw - 32px)); background: var(--color-surface, #202025); color: inherit; border-radius: 16px; }
 .project-move-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: #0008; }
 .session-project-line { display: flex; gap: 12px; padding: 8px 20px; font-size: 12px; }
+.project-knowledge-search { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.project-knowledge-search label { flex: 1 1 240px; min-width: 0; }
+.project-knowledge-search button { margin-bottom: 12px; }
+.project-folder-path, .project-knowledge-results p { overflow-wrap: anywhere; }
+.project-knowledge-results { list-style: none; padding: 0; }
+.project-knowledge-results li { border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 16px 0; }
+.project-knowledge-results button { text-align: left; }
+.project-citation-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: flex-end; background: #0008; }
+.project-citation-dialog { width: min(640px, 100%); min-width: 0; height: 100dvh; overflow: auto; padding: clamp(20px, 4vw, 36px); color: var(--color-ink, #eee); background: var(--color-surface, #202025); box-shadow: -12px 0 50px #0004; }
+.project-citation-dialog h2 { font-size: 20px; overflow-wrap: anywhere; margin: 0; }
+.project-citation-dialog button { border: 1px solid currentColor; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.project-citation-dialog :focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.project-citation-dialog pre { max-height: 70dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; margin: 24px 0; }
+.project-citation-locator { opacity: .75; }
+@media (max-width: 560px) { .project-knowledge-search button { width: 100%; } .project-citation-dialog { padding-bottom: max(24px, env(safe-area-inset-bottom)); } }

@@ -26,6 +26,7 @@ import {
   ChatExportDownload,
   chatExportTarget,
 } from './sessions/ChatExportDownload';
+import { isKnowledgeCitationLink, ProjectKnowledgeLink } from './projects/ProjectKnowledgeLink';
 
 function isAbsoluteWebUrl(href: string | undefined): boolean {
   return href !== undefined && /^https?:\/\//i.test(href);
@@ -217,7 +218,9 @@ const components: Components = {
     </blockquote>
   ),
   a: ({ children, href, className, node: _node, ...props }) =>
-    workspaceArtifactPath(href) ? (
+    isKnowledgeCitationLink(href) ? (
+      <ProjectKnowledgeLink href={href!}>{children}</ProjectKnowledgeLink>
+    ) : workspaceArtifactPath(href) ? (
       <WorkspaceArtifactLink path={href!}>{children}</WorkspaceArtifactLink>
     ) : (
       <ArtifactLinkBoundary>

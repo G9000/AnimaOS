@@ -13,7 +13,7 @@ import {
   discordWarning,
   isDiscordSnowflake,
 } from '../lib/discord';
-import { SectionTitle, primaryBtnCls } from './ui-bits';
+import { primaryBtnCls } from './ui-bits';
 
 interface DiscordSettingsProps {
   online?: boolean;
@@ -43,7 +43,11 @@ interface DiscordSettingsProps {
   openConversation: (connector: DiscordConnector, roomId?: string) => void;
 }
 const button =
-  'rounded-lg border border-line px-3 py-1.5 text-xs text-ink-2 disabled:opacity-50';
+  'rounded border border-line px-3 py-1.5 text-xs text-ink-2 hover:border-ink-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50';
+const buttonPrimary =
+  'rounded border border-accent bg-accent/10 px-3 py-1.5 text-xs text-ink hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-50';
+const buttonDanger =
+  'rounded border border-danger px-3 py-1.5 text-xs text-danger disabled:cursor-not-allowed disabled:opacity-50';
 
 interface RulesDraft {
   users: string;
@@ -109,7 +113,7 @@ function DiscordRules({
     key: 'users' | 'roles' | 'allowed' | 'free' | 'home',
     label: string,
   ) => (
-    <label className="block text-xs text-ink-3">
+    <label className="block text-xs text-ink-2">
       {label}
       <input
         className="field mt-1"
@@ -134,43 +138,41 @@ function DiscordRules({
     </label>
   );
   return (
-    <div className="space-y-3">
-      <p className="text-xs font-semibold text-ink-2">
-        Who can talk to the bot
-      </p>
-      {textField('users', 'Approved user IDs')}
-      {textField('roles', 'Approved role IDs')}
-      <p className="text-xs text-ink-3">
-        {creating
-          ? 'Leave users empty to use the verified application owners. '
-          : ''}
-        Only approved users or members of approved roles can start a reply. A
-        mention does not grant access. Separate IDs with commas or spaces.
-      </p>
-      <p className="text-xs font-semibold text-ink-2">
-        When and where it replies
-      </p>
-      {checkbox('requireMention', 'Require a mention in channels')}
-      {checkbox('autoThread', 'Create a thread for mentions')}
-      {checkbox(
-        'threadRequireMention',
-        'Require mentions in participating threads',
-      )}
-      <p className="text-xs text-ink-3">
-        Follow-up messages in a participating thread continue naturally unless
-        mentions are required there.
-      </p>
-      {textField('allowed', 'Allowed channel IDs (optional)')}
-      <p className="text-xs text-ink-3">
-        Leave empty for channels the bot can access. Allowed parent channels
-        include their threads.
-      </p>
-      {textField('free', 'Channels that reply without a mention (optional)')}
-      {textField('home', 'Home channel ID (optional)')}
-      <p className="text-xs text-ink-3">
-        Home is the default destination for proactive messages. Replies stay in
-        their original channel or thread.
-      </p>
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <p className="discord-group-title">Who can talk to the bot</p>
+        {textField('users', 'Approved user IDs')}
+        {textField('roles', 'Approved role IDs')}
+        <p className="discord-hint">
+          {creating
+            ? 'Leave users empty to use the verified application owners. '
+            : ''}
+          Only approved users or members of approved roles can start a reply. A
+          mention does not grant access. Separate IDs with commas or spaces.
+        </p>
+      </div>
+      <div className="space-y-3">
+        <p className="discord-group-title">When and where it replies</p>
+        {checkbox('requireMention', 'Require a mention in channels')}
+        {checkbox('autoThread', 'Create a thread for mentions')}
+        {checkbox(
+          'threadRequireMention',
+          'Require mentions in participating threads',
+        )}
+        <p className="discord-hint">
+          Follow-up messages in a participating thread continue naturally unless
+          mentions are required there.
+        </p>
+        {textField('allowed', 'Allowed channel IDs (optional)')}
+        {textField('free', 'Channels that reply without a mention (optional)')}
+        {textField('home', 'Home channel ID (optional)')}
+        <p className="discord-hint">
+          Leave allowed channels empty for every channel the bot can access;
+          parent channels include their threads. Home is the default
+          destination for proactive messages. Replies stay in their original
+          channel or thread.
+        </p>
+      </div>
       {!parseRules(draft) && (
         <p role="alert" className="text-xs text-danger">
           Use unique positive decimal Discord IDs without leading zeroes.
@@ -178,6 +180,10 @@ function DiscordRules({
       )}
     </div>
   );
+}
+
+function count(n: number, noun: string) {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
 function DiscordConnection({
@@ -206,59 +212,185 @@ function DiscordConnection({
   const disabled =
     p.disabled || p.online === false || p.busy !== null || p.loading;
   const warning = discordWarning(c.warning);
+  const rules = discordSettings(c);
   const submitReplacement = () => {
     const value = token.trim();
     setToken('');
     setReplacing(false);
     if (value) void p.replace(c.id, value);
   };
+  const unavailable = p.available === false;
+  const tone = unavailable
+    ? 'attention'
+    : c.status === 'ready'
+      ? 'ok'
+      : ['error', 'degraded', 'credentialRequired'].includes(c.status)
+        ? 'attention'
+        : 'idle';
+  const who = [
+    count(c.approvedUserIds.length, 'user'),
+    rules.approvedRoleIds.length > 0
+      ? count(rules.approvedRoleIds.length, 'role')
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const queued = c.pendingInbound + c.pendingOutbound + c.unknownOutbound > 0;
   return (
-    <article className="space-y-3 rounded-xl border border-line bg-white/[0.02] p-4">
-      <div>
-        <p className="text-sm font-semibold text-ink">
-          {c.bot.displayName ?? c.bot.username ?? 'Discord bot'} ·{' '}
-          {c.channel
-            ? `#${c.channel.name ?? c.channel.id}`
-            : 'Discord bot connection'}
-        </p>
-        <p className="mt-1 text-xs text-ink-3">
-          {p.available === false
+    <article className="discord-card">
+      <header className="discord-head">
+        <div>
+          <p className="discord-title">
+            {c.bot.displayName ?? c.bot.username ?? 'Discord bot'}
+          </p>
+          <p className="discord-sub">
+            {c.channel
+              ? `#${c.channel.name ?? c.channel.id}`
+              : 'Discord bot connection'}
+          </p>
+        </div>
+        <span className="connections-row-status" data-tone={tone}>
+          {unavailable
             ? 'Status unavailable — refresh to verify'
             : discordStatusLabel(c.status)}
+        </span>
+      </header>
+      {!c.enabled && (
+        <p className="discord-note">
+          First activation starts with new messages after activation. Earlier
+          channel history is not imported. Use Activate to start or resume
+          listening.
         </p>
-      </div>
-      <p className="text-xs text-ink-3">
-        {c.channel && (
-          <>
-            Server {c.channel.guildId} · Channel {c.channel.id}
-            <br />
-          </>
-        )}
-        Approved users: {c.approvedUserIds.join(', ')}
-      </p>
-      <p className="text-xs text-ink-3">
-        Approved roles:{' '}
-        {discordSettings(c).approvedRoleIds.join(', ') || 'None'}
-      </p>
-      <p className="text-xs text-ink-3">
-        {discordSettings(c).requireMention
-          ? 'Mention the bot to start a channel reply.'
-          : 'Replies without mentions in allowed channels.'}{' '}
-        {discordSettings(c).autoThread
-          ? 'Mentions open a thread.'
-          : 'Replies stay inline.'}
-      </p>
-      {c.inviteUrl && (
-        <a
-          className="text-xs underline"
-          href={c.inviteUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Add to Discord
-        </a>
       )}
+      {warning && (
+        <p role="status" className="text-xs text-danger">
+          {warning}
+        </p>
+      )}
+      <dl className="discord-facts">
+        <div>
+          <dt>Who can reply</dt>
+          <dd>{who}</dd>
+        </div>
+        <div>
+          <dt>In channels</dt>
+          <dd>
+            {rules.requireMention
+              ? 'Needs a mention'
+              : 'Replies without a mention'}
+            {' · '}
+            {rules.autoThread ? 'opens a thread' : 'replies inline'}
+          </dd>
+        </div>
+        {queued && (
+          <div>
+            <dt>Queue</dt>
+            <dd>
+              {c.pendingInbound} inbound · {c.pendingOutbound} outbound ·{' '}
+              {c.unknownOutbound} uncertain
+            </dd>
+          </div>
+        )}
+      </dl>
+      {c.unknownOutbound > 0 && (
+        <div className="space-y-2 rounded border border-danger/30 p-3">
+          <p className="text-xs text-ink-2">
+            A reply may already be in Discord. Automatic resend and Retry are
+            blocked.
+          </p>
+          {c.deliveredMessageIds.length > 0 && (
+            <p className="break-all text-xs text-ink-3">
+              Already delivered, by message ID:{' '}
+              {c.deliveredMessageIds.join(', ')}
+            </p>
+          )}
+          {reviewing ? (
+            <>
+              <p className="text-xs text-ink-2">
+                Check Discord and the delivered IDs above. Suppression keeps
+                delivered receipts and full conversation history, skips
+                uncertain output and its unsent remainder, and allows new
+                conversation work. It never resends this reply.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  className={button}
+                  onClick={() => void p.suppress(c.id)}
+                >
+                  I checked Discord — suppress unsent remainder
+                </button>
+                <button
+                  type="button"
+                  className={button}
+                  onClick={() => setReviewing(false)}
+                >
+                  Cancel review
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={disabled}
+              className={button}
+              onClick={() => setReviewing(true)}
+            >
+              Review uncertain delivery
+            </button>
+          )}
+        </div>
+      )}
+      <div className="discord-actions">
+        {c.channel && (
+          <button
+            type="button"
+            disabled={disabled}
+            className={buttonPrimary}
+            onClick={() => p.openConversation(c)}
+          >
+            Open conversation
+          </button>
+        )}
+        {c.conversations
+          ?.filter(
+            (conversation) => !c.channel || conversation.roomId !== c.roomId,
+          )
+          .map((conversation) => (
+            <button
+              key={conversation.roomId}
+              type="button"
+              className={button}
+              disabled={disabled}
+              onClick={() => p.openConversation(c, conversation.roomId)}
+            >
+              Open #{conversation.name ?? conversation.channelId}
+            </button>
+          ))}
+        <button
+          type="button"
+          disabled={disabled}
+          className={button}
+          onClick={() =>
+            c.enabled ? void p.setEnabled(c.id, false) : void p.activate(c.id)
+          }
+        >
+          {c.enabled ? 'Disable' : 'Activate'}
+        </button>
+        {c.inviteUrl && (
+          <a
+            className="discord-link"
+            href={c.inviteUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Add to Discord
+          </a>
+        )}
+      </div>
       <details
+        className="discord-fold"
         open={editing}
         onToggle={(e) => {
           if (e.currentTarget.open && !editing) {
@@ -268,11 +400,9 @@ function DiscordConnection({
           if (!e.currentTarget.open) setEditing(false);
         }}
       >
-        <summary className="cursor-pointer text-xs text-ink-2">
-          Edit Discord rules
-        </summary>
+        <summary>Edit Discord rules</summary>
         {editing && (
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 space-y-4">
             <DiscordRules
               draft={draft}
               setDraft={setDraft}
@@ -300,153 +430,72 @@ function DiscordConnection({
           </div>
         )}
       </details>
-      {!c.enabled && (
-        <p className="text-xs text-ink-2">
-          First activation starts with new messages after activation. Earlier
-          channel history is not imported. Use Activate to start or resume
-          listening.
-        </p>
-      )}
-      <p className="text-xs text-ink-3">
-        {c.pendingInbound} inbound · {c.pendingOutbound} outbound ·{' '}
-        {c.unknownOutbound} uncertain
-      </p>
-      {warning && (
-        <p role="status" className="text-xs text-danger">
-          {warning}
-        </p>
-      )}
-      {c.deliveredMessageIds.length > 0 && (
-        <p className="break-all text-xs text-ink-3">
-          Delivered message IDs: {c.deliveredMessageIds.join(', ')}
-        </p>
-      )}
-      {c.unknownOutbound > 0 && (
-        <div className="space-y-2 rounded-lg border border-danger/30 p-3">
-          <p className="text-xs text-ink-2">
-            A reply may already be in Discord. Automatic resend and Retry are
-            blocked.
-          </p>
-          {reviewing ? (
+      <details className="discord-fold">
+        <summary>IDs</summary>
+        <p className="discord-ids">
+          {c.channel && (
             <>
-              <p className="text-xs text-ink-2">
-                Check Discord and the delivered IDs above. Suppression keeps
-                delivered receipts and full conversation history, skips
-                uncertain output and its unsent remainder, and allows new
-                conversation work. It never resends this reply.
-              </p>
-              <button
-                type="button"
-                disabled={disabled}
-                className={button}
-                onClick={() => void p.suppress(c.id)}
-              >
-                I checked Discord — suppress unsent remainder
-              </button>
-              <button
-                type="button"
-                className={button}
-                onClick={() => setReviewing(false)}
-              >
-                Cancel review
-              </button>
+              Server {c.channel.guildId} · Channel {c.channel.id}
+              <br />
             </>
-          ) : (
-            <button
-              type="button"
-              disabled={disabled}
-              className={button}
-              onClick={() => setReviewing(true)}
-            >
-              Review uncertain delivery
-            </button>
           )}
-        </div>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          className={button}
-          onClick={() =>
-            c.enabled ? void p.setEnabled(c.id, false) : void p.activate(c.id)
-          }
-        >
-          {c.enabled ? 'Disable' : 'Activate'}
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          className={button}
-          onClick={() => void p.restart(c.id)}
-        >
-          Restart
-        </button>
-        <button
-          type="button"
-          disabled={
-            disabled || c.unknownOutbound > 0 || c.pendingOutbound === 0
-          }
-          className={button}
-          onClick={() => void p.retry(c.id)}
-        >
-          Retry safe delivery
-        </button>
-        {c.channel && (
+          Approved users: {c.approvedUserIds.join(', ')}
+          <br />
+          Approved roles: {rules.approvedRoleIds.join(', ') || 'None'}
+        </p>
+      </details>
+      <details className="discord-fold">
+        <summary>More</summary>
+        <div className="discord-actions mt-3">
           <button
             type="button"
             disabled={disabled}
             className={button}
-            onClick={() => p.openConversation(c)}
+            onClick={() => void p.restart(c.id)}
           >
-            Open conversation
+            Restart
           </button>
-        )}
-        {c.conversations
-          ?.filter(
-            (conversation) => !c.channel || conversation.roomId !== c.roomId,
-          )
-          .map((conversation) => (
-            <button
-              key={conversation.roomId}
-              type="button"
-              className={button}
-              disabled={disabled}
-              onClick={() => p.openConversation(c, conversation.roomId)}
-            >
-              Open #{conversation.name ?? conversation.channelId}
-            </button>
-          ))}
-        <button
-          type="button"
-          disabled={disabled}
-          className={button}
-          onClick={() => {
-            setToken('');
-            setReplacing((v) => !v);
-          }}
-        >
-          Replace token
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          className={button}
-          onClick={() =>
-            deleting ? void p.disconnect(c.id) : setDeleting(true)
-          }
-        >
-          {deleting ? 'Confirm delete connection' : 'Delete connection'}
-        </button>
-      </div>
+          <button
+            type="button"
+            disabled={
+              disabled || c.unknownOutbound > 0 || c.pendingOutbound === 0
+            }
+            className={button}
+            onClick={() => void p.retry(c.id)}
+          >
+            Retry safe delivery
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            className={button}
+            onClick={() => {
+              setToken('');
+              setReplacing((v) => !v);
+            }}
+          >
+            Replace token
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            className={deleting ? buttonDanger : button}
+            onClick={() =>
+              deleting ? void p.disconnect(c.id) : setDeleting(true)
+            }
+          >
+            {deleting ? 'Confirm delete connection' : 'Delete connection'}
+          </button>
+        </div>
+      </details>
       {replacing && (
-        <div>
-          <p className="mb-2 text-xs text-ink-3">
+        <div className="space-y-2">
+          <p className="text-xs text-ink-3">
             Replacement must belong to the same bot. The daemon stores the token
             in the operating-system credential vault.
           </p>
           <label
-            className="text-xs text-ink-3"
+            className="block text-xs text-ink-2"
             htmlFor={`discord-replacement-${c.id}`}
           >
             Replacement Discord bot token
@@ -462,7 +511,7 @@ function DiscordConnection({
           />
           <button
             type="button"
-            className={`${button} mt-2`}
+            className={button}
             disabled={disabled || !token.trim()}
             onClick={submitReplacement}
           >
@@ -541,95 +590,109 @@ export function DiscordSettings(p: DiscordSettingsProps) {
     });
   };
   return (
-    <section className="space-y-3" aria-label="Discord connection setup">
-      <SectionTitle>Discord</SectionTitle>
+    <section className="space-y-4" aria-label="Discord connection setup">
       <p className="text-xs leading-relaxed text-ink-2">
-        Connect one bot and mention it in a server channel to start talking.
-        Replies stay in the channel or thread where each message arrives. Each
-        channel and thread keeps its own conversation history.
-      </p>
-      <p className="text-xs leading-relaxed text-ink-2">
-        Create a bot in the{' '}
-        <a
-          className="underline"
-          href="https://discord.com/developers/applications"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Discord Developer Portal
-        </a>
-        , then check its token below to get an invitation. Enable Message
-        Content intent in the Bot settings. The bot needs View Channel, Read
-        Message History, and Send Messages, plus Create Public Threads and Send
-        Messages in Threads for automatic threads.
+        Mention the bot in a server channel to talk to it. Replies stay in the
+        channel or thread where each message arrives, and each keeps its own
+        history.
       </p>
       {p.connectors.map((c) => (
         <DiscordConnection key={p.agentId + ':' + c.id} {...p} connector={c} />
       ))}
-      <details open={p.connectors.length === 0}>
-        <summary className="cursor-pointer text-xs text-ink-2">
-          Connect a Discord bot
-        </summary>
-        <div className="mt-3 space-y-3">
-          <p className="text-xs text-ink-3">
-            Check the bot, add it to Discord, then save disabled and Activate.
-            No channel ID is required. The daemon stores your token in the
-            operating-system credential vault.
-          </p>
-          <label className="block text-xs text-ink-3">
-            Discord bot token
-            <input
-              className="field mt-1"
-              type="password"
-              autoComplete="off"
-              disabled={tokenDisabled}
-              value={token}
-              onChange={(e) => {
-                request.current++;
-                setToken(e.target.value);
-                setChecked(null);
-                setChecking(false);
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className={button}
-            disabled={disabled || !token.trim()}
-            onClick={() => void check()}
-          >
-            {checking ? 'Checking bot…' : 'Check bot token'}
-          </button>
-          {checked && (
-            <div className="space-y-3 rounded-lg border border-line p-3">
-              <p className="text-xs text-ink-2">
-                Verified bot:{' '}
-                {checked.bot.displayName ??
-                  checked.bot.username ??
-                  checked.bot.id}
-              </p>
+      <details
+        className={p.connectors.length === 0 ? 'discord-setup' : 'discord-fold'}
+        open={p.connectors.length === 0}
+      >
+        <summary>Connect a Discord bot</summary>
+        <div className="mt-3 space-y-4">
+          <details className="discord-guide">
+            <summary>How to create a bot</summary>
+            <p>
+              Create a bot in the{' '}
               <a
-                className="text-xs underline"
-                href={checked.inviteUrl}
+                className="underline"
+                href="https://discord.com/developers/applications"
                 target="_blank"
                 rel="noreferrer"
               >
-                Add to Discord
+                Discord Developer Portal
               </a>
-              <p className="text-xs text-ink-3">
-                {checked.messageContentEnabled
-                  ? 'Message Content intent is enabled.'
-                  : 'Enable Message Content intent in Discord Developer Portal → Bot → Privileged Gateway Intents before activation.'}
-              </p>
-              <p className="text-xs text-ink-3">
-                Verified application owners:{' '}
-                {checked.ownerUserIds.join(', ') ||
-                  'None found; add approved users or roles below.'}
-              </p>
-              <details>
-                <summary className="cursor-pointer text-xs text-ink-2">
-                  Access and reply rules
-                </summary>
+              , then check its token below to get an invitation. Enable Message
+              Content intent in the Bot settings. The bot needs View Channel,
+              Read Message History, and Send Messages, plus Create Public
+              Threads and Send Messages in Threads for automatic threads.
+            </p>
+          </details>
+          <div className="space-y-3">
+            <label className="block text-xs text-ink-2">
+              Discord bot token
+              <input
+                className="field mt-1"
+                type="password"
+                autoComplete="off"
+                disabled={tokenDisabled}
+                value={token}
+                onChange={(e) => {
+                  request.current++;
+                  setToken(e.target.value);
+                  setChecked(null);
+                  setChecking(false);
+                }}
+              />
+            </label>
+            <p className="discord-hint">
+              Check the bot, add it to Discord, then save and Activate. No
+              channel ID is needed. The daemon stores your token in the
+              operating-system credential vault.
+            </p>
+            <button
+              type="button"
+              className={button}
+              disabled={disabled || !token.trim()}
+              onClick={() => void check()}
+            >
+              {checking ? 'Checking bot…' : 'Check bot token'}
+            </button>
+          </div>
+          {checked && (
+            <div className="discord-card">
+              <header className="discord-head">
+                <div>
+                  <p className="discord-title">
+                    {checked.bot.displayName ??
+                      checked.bot.username ??
+                      checked.bot.id}
+                  </p>
+                  <p className="discord-sub">Verified bot</p>
+                </div>
+                <a
+                  className="discord-link"
+                  href={checked.inviteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Add to Discord
+                </a>
+              </header>
+              <dl className="discord-facts">
+                <div>
+                  <dt>Message Content</dt>
+                  <dd>
+                    {checked.messageContentEnabled
+                      ? 'Message Content intent is enabled.'
+                      : 'Enable Message Content intent in Discord Developer Portal → Bot → Privileged Gateway Intents before activation.'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Owners</dt>
+                  <dd>
+                    {checked.ownerUserIds.join(', ') ||
+                      'None found; add approved users or roles below.'}
+                  </dd>
+                </div>
+              </dl>
+              <details className="discord-fold">
+                <summary>Access and reply rules</summary>
                 <div className="mt-3">
                   <DiscordRules
                     draft={draft}
@@ -641,12 +704,10 @@ export function DiscordSettings(p: DiscordSettingsProps) {
               </details>
             </div>
           )}
-          <details>
-            <summary className="cursor-pointer text-xs text-ink-2">
-              Advanced: limit this connection to one channel
-            </summary>
+          <details className="discord-fold">
+            <summary>Advanced: limit this connection to one channel</summary>
             <div className="mt-3 space-y-3">
-              <label className="block text-xs text-ink-3">
+              <label className="block text-xs text-ink-2">
                 Server ID
                 <input
                   className="field mt-1"
@@ -655,7 +716,7 @@ export function DiscordSettings(p: DiscordSettingsProps) {
                   onChange={(e) => setGuild(e.target.value)}
                 />
               </label>
-              <label className="block text-xs text-ink-3">
+              <label className="block text-xs text-ink-2">
                 Channel ID
                 <input
                   className="field mt-1"
@@ -664,7 +725,7 @@ export function DiscordSettings(p: DiscordSettingsProps) {
                   onChange={(e) => setChannel(e.target.value)}
                 />
               </label>
-              <p className="text-xs text-ink-3">
+              <p className="discord-hint">
                 Both fields are optional. Use Discord Developer Mode to copy IDs
                 when setting a specific channel or rule.
               </p>
@@ -689,14 +750,16 @@ export function DiscordSettings(p: DiscordSettingsProps) {
           </button>
         </div>
       </details>
-      <button
-        type="button"
-        disabled={disabled}
-        className={button}
-        onClick={() => void p.refresh()}
-      >
-        {p.loading ? 'Loading Discord…' : 'Refresh Discord status'}
-      </button>
+      <div className="discord-foot">
+        <button
+          type="button"
+          disabled={disabled}
+          className={button}
+          onClick={() => void p.refresh()}
+        >
+          {p.loading ? 'Loading Discord…' : 'Refresh Discord status'}
+        </button>
+      </div>
       {p.error && (
         <p role="alert" className="text-xs text-danger">
           {p.error}

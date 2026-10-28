@@ -42,11 +42,13 @@ mod chat_suite_upgrade_tests;
 /// 30 adds owner delegation policies, routed assignments and JSON output contracts.
 /// 31 adds endpoint-bound opaque MCP OAuth credential references.
 /// 32 adds connected-account search and account workflow state; 33 adds
-/// deeper search settings, workflow holds and selected Microsoft file metadata.
+/// deeper search settings, workflow holds and selected Microsoft file metadata;
+/// 34 adds explicit project knowledge folder grants and passage evidence.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 33;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 34;
+pub(crate) const PRE_PROJECT_KNOWLEDGE_BACKUP_SUFFIX: &str = ".pre-project-knowledge.bak";
 pub(crate) const PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX: &str =
     ".pre-project-documents-search-continuity.bak";
 pub(crate) const PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX: &str = ".pre-connected-accounts.bak";
@@ -596,8 +598,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_MCP_OAUTH_BACKUP_SUFFIX
             } else if loaded_version < 32 {
                 PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 33 {
                 PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX
+            } else {
+                PRE_PROJECT_KNOWLEDGE_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -1259,6 +1263,7 @@ mod tests {
             (30, ".pre-mcp-oauth.bak"),
             (31, ".pre-connected-accounts.bak"),
             (32, ".pre-project-documents-search-continuity.bak"),
+            (33, ".pre-project-knowledge.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1317,7 +1322,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(upgraded.version, 33);
+        assert_eq!(upgraded.version, super::CONTROL_PLANE_STORE_VERSION);
         assert!(upgraded.microsoft_file_records.is_empty());
         assert!(upgraded.projects.is_empty());
         assert!(upgraded.project_creation_receipts.is_empty());

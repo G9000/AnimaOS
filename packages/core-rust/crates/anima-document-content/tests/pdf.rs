@@ -416,3 +416,57 @@ fn encrypted_and_empty_password_auto_open_documents_never_release_text() {
         validate_document_extraction(&value).unwrap();
     }
 }
+
+#[test]
+fn knowledge_pdf_retains_late_pages_beyond_the_attachment_preview() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::validate_knowledge_document_extraction;
+    let large = text_stream(&"ordinary padding ".repeat(1800));
+    let later = text_stream("LATE_PDF_KNOWLEDGE_ANCHOR_7319");
+    let bytes = raw_pdf(&[(&large, true), (&later, true)]);
+    let preview = extract_pdf(&bytes);
+    validate_document_extraction(&preview).unwrap();
+    assert!(!preview
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_PDF_KNOWLEDGE_ANCHOR_7319")));
+    let knowledge = extract_knowledge_document(DocumentFormat::Pdf, &bytes);
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+    assert!(knowledge
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_PDF_KNOWLEDGE_ANCHOR_7319")));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            > 16 * 1024
+    );
+    assert_eq!(knowledge.pdf_coverage.unwrap().included_page_count, 2);
+}
+
+#[test]
+fn knowledge_pdf_caps_one_mib_while_observing_later_page_coverage() {
+    use anima_document_content::extract_knowledge_document;
+    use anima_service_adapters::document_content::{
+        validate_knowledge_document_extraction, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
+    };
+    let large = text_stream(&"x".repeat(MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES + 1024));
+    let later = text_stream("later page must still be counted");
+    let bytes = raw_pdf(&[(&large, true), (&later, true)]);
+    let knowledge = extract_knowledge_document(DocumentFormat::Pdf, &bytes);
+    validate_knowledge_document_extraction(&knowledge).unwrap();
+    assert_eq!(knowledge.status, Status::Partial);
+    assert!(knowledge.omissions.contains(&Omission::TextLimit));
+    assert!(
+        knowledge
+            .blocks
+            .iter()
+            .map(|block| block.text.len())
+            .sum::<usize>()
+            <= MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES
+    );
+    assert_eq!(knowledge.pdf_coverage.unwrap().text_page_count, 2);
+}

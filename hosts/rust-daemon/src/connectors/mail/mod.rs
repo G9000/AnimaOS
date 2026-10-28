@@ -178,6 +178,21 @@ impl std::fmt::Display for MailError {
         })
     }
 }
+/// The step of finishing a sign-in that failed, so the page shown to the
+/// owner can say what to check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConnectStage {
+    /// Reading the app's OAuth credentials.
+    Setup,
+    /// Matching the redirect to a sign-in attempt this daemon started.
+    Attempt,
+    /// Trading the provider's code for tokens.
+    Exchange,
+    /// Reading the signed-in mailbox's address.
+    Profile,
+    /// Storing the tokens and activating the connector.
+    Save,
+}
 #[derive(Clone)]
 pub(crate) struct OAuthConfig {
     pub(crate) provider: Provider,
@@ -559,6 +574,39 @@ impl MailManager {
         nonce: &str,
         code: &str,
     ) -> Result<MailConnector, MailError> {
+        self.complete_connect_staged(p, nonce, code)
+            .await
+            .map_err(|(_, error)| error)
+    }
+    /// `complete_connect`, reporting the step that failed.
+    pub(crate) async fn complete_connect_staged(
+        &self,
+        p: Provider,
+        nonce: &str,
+        code: &str,
+    ) -> Result<MailConnector, (ConnectStage, MailError)> {
+        let mut stage = ConnectStage::Setup;
+        match self.finish_connect(p, nonce, code, &mut stage).await {
+            Ok(connector) => Ok(connector),
+            Err(error) => {
+                tracing::warn!(
+                    provider = ?p,
+                    stage = ?stage,
+                    error = %error,
+                    "could not finish the mail sign-in"
+                );
+                Err((stage, error))
+            }
+        }
+    }
+    async fn finish_connect(
+        &self,
+        p: Provider,
+        nonce: &str,
+        code: &str,
+        stage: &mut ConnectStage,
+    ) -> Result<MailConnector, MailError> {
+        *stage = ConnectStage::Setup;
         let oauth_lease = self
             .oauth_apps
             .locked_config(p.oauth_provider().ok_or(MailError::Invalid)?)
@@ -568,6 +616,7 @@ impl MailManager {
             .config()
             .map(|resolved| OAuthConfig::from_resolved(p, resolved))
             .ok_or(MailError::Unconfigured)?;
+        *stage = ConnectStage::Attempt;
         let pending = {
             let mut pending = self.pending.lock().await;
             if !pending.get(nonce).is_some_and(|v| {
@@ -590,11 +639,14 @@ impl MailManager {
                 return Err(MailError::Conflict);
             }
         }
+        *stage = ConnectStage::Exchange;
         let tokens = self
             .transport
             .exchange(&config, code, &pending.verifier)
             .await?;
+        *stage = ConnectStage::Profile;
         let label = self.transport.account(p, tokens.access_token()).await?;
+        *stage = ConnectStage::Save;
         let previous = self
             .credentials
             .load(&pending.id)

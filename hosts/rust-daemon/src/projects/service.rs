@@ -42,6 +42,16 @@ pub(crate) struct AddResourceRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AddKnowledgeFolderRequest {
+    pub(crate) expected_revision: u64,
+    pub(crate) request_key: String,
+    pub(crate) as_agent_id: String,
+    pub(crate) root_path: String,
+    pub(crate) label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MoveChatRequest {
     pub(crate) project_id: Option<String>,
     pub(crate) expected_binding_revision: u64,
@@ -65,6 +75,15 @@ pub(crate) enum ProjectMutation {
         expected_revision: u64,
     },
     AddResource {
+        id: String,
+        input: AddResourceRequest,
+    },
+    AddKnowledgeFolder {
+        id: String,
+        input: AddKnowledgeFolderRequest,
+    },
+    /// Host-only admission result. Never deserialized from an owner request.
+    AddGrantedKnowledgeFolder {
         id: String,
         input: AddResourceRequest,
     },
@@ -227,7 +246,50 @@ impl ProjectService {
     }
 
     async fn mutate_owned(&self, mutation: ProjectMutation) -> Result<Value, ProjectError> {
-        let preflight = if let ProjectMutation::AddResource { id, input } = &mutation {
+        let mutation = match mutation {
+            ProjectMutation::AddKnowledgeFolder { id, input } => {
+                let protected = {
+                    let state = self.state.read().await;
+                    member_project(&state, &id, &input.as_agent_id)?;
+                    state
+                        .ensure_profile_owned()
+                        .map_err(|_| ProjectError::AccessUnavailable)?;
+                    state
+                        .profile_owner()
+                        .map_or_else(Vec::new, |owner| owner.protected_paths())
+                };
+                let path = std::path::PathBuf::from(&input.root_path);
+                let grant = tokio::task::spawn_blocking(move || {
+                    super::knowledge::capture_folder(&path, &protected)
+                })
+                .await
+                .map_err(|_| ProjectError::AccessUnavailable)?
+                .map_err(|_| {
+                    ProjectError::InvalidRecord(
+                        "choose a safe document folder outside private profile storage",
+                    )
+                })?;
+                ProjectMutation::AddGrantedKnowledgeFolder {
+                    id,
+                    input: AddResourceRequest {
+                        expected_revision: input.expected_revision,
+                        request_key: input.request_key,
+                        as_agent_id: input.as_agent_id,
+                        target: ProjectResourceTarget::KnowledgeFolder {
+                            root_path: grant.root_path,
+                            root_identity: grant.root_identity,
+                        },
+                        role: ProjectResourceRole::Reference,
+                        label: input.label,
+                        use_in_context: true,
+                    },
+                }
+            }
+            mutation => mutation,
+        };
+        let preflight = if let ProjectMutation::AddResource { id, input }
+        | ProjectMutation::AddGrantedKnowledgeFolder { id, input } = &mutation
+        {
             let (resource, binding) = {
                 let state = self.state.read().await;
                 let candidate = prepare(&state, mutation.clone())?;
@@ -425,6 +487,18 @@ impl ProjectService {
         for notice in &prepared.changes {
             publish_project_invalidation(&state, notice);
         }
+        let knowledge = state.project_knowledge.clone();
+        let changed_projects: Vec<_> = prepared
+            .changes
+            .iter()
+            .map(|notice| notice.project_id.clone())
+            .collect();
+        drop(state);
+        for project_id in changed_projects {
+            if let Err(error) = knowledge.reconcile(&self.state, &project_id).await {
+                tracing::warn!(%project_id, %error, "project knowledge cache reconciliation deferred");
+            }
+        }
         Ok(prepared.result)
     }
 }
@@ -553,6 +627,7 @@ fn prepare(
     state: &DaemonState,
     mutation: ProjectMutation,
 ) -> Result<PreparedMutation, ProjectError> {
+    let granted_knowledge = matches!(&mutation, ProjectMutation::AddGrantedKnowledgeFolder { .. });
     let mut registry = state.projects.clone();
     let mut bindings = Vec::new();
     let mut changes = Vec::new();
@@ -610,7 +685,15 @@ fn prepare(
             changes.push(invalidation(Some(&old), None)?);
             json!({"deleted":true,"detachedChatCount":bindings.len()})
         }
-        ProjectMutation::AddResource { id, input } => {
+        ProjectMutation::AddResource { id, input }
+        | ProjectMutation::AddGrantedKnowledgeFolder { id, input } => {
+            if matches!(&input.target, ProjectResourceTarget::KnowledgeFolder { .. })
+                != granted_knowledge
+            {
+                return Err(ProjectError::InvalidRecord(
+                    "knowledge folders require explicit read-only admission",
+                ));
+            }
             let old = member_project(state, &id, &input.as_agent_id)?.clone();
             input.target.validate()?;
             let donor = input
@@ -705,6 +788,7 @@ fn prepare(
             changes.push(invalidation(Some(&old), Some(&changed))?);
             json!({"project":project_view(state,&changed)})
         }
+        ProjectMutation::AddKnowledgeFolder { .. } => return Err(ProjectError::AccessUnavailable),
         ProjectMutation::PatchResource {
             id,
             resource_id,

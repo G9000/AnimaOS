@@ -8127,6 +8127,1072 @@ details.settings-item > :not(summary) {
 .connections-app-row.is-unavailable > div > p {
   color: rgb(236 230 218 / 0.35);
 }
+
+/* Services and chat apps are tiles in a grid: icon, name, where it stands,
+ * what it does. A click anywhere on a service tile opens its settings in a
+ * drawer on the right, so the grid never moves. */
+.connections-service-list,
+.connections-chat-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  border-top: 0;
+}
+.connections-service-list > *,
+.connections-chat-list > * {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 4px;
+  padding: 16px;
+  background: rgb(236 230 218 / 0.035);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.connections-service-list > .connections-wide,
+.connections-chat-list > .connections-wide {
+  grid-column: 1 / -1;
+}
+/* The whole card answers the pointer, not just its icon. */
+.connections-row:hover,
+.connections-app-row:not(.is-unavailable):hover {
+  border-color: rgb(236 230 218 / 0.24);
+  background: rgb(236 230 218 / 0.09);
+}
+.connections-service-list > .connections-row {
+  position: relative;
+  align-self: start;
+  padding: 0;
+}
+.connections-row-tile {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'icon name status'
+    'icon what what';
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 3px;
+  padding: 16px;
+}
+.connections-row-icon {
+  grid-area: icon;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 3px;
+  color: var(--color-ink-2);
+}
+.connections-row-name {
+  grid-area: name;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+/* The name is the button, stretched over the whole card. */
+.connections-row-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.connections-row-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.connections-row-open:focus-visible {
+  outline: none;
+}
+.connections-row-open:focus-visible::after {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.connections-row-what {
+  grid-area: what;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.connections-row-status {
+  grid-area: status;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+}
+.connections-row-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border: 1px solid rgb(236 230 218 / 0.4);
+}
+.connections-row-status[data-tone='ok'] {
+  color: var(--color-ink);
+}
+.connections-row-status[data-tone='ok']::before {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+.connections-row-status[data-tone='attention']::before {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+}
+.connections-app-row {
+  gap: 12px;
+}
+
+/* The drawer: one service's settings, over a dimmed page. */
+.connections-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(540px, 100vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid rgb(236 230 218 / 0.16);
+  background: #151513;
+  color: var(--color-ink);
+  box-shadow: -24px 0 80px rgb(0 0 0 / 0.5);
+}
+.connections-drawer[open] {
+  display: flex;
+  flex-direction: column;
+  animation: connections-drawer-in 160ms ease-out;
+}
+.connections-drawer::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+@keyframes connections-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connections-drawer[open] {
+    animation: none;
+  }
+}
+.connections-drawer-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgb(236 230 218 / 0.12);
+}
+.connections-drawer-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.connections-drawer-head p {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.connections-drawer-head .connections-drawer-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.connections-drawer-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 3px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+.connections-drawer-close:hover {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+.connections-drawer-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px;
+}
+.connections-drawer-body > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* The tile whose drawer is open is the selected one: an accent fill. */
+.connections-service-list > .connections-row[data-open],
+.connections-service-list > .connections-row[data-open]:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.connections-row[data-open] .connections-row-icon {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Only what is connected is listed; the rest waits in the catalogue. Its
+ * drawer stays mounted so the catalogue can still open it. */
+.connections-service-list > .connections-row:not([data-listed]) {
+  display: contents;
+}
+.connections-row:not([data-listed]) .connections-row-tile {
+  display: none;
+}
+
+.connections-section-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.connections-add {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.connections-add:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.connections-empty {
+  margin: 0;
+  padding: 28px 16px;
+  border: 1px dashed rgb(236 230 218 / 0.18);
+  border-radius: 4px;
+  color: rgb(236 230 218 / 0.55);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* OAuth app setup: two provider cards with controls cut to one size. */
+.connections-oauth-setup {
+  padding: 0;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 4px;
+  background: rgb(236 230 218 / 0.025);
+}
+.connections-oauth-setup > summary {
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.connections-oauth-setup[open] > summary {
+  padding-bottom: 4px;
+}
+.connections-oauth-setup > p {
+  margin: 0;
+  padding: 0 16px;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.oauth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  align-items: start;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+.oauth-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 4px;
+  background: rgb(236 230 218 / 0.03);
+}
+.oauth-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oauth-head .connections-row-status {
+  flex: none;
+  white-space: nowrap;
+}
+.oauth-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.oauth-head p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgb(236 230 218 / 0.55);
+}
+.oauth-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.oauth-facts > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.oauth-facts dt {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+.oauth-facts dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.oauth-guide {
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+}
+.oauth-guide > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.oauth-guide > summary:hover,
+.oauth-guide[open] > summary {
+  color: var(--color-ink);
+}
+.oauth-steps {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: oauth-step;
+}
+.oauth-steps li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  counter-increment: oauth-step;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+.oauth-steps li::before {
+  content: counter(oauth-step);
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: rgb(236 230 218 / 0.6);
+}
+.oauth-steps a,
+.oauth-guide a {
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.oauth-steps strong {
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.oauth-tip {
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgb(236 230 218 / 0.5);
+}
+.oauth-uris {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.oauth-label {
+  margin: 0;
+  color: rgb(236 230 218 / 0.45);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.oauth-uri {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.oauth-uri code {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid rgb(236 230 218 / 0.1);
+  border-radius: 3px;
+  background: rgb(0 0 0 / 0.25);
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.oauth-note {
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.04);
+}
+.oauth-note p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.oauth-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.oauth-wide {
+  grid-column: 1 / -1;
+}
+.oauth-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+}
+.oauth-card .field {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.oauth-hint {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.45);
+}
+.oauth-inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-ink);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.oauth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.oauth-save,
+.oauth-remove,
+.oauth-copy {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  background: none;
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.oauth-save {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.oauth-save:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+/* The copy button is an icon: a square the height of the box beside it. */
+.oauth-copy {
+  width: 36px;
+  padding: 0;
+}
+.oauth-remove:hover:not(:disabled),
+.oauth-copy:hover:not(:disabled) {
+  border-color: var(--color-ink-2);
+}
+.oauth-save:disabled,
+.oauth-remove:disabled,
+.oauth-copy:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Mail and calendar drawers: one account panel, then the work. */
+.conn-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.conn-account {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.conn-account span {
+  flex: none;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+.conn-account strong {
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.conn-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.conn-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+.conn-next p {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}
+.conn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.conn-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  background: none;
+  color: var(--color-ink);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.conn-btn:hover:not(:disabled) {
+  border-color: var(--color-ink-2);
+}
+.conn-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.conn-btn--primary {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.conn-btn--primary:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+.conn-btn--icon {
+  width: 34px;
+  padding: 0;
+}
+.conn-btn--icon[data-loading] svg {
+  animation: conn-spin 900ms linear infinite;
+}
+@keyframes conn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-btn--icon[data-loading] svg {
+    animation: none;
+  }
+}
+.conn-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+.conn-title {
+  margin: 0;
+  color: rgb(236 230 218 / 0.45);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.conn-empty {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.5);
+}
+.conn-messages {
+  display: flex;
+  flex-direction: column;
+}
+.conn-message {
+  padding: 10px 0;
+  border-bottom: 1px solid rgb(236 230 218 / 0.08);
+}
+.conn-message:first-child {
+  padding-top: 0;
+}
+.conn-message:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.conn-message:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.conn-message-subject {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.conn-message-meta {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+  overflow-wrap: anywhere;
+}
+.conn-message-preview {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.conn-compose {
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+}
+.conn-compose > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.conn-compose > summary::-webkit-details-marker {
+  display: none;
+}
+.conn-compose > summary:hover,
+.conn-compose[open] > summary {
+  color: var(--color-ink);
+}
+.conn-compose[open] > summary {
+  border-bottom: 1px solid rgb(236 230 218 / 0.1);
+}
+.conn-compose > form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+}
+.conn-field .field {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.conn-field input.field {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.conn-foot {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.45);
+}
+.conn-draft {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.03);
+  font-size: 12px;
+}
+
+/* Missing provider credentials: say so once, and offer the way there. */
+.connections-setup-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.04);
+}
+.connections-setup-hint p {
+  flex: 1 1 220px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.connections-setup-hint button {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.connections-setup-hint button:hover {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* Discord inside its drawer: one calm card, the rest folded away. */
+.discord-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 4px;
+  background: rgb(236 230 218 / 0.035);
+}
+.discord-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.discord-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.discord-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.discord-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.discord-facts > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.discord-facts dt {
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.5);
+}
+.discord-facts dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-2);
+  overflow-wrap: anywhere;
+}
+.discord-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+  background: rgb(236 230 218 / 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+.discord-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.discord-link {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.discord-link:hover {
+  color: var(--color-ink);
+}
+.discord-fold,
+.discord-setup,
+.discord-guide {
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+  padding-top: 12px;
+}
+.discord-guide {
+  border-top: 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-radius: 3px;
+}
+.discord-fold > summary,
+.discord-setup > summary,
+.discord-guide > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.discord-setup > summary {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.discord-fold > summary:hover,
+.discord-guide > summary:hover {
+  color: var(--color-ink);
+}
+.discord-guide > p {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+}
+.discord-ids {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: rgb(236 230 218 / 0.55);
+  overflow-wrap: anywhere;
+}
+.discord-group-title {
+  margin: 0;
+  color: rgb(236 230 218 / 0.45);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.discord-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgb(236 230 218 / 0.5);
+}
+.discord-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid rgb(236 230 218 / 0.1);
+}
+
+/* The catalogue: everything that can be connected, in one place. */
+.connections-catalog {
+  position: fixed;
+  inset: 0;
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(720px, 90dvh);
+  margin: auto;
+  padding: 0;
+  border: 1px solid rgb(236 230 218 / 0.16);
+  background: #151513;
+  color: var(--color-ink);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+}
+.connections-catalog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.connections-catalog::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+.connections-catalog-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgb(236 230 218 / 0.12);
+}
+.connections-catalog-head > div {
+  flex: 1;
+}
+.connections-catalog-head p {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.connections-catalog-head .connections-drawer-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.connections-catalog-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 18px 0;
+  padding: 0 12px;
+  border: 1px solid rgb(236 230 218 / 0.16);
+  border-radius: 3px;
+  color: rgb(236 230 218 / 0.55);
+}
+.connections-catalog-search:focus-within {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+}
+.connections-catalog-search input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border: 0;
+  background: none;
+  color: var(--color-ink);
+  font-size: 13px;
+  outline: none;
+}
+.connections-catalog-search input::placeholder {
+  color: rgb(236 230 218 / 0.4);
+}
+.connections-catalog-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+}
+.connections-catalog-group {
+  margin: 0 0 4px;
+  color: rgb(236 230 218 / 0.45);
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.connections-catalog ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.connections-catalog li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgb(236 230 218 / 0.1);
+}
+.connections-catalog li > div {
+  flex: 1;
+  min-width: 0;
+}
+.connections-catalog li strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.connections-catalog li p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
+}
+.connections-catalog li > button {
+  flex: none;
+  padding: 5px 14px;
+  border: 1px solid rgb(236 230 218 / 0.2);
+  border-radius: 3px;
+  color: var(--color-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.connections-catalog li > button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.connections-catalog li.is-unavailable {
+  opacity: 0.5;
+}
+.connections-catalog li > button:disabled {
+  cursor: not-allowed;
+}
 .connections-oauth-setup {
   padding: 10px 12px;
   border-bottom: 1px solid rgb(236 230 218 / 0.12);

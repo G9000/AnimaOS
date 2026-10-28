@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProjectsClient } from './projects.js';
 import type { DaemonClient } from './client.js';
+import { createDaemonClient } from './client.js';
 
 function fixture() {
   const requestJson = vi.fn().mockResolvedValue({ project: { id: 'shared' }, projects: [], projectSummary: { id: 'shared' } });
@@ -43,5 +44,33 @@ describe('ProjectsClient', () => {
     expect(requestJson).toHaveBeenCalledWith('/api/projects/p/resources/r%2Fa/preview?asAgentId=b', {});
     await client.manage();
     expect(requestJson).toHaveBeenLastCalledWith('/api/projects/manage', {});
+  });
+
+  it('grants exactly the chosen folder through the dedicated revision-checked endpoint', async () => {
+    const { client, requestJson } = fixture();
+    const input = { expectedRevision: 4, requestKey: 'folder-grant', asAgentId: 'b', rootPath: 'D:\\Research', label: 'Research' };
+    expect(await client.addKnowledgeFolder('p/a', input)).toEqual({ id: 'shared' });
+    expect(requestJson).toHaveBeenLastCalledWith('/api/projects/p%2Fa/knowledge/sources', { method: 'POST', body: input });
+  });
+
+  it('preserves knowledge bindings and passages in the documented response envelopes', async () => {
+    const binding = { projectRevision: 4, accessEpoch: 2, memberGeneration: 3 };
+    const hit = { citationId: 'opaque', resourceId: 'r', documentId: 'd', title: 'Annual plan', locator: 'Page 2', excerpt: 'Relevant evidence' };
+    const status = { ...binding, sources: [{ resourceId: 'r', status: 'partial', documentCount: 2, indexedAtMs: 20, generation: 1, omittedCount: 1, error: 'One file is busy' }] };
+    const responses = [status, status, { ...status, hits: [hit] }, { ...binding, ...hit, text: 'Verified bounded passage' }];
+    const fetch = vi.fn(async () => Response.json(responses.shift()));
+    const client = createDaemonClient({ baseUrl: '', fetch }).projects;
+    const signal = new AbortController().signal;
+    expect(await client.knowledgeStatus('p', 'a', { signal })).toEqual(status);
+    expect(await client.refreshKnowledge('p', { asAgentId: 'a', resourceId: 'r' }, { signal })).toEqual(status);
+    expect(await client.searchKnowledge('p', 'a', { query: 'annual & plan', limit: 8, signal })).toEqual({ ...status, hits: [hit] });
+    expect(await client.openKnowledgeCitation('p', 'opaque/a', 'a', { signal })).toEqual({ ...binding, ...hit, text: 'Verified bounded passage' });
+    const urls = fetch.mock.calls.map((call) => String((call as unknown as [string])[0]));
+    expect(urls).toEqual([
+      '/api/projects/p/knowledge/status?asAgentId=a', '/api/projects/p/knowledge/refresh',
+      '/api/projects/p/knowledge/search?asAgentId=a&query=annual+%26+plan&limit=8',
+      '/api/projects/p/knowledge/citations/opaque%2Fa?asAgentId=a',
+    ]);
+    for (const call of fetch.mock.calls) expect((call as unknown as [string, RequestInit])[1].signal).toBe(signal);
   });
 });

@@ -73,6 +73,7 @@ describe('onboarding HTTP contracts', () => {
     await client.workspace.bootstrap(bootstrap);
     await client.workspace.inspect(workspace.rootPath);
     expect((await client.workspace.pickFolder()).rootPath).toBeNull();
+    expect((await client.workspace.pickFolder({ purpose: 'project_knowledge' })).rootPath).toBeNull();
     await client.workspace.resume(workspace.rootPath);
     expect(
       calls.map(({ url, init }) => [
@@ -91,6 +92,7 @@ describe('onboarding HTTP contracts', () => {
         undefined,
       ],
       ['/api/workspace/pick-folder', 'POST', undefined],
+      ['/api/workspace/pick-folder?purpose=project_knowledge', 'POST', undefined],
       ['/api/workspace/resume', 'POST', { rootPath: workspace.rootPath }],
     ]);
   });
