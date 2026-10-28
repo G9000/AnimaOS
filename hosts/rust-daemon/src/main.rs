@@ -4,6 +4,19 @@ use anima_daemon::{run_from_env, ServeOptions};
 
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if arguments.iter().any(|argument| {
+        argument
+            .to_string_lossy()
+            .starts_with("--document-edit-worker-")
+    }) {
+        if arguments.len() != 1 || arguments[0] != "--document-edit-worker-v1" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "document edit worker requires exactly --document-edit-worker-v1",
+            ));
+        }
+        return anima_daemon::document_edit_worker_entry();
+    }
     if arguments
         .iter()
         .any(|a| a.to_string_lossy().starts_with("--execution-worker-"))

@@ -51,6 +51,13 @@ import {
   TrimmedDivider,
 } from './sessions/TranscriptNotes';
 import { slashSuggestions, type SlashCommand } from '../lib/slash-commands';
+import {
+  loadSent,
+  pushSent,
+  recallNewer,
+  recallOlder,
+  type Recall,
+} from '../lib/sent-history';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
 import {
   AttachmentControls,
@@ -1143,9 +1150,18 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const latestDraftRef = useLatest(draft);
   const spokenDraftRef = useRef(false);
+  const historyKey = conversationKey ?? agentName;
+  const recallRef = useRef<Recall>({ cursor: -1, stash: '' });
   const changeDraft = (value: string) => {
     latestDraftRef.current = value;
     setDraft(value);
+  };
+  /** Shows a recalled message with the caret after its last character. */
+  const showRecalled = (value: string) => {
+    changeDraft(value);
+    requestAnimationFrame(() =>
+      taRef.current?.setSelectionRange(value.length, value.length),
+    );
   };
   const appendDictation = (text: string) => {
     spokenDraftRef.current = true;
@@ -1157,6 +1173,8 @@ export function Composer({
       markSpokenInput(conversationKey);
       spokenDraftRef.current = false;
     }
+    pushSent(historyKey, text ?? latestDraftRef.current);
+    recallRef.current = { cursor: -1, stash: '' };
     onSend(text);
   };
   const menuId = useId();
@@ -1197,6 +1215,9 @@ export function Composer({
         savedAttachmentCount > 0));
 
   useResetOnChange([draft], () => setActiveIndex(0));
+  useResetOnChange([historyKey], () => {
+    recallRef.current = { cursor: -1, stash: '' };
+  });
 
   // Fit the field to its text. It measures again when its width changes:
   // measured before layout, at no width, the empty field filled its
@@ -1366,10 +1387,46 @@ export function Composer({
                 ref={taRef}
                 value={draft}
                 disabled={disabled}
-                onChange={(e) => changeDraft(e.target.value)}
+                onChange={(e) => {
+                  // Typing makes a recalled message the user's own draft.
+                  recallRef.current = { cursor: -1, stash: '' };
+                  changeDraft(e.target.value);
+                }}
                 onKeyDown={(e) => {
                   const composing =
                     e.nativeEvent.isComposing || e.keyCode === 229;
+                  // ↑ on the first line brings back the last message sent
+                  // here, ↓ on the last line walks forward to the draft.
+                  if (
+                    !selected &&
+                    !composing &&
+                    !disabled &&
+                    (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+                    !e.shiftKey &&
+                    !e.altKey &&
+                    !e.ctrlKey &&
+                    !e.metaKey
+                  ) {
+                    const field = e.currentTarget;
+                    const up = e.key === 'ArrowUp';
+                    const onEdge = up
+                      ? !field.value.slice(0, field.selectionStart).includes('\n')
+                      : !field.value.slice(field.selectionEnd).includes('\n');
+                    const free =
+                      recallRef.current.cursor !== -1 || draft.length === 0;
+                    if (onEdge && (up ? free : recallRef.current.cursor !== -1)) {
+                      const items = loadSent(historyKey);
+                      const step = up
+                        ? recallOlder(items, recallRef.current, draft)
+                        : recallNewer(items, recallRef.current);
+                      if (step) {
+                        e.preventDefault();
+                        recallRef.current = step.recall;
+                        showRecalled(step.draft);
+                        return;
+                      }
+                    }
+                  }
                   if (selected) {
                     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                       e.preventDefault();

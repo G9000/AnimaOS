@@ -13,6 +13,12 @@ afterEach(() => {
 });
 
 describe('hash routes', () => {
+  it('round trips stable project homes and a projects index', () => {
+    for (const route of [{ kind: 'project', projectId: null }, { kind: 'project', projectId: 'project_shared' }] as const)
+      expect(parseHashRoute(formatHashRoute(route))).toEqual(route);
+    expect(parseHashRoute('#/p/../private')).toEqual({ kind: 'home' });
+    expect(parseHashRoute('#/p/%2Fprivate')).toEqual({ kind: 'home' });
+  });
   it('retains an exact message anchor across reload and helper deep links', () => {
     for (const route of [
       {

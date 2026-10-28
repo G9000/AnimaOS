@@ -1,4 +1,6 @@
 import type { DaemonClient } from './client.js';
+import type { AgentJob } from './agents.js';
+import type { RunContinuityEvidence, RunStatus } from './runs.js';
 
 export type WorkflowStatus =
   | 'running'
@@ -25,7 +27,7 @@ export interface WorkflowInput {
 
 export interface WorkflowResumeInput {
   revision: number;
-  action: 'approve' | 'answer' | 'retry' | 'resolve';
+  action: 'approve' | 'answer' | 'retry' | 'resolve' | 'pause' | 'continue';
   value?: string | null;
   acknowledgeUncertain?: boolean;
 }
@@ -50,6 +52,8 @@ export interface WorkflowRun {
   title: string;
   requestKey: string;
   status: WorkflowStatus;
+  /** Absent on older daemons; a hold prevents new tasks from starting. */
+  paused?: boolean;
   revision: number;
   currentStep: number;
   steps: WorkflowStep[];
@@ -58,6 +62,28 @@ export interface WorkflowRun {
   updatedAtMs: number;
   error: string | null;
   sourceTemplate?: WorkflowTemplateSource;
+}
+
+/** A read-only view of one retained job attempt and its available run evidence. */
+export interface WorkflowAttemptEvidence {
+  workflowId: string;
+  workflowRevision: number;
+  stepId: string;
+  jobId: string;
+  stepAttempt: number;
+  status: AgentJob['status'];
+  startedAtMs: number | null;
+  finishedAtMs: number | null;
+  result: string | null;
+  error: string | null;
+  resultTruncated: boolean;
+  evidenceState: 'not_started' | 'retained' | 'unavailable';
+  run: {
+    id: string;
+    sessionId: string;
+    status: RunStatus;
+    evidence: RunContinuityEvidence;
+  } | null;
 }
 
 export interface WorkflowTemplateParameter {
@@ -176,6 +202,19 @@ export class WorkflowsClient {
     return this.client.requestJson<WorkflowRun>(workflowPath(agentId, id), {
       signal: options.signal,
     });
+  }
+
+  inspectAttempt(
+    agentId: string,
+    workflowId: string,
+    stepId: string,
+    jobId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkflowAttemptEvidence> {
+    return this.client.requestJson<WorkflowAttemptEvidence>(
+      `${workflowPath(agentId, workflowId)}/steps/${encodeURIComponent(stepId)}/attempts/${encodeURIComponent(jobId)}`,
+      { signal: options.signal },
+    );
   }
 
   create(agentId: string, input: WorkflowInput): Promise<WorkflowRun> {

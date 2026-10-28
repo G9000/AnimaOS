@@ -26,10 +26,13 @@ pub(crate) struct RecoverySummary {
     pub(crate) unknown_action_count: usize,
     pub(crate) remaining_attempts: u8,
     pub(crate) continuation_run_id: Option<String>,
+    pub(crate) evidence: super::continuity::RunContinuityEvidence,
     pub(crate) root_run_id: Option<String>,
     pub(crate) checkpoint_sequence: Option<u64>,
     pub(crate) checkpoint_phase: Option<String>,
     pub(crate) recovery_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) project_context_notice: Option<String>,
 }
 
 pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
@@ -81,6 +84,7 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
         unknown_action_count: unknown,
         remaining_attempts: MAX_RECOVERY_ATTEMPTS.saturating_sub(run.recovery_attempt),
         continuation_run_id: run.recovery.as_ref().map(|r| r.continuation_run_id.clone()),
+        evidence: super::continuity::project(run),
         root_run_id: run.turn.as_ref().map(|t| t.binding.root_run_id.clone()),
         checkpoint_sequence: run
             .turn
@@ -100,6 +104,7 @@ pub(crate) fn summary(run: &RunRecord) -> RecoverySummary {
             "invalid_or_stale"
         }
         .into(),
+        project_context_notice: None,
     }
 }
 

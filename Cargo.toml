@@ -17,6 +17,7 @@ members = [
     "hosts/rust-daemon",
     "hosts/anima",
 ]
+exclude = ["packages/vendor/win-custody"]
 resolver = "2"
 
 [workspace.package]
@@ -41,10 +42,14 @@ type_complexity = "allow"
 # Workspace types are constructed explicitly; `Default` is not part of their API.
 new_without_default = "allow"
 
+[patch.crates-io]
+win-custody = { path = "packages/vendor/win-custody" }
+
 # Keep local/test builds useful for backtraces without storing full dependency
 # symbols or incremental test state in the build cache.
 [profile.dev]
 debug = "line-tables-only"
+incremental = false
 
 [profile.dev.package."*"]
 debug = false

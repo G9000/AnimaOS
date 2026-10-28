@@ -1,16 +1,8 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -19,11 +11,15 @@ import {
   DAEMON_TEST_OWNER_TOKEN,
   daemonTestEnvironment,
 } from './daemon-environment.js';
+import {
+  createPrivateTestHome,
+  type PrivateTestHome,
+} from './private-test-home.js';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const target = resolve(
   repository,
-  process.env.CARGO_TARGET_DIR ?? 'target/cargo/sdk-daemon-integration',
+  process.env.CARGO_TARGET_DIR ?? 'target/cargo/validation',
 );
 // A supplied artifact permits acceptance of an already-built executable.
 // Ordinary test runs always compile the current tree first.
@@ -41,6 +37,8 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
   { concurrent: false },
   () => {
     let directory: string;
+    let profileDirectory: string;
+    let privateHome: PrivateTestHome | undefined;
     let daemon: ChildProcess | undefined;
     let output = '';
     let port: number;
@@ -81,7 +79,10 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...daemonTestEnvironment(process.env, directory, port),
-          ANIMAOS_RS_CONTROL_PLANE_FILE: join(directory, 'control-plane.json'),
+          ANIMAOS_RS_CONTROL_PLANE_FILE: join(
+            profileDirectory,
+            'control-plane.json',
+          ),
           ANIMAOS_RS_KEYCHAIN_NAMESPACE: `persona-test-${port}`,
           ANIMA_LOCAL_ADMIN_TOKEN: ownerToken,
           OPENAI_API_KEY: 'isolated-personality-test-key',
@@ -145,7 +146,9 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
           },
         );
       expect((await stat(binary)).isFile()).toBe(true);
-      directory = await mkdtemp(join(tmpdir(), 'anima-personality-test-'));
+      privateHome = await createPrivateTestHome('anima-personality-test-');
+      directory = privateHome.workspace;
+      profileDirectory = privateHome.profile;
       await new Promise<void>((resolveListen) =>
         model.listen(0, '127.0.0.1', resolveListen),
       );
@@ -178,12 +181,7 @@ describe.skipIf(process.env.ANIMA_SKIP_SERVICE_TESTS === '1')(
         await new Promise<void>((resolveClose, reject) =>
           model.close((error) => (error ? reject(error) : resolveClose())),
         );
-      if (
-        directory &&
-        dirname(resolve(directory)) === resolve(tmpdir()) &&
-        basename(directory).startsWith('anima-personality-test-')
-      )
-        await rm(directory, { recursive: true, force: true });
+      await privateHome?.cleanup();
     });
 
     it('uses saved config and profile SOUL in separate chats before and after a process restart', async () => {

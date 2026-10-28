@@ -1975,6 +1975,7 @@ impl AgentRunCoordinator {
                 tools: tool_context,
                 base,
                 context,
+                project_context: _,
                 ..
             }) = guard.build_run_runtime(&agent_id, &room_id, &content)
             else {
@@ -2105,6 +2106,15 @@ impl AgentRunCoordinator {
                     now_ms,
                 ),
             };
+            if accepted.is_some() {
+                crate::projects::validate_queued_witness(&guard, &record)
+                    .map_err(|error| ApiError::conflict(error.to_string()))?;
+            } else {
+                record.project_witness = Some(
+                    crate::projects::capture_run_witness(&guard, &agent_id, &session_id)
+                        .map_err(|error| ApiError::conflict(error.to_string()))?,
+                );
+            }
             record.reasoning_effort =
                 crate::chat_models::effort(runtime.config()).map(str::to_owned);
             if system_followup.is_some() {
@@ -2370,6 +2380,7 @@ impl AgentRunCoordinator {
             adapter,
             base,
             mut context,
+            project_context,
         } = admitted;
         let tool_context = tool_context.with_execution_budget(execution_budget.clone(), true);
         // Spec §5.4: turns about to leave the context are summarized first;
@@ -2383,6 +2394,7 @@ impl AgentRunCoordinator {
                     input: &content,
                     config: &frozen_config,
                     files: &accepted_files,
+                    project_context: project_context.as_ref(),
                     tools: &tool_context,
                     adapter: &adapter,
                     deadline: helper_deadline.map(|(_, deadline)| deadline),

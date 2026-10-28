@@ -4,10 +4,17 @@
 //! containment do not bound their memory or wall time. Production callers must
 //! execute extraction in a physically limited, owned worker process.
 mod docx;
+mod editing;
 mod generation;
 mod pdf;
 mod xlsx;
 pub use docx::extract_docx;
+pub use editing::{
+    check_office_document_text, inspect_office_document, prepare_office_edit,
+    OfficeCalculationState, OfficeCellValue, OfficeChange, OfficeEditError, OfficeEditOperation,
+    OfficeEditReview, OfficeEditSpec, OfficeFormat, OfficeInventory, OfficePreservation,
+    OfficeRange, OfficeTarget, OfficeTargetValue, PreparedOfficeEdit, RetainedOfficeHyperlink,
+};
 pub use generation::{
     document_schema, inspect_generated_document, render_document, CellValue, DocumentBlock,
     DocumentSheet, DocumentSlide, DocumentSpec, GeneratedDocument, GeneratedFormat,

@@ -274,6 +274,10 @@ pub(crate) struct RunRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project_witness: Option<crate::projects::QueuedProjectWitness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project_context: Option<crate::projects::ProjectContextManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) recovery: Option<super::recovery::RecoveryRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) recovery_of: Option<String>,
@@ -360,6 +364,8 @@ impl RunRecord {
             provider: start.provider,
             parent_run_id: start.parent_run_id,
             reasoning_effort: None,
+            project_witness: None,
+            project_context: None,
             recovery: None,
             recovery_of: None,
             recovery_attempt: 0,
@@ -919,9 +925,8 @@ impl RunLedger {
         })
     }
 
-    /// This agent's runs, oldest first, for tests; the runs routes read a
-    /// session's runs with `for_session`.
-    #[cfg(test)]
+    /// This agent's runs, oldest first; workflow inspection needs the complete
+    /// set to detect inconsistent attempt linkage.
     pub(crate) fn for_agent(&self, agent_id: &str) -> Vec<&RunRecord> {
         let mut records = self
             .records

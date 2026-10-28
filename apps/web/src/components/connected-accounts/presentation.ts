@@ -7,6 +7,8 @@ export const providerName = (value: string) =>
     email: 'Email',
     gdrive: 'Google Drive',
     gcalendar: 'Google Calendar',
+    onedrive: 'OneDrive',
+    sharepoint: 'SharePoint',
   })[value] ?? value;
 export const sourceStatus = (value: string) =>
   ({

@@ -28,6 +28,15 @@ pub(crate) struct PersistencePreflight {
     memory: Option<MemoryStoreChoice>,
     control_plane: Option<PathBuf>,
     history: Option<PathBuf>,
+    document_edits: Option<PathBuf>,
+}
+
+enum DocumentEditsStartup<'a> {
+    /// Real startup validates retained evidence even with no configured root.
+    Runtime(Option<&'a Path>),
+    /// Existing loader tests isolate metadata migration from startup storage.
+    #[cfg(test)]
+    LoaderOnly,
 }
 
 pub(crate) fn prepare_persistence(config: &DaemonConfig) -> io::Result<PersistencePreflight> {
@@ -54,6 +63,14 @@ pub(crate) fn prepare_persistence_with_durable(
         .map(|path| ProfileOwner::resolve_path(path))
         .transpose()?;
     let explicit_tool_root = non_empty_env_path("ANIMAOS_RS_TOOL_RESULTS_DIR")?;
+    let document_edits = non_empty_env_path("ANIMAOS_RS_DOCUMENT_EDITS_DIR")?
+        .or_else(|| {
+            canonical_control_plane
+                .as_deref()
+                .and_then(default_document_edits_root)
+        })
+        .map(|path| ProfileOwner::resolve_path(&path))
+        .transpose()?;
     let mut resources = typed_profile_resources(
         canonical_control_plane.as_deref(),
         memory.as_ref(),
@@ -63,6 +80,9 @@ pub(crate) fn prepare_persistence_with_durable(
         checkpoint.as_deref(),
         explicit_tool_root.as_deref(),
     );
+    if let Some(root) = &document_edits {
+        resources.push(ProfileResource::Directory(root.clone()));
+    }
     if let Some(startup) = durable {
         let additions = startup.resources();
         for added in &additions {
@@ -92,6 +112,7 @@ pub(crate) fn prepare_persistence_with_durable(
         memory,
         control_plane,
         history,
+        document_edits,
     })
 }
 
@@ -105,6 +126,7 @@ pub(crate) async fn configure_persistence(
         memory,
         control_plane,
         history,
+        document_edits,
     } = preflight;
     let postgres_pool = configure_database(state, config, &owner).await?;
     let memory_store = memory
@@ -122,9 +144,58 @@ pub(crate) async fn configure_persistence(
         .transpose()?;
     state.write().await.profile_owner = Some(owner.clone());
     let memory_store = configure_memory_store(state, memory_store).await?;
-    configure_memory_embeddings(state, memory_store.as_ref(), owner).await?;
-    configure_control_plane_and_history(state, control_plane_store, history).await?;
+    configure_memory_embeddings(state, memory_store.as_ref(), owner.clone()).await?;
+    configure_control_plane_and_history_with_document_edits(
+        state,
+        control_plane_store,
+        history,
+        DocumentEditsStartup::Runtime(document_edits.as_deref()),
+    )
+    .await?;
+    if let Some(root) = document_edits {
+        owner
+            .with_directory(&root, || {
+                crate::document_edits::store::initialize_owned_directory(&root)
+            })?
+            .map_err(io::Error::other)?;
+        let store = crate::document_edits::DocumentEditStore::open_existing(&root)
+            .and_then(|store| store.with_owner(owner.clone()))
+            .map_err(io::Error::other)?;
+        install_document_edit_store(&mut *state.write().await, store)?;
+    }
     write_core_memory_copies(state).await?;
+    Ok(())
+}
+
+fn install_document_edit_store(
+    state: &mut crate::state::DaemonState,
+    store: crate::document_edits::DocumentEditStore,
+) -> io::Result<()> {
+    // Creation can resolve aliases that did not exist at the early decision.
+    // Recheck the held store against the effective workspace before publishing it.
+    crate::document_edits::workspace_boundary::ensure_separate(
+        store.canonical_root().map_err(io::Error::other)?,
+        state
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root_path.as_path()),
+    )
+    .map_err(io::Error::other)?;
+    if let Some(metadata) = state
+        .control_plane_store
+        .as_ref()
+        .and_then(ControlPlaneStoreConfig::file_path)
+    {
+        crate::document_edits::workspace_boundary::ensure_metadata_separate(
+            metadata,
+            state
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.as_path()),
+        )
+        .map_err(io::Error::other)?;
+    }
+    state.document_edit_store = Some(store);
     Ok(())
 }
 
@@ -184,16 +255,55 @@ async fn configure_database(
     }
 }
 
+/// Protect original document evidence before backup, restore or recovery can change it.
+fn validate_document_storage(
+    staging_root: Option<&Path>,
+    metadata_file: Option<&Path>,
+    registry: &crate::document_edits::DocumentEditRegistry,
+    configured_workspace: Option<&Path>,
+) -> io::Result<()> {
+    registry
+        .validate()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if staging_root.is_none() && registry != &crate::document_edits::DocumentEditRegistry::default()
+    {
+        return Err(io::Error::other(
+            "Document staging must be configured before recovering retained document evidence",
+        ));
+    }
+    if let Some(root) = staging_root {
+        crate::document_edits::workspace_boundary::ensure_separate(root, configured_workspace)
+            .map_err(io::Error::other)?;
+    }
+    if let Some(file) = metadata_file {
+        crate::document_edits::workspace_boundary::ensure_metadata_separate(
+            file,
+            configured_workspace,
+        )
+        .map_err(io::Error::other)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 async fn configure_control_plane_store(
     state: &SharedDaemonState,
     config: Option<ControlPlaneStoreConfig>,
 ) -> io::Result<()> {
-    let Some(config) = config else {
-        state.write().await.set_control_plane_store(None);
-        return Ok(());
-    };
+    configure_control_plane_store_with_document_edits(
+        state,
+        config,
+        DocumentEditsStartup::LoaderOnly,
+    )
+    .await
+}
 
-    if let Some(path) = config.file_path() {
+async fn configure_control_plane_store_with_document_edits(
+    state: &SharedDaemonState,
+    config: Option<ControlPlaneStoreConfig>,
+    document_edits: DocumentEditsStartup<'_>,
+) -> io::Result<()> {
+    if let Some(path) = config.as_ref().and_then(ControlPlaneStoreConfig::file_path) {
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -202,7 +312,46 @@ async fn configure_control_plane_store(
         }
     }
 
-    let snapshot = load_control_plane_snapshot(&config).await?;
+    let snapshot = match &config {
+        Some(config) => load_control_plane_snapshot(config).await?,
+        None => None,
+    };
+    match document_edits {
+        DocumentEditsStartup::Runtime(staging_root) => {
+            let metadata_file = config
+                .as_ref()
+                .and_then(ControlPlaneStoreConfig::file_path)
+                .map(PathBuf::as_path);
+            if let Some(snapshot) = &snapshot {
+                validate_document_storage(
+                    staging_root,
+                    metadata_file,
+                    &snapshot.document_edits,
+                    snapshot
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.root_path.as_path()),
+                )?;
+            } else {
+                let guard = state.read().await;
+                validate_document_storage(
+                    staging_root,
+                    metadata_file,
+                    &guard.document_edits,
+                    guard
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.root_path.as_path()),
+                )?;
+            }
+        }
+        #[cfg(test)]
+        DocumentEditsStartup::LoaderOnly => {}
+    }
+    let Some(config) = config else {
+        state.write().await.set_control_plane_store(None);
+        return Ok(());
+    };
     if let Some(loaded) = &snapshot {
         if loaded.version < CONTROL_PLANE_STORE_VERSION {
             // Spec §13.3 step 1: back up the untouched snapshot before anything
@@ -336,13 +485,29 @@ pub(crate) const HISTORY_SQLITE_FILE_ENV: &str = "ANIMAOS_RS_HISTORY_SQLITE_FILE
 /// Opens the history store before the control plane is loaded or saved: a
 /// history file that cannot be opened refuses boot while the snapshot is still
 /// untouched, so an older daemon can start on it (spec §16).
+#[cfg(test)]
 async fn configure_control_plane_and_history(
     state: &SharedDaemonState,
     control_plane: Option<ControlPlaneStoreConfig>,
     history_sqlite: Option<PathBuf>,
 ) -> io::Result<()> {
+    configure_control_plane_and_history_with_document_edits(
+        state,
+        control_plane,
+        history_sqlite,
+        DocumentEditsStartup::LoaderOnly,
+    )
+    .await
+}
+
+async fn configure_control_plane_and_history_with_document_edits(
+    state: &SharedDaemonState,
+    control_plane: Option<ControlPlaneStoreConfig>,
+    history_sqlite: Option<PathBuf>,
+    document_edits: DocumentEditsStartup<'_>,
+) -> io::Result<()> {
     let store = history_store_for(control_plane.as_ref(), history_sqlite).await?;
-    configure_control_plane_store(state, control_plane).await?;
+    configure_control_plane_store_with_document_edits(state, control_plane, document_edits).await?;
     let label = store.label();
     state.write().await.set_history(HistoryService::new(store));
     info!(history_store = label, "runtime history store configured");
@@ -673,6 +838,10 @@ pub(crate) fn default_tool_results_root(control_plane: &Path) -> Option<PathBuf>
     Some(control_plane.with_file_name(name))
 }
 
+fn default_document_edits_root(control_plane: &Path) -> Option<PathBuf> {
+    Some(control_plane.parent()?.join("document-edits"))
+}
+
 /// Explicit JSON or SQLite file wins, then Postgres, then `memory.sqlite` next to the
 /// control-plane file. No control-plane file means memory-only, as before.
 fn memory_store_choice(
@@ -789,6 +958,7 @@ mod tests {
             "ANIMAOS_RS_MEMORY_EMBEDDINGS_SQLITE_FILE",
             "ANIMAOS_RS_CHECKPOINT_ROOT",
             "ANIMAOS_RS_TOOL_RESULTS_DIR",
+            "ANIMAOS_RS_DOCUMENT_EDITS_DIR",
             "ANIMA_TEST_PROFILE_OWNER_REFUSED",
         ] {
             command.env_remove(name);
@@ -860,26 +1030,75 @@ mod tests {
         drop(state);
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum ProfilePayloadSnapshot {
+        Directory,
+        File(Vec<u8>),
+        OwnerLockSidecar,
+    }
+
+    fn profile_payload_snapshot(
+        root: &Path,
+    ) -> std::collections::BTreeMap<PathBuf, ProfilePayloadSnapshot> {
+        use cap_fs_ext::DirExt;
+        use std::io::Read;
+
+        fn visit(
+            directory: &cap_std::fs::Dir,
+            prefix: &Path,
+            snapshot: &mut std::collections::BTreeMap<PathBuf, ProfilePayloadSnapshot>,
+        ) {
+            for entry in directory.entries().unwrap() {
+                let entry = entry.unwrap();
+                let name = entry.file_name();
+                let metadata = directory.symlink_metadata(&name).unwrap();
+                assert!(
+                    !crate::tools::workspace_bytes::linked(&metadata),
+                    "owned profile fixture contains a linked entry: {}",
+                    prefix.join(&name).display()
+                );
+                let relative = prefix.join(&name);
+                let payload = if metadata.is_dir() {
+                    let child = directory.open_dir_nofollow(&name).unwrap();
+                    visit(&child, &relative, snapshot);
+                    ProfilePayloadSnapshot::Directory
+                } else {
+                    assert!(metadata.is_file(), "unsupported profile fixture entry");
+                    if name.to_string_lossy().ends_with(".owner.lock") {
+                        // Preserve the original exclusion of lock contents, but
+                        // retain the entry so adding/removing a sidecar is visible.
+                        ProfilePayloadSnapshot::OwnerLockSidecar
+                    } else {
+                        let mut file = crate::tools::workspace_bytes::open_regular_file(
+                            directory,
+                            name.to_str().expect("profile fixture names are UTF-8"),
+                        )
+                        .unwrap();
+                        let mut bytes = Vec::new();
+                        file.read_to_end(&mut bytes).unwrap();
+                        ProfilePayloadSnapshot::File(bytes)
+                    }
+                };
+                assert!(snapshot.insert(relative, payload).is_none());
+            }
+        }
+
+        let held = crate::tools::workspace_bytes::WorkspaceBytes::open(root).unwrap();
+        let mut snapshot = std::collections::BTreeMap::new();
+        visit(
+            &held.held_directory().unwrap(),
+            Path::new(""),
+            &mut snapshot,
+        );
+        snapshot
+    }
+
     #[test]
     fn profile_owner_two_real_startups_refuse_before_any_payload_or_backup_changes() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = crate::document_edits::store::test_support::private_directory();
         let control = temp.path().join("profile.json");
         let first = running_profile(&control, &temp.path().join("ready-one"));
-        let paths: Vec<_> = std::fs::read_dir(temp.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| {
-                !path
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .ends_with(".owner.lock")
-            })
-            .collect();
-        let before: Vec<_> = paths
-            .iter()
-            .map(|path| std::fs::read(path).unwrap())
-            .collect();
+        let before = profile_payload_snapshot(temp.path());
         let entries = std::fs::read_dir(temp.path()).unwrap().count();
         let output = profile_child_command(&control, &temp.path().join("unused-ready"))
             .env("ANIMA_TEST_PROFILE_OWNER_REFUSED", "1")
@@ -891,23 +1110,22 @@ mod tests {
             "the competing startup was not refused"
         );
         assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), entries);
-        for (path, original) in paths.iter().zip(before) {
-            assert_eq!(std::fs::read(path).unwrap(), original);
-        }
+        assert_eq!(profile_payload_snapshot(temp.path()), before);
         drop(first);
         let _successor = running_profile(&control, &temp.path().join("ready-successor"));
     }
 
     #[test]
     fn profile_owner_two_real_startups_with_separate_profiles_are_independent() {
-        let temp = tempfile::tempdir().unwrap();
+        let one = crate::document_edits::store::test_support::private_directory();
+        let two = crate::document_edits::store::test_support::private_directory();
         let _one = running_profile(
-            &temp.path().join("one/state.json"),
-            &temp.path().join("ready-one"),
+            &one.path().join("state.json"),
+            &one.path().join("ready-one"),
         );
         let _two = running_profile(
-            &temp.path().join("two/state.json"),
-            &temp.path().join("ready-two"),
+            &two.path().join("state.json"),
+            &two.path().join("ready-two"),
         );
     }
 
@@ -2141,6 +2359,274 @@ mod tests {
         let status = embeddings.read().await.status();
         assert!(matches!(status.load, MemoryEmbeddingLoad::Fallback(_)));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+}
+
+#[cfg(test)]
+mod document_storage_tests {
+    use super::*;
+    use crate::document_edits::{DocumentEditRegistry, DocumentEditStore};
+
+    struct Fixture {
+        _profile: crate::document_edits::store::test_support::PrivateTestDirectory,
+        _private: crate::document_edits::store::test_support::PrivateTestDirectory,
+        control: PathBuf,
+        staging: PathBuf,
+        backup: PathBuf,
+        original: Vec<u8>,
+        state: SharedDaemonState,
+        before: serde_json::Value,
+    }
+
+    impl Fixture {
+        fn new(registry: DocumentEditRegistry, layout: &str) -> Self {
+            registry.validate().unwrap();
+            let profile = crate::document_edits::store::test_support::private_directory();
+            let private = crate::document_edits::store::test_support::private_directory();
+            let metadata_parent = profile.path().join("metadata");
+            std::fs::create_dir(&metadata_parent).unwrap();
+            let control = metadata_parent.join("meeting-notes.json");
+            let staging = private.path().join("document-edits");
+            crate::document_edits::store::initialize_owned_directory(&staging).unwrap();
+            let workspace = match layout {
+                "metadata" => metadata_parent,
+                "stage" => private.path().to_path_buf(),
+                "child" => metadata_parent.join("work"),
+                "sibling" => profile.path().join("work"),
+                _ => unreachable!(),
+            };
+            std::fs::create_dir_all(&workspace).unwrap();
+            let mut snapshot = crate::state::DaemonState::new().control_plane_snapshot();
+            snapshot.version = CONTROL_PLANE_STORE_VERSION - 1;
+            snapshot.document_edits = registry;
+            snapshot.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+                root_path: workspace,
+                ..Default::default()
+            });
+            crate::state::DaemonState::new()
+                .restore_control_plane_snapshot(snapshot.clone())
+                .expect("fixture must be restorable before storage admission is checked");
+            let original = serde_json::to_vec_pretty(&snapshot).unwrap();
+            std::fs::write(&control, &original).unwrap();
+            let backup =
+                crate::control_plane_store::pre_upgrade_backup_path(&control, snapshot.version);
+            let daemon = crate::state::DaemonState::new();
+            let before = serde_json::to_value(daemon.control_plane_snapshot()).unwrap();
+            let state = Arc::new(tokio::sync::RwLock::new(daemon));
+            Self {
+                _profile: profile,
+                _private: private,
+                control,
+                staging,
+                backup,
+                original,
+                state,
+                before,
+            }
+        }
+
+        async fn load(&self, staging: bool) -> io::Result<()> {
+            configure_control_plane_store_with_document_edits(
+                &self.state,
+                Some(ControlPlaneStoreConfig::Json(self.control.clone())),
+                DocumentEditsStartup::Runtime(staging.then_some(self.staging.as_path())),
+            )
+            .await
+        }
+
+        async fn assert_untouched(&self) {
+            assert_eq!(std::fs::read(&self.control).unwrap(), self.original);
+            assert!(
+                matches!(std::fs::symlink_metadata(&self.backup), Err(error) if error.kind() == io::ErrorKind::NotFound)
+            );
+            let guard = self.state.read().await;
+            assert_eq!(
+                serde_json::to_value(guard.control_plane_snapshot()).unwrap(),
+                self.before
+            );
+            assert!(guard.document_edit_store.is_none());
+            assert_eq!(std::fs::read_dir(&self.staging).unwrap().count(), 0);
+        }
+    }
+
+    async fn publication_registry() -> DocumentEditRegistry {
+        use crate::approvals::{
+            ApprovalDecisionKind, ApprovalRequest, ApprovalResolution, ApprovalStatus,
+            PendingApprovalStart, ResolvedBy,
+        };
+        use anima_core::{DataValue, ToolCall};
+        let mut registry = crate::document_edits::metadata_review_registry_fixture().await;
+        let record = registry.records().next().unwrap().clone();
+        let draft = record.draft;
+        let now = draft.created_at_ms + 1;
+        let DataValue::Object(args) = crate::tools::generated_documents::schema_data(
+            serde_json::json!({"proposal_id":draft.id,"review_sha256":record.review_sha256,"file_path":draft.file_path,"expected_destination":draft.expected_destination}),
+        ) else {
+            unreachable!()
+        };
+        let call = ToolCall {
+            id: "storage-fixture".into(),
+            name: "apply_document_edit".into(),
+            args,
+        };
+        let witness = crate::document_edits::approval::capture(&registry, &draft.scope, &call, now)
+            .unwrap()
+            .unwrap();
+        let projected = witness.approval_call(&call);
+        let mut approval = ApprovalRequest::pending(
+            PendingApprovalStart {
+                agent_id: &draft.scope.agent_id,
+                session_id: &draft.scope.session_id,
+                run_id: &draft.scope.run_id,
+                call: &projected,
+                timeout_ms: 1000,
+                reason: None,
+            },
+            now,
+        );
+        approval.resolve(
+            ApprovalStatus::Allowed,
+            ApprovalResolution {
+                decision: Some(ApprovalDecisionKind::AllowOnce),
+                note: None,
+                matcher: None,
+                rule_id: None,
+                resolved_by: ResolvedBy::Owner,
+                resolved_at_ms: now,
+            },
+        );
+        let proof = witness.resolved_approval(&call, &approval).unwrap();
+        registry
+            .begin_apply(
+                &draft.id,
+                &record.review_sha256,
+                &draft.scope,
+                &proof,
+                &call.id,
+                now,
+            )
+            .unwrap();
+        registry.begin_publication(&draft.id, &call.id).unwrap();
+        registry
+            .confirm_publication(&draft.id, &call.id, &draft.candidate_sha256, None, now)
+            .unwrap();
+        registry.validate().unwrap();
+        registry
+    }
+
+    #[tokio::test]
+    async fn strict_document_storage_rejects_stage_overlap_before_restore() {
+        let fixture = Fixture::new(DocumentEditRegistry::default(), "stage");
+        assert!(fixture.load(true).await.is_err());
+        fixture.assert_untouched().await;
+        let store = DocumentEditStore::open_existing(&fixture.staging).unwrap();
+        let mut guard = fixture.state.write().await;
+        guard.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: fixture.staging.parent().unwrap().to_path_buf(),
+            ..Default::default()
+        });
+        assert!(install_document_edit_store(&mut guard, store).is_err());
+        assert!(guard.document_edit_store.is_none());
+    }
+
+    #[tokio::test]
+    async fn strict_document_storage_rejects_missing_staging_with_retained_evidence() {
+        for registry in [
+            crate::document_edits::metadata_review_registry_fixture().await,
+            publication_registry().await,
+        ] {
+            let fixture = Fixture::new(registry, "child");
+            assert!(fixture.load(false).await.is_err());
+            fixture.assert_untouched().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn strict_document_storage_allows_unconfigured_empty_state() {
+        let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+        configure_control_plane_store_with_document_edits(
+            &state,
+            None,
+            DocumentEditsStartup::Runtime(None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.read().await.document_edits,
+            DocumentEditRegistry::default()
+        );
+        assert!(state.read().await.document_edit_store.is_none());
+    }
+
+    #[tokio::test]
+    async fn strict_document_metadata_rejects_overlap_even_with_empty_original_registry() {
+        let fixture = Fixture::new(DocumentEditRegistry::default(), "metadata");
+        for staging_configured in [true, false] {
+            assert!(fixture.load(staging_configured).await.is_err());
+            fixture.assert_untouched().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn strict_document_metadata_preserves_prepared_and_published_evidence_before_restore() {
+        for registry in [
+            crate::document_edits::metadata_review_registry_fixture().await,
+            publication_registry().await,
+        ] {
+            let contains_review = registry.records().next().is_some();
+            let fixture = Fixture::new(registry, "metadata");
+            if contains_review {
+                assert!(String::from_utf8_lossy(&fixture.original)
+                    .contains("Private fixture original paragraph"));
+            }
+            assert!(fixture.load(true).await.is_err());
+            fixture.assert_untouched().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn strict_document_metadata_install_rechecks_the_configured_file() {
+        let fixture = Fixture::new(DocumentEditRegistry::default(), "metadata");
+        let store = DocumentEditStore::open_existing(&fixture.staging).unwrap();
+        let mut guard = fixture.state.write().await;
+        guard.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(fixture.control.clone())));
+        guard.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+            root_path: fixture.control.parent().unwrap().to_path_buf(),
+            ..Default::default()
+        });
+        let before = serde_json::to_value(guard.control_plane_snapshot()).unwrap();
+        assert!(install_document_edit_store(&mut guard, store).is_err());
+        assert!(guard.document_edit_store.is_none());
+        assert_eq!(
+            serde_json::to_value(guard.control_plane_snapshot()).unwrap(),
+            before
+        );
+        assert_eq!(std::fs::read(&fixture.control).unwrap(), fixture.original);
+    }
+
+    #[tokio::test]
+    async fn strict_document_metadata_allows_child_and_sibling_workspaces_excluding_the_file() {
+        for layout in ["child", "sibling"] {
+            let fixture = Fixture::new(DocumentEditRegistry::default(), layout);
+            fixture.load(true).await.unwrap();
+            assert_eq!(std::fs::read(&fixture.backup).unwrap(), fixture.original);
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn strict_document_metadata_refuses_unavailable_file_without_changes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let fixture = Fixture::new(DocumentEditRegistry::default(), "metadata");
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&fixture.control)
+            .unwrap();
+        let outcome = fixture.load(true).await;
+        drop(held);
+        assert!(outcome.is_err());
+        fixture.assert_untouched().await;
     }
 }
 

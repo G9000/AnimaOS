@@ -376,6 +376,265 @@ fn a6_native_checkpoint_final_authority_revalidation_refuses_before_effect() {
 }
 
 #[test]
+fn native_checkpoint_retains_authority_until_published_bytes_are_read_back() {
+    struct Authority {
+        path: PathBuf,
+        observed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Drop for Authority {
+        fn drop(&mut self) {
+            assert_eq!(fs::read(&self.path).unwrap(), b"reviewed candidate");
+            self.observed
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    for tool in ["write_file", "apply_document_edit"] {
+        let fixture = NativeFixture::new();
+        let path = fixture.workspace.join("target");
+        fs::write(&path, b"original").unwrap();
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut request = call("call", "target");
+        request.name = tool.into();
+        fixture
+            .service()
+            .mutate_with_authority(
+                &fixture.workspace,
+                &fixture.run("run"),
+                &request,
+                "target",
+                |_| Ok(b"reviewed candidate".to_vec()),
+                || {
+                    Ok(Authority {
+                        path: path.clone(),
+                        observed: observed.clone(),
+                    })
+                },
+            )
+            .unwrap();
+        assert!(observed.load(std::sync::atomic::Ordering::Acquire));
+    }
+}
+
+fn persisted_bytes(root: &std::path::Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn visit(
+        root: &std::path::Path,
+        directory: &std::path::Path,
+        files: &mut BTreeMap<PathBuf, Vec<u8>>,
+    ) {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.insert(
+                    path.strip_prefix(root).unwrap().to_owned(),
+                    fs::read(path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    visit(root, root, &mut files);
+    files
+}
+
+#[test]
+fn document_checkpoint_publication_evidence_requires_exact_native_binding_and_is_read_only() {
+    use anima_core::filesystem_checkpoints::checkpoint_digest;
+    for existing in [false, true] {
+        let fixture = NativeFixture::new();
+        if existing {
+            fs::write(fixture.workspace.join("report.docx"), b"original").unwrap();
+        }
+        let run = fixture.run("document-run");
+        let mut request = call("document-apply", "report.docx");
+        request.name = "apply_document_edit".into();
+        request
+            .args
+            .insert("proposal_id".into(), DataValue::String("proposal".into()));
+        request
+            .args
+            .insert("review_sha256".into(), DataValue::String("a".repeat(64)));
+        let service = fixture.service();
+        let receipt = service
+            .mutate(&fixture.workspace, &run, &request, "report.docx", |_| {
+                Ok(b"candidate".to_vec())
+            })
+            .unwrap();
+        let preimage = existing.then(|| checkpoint_digest(b"original"));
+        let postimage = checkpoint_digest(b"candidate");
+        let before = persisted_bytes(fixture.temp.path());
+        let reloaded = fixture.service();
+        let proof = reloaded
+            .publication_evidence(
+                &fixture.workspace,
+                &run,
+                &request,
+                "report.docx",
+                preimage.as_deref(),
+                &postimage,
+                9,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.checkpoint_id, receipt.checkpoint_id);
+        assert_eq!(persisted_bytes(fixture.temp.path()), before);
+        let mut other_run = run.clone();
+        other_run.run_id = "other-run".into();
+        let mut other_call = request.clone();
+        other_call.id = "other-call".into();
+        let mut changed_request = request.clone();
+        changed_request
+            .args
+            .insert("review_sha256".into(), DataValue::String("b".repeat(64)));
+        for (run, call, path, preimage, postimage, bytes) in [
+            (
+                &other_run,
+                &request,
+                "report.docx",
+                preimage.as_deref(),
+                postimage.as_str(),
+                9,
+            ),
+            (
+                &run,
+                &other_call,
+                "report.docx",
+                preimage.as_deref(),
+                postimage.as_str(),
+                9,
+            ),
+            (
+                &run,
+                &changed_request,
+                "report.docx",
+                preimage.as_deref(),
+                postimage.as_str(),
+                9,
+            ),
+            (
+                &run,
+                &request,
+                "other.docx",
+                preimage.as_deref(),
+                postimage.as_str(),
+                9,
+            ),
+            (
+                &run,
+                &request,
+                "report.docx",
+                Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+                postimage.as_str(),
+                9,
+            ),
+            (
+                &run,
+                &request,
+                "report.docx",
+                preimage.as_deref(),
+                "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                9,
+            ),
+            (
+                &run,
+                &request,
+                "report.docx",
+                preimage.as_deref(),
+                postimage.as_str(),
+                10,
+            ),
+        ] {
+            assert!(reloaded
+                .publication_evidence(
+                    &fixture.workspace,
+                    run,
+                    call,
+                    path,
+                    preimage,
+                    postimage,
+                    bytes
+                )
+                .ok()
+                .flatten()
+                .is_none());
+        }
+        assert_eq!(persisted_bytes(fixture.temp.path()), before);
+        fs::write(fixture.store.join("capture.lock"), b"busy").unwrap();
+        assert!(reloaded
+            .publication_evidence(
+                &fixture.workspace,
+                &run,
+                &request,
+                "report.docx",
+                preimage.as_deref(),
+                &postimage,
+                9
+            )
+            .is_err());
+        assert_eq!(
+            fs::read(fixture.store.join("capture.lock")).unwrap(),
+            b"busy"
+        );
+    }
+}
+
+#[test]
+fn document_checkpoint_evidence_never_provisions_missing_storage_or_admits_partial_publication() {
+    use anima_core::filesystem_checkpoints::checkpoint_digest;
+    let fixture = NativeFixture::new();
+    let run = fixture.run("document-run");
+    let mut request = call("document-apply", "report.docx");
+    request.name = "apply_document_edit".into();
+    let hash = checkpoint_digest(b"candidate");
+    assert!(fixture
+        .service()
+        .publication_evidence(
+            &fixture.workspace,
+            &run,
+            &request,
+            "report.docx",
+            None,
+            &hash,
+            9
+        )
+        .is_err());
+    assert!(
+        !fixture.store.exists(),
+        "read-only evidence lookup cannot initialize storage"
+    );
+    let service = fixture.service();
+    service.set_fault(NativeMutationFault::BeforePostimageAck);
+    assert!(service
+        .mutate(&fixture.workspace, &run, &request, "report.docx", |_| Ok(
+            b"candidate".to_vec()
+        ))
+        .is_err());
+    assert_eq!(
+        fs::read(fixture.workspace.join("report.docx")).unwrap(),
+        b"candidate"
+    );
+    let before = persisted_bytes(fixture.temp.path());
+    assert!(fixture
+        .service()
+        .publication_evidence(
+            &fixture.workspace,
+            &run,
+            &request,
+            "report.docx",
+            None,
+            &hash,
+            9
+        )
+        .is_err());
+    assert_eq!(
+        persisted_bytes(fixture.temp.path()),
+        before,
+        "partial evidence cannot be repaired by inspection"
+    );
+}
+
+#[test]
 fn a6_native_checkpoint_restore_revalidates_authority_after_safety_before_effect() {
     let fixture = NativeFixture::new();
     fs::write(fixture.workspace.join("target"), b"original").unwrap();

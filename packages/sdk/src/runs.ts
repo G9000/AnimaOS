@@ -62,6 +62,20 @@ export interface AsyncHelperSummary {
   archiveUnconsumedCount: number;
 }
 
+/** Saved evidence is incomplete and does not authorize or prove an external effect. */
+export interface RunContinuityEvidence {
+  actionReceipts: ActionReceipt[];
+  unreceiptedTools: string[];
+  omittedUnreceiptedToolCount: number;
+  checkpoint: {
+    sequence: number;
+    phase: 'before_model' | 'model_responded' | 'tools_settled';
+    modelCalls: number;
+    excerpts: { role: 'assistant' | 'tool'; text: string }[];
+    intendedTools: { callId: string; name: string }[];
+  } | null;
+}
+
 /** Typed host provenance for evidence returned to the original companion chat. */
 export interface HelperCompletionOrigin {
   helperRunId: string;
@@ -76,6 +90,8 @@ export interface RunRecoverySummary {
   unknownActionCount: number;
   remainingAttempts: number;
   continuationRunId: string | null;
+  /** Response-only evidence from the same saved source as the fingerprint. */
+  evidence?: RunContinuityEvidence;
   rootRunId?: string | null;
   checkpointSequence?: number | null;
   checkpointPhase?: 'before_model' | 'model_responded' | 'tools_settled' | null;
@@ -85,6 +101,7 @@ export interface RunRecoverySummary {
     | 'already_completed'
     | 'stopped'
     | 'invalid_or_stale';
+  projectContextNotice?: string;
 }
 
 /** Persisted progress and final identity; this summary grants no execution authority. */

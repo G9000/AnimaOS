@@ -351,7 +351,7 @@ pub(super) async fn put_approval_policy(
     // caller disconnects.
     let operation = tokio::spawn(async move {
         let transaction = state.agent_runs.control_plane_transaction().await;
-        let (previous, previous_autonomy, persist) = {
+        let (previous, previous_autonomy, document_candidate, persist) = {
             let mut guard = state.daemon.write().await;
             match guard.agents.get(&agent_id) {
                 None => return rejected(ApiError::not_found()),
@@ -370,19 +370,60 @@ pub(super) async fn put_approval_policy(
                 let _ = guard.refresh_mcp_permissions(&agent_id);
                 return rejected(ApiError::service_unavailable(error));
             }
+            let document_candidate = (policy.write == crate::approvals::PolicyAction::Deny
+                && previous
+                    .as_ref()
+                    .is_none_or(|old| old.write != crate::approvals::PolicyAction::Deny))
+            .then(|| guard.document_edit_invalidation(&agent_id))
+            .flatten();
             (
                 previous,
                 previous_autonomy,
+                document_candidate,
                 guard.control_plane_persist_request(),
             )
         };
-        if let Err(error) = persist.save().await {
+        let mut request = Some(persist);
+        let mut saved = Err(std::io::Error::other(
+            "Document policy change was superseded",
+        ));
+        for _ in 0..3 {
+            let persist = match request.take() {
+                Some(persist) => persist,
+                None => state.daemon.write().await.control_plane_persist_request(),
+            };
+            saved = if let Some(candidate) = &document_candidate {
+                match persist.with_document_edit_candidate(candidate.clone()) {
+                    Some(persist) => persist.save_document_edit_candidate().await,
+                    None => Err(std::io::Error::other(
+                        "Document policy invalidation is unavailable",
+                    )),
+                }
+            } else {
+                persist.save().await
+            };
+            if !saved
+                .as_ref()
+                .is_err_and(crate::state::is_superseded_control_plane_save)
+            {
+                break;
+            }
+        }
+        if let Err(error) = saved {
             let mut guard = state.daemon.write().await;
+            if crate::control_plane_store::is_durability_uncertain(&error) {
+                if let Some(candidate) = document_candidate {
+                    guard.document_edits = candidate;
+                }
+            }
             guard.approvals.restore_policy(&agent_id, previous);
             guard.autonomy.set(previous_autonomy);
             let _ = guard.refresh_mcp_permissions(&agent_id);
             drop(guard);
             return rejected(ApiError::service_unavailable(error.to_string()));
+        }
+        if let Some(candidate) = document_candidate {
+            state.daemon.write().await.document_edits = candidate;
         }
         drop(transaction);
         no_store(json_response(

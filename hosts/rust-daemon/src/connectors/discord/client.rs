@@ -148,6 +148,15 @@ pub(crate) trait DiscordTransport: Send + Sync {
         token: &DiscordBotToken,
         channel_id: &str,
     ) -> Result<String, DiscordTransportError>;
+    async fn read_thread_history(
+        &self,
+        _token: &DiscordBotToken,
+        _channel_id: &str,
+        _before: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<DiscordMessage>, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn receive(
         &self,
         token: &DiscordBotToken,
@@ -532,6 +541,19 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn read_thread_history(
+        &self,
+        token: &DiscordBotToken,
+        channel: &str,
+        before: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<DiscordMessage>, DiscordTransportError> {
+        if !(1..=25).contains(&limit) {
+            return Err(DiscordTransportError::InvalidInput);
+        }
+        self.page(token, channel, before, limit).await
+    }
+
     async fn download_attachment(
         &self,
         channel: &str,

@@ -65,12 +65,14 @@ export interface SessionContextUsage {
     toolSchemasTokens: number;
     companionFilesTokens: number | null;
     memoryTokens: number | null;
+    projectContextTokens?: number | null;
   };
   coverage?: {
     basis: string;
     omitted: string[];
     companionFilesRunId?: string;
   };
+  projectContext?: import('./projects.js').ProjectContextReport;
 }
 
 export interface SessionCompactInput {
@@ -150,6 +152,9 @@ export interface Session {
   mainChat?: boolean;
   /** Changes when the same conversation identity is cleared. */
   clearGeneration?: number;
+  /** Canonical shared-project grouping; older daemons omit these fields. */
+  projectId?: string | null;
+  projectBindingRevision?: number;
   parentSessionId: string | null;
   parentRunId: string | null;
   parentAgentId: string | null;
@@ -177,6 +182,8 @@ export interface SessionPage {
 }
 
 export interface SessionListOptions {
+  /** A shared project ID, or 'none' for unassigned chats. */
+  projectId?: string;
   kind?: SessionKind;
   /** true lists only archived sessions; the daemon default is false. */
   archived?: boolean;
@@ -383,6 +390,7 @@ export class SessionsClient {
     options: SessionListOptions = {},
   ): Promise<SessionPage> {
     const search = new URLSearchParams();
+    if (options.projectId) search.set('projectId', options.projectId);
     if (options.kind) search.set('kind', options.kind);
     if (options.archived !== undefined)
       search.set('archived', String(options.archived));
@@ -447,11 +455,23 @@ export class SessionsClient {
 
   async create(
     agentId: string,
-    input: { title?: string } = {},
+    input: { title?: string; projectId?: string; projectRevision?: number; memberGeneration?: number } = {},
   ): Promise<Session> {
     const response = await this.client.requestJson<{ session: Session }>(
       sessionsPath(agentId),
       { method: 'POST', body: input },
+    );
+    return response.session;
+  }
+
+  async setProject(
+    agentId: string,
+    sessionId: string,
+    input: { projectId: string | null; expectedBindingRevision: number; expectedProjectRevision?: number },
+  ): Promise<Session> {
+    const response = await this.client.requestJson<{ session: Session }>(
+      `${sessionPath(agentId, sessionId)}/project`,
+      { method: 'PUT', body: input },
     );
     return response.session;
   }

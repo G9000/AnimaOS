@@ -107,6 +107,50 @@ fn native_discord_preserves_attachment_only_message_metadata() {
 }
 
 #[test]
+fn discord_thread_reader_is_registered() {
+    let registry = crate::tools::ToolRegistry::new();
+    let tool = registry.descriptor("read_discord_thread");
+    assert!(
+        tool.is_some(),
+        "current-thread history must be available to Discord agents"
+    );
+}
+
+#[tokio::test]
+async fn discord_thread_history_uses_bounded_page_and_keeps_bot_identity() {
+    let mut other = message(102);
+    other["author"]["bot"] = serde_json::json!(true);
+    other["author"]["username"] = serde_json::json!("other-agent");
+    let (client, fixture, task) = fixture(vec![json(serde_json::json!([other]))]).await;
+    let result = client
+        .read_thread_history(
+            &DiscordBotToken::parse("history-fixture").unwrap(),
+            "42",
+            Some("103"),
+            20,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_bot);
+    assert_eq!(result[0].sender.username.as_deref(), Some("other-agent"));
+    assert_eq!(
+        fixture.calls.lock().unwrap()[0].0,
+        "/api/v10/channels/42/messages?limit=20&before=103"
+    );
+    assert!(client
+        .read_thread_history(
+            &DiscordBotToken::parse("history-fixture").unwrap(),
+            "42",
+            None,
+            26
+        )
+        .await
+        .is_err());
+    task.abort();
+}
+
+#[test]
 fn discord_attachment_tool_is_registered_for_generated_files() {
     let tool = crate::tools::ToolRegistry::new().descriptor("send_discord_file");
     assert!(

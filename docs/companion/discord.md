@@ -16,6 +16,8 @@ Use the invite to install the bot in your server, then save and activate the con
 
 Bot messages and webhooks cannot trigger the assistant. Channel names, display names and message text are untrusted conversation content; they never grant permission.
 
+When asked about a discussion or another participant, Anima can read recent messages in its current Discord thread, including messages from other bots. The reader identifies each account by its Discord ID and marks Anima's own bot account, so matching display names do not merge participants. It reads bounded pages and can request older messages; long messages may be marked as truncated. Discord's channel permissions and ordinary read approval rules still apply. Reading other bots' messages does not make their messages start runs or automatically trigger replies.
+
 ## Files and images
 
 Authorized participants can attach files to a mention in a server channel, or upload without a caption in a thread where Anima already participates (unless thread mentions are required). A configured workspace is required. Files are saved under `uploads/YYYY-MM-DD/` and bound to that conversation; saved inputs survive restart. Existing sender, role and channel restrictions apply before downloading.

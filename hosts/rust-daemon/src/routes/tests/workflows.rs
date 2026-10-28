@@ -77,6 +77,8 @@ async fn workflows_http_checkpoint_decisions_are_durable_idempotent_and_owned() 
         serde_json::json!({"revision":revision,"action":"answer"}),
         serde_json::json!({"revision":revision,"action":"answer","value":"   "}),
         serde_json::json!({"revision":revision,"action":"approve","value":"unexpected"}),
+        serde_json::json!({"revision":revision,"action":"pause","value":"unexpected"}),
+        serde_json::json!({"revision":revision,"action":"pause","acknowledgeUncertain":true}),
         serde_json::json!({"revision":0,"action":"approve"}),
         serde_json::json!({"revision":revision,"action":"retry"}),
         serde_json::json!({"revision":revision,"action":"resolve","acknowledgeUncertain":true}),
@@ -153,6 +155,78 @@ async fn workflows_http_checkpoint_decisions_are_durable_idempotent_and_owned() 
 }
 
 #[tokio::test]
+async fn workflows_http_pause_and_continue_preserve_checkpoint_and_replay() {
+    use crate::control_plane_store::ControlPlaneStoreConfig;
+    let dir = tempfile::tempdir().unwrap();
+    let mut daemon = DaemonState::new();
+    daemon.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(
+        dir.path().join("state.json"),
+    )));
+    let owner = daemon
+        .create_agent(test_config("workflow-owner"))
+        .unwrap()
+        .state
+        .id;
+    let app = router(Arc::new(RwLock::new(daemon)), DaemonConfig::default());
+    let uri = format!("/api/agents/{owner}/workflows");
+    let created = response_json(
+        workflow_request(
+            app.clone(),
+            "POST",
+            &uri,
+            serde_json::json!({
+                "title":"Review", "requestKey":"pause-review", "steps":[
+                    {"id":"review", "title":"Review", "kind":"approval", "prompt":"Approve?"}
+                ]
+            }),
+        )
+        .await,
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+    let resume = format!("{uri}/{id}/resume");
+    let pause = serde_json::json!({"revision":created["revision"],"action":"pause"});
+    let held =
+        response_json(workflow_request(app.clone(), "POST", &resume, pause.clone()).await).await;
+    assert_eq!(held["paused"], true);
+    assert_eq!(held["status"], "awaiting_approval");
+    assert_eq!(
+        response_json(workflow_request(app.clone(), "POST", &resume, pause).await).await,
+        held
+    );
+    let premature = workflow_request(
+        app.clone(),
+        "POST",
+        &resume,
+        serde_json::json!({"revision":held["revision"],"action":"approve"}),
+    )
+    .await;
+    assert_eq!(premature.status(), StatusCode::CONFLICT);
+    let continued = response_json(
+        workflow_request(
+            app.clone(),
+            "POST",
+            &resume,
+            serde_json::json!({"revision":held["revision"],"action":"continue"}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(continued["status"], "awaiting_approval");
+    let completed = response_json(
+        workflow_request(
+            app,
+            "POST",
+            &resume,
+            serde_json::json!({"revision":continued["revision"],"action":"approve"}),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(completed["status"], "completed");
+}
+
+#[tokio::test]
 async fn workflows_http_guard_precedes_body_parsing_and_lookup() {
     let app = router(
         Arc::new(RwLock::new(DaemonState::new())),
@@ -162,6 +236,10 @@ async fn workflows_http_guard_precedes_body_parsing_and_lookup() {
         ("GET", "/api/agents/missing/workflows"),
         ("POST", "/api/agents/missing/workflows"),
         ("GET", "/api/agents/missing/workflows/missing"),
+        (
+            "GET",
+            "/api/agents/missing/workflows/missing/steps/missing/attempts/missing",
+        ),
         ("POST", "/api/agents/missing/workflows/missing/resume"),
         ("POST", "/api/agents/missing/workflows/missing/cancel"),
     ] {

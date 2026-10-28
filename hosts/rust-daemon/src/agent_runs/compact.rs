@@ -38,6 +38,7 @@ pub(super) struct RunCompaction<'a> {
     /// summary, and the rebuilt runtime keeps it.
     pub(super) config: &'a AgentConfig,
     pub(super) files: &'a Arc<crate::agent_files::AcceptedAgentFiles>,
+    pub(super) project_context: Option<&'a Arc<crate::projects::AdmittedProjectContext>>,
     pub(super) tools: &'a crate::tools::ToolExecutionContext,
     pub(super) adapter: &'a Arc<dyn anima_core::ModelAdapter>,
     /// A helper's execution deadline, which its compaction counts toward
@@ -434,7 +435,7 @@ impl AgentRunCoordinator {
                     // ruling 3): what its selection still leaves out is the
                     // session's `contextTrimmed`, saved with the summary.
                     rebuilt = run.and_then(|run| {
-                        let mut build = guard.build_run_runtime_with_bindings(
+                        let mut build = guard.build_run_runtime_with_bindings_and_project(
                             agent_id,
                             run.room_id,
                             run.input,
@@ -442,6 +443,7 @@ impl AgentRunCoordinator {
                             &run.files.rendered,
                             run.tools.clone(),
                             Arc::clone(run.adapter),
+                            run.project_context.cloned(),
                         )?;
                         // A PATCH meanwhile applies to later runs (spec §4.4).
                         build.runtime.replace_config(run.config.clone());

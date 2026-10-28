@@ -38,6 +38,21 @@ pub(crate) trait DocumentExtractor: Send + Sync {
 #[derive(Default)]
 pub(crate) struct DocumentWorker;
 
+/// Editing and extraction share this one actual process-custody admission slot.
+pub(crate) fn shared_physical_slot() -> std::sync::Arc<tokio::sync::Semaphore> {
+    #[cfg(windows)]
+    {
+        physical::shared_physical_slot()
+    }
+    #[cfg(not(windows))]
+    {
+        static SLOT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+            std::sync::OnceLock::new();
+        SLOT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+}
+
 #[async_trait]
 impl DocumentExtractor for DocumentWorker {
     async fn extract(
@@ -266,6 +281,9 @@ mod physical {
                 })
             })
             .clone()
+    }
+    pub(super) fn shared_physical_slot() -> Arc<Semaphore> {
+        runtime().permit.clone()
     }
     struct Resources {
         _permit: OwnedSemaphorePermit,

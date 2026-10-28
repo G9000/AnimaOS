@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Debug builds are ad-hoc signed, so macOS binds keychain "Always Allow" to one
 // binary hash and forgets it on the next build. Re-signing every build with an
@@ -80,8 +81,10 @@ export function parseDaemonDevArgs(argv: string[]): {
 
 function buildDaemon(): string {
   const result = spawnSync(
-    'cargo',
+    process.execPath,
     [
+      fileURLToPath(new URL('../scripts/run-task.ts', import.meta.url)),
+      '--cwd', process.cwd(), '--rust-cache', 'dev', '--', 'cargo',
       'build',
       '-p',
       DAEMON_PACKAGE,

@@ -1,5 +1,82 @@
 use super::*;
 impl DriveManager {
+    pub(crate) async fn read_binary_for_search(
+        &self,
+        agent: &str,
+        file: &str,
+        generation: &str,
+    ) -> Result<DriveBinaryResult, DriveError> {
+        let id = DriveFileId::parse(file)?;
+        let capture = self.capture(agent, "drive_read").await?;
+        if capture.generation != generation || !capture.selected_file_ids.contains(&id) {
+            return Err(DriveError::Conflict);
+        }
+        let grant = self
+            .access_grant(capture.clone(), "drive_read".into())
+            .await?;
+        self.current(&capture, Some("drive_read")).await?;
+        let lease = self
+            .inner
+            .oauth_apps
+            .locked_config(OAuthProvider::Google)
+            .await
+            .map_err(|_| DriveError::Credential)?;
+        if lease.revision() != capture.oauth_config_revision {
+            return Err(DriveError::Conflict);
+        }
+        let metadata = self
+            .inner
+            .transport
+            .metadata(grant.tokens.access_token(), &id)
+            .await?;
+        if metadata.id != id || metadata.trashed || !metadata.can_download {
+            return Err(DriveError::PermissionDenied);
+        }
+        if metadata
+            .size_bytes
+            .is_some_and(|size| size > 2 * 1024 * 1024)
+            || !matches!(
+                metadata.mime_type.as_str(),
+                "application/pdf"
+                    | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    | "text/csv"
+            )
+        {
+            return Ok(DriveBinaryResult {
+                metadata,
+                bytes: None,
+            });
+        }
+        let bytes = self
+            .inner
+            .transport
+            .read_binary(grant.tokens.access_token(), &metadata)
+            .await?;
+        if bytes.len() > 2 * 1024 * 1024 {
+            return Err(DriveError::TooLarge);
+        }
+        self.current(&capture, Some("drive_read")).await?;
+        let after = self
+            .inner
+            .transport
+            .metadata(grant.tokens.access_token(), &id)
+            .await?;
+        if after.id != metadata.id
+            || after.version != metadata.version
+            || after.modified_time != metadata.modified_time
+            || after.mime_type != metadata.mime_type
+            || after.trashed
+            || !after.can_download
+        {
+            return Err(DriveError::Conflict);
+        }
+        self.current(&capture, Some("drive_read")).await?;
+        Ok(DriveBinaryResult {
+            metadata,
+            bytes: Some(bytes),
+        })
+    }
     pub(crate) async fn require_search_reauthorization(
         &self,
         agent: String,

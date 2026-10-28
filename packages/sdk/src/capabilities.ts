@@ -17,6 +17,8 @@ export interface DaemonCapabilityTool {
 
 export interface DaemonCapabilities {
   schemaVersion: 1;
+  /** Owner-selected shared context; membership never transfers agent permissions. */
+  projects?: { version: 1; sharedAgents: true; selectedContext: true };
   /** Configuration inventory only; execution still validates interpreter/process custody. */
   programmaticTools?: {
     status: 'configured' | 'unconfigured' | 'unsupported';

@@ -26,6 +26,78 @@ fn document(id: &str, text: &str) -> IndexedDocument {
 }
 
 #[test]
+fn restored_history_requires_matching_keys_and_import_receipts() {
+    let authority = SourceAuthority {
+        agent_id: "agent".into(),
+        connector_id: "mail".into(),
+        provider: "gmail".into(),
+        generation: "generation".into(),
+        enabled: true,
+        read_granted: true,
+        sync_started_at_ms: 1,
+    };
+    let mut source = SourceIndex::new(&authority);
+    let item = normalize(document("message", "private text"), &authority, 1).unwrap();
+    source
+        .imported
+        .insert(item.citation_id.clone(), item.revision.clone());
+    source
+        .historical
+        .insert(item.citation_id.clone(), item.clone());
+    let mut registry = SearchRegistry::default();
+    registry
+        .sources
+        .insert(authority.connector_id.clone(), source);
+    assert!(validate_snapshot(&registry).is_ok());
+    let source = registry.sources.get_mut(&authority.connector_id).unwrap();
+    source.historical.remove(&item.citation_id);
+    source.historical.insert("mismatched-key".into(), item);
+    assert!(validate_snapshot(&registry).is_err());
+}
+
+#[test]
+fn history_pagination_cycle_stops_after_restart_without_workflow_events() {
+    let authority = SourceAuthority {
+        agent_id: "agent".into(),
+        connector_id: "mail".into(),
+        provider: "gmail".into(),
+        generation: "generation".into(),
+        enabled: true,
+        read_granted: true,
+        sync_started_at_ms: 1,
+    };
+    let mut source = SourceIndex::new(&authority);
+    source.history = Some(HistoryProgress {
+        coverage: HistoryCoverage {
+            requested_from_ms: Some(0),
+            requested_before_ms: Some(10_000),
+            ..Default::default()
+        },
+        cursor: None,
+        pass_id: "pass".into(),
+        verification_cursor: None,
+        cursor_fingerprints: vec![],
+    });
+    let page = |token: &str| HistoryPage {
+        documents: vec![],
+        next_cursor: Some(ImportCursor::Gmail {
+            page_token: token.into(),
+        }),
+        exhausted: false,
+    };
+    apply_history_page(&mut source, &authority, page("A"), 1).unwrap();
+    apply_history_page(&mut source, &authority, page("B"), 2).unwrap();
+    let mut restored: SourceIndex =
+        serde_json::from_slice(&serde_json::to_vec(&source).unwrap()).unwrap();
+    apply_history_page(&mut restored, &authority, page("A"), 3).unwrap();
+    let progress = restored.history.unwrap();
+    assert_eq!(progress.coverage.state, HistoryStatus::Partial);
+    assert_eq!(progress.coverage.reason.as_deref(), Some("paginationCycle"));
+    assert!(progress.cursor.is_none());
+    assert!(restored.seen.is_empty());
+}
+
+#[test]
 fn snapshots_suppress_baseline_and_retained_window_reentry() {
     let authority = SourceAuthority {
         agent_id: "a".into(),
@@ -73,6 +145,121 @@ fn snapshots_suppress_baseline_and_retained_window_reentry() {
     )
     .unwrap();
     assert_eq!(changes[0].kind, SourceChangeKind::Changed);
+}
+
+#[test]
+fn history_import_is_silent_while_new_live_mail_is_admitted_once() {
+    let authority = SourceAuthority {
+        agent_id: "a".into(),
+        connector_id: "mail-a".into(),
+        provider: "gmail".into(),
+        generation: "g1".into(),
+        enabled: true,
+        read_granted: true,
+        sync_started_at_ms: 1_000,
+    };
+    let mut source = SourceIndex::new(&authority);
+    apply_snapshot(&mut source, &authority, vec![], 1_000).unwrap();
+    source.live_event_fence_at_ms = Some(2_000);
+    source.settings.history_depth = HistoryDepth::Days30;
+    source.history = Some(HistoryProgress {
+        coverage: HistoryCoverage {
+            state: HistoryStatus::Pending,
+            requested_from_ms: Some(0),
+            requested_before_ms: Some(2_000),
+            ..Default::default()
+        },
+        cursor: None,
+        pass_id: "pass".into(),
+        verification_cursor: None,
+        cursor_fingerprints: vec![],
+    });
+    let mut old = document("old", "historical invoice");
+    old.source_modified_at = Some("1970-01-01T00:00:01Z".into());
+    apply_history_page(
+        &mut source,
+        &authority,
+        HistoryPage {
+            documents: vec![old.clone()],
+            next_cursor: None,
+            exhausted: true,
+        },
+        3_000,
+    )
+    .unwrap();
+    assert!(source.seen.is_empty(), "backfill never enters live dedupe");
+    let mut new = document("new", "new invoice");
+    new.source_modified_at = Some("1970-01-01T00:00:03Z".into());
+    let changes = apply_snapshot(
+        &mut source,
+        &authority,
+        vec![old.clone(), new.clone()],
+        4_000,
+    )
+    .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].document.external_id, "new");
+    assert_eq!(changes[0].observed_at_ms, 4_000);
+    assert!(
+        apply_snapshot(&mut source, &authority, vec![old.clone(), new], 5_000)
+            .unwrap()
+            .is_empty()
+    );
+    let old_citation = normalize(old.clone(), &authority, 1).unwrap().citation_id;
+    source.seen.remove(&old_citation);
+    source.historical.clear();
+    assert!(
+        apply_snapshot(&mut source, &authority, vec![old], 6_000)
+            .unwrap()
+            .is_empty(),
+        "import receipt survives retained-text eviction"
+    );
+}
+
+#[tokio::test]
+async fn attachment_extraction_keeps_the_parent_live_revision_unchanged() {
+    let authority = SourceAuthority {
+        agent_id: "a".into(),
+        connector_id: "mail-a".into(),
+        provider: "gmail".into(),
+        generation: "g1".into(),
+        enabled: true,
+        read_granted: true,
+        sync_started_at_ms: 10,
+    };
+    let mut source = SourceIndex::new(&authority);
+    let raw_parent = document("parent", "original mail");
+    apply_snapshot(&mut source, &authority, vec![raw_parent.clone()], 20).unwrap();
+    let parent = source.documents[0].clone();
+    let attachment = attachments::extract_attachment(
+        &authority,
+        &parent,
+        RawAttachment {
+            id: "part-1".into(),
+            name: "invoice.txt".into(),
+            mime: "text/plain".into(),
+            bytes: Some(b"invoice attachment 983".to_vec()),
+            status: "ready".into(),
+        },
+        30,
+    )
+    .await
+    .unwrap();
+    assert_eq!(attachment.parent_citation_id, parent.citation_id);
+    assert!(attachment.document.text.contains("983"));
+    source
+        .attachment_scanned
+        .insert(parent.citation_id.clone(), parent.revision.clone());
+    source
+        .attachments
+        .insert(attachment.document.citation_id.clone(), attachment);
+    assert!(
+        apply_snapshot(&mut source, &authority, vec![raw_parent], 40)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(source.documents[0].revision, parent.revision);
+    assert_eq!(source.attachments.len(), 1);
 }
 
 #[test]
@@ -142,6 +329,9 @@ pub(super) struct FixtureReader {
     entered: Notify,
     release: Notify,
     epoch: std::sync::Mutex<Option<String>>,
+    history_page: std::sync::Mutex<Option<HistoryPage>>,
+    inbox_ids: std::sync::Mutex<HashSet<String>>,
+    attachment_unavailable: AtomicBool,
 }
 impl Default for FixtureReader {
     fn default() -> Self {
@@ -151,11 +341,50 @@ impl Default for FixtureReader {
             entered: Notify::new(),
             release: Notify::new(),
             epoch: std::sync::Mutex::new(None),
+            history_page: std::sync::Mutex::new(None),
+            inbox_ids: std::sync::Mutex::new(HashSet::new()),
+            attachment_unavailable: AtomicBool::new(false),
         }
     }
 }
 #[async_trait::async_trait]
 impl SourceReader for FixtureReader {
+    async fn attachments(
+        &self,
+        _: &SourceAuthority,
+        _: &IndexedDocument,
+    ) -> Result<AttachmentBatch, SearchError> {
+        let unavailable = self.attachment_unavailable.load(Ordering::SeqCst);
+        Ok(AttachmentBatch {
+            items: vec![RawAttachment {
+                id: "attachment".into(),
+                name: "note.txt".into(),
+                mime: "text/plain".into(),
+                bytes: (!unavailable).then(|| b"retry succeeded".to_vec()),
+                status: if unavailable { "unavailable" } else { "ready" }.into(),
+            }],
+            omitted: 0,
+        })
+    }
+    async fn read_history(
+        &self,
+        _: &SourceAuthority,
+        _: &HistoryPageRequest,
+    ) -> Result<HistoryPage, SearchError> {
+        self.history_page
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(SearchError::Unavailable)
+    }
+    async fn inbox_membership(
+        &self,
+        _: &SourceAuthority,
+        ids: &[String],
+    ) -> Result<Vec<bool>, SearchError> {
+        let present = self.inbox_ids.lock().unwrap();
+        Ok(ids.iter().map(|id| present.contains(id)).collect())
+    }
     async fn read(&self, a: &SourceAuthority) -> Result<SourceSnapshot, SearchError> {
         if self.block_first.swap(false, Ordering::SeqCst) {
             self.entered.notify_one();
@@ -176,6 +405,8 @@ impl SourceReader for FixtureReader {
         Ok(SourceSnapshot {
             documents: vec![d],
             stream_epoch: self.epoch.lock().unwrap().clone(),
+            selection_revision: None,
+            incomplete_count: 0,
         })
     }
 }
@@ -293,6 +524,8 @@ pub(super) async fn enable(service: &SearchService, agent: &str, id: &str) {
             SourceInput {
                 enabled: true,
                 expected_generation: view.generation,
+                expected_settings_revision: None,
+                settings: None,
             },
         )
         .await
@@ -336,7 +569,7 @@ async fn all_native_sources_search_full_text_with_private_scoped_citations_and_r
     let mut restored = DaemonState::new();
     restored.restore_control_plane_snapshot(snapshot).unwrap();
     assert_eq!(
-        query(&restored, &agent, &invoice_query())
+        query(&restored, &agent, &invoice_query(), None)
             .unwrap()
             .hits
             .len(),
@@ -415,6 +648,8 @@ async fn disabling_and_reenabling_during_a_read_rejects_the_previous_enrollment(
             SourceInput {
                 enabled: false,
                 expected_generation: view.generation,
+                expected_settings_revision: None,
+                settings: None,
             },
         )
         .await
@@ -468,7 +703,9 @@ async fn persistence_failure_rolls_back_index_and_search_tool_grant() {
                 "mail-gmail",
                 SourceInput {
                     enabled: true,
-                    expected_generation: generation
+                    expected_generation: generation,
+                    expected_settings_revision: None,
+                    settings: None,
                 }
             )
             .await,
@@ -477,6 +714,199 @@ async fn persistence_failure_rolls_back_index_and_search_tool_grant() {
     let guard = state.read().await;
     assert!(guard.connected_search.sources.is_empty());
     assert_eq!(guard.get_agent(&agent).unwrap().state.config.tools, before);
+}
+
+#[tokio::test]
+async fn deeper_search_settings_preserve_source_identity_and_live_history() {
+    let (state, agent, _, service) = fixture();
+    enable(&service, &agent, "mail-gmail").await;
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let before = state.read().await.connected_search.sources["mail-gmail"].clone();
+
+    let input: SourceInput = serde_json::from_value(serde_json::json!({
+        "enabled": true,
+        "expectedGeneration": before.generation,
+        "expectedSettingsRevision": 1,
+        "settings": {
+            "historyDepth": "days90",
+            "retainedItemLimit": 500,
+            "attachmentText": "supportedText",
+            "historyPaused": false
+        }
+    }))
+    .expect("deeper-search settings should be accepted by the source contract");
+    let response = service
+        .configure(&agent, "mail-gmail", input)
+        .await
+        .unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert_eq!(response["settingsRevision"], 2);
+    assert_eq!(response["settings"]["historyDepth"], "days90");
+
+    let after = state.read().await.connected_search.sources["mail-gmail"].clone();
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(after.grant_epoch, before.grant_epoch);
+    assert_eq!(after.stream_epoch, before.stream_epoch);
+    assert_eq!(after.baseline_at_ms, before.baseline_at_ms);
+    assert_eq!(after.seen, before.seen);
+    assert_eq!(after.documents, before.documents);
+}
+
+#[tokio::test]
+async fn temporary_attachment_failure_is_retried_after_restart_without_live_changes() {
+    let (state, agent, reader, service) = fixture();
+    enable(&service, &agent, "mail-gmail").await;
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    reader
+        .inbox_ids
+        .lock()
+        .unwrap()
+        .insert("gmail-opaque-id".into());
+    reader.attachment_unavailable.store(true, Ordering::SeqCst);
+    let generation = state.read().await.connected_search.sources["mail-gmail"]
+        .generation
+        .clone();
+    let input: SourceInput = serde_json::from_value(serde_json::json!({
+        "enabled": true, "expectedGeneration": generation, "expectedSettingsRevision": 1,
+        "settings": {"historyDepth":"recent", "retainedItemLimit":100, "attachmentText":"supportedText", "historyPaused":false}
+    })).unwrap();
+    service
+        .configure(&agent, "mail-gmail", input)
+        .await
+        .unwrap();
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let (mut restored, seen, revision) = {
+        let state = state.read().await;
+        let index = &state.connected_search.sources["mail-gmail"];
+        assert_eq!(index.attachment_retries.len(), 1);
+        assert!(index.attachment_scanned.is_empty());
+        (
+            serde_json::from_slice::<SourceIndex>(&serde_json::to_vec(index).unwrap()).unwrap(),
+            index.seen.clone(),
+            index.documents[0].revision.clone(),
+        )
+    };
+    restored
+        .attachment_retries
+        .values_mut()
+        .for_each(|retry| retry.retry_at_ms = 0);
+    state
+        .write()
+        .await
+        .connected_search
+        .sources
+        .insert("mail-gmail".into(), restored);
+    reader.attachment_unavailable.store(false, Ordering::SeqCst);
+    let restarted = SearchService::with_reader(&state, Arc::new(Mutex::new(())), reader);
+    restarted.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let state = state.read().await;
+    let index = &state.connected_search.sources["mail-gmail"];
+    assert!(index.attachment_retries.is_empty());
+    assert_eq!(index.attachment_scanned.len(), 1);
+    assert!(index
+        .attachments
+        .values()
+        .any(|entry| entry.document.text.contains("retry succeeded")));
+    assert_eq!(index.seen, seen);
+    assert_eq!(index.documents[0].revision, revision);
+}
+
+#[tokio::test]
+async fn moved_mail_is_excluded_during_import_and_purged_after_restart() {
+    let (state, agent, reader, service) = fixture();
+    enable(&service, &agent, "mail-gmail").await;
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let generation = state.read().await.connected_search.sources["mail-gmail"]
+        .generation
+        .clone();
+    let mut old = document("old", "private archived invoice");
+    let received = crate::connectors::gcalendar::now_ms().saturating_sub(60_000);
+    old.source_modified_at = Some(
+        chrono::DateTime::from_timestamp_millis(received as i64)
+            .unwrap()
+            .to_rfc3339(),
+    );
+    *reader.history_page.lock().unwrap() = Some(HistoryPage {
+        documents: vec![old],
+        next_cursor: None,
+        exhausted: true,
+    });
+    let configure = |depth: &str, revision| {
+        serde_json::from_value::<SourceInput>(serde_json::json!({
+        "enabled": true, "expectedGeneration": generation,
+        "expectedSettingsRevision": revision,
+        "settings": {"historyDepth": depth, "retainedItemLimit": 500, "attachmentText": "metadataOnly", "historyPaused": false}
+    })).unwrap()
+    };
+    service
+        .configure(&agent, "mail-gmail", configure("days90", 1))
+        .await
+        .unwrap();
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    assert!(
+        state.read().await.connected_search.sources["mail-gmail"]
+            .historical
+            .is_empty(),
+        "an item moved during the page must not be committed"
+    );
+
+    reader.inbox_ids.lock().unwrap().insert("old".into());
+    service
+        .configure(&agent, "mail-gmail", configure("days30", 2))
+        .await
+        .unwrap();
+    service.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let serialized = {
+        let state = state.read().await;
+        let index = &state.connected_search.sources["mail-gmail"];
+        assert_eq!(index.historical.len(), 1);
+        assert_eq!(index.imported.len(), 1);
+        serde_json::to_vec(index).unwrap()
+    };
+    let restored: SourceIndex = serde_json::from_slice(&serialized).unwrap();
+    state
+        .write()
+        .await
+        .connected_search
+        .sources
+        .insert("mail-gmail".into(), restored);
+    reader.inbox_ids.lock().unwrap().clear();
+    let restarted = SearchService::with_reader(&state, Arc::new(Mutex::new(())), reader.clone());
+    let query = SearchQuery {
+        query: "archived invoice".into(),
+        connector_ids: vec![],
+        kinds: vec![],
+        limit: None,
+    };
+    let result = restarted.query(&agent, &query).await.unwrap();
+    assert!(
+        result.hits.is_empty(),
+        "restored history is hidden until inbox membership is rechecked"
+    );
+    assert_eq!(
+        result
+            .sources
+            .iter()
+            .find(|source| source.connector_id == "mail-gmail")
+            .unwrap()
+            .history_coverage
+            .reason
+            .as_deref(),
+        Some("needsVerification")
+    );
+    restarted.refresh(&agent, Some("mail-gmail")).await.unwrap();
+    let state = state.read().await;
+    let index = &state.connected_search.sources["mail-gmail"];
+    assert!(
+        index.historical.is_empty(),
+        "archived content is purged after restore"
+    );
+    assert_eq!(
+        index.imported.len(),
+        1,
+        "suppression receipts survive a purge"
+    );
+    assert!(state.workflows.is_empty());
 }
 
 #[tokio::test]

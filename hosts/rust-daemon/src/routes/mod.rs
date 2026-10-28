@@ -40,6 +40,7 @@ mod memories;
 mod memory_edits;
 mod memory_export;
 mod memory_maintenance;
+mod microsoft_files;
 mod multipart;
 #[cfg(test)]
 pub(crate) mod owner_test_support;
@@ -53,9 +54,11 @@ mod chat_models;
 mod chat_results;
 mod chat_reviews;
 mod conversation_shares;
+mod document_edits;
 mod oauth_apps;
 mod personality;
 mod profile;
+mod projects;
 mod provider_keys;
 mod run_recovery;
 mod runs;
@@ -150,7 +153,11 @@ use crate::runtime_model::provider_summaries_with_pool;
         jobs::retry_job,
         jobs::approve_job,
         jobs::review_job,
-        workflows::list, workflows::create, workflows::get, workflows::resume, workflows::cancel,
+        workflows::list, workflows::create, workflows::get, workflows::inspect_attempt, workflows::resume, workflows::cancel,
+        projects::list, projects::manage, projects::create, projects::get, projects::patch,
+        projects::members, projects::remove, projects::add_resource, projects::patch_resource,
+        projects::remove_resource, projects::resource_order, projects::preview_resource,
+        projects::context, projects::chats, projects::set_chat_project,
         workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
         account_workflow_rules::list, account_workflow_rules::create, account_workflow_rules::update, account_workflow_rules::delete, account_workflow_rules::events,
         tool_results::get_tool_result, tool_results::download_tool_result,
@@ -211,6 +218,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         folder_picker::pick_folder,
         resume_workspace_entry,
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
+        microsoft_files::status,microsoft_files::connect,microsoft_files::files,microsoft_files::selection,microsoft_files::disconnect,microsoft_files::callback,
+        document_edits::review,document_edits::cancel,
         connected_search::sources,connected_search::configure,connected_search::refresh,connected_search::search,connected_search::item,
         discord::list, discord::create, discord::check, discord::configure, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
@@ -330,11 +339,18 @@ use crate::runtime_model::provider_summaries_with_pool;
         crate::community_bundles::McpComponentView,crate::community_bundles::SkillComponentView,
         crate::community_bundles::ReviewEnvelope,crate::community_bundles::BundleEnvelope,crate::community_bundles::BundlesEnvelope,crate::community_bundles::RemoveOutcome,
         self::contracts::MemoryDeleteRequest,
+        self::contracts::document_edits::DocumentEditOwnerQuery,
+        self::contracts::MicrosoftFilesConnectInput, self::contracts::MicrosoftFilesSelectionInput,
+        self::contracts::MicrosoftFilesDisconnectInput, self::contracts::MicrosoftFilesStatusResponse,
+        self::contracts::MicrosoftFilesSelectionResponse, self::contracts::MicrosoftFileConnectorResponse,
+        self::contracts::MicrosoftSelectedFileResponse,
         self::contracts::agent_files::AgentFilesPreview, self::contracts::agent_files::PreviewMode,
         crate::agent_files::AgentFilesManifest, crate::agent_files::AgentFileManifestEntry,
         crate::agent_files::Availability, crate::agent_files::IdentitySource, crate::agent_files::ProjectSourceKind,
         crate::agent_files::AgentFileKind, crate::agent_files::AgentFileState, crate::agent_files::ReasonCode)),
     tags(
+        (name = "documents", description = "Exact owner-reviewed structural document edits"),
+        (name = "projects", description = "Owner-selected shared project membership and bounded pinned context"),
         (name="community-bundles",description="Owner-reviewed declarative content and disabled MCP metadata"),
         (name = "mcp", description = "Owner-scoped reviewed external tools"),
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
@@ -379,6 +395,8 @@ struct AppState {
     connector_manager: ConnectorManager,
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
+    microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
+    document_edits: crate::document_edits::DocumentEditService,
     calendar: crate::connectors::gcalendar::CalendarManager,
     scheduler: SchedulerService,
     jobs: crate::jobs::JobService,
@@ -404,6 +422,7 @@ impl AppState {
         let calendar = self.calendar.clone();
         let mail = self.mail.clone();
         let drive = self.drive.clone();
+        let microsoft_files = self.microsoft_files.clone();
         self.oauth_apps
             .put_if_unused(provider, credentials, move || async move {
                 match provider {
@@ -414,6 +433,7 @@ impl AppState {
                     }
                     crate::connectors::oauth_apps::OAuthProvider::Microsoft => {
                         mail.has_provider_dependency(provider).await
+                            || microsoft_files.has_provider_dependency(provider).await
                     }
                 }
             })
@@ -427,6 +447,7 @@ impl AppState {
         let calendar = self.calendar.clone();
         let mail = self.mail.clone();
         let drive = self.drive.clone();
+        let microsoft_files = self.microsoft_files.clone();
         self.oauth_apps
             .delete_if_unused(provider, move || async move {
                 match provider {
@@ -437,6 +458,7 @@ impl AppState {
                     }
                     crate::connectors::oauth_apps::OAuthProvider::Microsoft => {
                         mail.has_provider_dependency(provider).await
+                            || microsoft_files.has_provider_dependency(provider).await
                     }
                 }
             })
@@ -674,6 +696,11 @@ pub(crate) fn router_with_all_services_and_discord(
         agent_runs.control_plane_transactions(),
         oauth_apps.clone(),
     );
+    let microsoft_files = crate::connectors::microsoft_files::MicrosoftFileManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
     let drain = crate::system::DrainController::new(
         Arc::clone(&state),
         agent_runs.clone(),
@@ -696,6 +723,7 @@ pub(crate) fn router_with_all_services_and_discord(
         bind_is_loopback,
         discord,
         drive,
+        microsoft_files,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
         drain,
@@ -718,6 +746,7 @@ pub(crate) fn router_with_all_integrations(
     bind_is_loopback: bool,
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
+    microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     drain: crate::system::DrainController,
@@ -739,6 +768,7 @@ pub(crate) fn router_with_all_integrations(
         self::http::ApiKeyPolicy::from_env(),
         discord,
         drive,
+        microsoft_files,
         voice,
         speech,
         drain,
@@ -764,6 +794,7 @@ pub(crate) fn router_with_all_integrations_for_owner_test(
     bind_is_loopback: bool,
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
+    microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     drain: crate::system::DrainController,
@@ -785,6 +816,7 @@ pub(crate) fn router_with_all_integrations_for_owner_test(
         self::http::ApiKeyPolicy::for_test(None),
         discord,
         drive,
+        microsoft_files,
         voice,
         speech,
         drain,
@@ -856,6 +888,11 @@ fn router_with_services_with_policies_and_discord(
         agent_runs.control_plane_transactions(),
         oauth_apps.clone(),
     );
+    let microsoft_files = crate::connectors::microsoft_files::MicrosoftFileManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
     let drain = crate::system::DrainController::new(
         Arc::clone(&state),
         agent_runs.clone(),
@@ -879,6 +916,7 @@ fn router_with_services_with_policies_and_discord(
         api_key,
         discord,
         drive,
+        microsoft_files,
         crate::voice::VoiceService::disabled(),
         crate::speech::SpeechService::disabled(),
         drain,
@@ -903,6 +941,7 @@ fn router_with_services_with_policies_and_integrations(
     api_key: self::http::ApiKeyPolicy,
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
+    microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
     voice: crate::voice::VoiceService,
     speech: crate::speech::SpeechService,
     drain: crate::system::DrainController,
@@ -911,6 +950,7 @@ fn router_with_services_with_policies_and_integrations(
     if let Ok(mut guard) = state.try_write() {
         guard.mail_manager = Some(mail.weak());
         guard.drive_manager = Some(drive.weak());
+        guard.microsoft_files_manager = Some(microsoft_files.weak());
     }
     let agent_runs = if agent_runs.mcp_manager().is_some() {
         agent_runs
@@ -952,12 +992,18 @@ fn router_with_services_with_policies_and_integrations(
         mail.clone(),
         drive.clone(),
         calendar.clone(),
+        microsoft_files.clone(),
+    );
+    let document_edits = crate::document_edits::DocumentEditService::new(
+        Arc::clone(&state),
+        agent_runs.control_plane_transactions(),
     );
     {
         let mut guard = state
             .try_write()
             .expect("search installation requires uncontended state");
         guard.connected_search_service = Some(connected_search.weak());
+        guard.document_edit_service = Some(document_edits.weak());
     }
     mail.start();
     connected_search.start();
@@ -965,6 +1011,7 @@ fn router_with_services_with_policies_and_integrations(
     let speech_request_timeout = speech.request_timeout();
     let app_state = AppState {
         connected_search,
+        document_edits,
         voice,
         speech,
         browser,
@@ -978,6 +1025,7 @@ fn router_with_services_with_policies_and_integrations(
         connector_manager,
         discord,
         drive,
+        microsoft_files,
         calendar,
         scheduler,
         jobs,
@@ -1003,6 +1051,23 @@ fn router_with_services_with_policies_and_integrations(
                 ),
         );
     let timed_routes = Router::new()
+        .route("/api/document-edits/{proposal_id}", get(document_edits::review).delete(document_edits::cancel))
+        .route("/api/projects", get(projects::list).post(projects::create))
+        .route("/api/projects/manage", get(projects::manage))
+        .route("/api/projects/{project_id}", get(projects::get).patch(projects::patch).delete(projects::remove))
+        .route("/api/projects/{project_id}/members", axum::routing::put(projects::members))
+        .route("/api/projects/{project_id}/resources", axum::routing::post(projects::add_resource))
+        .route("/api/projects/{project_id}/resources/{resource_id}", axum::routing::patch(projects::patch_resource).delete(projects::remove_resource))
+        .route("/api/projects/{project_id}/resource-order", axum::routing::put(projects::resource_order))
+        .route("/api/projects/{project_id}/resources/{resource_id}/preview", get(projects::preview_resource))
+        .route("/api/projects/{project_id}/context", get(projects::context))
+        .route("/api/projects/{project_id}/chats", get(projects::chats))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/project", axum::routing::put(projects::set_chat_project))
+        .route("/api/agents/{agent_id}/connectors/microsoft-files", get(microsoft_files::status))
+        .route("/api/agents/{agent_id}/connectors/microsoft-files/connect", axum::routing::post(microsoft_files::connect))
+        .route("/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/files", get(microsoft_files::files))
+        .route("/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/selection", axum::routing::put(microsoft_files::selection))
+        .route("/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}", axum::routing::delete(microsoft_files::disconnect))
         .route("/api/agents/{agent_id}/connected-search/sources",get(connected_search::sources))
         .route("/api/agents/{agent_id}/connected-search/sources/{connector_id}",axum::routing::put(connected_search::configure))
         .route("/api/agents/{agent_id}/connected-search/refresh",axum::routing::post(connected_search::refresh))
@@ -1118,6 +1183,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/tool-results/{artifact_id}/download", get(tool_results::download_tool_result))
         .route("/api/agents/{agent_id}/workflows", get(workflows::list).post(workflows::create))
         .route("/api/agents/{agent_id}/workflows/{workflow_id}", get(workflows::get))
+        .route("/api/agents/{agent_id}/workflows/{workflow_id}/steps/{step_id}/attempts/{job_id}", get(workflows::inspect_attempt))
         .route("/api/agents/{agent_id}/workflows/{workflow_id}/resume", axum::routing::post(workflows::resume))
         .route("/api/agents/{agent_id}/workflows/{workflow_id}/cancel", axum::routing::post(workflows::cancel))
         .route(
@@ -1724,6 +1790,10 @@ fn router_with_services_with_policies_and_integrations(
         .merge(voice_routes)
         .merge(speech_routes)
         .route("/api/connectors/gdrive/callback", get(gdrive::callback))
+        .route(
+            "/api/connectors/microsoft-files/callback",
+            get(microsoft_files::callback),
+        )
         // A native dialog waits for the user, rather than the API request timeout.
         .route(
             "/api/workspace/pick-folder",
@@ -1773,6 +1843,7 @@ fn router_with_services_with_policies_and_integrations(
         .fallback(not_found_entry)
         .layer(axum::middleware::from_fn(discord::protect_cache))
         .layer(axum::middleware::from_fn(gdrive::protect_cache))
+        .layer(axum::middleware::from_fn(microsoft_files::protect_cache))
         .layer(request_middleware)
         .with_state(app_state)
 }
@@ -3203,9 +3274,10 @@ async fn workspace_files_entry(
     get,
     path = "/api/workspace/file",
     tag = "workspace",
-    params(("path" = String, Query, description = "Relative workspace file path")),
+    params(("path" = String, Query, description = "Relative workspace file path"),
+        ("cursor" = Option<String>, Query, description = "Hash-bound next structural Office content page")),
     responses(
-        (status = 200, description = "Bounded UTF-8 text or verified generated-document content preview", body = workspace_files::WorkspaceFileResponse),
+        (status = 200, description = "Bounded text, generated-document content, or exact receipted structural Office preview", body = workspace_files::WorkspaceFileResponse),
         (status = 400, description = "Excluded path or unsupported content", body = ErrorBody),
         (status = 404, description = "File not found", body = ErrorBody),
         (status = 409, description = "No configured workspace", body = ErrorBody)
@@ -3220,14 +3292,19 @@ async fn workspace_file_entry(State(state): State<AppState>, request: AxumReques
         }
         .into_response();
     }
-    let path = match request_query(request.uri()) {
+    let (path, cursor) = match request_query(request.uri()) {
         Ok(query) => match query.get("path") {
-            Some(path) => path.clone(),
+            Some(path) => (path.clone(), query.get("cursor").cloned()),
             None => return ApiError::bad_request_static("path is required").into_response(),
         },
         Err(()) => return ApiError::malformed_request().into_response(),
     };
-    let mut response = match workspace_files::preview(&state.daemon, path).await {
+    let preview = if cursor.is_none() {
+        workspace_files::preview(&state.daemon, path).await
+    } else {
+        workspace_files::preview_with_cursor(&state.daemon, path, cursor).await
+    };
+    let mut response = match preview {
         Ok(file) => json_response(StatusCode::OK, &file),
         Err(error) => error.into_response(),
     };
@@ -3247,9 +3324,9 @@ struct WorkspaceDownloadQuery {
     get,
     path = "/api/workspace/file/download",
     tag = "workspace",
-    params(("path" = String, Query, description = "Relative TXT, Markdown, CSV or verified Anima-generated DOCX, XLSX, PPTX or PDF workspace path")),
+    params(("path" = String, Query, description = "Relative report, verified generated document, or exact server-receipted Office workspace path")),
     responses(
-        (status = 200, description = "Current snapshot: UTF-8 reports up to 1 MiB, or verified Anima-generated documents up to 4 MiB", content_type = "application/octet-stream"),
+        (status = 200, description = "Current snapshot: UTF-8 reports up to 1 MiB, generated or exact receipted documents up to 4 MiB", content_type = "application/octet-stream"),
         (status = 400, description = "Malformed query, excluded path or unsupported content", body = ErrorBody),
         (status = 403, description = "Local owner authorization required", body = ErrorBody),
         (status = 404, description = "File not found", body = ErrorBody),
@@ -3347,6 +3424,8 @@ mod tests {
     mod capabilities;
     mod core_memory;
     mod docs_contracts;
+    mod document_edit_permissions;
+    mod document_edits;
     mod events;
     mod foreign_sessions;
     mod goals;

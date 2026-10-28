@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsc --build tsconfig.lib.json",
     "typecheck": "bun run build && tsc --build --emitDeclarationOnly",
-    "test": "bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
+    "test": "bun ../../tools/workspace-dev/scripts/run-task.ts --rust-cache validation -- bun ../../tools/workspace-dev/scripts/run-vitest.ts run",
     "lint": "oxlint src --config ../../.oxlintrc.json --tsconfig tsconfig.json"
   }
 }

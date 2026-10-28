@@ -4,6 +4,7 @@ mod action_receipt;
 mod async_helper;
 #[cfg(test)]
 mod async_helper_contract_tests;
+pub(crate) mod continuity;
 mod delegation_origin;
 #[cfg(test)]
 mod delegation_origin_tests;

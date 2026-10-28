@@ -55,6 +55,8 @@ export interface LiveState {
   /** Bumped by every `automation.updated` (spec §6), so automation views
    *  read again. */
   automationsVersion: number;
+  /** Content-free invalidations; project payloads are never stored in this stream. */
+  projectUpdates?: Readonly<Record<string, { revision: number; accessEpoch: number; deleted: boolean }>>;
 }
 
 export const EMPTY_LIVE_STATE: LiveState = {
@@ -64,6 +66,7 @@ export const EMPTY_LIVE_STATE: LiveState = {
   epoch: 0,
   skillsVersion: 0,
   automationsVersion: 0,
+  projectUpdates: {},
 };
 
 /** A step's streamed text kept in the page; its full text arrives with the
@@ -328,11 +331,19 @@ export function applyEvent(state: LiveState, event: AgentEvent): LiveState {
       epoch: state.epoch + 1,
       skillsVersion: state.skillsVersion,
       automationsVersion: state.automationsVersion,
+      projectUpdates: {},
     };
   }
   // A seq at or below the last one applied is a repeat from this stream.
   if (event.seq <= state.seq) return state;
   const next: LiveState = { ...state, seq: event.seq };
+  if (event.type === 'project.updated') {
+    const previous = state.projectUpdates?.[event.projectId];
+    if (previous && previous.revision > event.revision) return next;
+    return { ...next, projectUpdates: { ...state.projectUpdates, [event.projectId]: {
+      revision: event.revision, accessEpoch: event.accessEpoch, deleted: event.deleted,
+    } } };
+  }
   if (event.type === 'session.cleared') {
     const keep = (item: { agentId: string; sessionId: string }) =>
       item.agentId !== event.agentId || item.sessionId !== event.sessionId;

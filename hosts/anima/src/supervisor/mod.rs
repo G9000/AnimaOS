@@ -386,9 +386,9 @@ fn workspace_problem(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
 }
 
 /// Why the server must not be started with this config: no workspace (the
-/// server would fall back to its working folder), or one that holds the home
-/// folder or Anima's own keys. A missing folder is not a reason: the server
-/// starts with it and reports the problem.
+/// server would fall back to its working folder), a path that is not a folder,
+/// or one that holds the home folder or Anima's own keys. A missing folder is
+/// not a reason: the server starts with it and reports the problem.
 fn unsafe_workspace(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
     let Some(workspace) = cfg.workspace.as_ref() else {
         return Some(crate::commands::NOT_SET_UP.to_string());
@@ -398,7 +398,8 @@ fn unsafe_workspace(cfg: &Config, paths: &AnimaPaths) -> Option<String> {
         Err(
             problem @ (WorkspaceProblem::IsHome
             | WorkspaceProblem::ContainsDataRoot
-            | WorkspaceProblem::InsideDataRoot),
+            | WorkspaceProblem::InsideDataRoot
+            | WorkspaceProblem::NotAFolder(_)),
         ) => Some(problem.message()),
         _ => None,
     }

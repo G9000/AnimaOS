@@ -401,8 +401,20 @@ impl ApprovalGate {
         original: &ToolCall,
         redacted: &ToolCall,
     ) -> GateOutcome {
-        let (outcome, streak) = self.check_exact_inner(agent, original, redacted).await;
-        self.refusals.apply(outcome, streak)
+        self.check_exact_with_record(agent, original, redacted)
+            .await
+            .0
+    }
+
+    /// The settled native record is required for one exact document publication.
+    pub(crate) async fn check_exact_with_record(
+        &self,
+        agent: &AgentState,
+        original: &ToolCall,
+        redacted: &ToolCall,
+    ) -> (GateOutcome, Option<ApprovalRequest>) {
+        let (outcome, streak, record) = self.check_exact_inner(agent, original, redacted).await;
+        (self.refusals.apply(outcome, streak), record)
     }
 
     async fn check_exact_inner(
@@ -410,7 +422,7 @@ impl ApprovalGate {
         agent: &AgentState,
         original: &ToolCall,
         redacted: &ToolCall,
-    ) -> (GateOutcome, Streak) {
+    ) -> (GateOutcome, Streak, Option<ApprovalRequest>) {
         if self
             .coordinator
             .approval_verdict(agent, &self.run.session_id, original)
@@ -420,15 +432,17 @@ impl ApprovalGate {
             return (
                 GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
                 Streak::Counts,
+                None,
             );
         }
         if is_helper_config(&agent.config) {
             return (
                 GateOutcome::Refuse(TaskResult::error(HELPER_NEEDS_APPROVAL, 0)),
                 Streak::Neutral,
+                None,
             );
         }
-        let (outcome, streak) = self.ask_counted(agent, redacted).await;
+        let (outcome, streak, record) = self.ask_counted_record(agent, redacted).await;
         if matches!(outcome, GateOutcome::Approved)
             && self
                 .coordinator
@@ -439,13 +453,23 @@ impl ApprovalGate {
             return (
                 GateOutcome::Refuse(TaskResult::error(DENIED_BY_POLICY, 0)),
                 Streak::Counts,
+                None,
             );
         }
-        (outcome, streak)
+        (outcome, streak, record)
     }
 
     /// Asks the owner; an owner Deny counts toward the refusal streak.
     async fn ask_counted(&self, agent: &AgentState, call: &ToolCall) -> (GateOutcome, Streak) {
+        let (outcome, streak, _) = self.ask_counted_record(agent, call).await;
+        (outcome, streak)
+    }
+
+    async fn ask_counted_record(
+        &self,
+        agent: &AgentState,
+        call: &ToolCall,
+    ) -> (GateOutcome, Streak, Option<ApprovalRequest>) {
         let timeout = self.coordinator.approval_timeout(self.source);
         // Taken before the request is made, so the wait ends when the
         // record's `expiresAtMs` says it does.
@@ -463,9 +487,9 @@ impl ApprovalGate {
             .await;
         let pending = match self.coordinator.open_approval(ask).await {
             Ok(pending) => pending,
-            Err(refused) => return (GateOutcome::Refuse(refused), Streak::Neutral),
+            Err(refused) => return (GateOutcome::Refuse(refused), Streak::Neutral, None),
         };
-        let (outcome, streak) = match self.wait(pending, deadline).await {
+        let (outcome, streak, record) = match self.wait(pending, deadline).await {
             Some(approval) => (
                 self.outcome(&approval),
                 match approval.status {
@@ -473,10 +497,12 @@ impl ApprovalGate {
                     ApprovalStatus::Allowed if !self.cancel.is_cancelled() => Streak::Resets,
                     _ => Streak::Neutral,
                 },
+                Some(approval),
             ),
             None => (
                 GateOutcome::Refuse(TaskResult::error(APPROVAL_LOST, 0)),
                 Streak::Neutral,
+                None,
             ),
         };
         // The owner may have changed the agent during the wait: what runs is
@@ -492,9 +518,13 @@ impl ApprovalGate {
             return (
                 GateOutcome::Refuse(TaskResult::error(tool_not_configured_error(&call.name), 0)),
                 Streak::Neutral,
+                None,
             );
         }
-        (outcome, streak)
+        let record = matches!(outcome, GateOutcome::Approved)
+            .then_some(record)
+            .flatten();
+        (outcome, streak, record)
     }
 
     /// The approval as it was settled, by whoever settled it first. Holds no

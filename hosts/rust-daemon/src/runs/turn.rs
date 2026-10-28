@@ -85,7 +85,7 @@ pub(crate) fn bind(
 }
 
 pub(crate) fn current(state: &DaemonState, record: &RunRecord) -> Result<(), String> {
-    current_admission(state, record, true)
+    current_admission(state, record, true, true)
 }
 
 /// The browser binder owns its prepared workspace proof and specific refusal.
@@ -93,15 +93,20 @@ pub(crate) fn current_for_browser_selection(
     state: &DaemonState,
     record: &RunRecord,
 ) -> Result<(), String> {
-    current_admission(state, record, false)
+    current_admission(state, record, false, true)
 }
 
 fn current_admission(
     state: &DaemonState,
     record: &RunRecord,
     check_workspace: bool,
+    check_project: bool,
 ) -> Result<(), String> {
     validate(record)?;
+    if check_project {
+        crate::projects::validate_queued_witness(state, record)
+            .map_err(|_| "Project context changed; owner review is required".to_string())?;
+    }
     let turn = record
         .turn
         .as_ref()
@@ -130,6 +135,8 @@ fn current_admission(
 /// independently recheck live grants; queued admission and recovery stay strict.
 pub(crate) fn active(state: &DaemonState, record: &RunRecord) -> Result<(), String> {
     validate(record)?;
+    crate::projects::validate_active_lease(state, record)
+        .map_err(|_| "Project access changed during the turn".to_string())?;
     let turn = record.turn.as_ref().ok_or("Turn binding unavailable")?;
     if !state.agents.contains_key(&record.agent_id)
         || !state
@@ -193,7 +200,7 @@ pub(crate) fn recovery_state(
     } else if automatic_candidate(state, record) {
         R::SafelyRecoverable
     } else if !super::recovery::summary(record).eligible
-        || (record.turn.is_some() && current(state, record).is_err())
+        || (record.turn.is_some() && current_admission(state, record, true, false).is_err())
     {
         R::InvalidOrStale
     } else {

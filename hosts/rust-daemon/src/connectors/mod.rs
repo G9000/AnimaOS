@@ -6,6 +6,7 @@ pub(crate) mod adapters;
 pub(crate) mod credentials;
 pub(crate) mod gcalendar;
 pub(crate) mod mail;
+pub(crate) mod microsoft_files;
 pub(crate) mod oauth_apps;
 pub(crate) mod registry;
 pub(crate) mod runtime;

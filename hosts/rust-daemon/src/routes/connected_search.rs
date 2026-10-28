@@ -27,12 +27,12 @@ fn no_store(mut response: Response) -> Response {
 fn error(e: SearchError) -> Response {
     no_store(json_response(
         match e {
-            SearchError::Invalid => StatusCode::BAD_REQUEST,
+            SearchError::Invalid | SearchError::UnsupportedSetting => StatusCode::BAD_REQUEST,
             SearchError::NotFound => StatusCode::NOT_FOUND,
             SearchError::Conflict => StatusCode::CONFLICT,
             _ => StatusCode::SERVICE_UNAVAILABLE,
         },
-        &serde_json::json!({"code":match e{SearchError::Invalid=>"invalid_request",SearchError::NotFound=>"not_found",SearchError::Conflict=>"source_changed",SearchError::Capacity=>"capacity",SearchError::Persistence=>"persistence_unavailable",SearchError::Unavailable=>"source_unavailable"},"error":e.to_string()}),
+        &serde_json::json!({"code":match e{SearchError::Invalid=>"invalid_request",SearchError::UnsupportedSetting=>"unsupported_setting",SearchError::NotFound=>"not_found",SearchError::Conflict=>"source_changed",SearchError::Capacity=>"capacity",SearchError::Persistence=>"persistence_unavailable",SearchError::Unavailable=>"source_unavailable"},"error":e.to_string()}),
     ))
 }
 fn guard(state: &AppState, request: &Request, mutation: bool) -> Result<(), Response> {
@@ -100,7 +100,7 @@ pub(super) async fn refresh(
     };
     match s
         .connected_search
-        .request_refresh(&agent, input.connector_id.as_deref())
+        .request_refresh(&agent, input.connector_id.as_deref(), input.work)
         .await
     {
         Ok(r) => no_store(json_response(StatusCode::OK, &r)),

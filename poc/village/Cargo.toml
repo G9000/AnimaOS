@@ -19,6 +19,7 @@ new_without_default = "allow"
 
 [profile.dev]
 debug = "line-tables-only"
+incremental = false
 
 [profile.dev.package."*"]
 debug = false

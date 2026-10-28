@@ -20,6 +20,61 @@ const files = [
   { path: 'plan.txt', name: 'plan.txt', sizeBytes: 2000, modifiedAtMs: 1000 },
 ];
 
+it('shows receipt-backed Office content in pages and refuses a changed fingerprint', async () => {
+  const path = 'reports/edited.xlsx';
+  const source = 'a'.repeat(64);
+  const page = { version: 1 as const, format: 'xlsx' as const, source_sha256: source, source: { kind: 'workspace', display_name: path }, targets: [{ id: 'cell1', label: 'Total', editable: true, value: { kind: 'text' as const, text: '<script>safe</script>' } }], coverage: { total_targets: 2, returned_targets: 1, complete: false }, retained_hyperlink_count: 1, limitations: ['Layout is not rendered'], next_cursor: 'next' };
+  vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({ files: [{ path, name: 'edited.xlsx', sizeBytes: 100, modifiedAtMs: null }], truncated: false });
+  const read = vi.spyOn(daemon, 'readWorkspaceFile').mockResolvedValueOnce({ path, content: '', truncated: true, previewKind: 'office_content', sha256: source, officeContent: page }).mockResolvedValueOnce({ path, content: '', truncated: false, previewKind: 'office_content', sha256: 'b'.repeat(64), officeContent: { ...page, source_sha256: 'b'.repeat(64), targets: [{ ...page.targets[0], id: 'cell2', label: 'Changed data' }], coverage: { total_targets: 2, returned_targets: 1, complete: true }, next_cursor: null } });
+  const view = render(<WorkspaceFiles online />);
+  fireEvent.click(await screen.findByRole('button', { name: /reports\/edited.xlsx/ }));
+  expect(await screen.findByText(/<script>safe<\/script>/)).toBeVisible();
+  expect(view.container.querySelector('script')).toBeNull();
+  expect(screen.getByText('Layout is not rendered')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Load more content' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(/changed/i);
+  expect(screen.queryByText('Changed data')).toBeNull();
+  expect(read).toHaveBeenCalledWith(path, expect.objectContaining({ cursor: 'next', signal: expect.any(AbortSignal) }));
+});
+
+it('loads the next receipt-backed Office page without replacing the first', async () => {
+  const path = 'report.docx'; const sha256 = 'a'.repeat(64);
+  const page = { version: 1 as const, format: 'docx' as const, source_sha256: sha256, source: { kind: 'workspace', display_name: path }, targets: [{ id: 'one', label: 'First', editable: true, value: { kind: 'text' as const, text: 'Page one' } }], coverage: { total_targets: 2, returned_targets: 1, complete: false }, retained_hyperlink_count: 0, limitations: [], next_cursor: 'cursor' };
+  vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({ files: [{ path, name: path, sizeBytes: 100, modifiedAtMs: null }], truncated: false });
+  const read = vi.spyOn(daemon, 'readWorkspaceFile').mockResolvedValueOnce({ path, content: '', truncated: true, previewKind: 'office_content', sha256, officeContent: page }).mockResolvedValueOnce({ path, content: '', truncated: false, previewKind: 'office_content', sha256, officeContent: { ...page, targets: [{ ...page.targets[0], id: 'two', label: 'Second', value: { kind: 'text', text: 'Page two' } }], coverage: { total_targets: 2, returned_targets: 1, complete: true }, next_cursor: null } });
+  render(<WorkspaceFiles online />);
+  fireEvent.click(await screen.findByRole('button', { name: /report.docx/ }));
+  expect(await screen.findByText(/Page one/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Load more content' }));
+  expect(await screen.findByText(/Page two/)).toBeVisible();
+  expect(screen.getByText(/Page one/)).toBeVisible();
+  expect(screen.getByText(/2 of 2 content items shown/)).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Load more content' })).toBeNull();
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('retires a pending Office page when a different file is selected', async () => {
+  const path = 'report.docx'; const sha256 = 'a'.repeat(64);
+  const page = { version: 1 as const, format: 'docx' as const, source_sha256: sha256, source: { kind: 'workspace', display_name: path }, targets: [{ id: 'one', label: 'First', editable: true, value: { kind: 'text' as const, text: 'Page one' } }], coverage: { total_targets: 2, returned_targets: 1, complete: false }, retained_hyperlink_count: 0, limitations: [], next_cursor: 'cursor' };
+  vi.spyOn(daemon, 'listWorkspaceFiles').mockResolvedValue({ files: [{ path, name: path, sizeBytes: 100, modifiedAtMs: null }, files[1]], truncated: false });
+  let finish!: (value: Awaited<ReturnType<typeof daemon.readWorkspaceFile>>) => void;
+  const read = vi.spyOn(daemon, 'readWorkspaceFile').mockImplementation((requested, options) => {
+    if (requested === 'plan.txt') return Promise.resolve({ path: requested, content: 'Other file', truncated: false });
+    if (options?.cursor) return new Promise((resolve) => { finish = resolve; });
+    return Promise.resolve({ path, content: '', truncated: true, previewKind: 'office_content', sha256, officeContent: page });
+  });
+  render(<WorkspaceFiles online />);
+  fireEvent.click(await screen.findByRole('button', { name: /report.docx/ }));
+  expect(await screen.findByText(/Page one/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Load more content' }));
+  const signal = read.mock.calls[1][1]?.signal;
+  fireEvent.click(screen.getByRole('button', { name: /plan.txt/ }));
+  expect(await screen.findByText('Other file')).toBeVisible();
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish({ path, content: '', truncated: false, previewKind: 'office_content', sha256, officeContent: { ...page, targets: [{ ...page.targets[0], label: 'Late page' }], coverage: { total_targets: 2, returned_targets: 1, complete: true }, next_cursor: null } }));
+  expect(screen.queryByText('Late page')).toBeNull();
+});
+
 it.each(['docx', 'xlsx', 'pptx', 'pdf'])(
   'shows the generated %s content preview and downloads only on request',
   async (extension) => {

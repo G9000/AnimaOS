@@ -356,15 +356,52 @@ pub(crate) async fn handle_update_agent(
         Err(UpdateAgentError::InvalidTools(message)) => return Err(ApiError::bad_request(message)),
         Err(UpdateAgentError::NotFound) => return Err(ApiError::not_found()),
     };
+    let removed_document_tool = [
+        "inspect_office_document",
+        "propose_document_edit",
+        "apply_document_edit",
+    ]
+    .iter()
+    .any(|tool| {
+        previous.state.config.allows_tool(tool) && !snapshot.state.config.allows_tool(tool)
+    });
+    let document_candidate = removed_document_tool
+        .then(|| guard.document_edit_invalidation(agent_id))
+        .flatten();
     if let Some(update) = &yaml_update {
         if let Err(error) = update.apply() {
             guard.restore_agent_config(agent_id, previous.state.config);
             return Err(error);
         }
     }
-    if let Err(error) = guard.control_plane_persist_request().save().await {
+    let mut saved = Err(std::io::Error::other(
+        "Document permission change was superseded",
+    ));
+    for _ in 0..3 {
+        let request = guard.control_plane_persist_request();
+        saved = if let Some(candidate) = &document_candidate {
+            match request.with_document_edit_candidate(candidate.clone()) {
+                Some(request) => request.save_document_edit_candidate().await,
+                None => Err(std::io::Error::other(
+                    "Document permission invalidation is unavailable",
+                )),
+            }
+        } else {
+            request.save().await
+        };
+        if !saved
+            .as_ref()
+            .is_err_and(crate::state::is_superseded_control_plane_save)
+        {
+            break;
+        }
+    }
+    if let Err(error) = saved {
         let mut restored = previous.state.config;
         if crate::control_plane_store::is_durability_uncertain(&error) {
+            if let Some(candidate) = document_candidate {
+                guard.document_edits = candidate;
+            }
             if let Some(limits) = uncertain_execution_limits {
                 // Atomic replacement may already contain the proposed limit.
                 // Keep the stricter live ceiling while other fields roll back.
@@ -384,6 +421,9 @@ pub(crate) async fn handle_update_agent(
             })?;
         }
         return Err(ApiError::service_unavailable(error.to_string()));
+    }
+    if let Some(candidate) = document_candidate {
+        guard.document_edits = candidate;
     }
 
     let browser_access = |config: &anima_core::AgentConfig| {

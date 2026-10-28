@@ -90,7 +90,7 @@ impl RunToolCatalog {
                 match explicit {
                     _ if matches!(
                         descriptor.name.as_str(),
-                        "rename_discord_thread" | "send_discord_file"
+                        "rename_discord_thread" | "send_discord_file" | "read_discord_thread"
                     ) =>
                     {
                         Origin::DiscordThreadControl
@@ -554,6 +554,7 @@ impl ModelToolSelector for RunToolCatalog {
             "rename_chat",
             "rename_discord_thread",
             "send_discord_file",
+            "read_discord_thread",
             "compact_chat",
             "export_chat",
             "manage_mcp",

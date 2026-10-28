@@ -133,6 +133,7 @@ pub(crate) struct ContextInspection {
     pub(crate) usage: ContextUsage,
     pub(crate) breakdown: ContextBreakdown,
     pub(crate) coverage: ContextCoverage,
+    pub(crate) project_context: Option<crate::projects::ProjectContextReport>,
 }
 
 pub(crate) struct ContextBreakdown {
@@ -143,6 +144,7 @@ pub(crate) struct ContextBreakdown {
     pub(crate) tool_schemas_tokens: u64,
     pub(crate) companion_files_tokens: Option<u64>,
     pub(crate) memory_tokens: Option<u64>,
+    pub(crate) project_context_tokens: Option<u64>,
 }
 
 pub(crate) struct ContextCoverage {
@@ -248,8 +250,10 @@ pub(crate) fn context_inspection(
         omitted.push("always-on core memory unavailable during preview".into());
     }
     ContextInspection {
+        project_context: None,
         usage,
         breakdown: ContextBreakdown {
+            project_context_tokens: None,
             conversation_tokens: usage.estimated_tokens.saturating_sub(summary_tokens).saturating_sub(checkpoint_tokens),
             summary_tokens, checkpoint_tokens,
             system_instructions_tokens: if instructions.is_empty() { 0 } else { estimator.text_tokens(&instructions) },
@@ -337,14 +341,63 @@ pub(crate) async fn inspect_session_context(
     };
     let file_tokens =
         file_tokens.map(|tokens| (tokens as f64 * estimator.calibration().max(1.0)).ceil() as u64);
-    Some(context_inspection(
+    let mut project_context = if let Some(project) = &record.project_id {
+        crate::projects::preview_context(state, project, agent_id)
+            .await
+            .ok()
+    } else {
+        None
+    };
+    if let Some(report) = &project_context {
+        let guard = state.read().await;
+        let same_chat = guard
+            .sessions
+            .get(agent_id, session_id)
+            .is_some_and(|current| {
+                current.project_id == record.project_id
+                    && current.project_binding_revision == record.project_binding_revision
+            });
+        let same_project = guard
+            .projects
+            .get(&report.project_id)
+            .is_some_and(|project| {
+                project.revision == report.project_revision
+                    && project.access_epoch == report.access_epoch
+                    && project.member(agent_id).map(|member| member.generation)
+                        == Some(report.member_generation)
+            });
+        if !same_chat
+            || !same_project
+            || crate::projects::member_read_lease(&guard, &report.project_id, agent_id)
+                .and_then(|lease| lease.check())
+                .is_err()
+        {
+            project_context = None;
+        }
+    }
+    let mut inspection = context_inspection(
         &config,
         &record,
         &history,
         file_tokens,
         memory_tokens,
         file_identity,
-    ))
+    );
+    inspection.breakdown.project_context_tokens = if record.project_id.is_none() {
+        Some(0)
+    } else {
+        project_context
+            .as_ref()
+            .map(|report| report.estimated_tokens)
+    };
+    if record.project_id.is_some() && project_context.is_none() {
+        inspection
+            .coverage
+            .omitted
+            .push("shared project sources unavailable or changed during preview".into());
+    }
+    inspection.project_context = project_context;
+    Some(inspection)
 }
 
 /// The messages of one room, in transcript order, that the model may see:

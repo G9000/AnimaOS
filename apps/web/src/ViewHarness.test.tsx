@@ -2544,8 +2544,10 @@ it('keeps the composer usable while the session has a reply in progress', async 
   window.history.replaceState(null, '', '/#/s/room-7');
   render(<ViewHarness />);
 
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, 'And one more{Enter}');
 
   expect(daemon.startRun).toHaveBeenCalledWith(
@@ -2576,8 +2578,10 @@ it('sends a /skill message from the composer with its skill', async () => {
   window.history.replaceState(null, '', '/#/s/room-7');
   render(<ViewHarness />);
 
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, '/no');
   expect(
     await screen.findByRole('option', { name: /\/notes <request>/ }),
@@ -2617,8 +2621,10 @@ it('sends a session’s messages one at a time, in the order written', async () 
   window.history.replaceState(null, '', '/#/s/room-7');
   render(<ViewHarness />);
 
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, 'First{Enter}');
   await user.type(input, 'Second{Enter}');
 
@@ -2655,8 +2661,10 @@ it('gives a restored message that was edited a new key', async () => {
   window.history.replaceState(null, '', '/#/s/room-7');
   render(<ViewHarness />);
 
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, 'Book the train{Enter}');
   await user.click(
     await screen.findByRole('button', { name: 'Restore message' }),
@@ -2802,8 +2810,10 @@ it('keeps the composer disabled until the open session record loads', async () =
       }),
     );
   });
-  await waitFor(() => expect(input).toBeEnabled());
-  await user.type(input, 'Hello again');
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  await user.type(screen.getByPlaceholderText('Message Nova…'), 'Hello again');
   await user.click(screen.getByRole('button', { name: 'Send' }));
 
   expect(startRun).toHaveBeenCalledWith(
@@ -2843,7 +2853,9 @@ it('retries an unlisted session record that fails to load and says why', async (
   expect(input).toBeDisabled();
 
   await elapse(SESSION_MESSAGES_POLL_MS);
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
   expect(
     screen.queryByText(/Session details could not be loaded/),
   ).not.toBeInTheDocument();
@@ -2911,8 +2923,10 @@ it('keeps each conversation draft across a reload', async () => {
   );
   window.history.replaceState(null, '', '/#/s/room-7');
   const first = render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
+  const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, 'Half-written thought');
   first.unmount();
 
@@ -4460,9 +4474,12 @@ async function openLiveSession(overrides: Partial<Session> = {}) {
   window.history.replaceState(null, '', '/#/s/room-7');
   const events = scriptedAgentEvents();
   render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  // Loading the chat mounts its artifact layout and replaces the initial composer.
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
   await waitFor(() => expect(events.streams).toHaveLength(1));
+  const input = screen.getByPlaceholderText('Message Nova…');
   return { input, stream: events.streams[0], events };
 }
 
@@ -5096,8 +5113,9 @@ it('reads an unlisted open session again when the stream reports it changed', as
   window.history.replaceState(null, '', '/#/s/room-9');
   const events = scriptedAgentEvents();
   render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Nova…');
-  await waitFor(() => expect(input).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled(),
+  );
   await waitFor(() => expect(events.streams).toHaveLength(1));
   const stream = events.streams[0];
   act(() => stream.push(snapshotEvent([])));

@@ -6,6 +6,7 @@ import type {
 } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { MarkdownMessage } from './MarkdownMessage';
+import { OfficeContentPreview } from './documents/OfficeContentPreview';
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -239,7 +240,7 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
               <div className="files-preview-head">
                 <h2>{selected ?? 'File preview'}</h2>
                 <span>
-                  {preview?.previewKind === 'document'
+                  {preview?.previewKind === 'document' || preview?.previewKind === 'office_content'
                     ? 'Content preview'
                     : 'Read only'}
                 </span>
@@ -297,7 +298,7 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
               )}
               {preview && (
                 <>
-                  {preview.truncated && (
+                  {preview.truncated && preview.previewKind !== 'office_content' && (
                     <p className="border-b border-line p-4 text-sm text-ink-3">
                       This preview is truncated.{' '}
                       {selectedSupportsDownload
@@ -305,7 +306,9 @@ export function WorkspaceFiles({ online }: { online: boolean }) {
                         : 'Open the file locally to see its full contents.'}
                     </p>
                   )}
-                  {preview.previewKind === 'document' ? (
+                  {preview.previewKind === 'office_content' && selected ? (
+                    <OfficeContentPreview key={`${selected}:${preview.sha256 ?? ''}`} path={selected} file={preview} />
+                  ) : preview.previewKind === 'document' ? (
                     <div className="max-h-[65vh] space-y-4 overflow-auto p-4">
                       <p className="text-xs text-ink-3">
                         Open the downloaded file to see its final layout.

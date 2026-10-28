@@ -245,7 +245,18 @@ pub(super) async fn list_sessions(
         Ok(query) => query,
         Err(error) => return rejected(error),
     };
-    match views::list_sessions(&state.daemon, &agent_id, &query).await {
+    let project_filter = match params(request.uri()) {
+        Ok(params) => params.get("projectId").filter(|id| !id.is_empty()).cloned(),
+        Err(error) => return rejected(error),
+    };
+    match views::list_sessions_for_project(
+        &state.daemon,
+        &agent_id,
+        &query,
+        project_filter.as_deref(),
+    )
+    .await
+    {
         Some(page) => no_store(json_response(
             StatusCode::OK,
             &SessionsEnvelope::from(&page),
@@ -441,7 +452,7 @@ pub(super) async fn create_session(
             Some(title) => (title, TitleSource::Owner),
             None => (DEFAULT_CHAT_TITLE.to_string(), TitleSource::FirstMessage),
         };
-        let record = SessionRecord::new(
+        let mut record = SessionRecord::new(
             &agent_id,
             &new_chat_session_id(),
             SessionKind::Chat,
@@ -450,6 +461,29 @@ pub(super) async fn create_session(
             title_source,
             now_ms,
         );
+        match (
+            &input.project_id,
+            input.project_revision,
+            input.member_generation,
+        ) {
+            (None, None, None) => {}
+            (Some(project_id), Some(revision), Some(generation)) => {
+                if crate::projects::validate_project_chat_selection(
+                    &guard, project_id, &agent_id, revision, generation,
+                )
+                .is_err()
+                {
+                    return rejected(ApiError::conflict("Project membership or instructions changed; refresh before creating this chat"));
+                }
+                record.project_id = Some(project_id.clone());
+                record.project_binding_revision = 1;
+            }
+            _ => {
+                return rejected(ApiError::bad_request_static(
+                    "Project, revision and member selection must be supplied together",
+                ))
+            }
+        }
         let session_id = record.id.clone();
         guard.sessions.insert(record);
         (session_id, guard.control_plane_persist_request())
@@ -754,7 +788,7 @@ pub(super) async fn delete_session(
     // pre-flight audit; Task 6's durable-deletion protocol): a crash right
     // after a successful save still replays this deletion on restart.
     let deletion = HistoryDeletion::session(&agent_id, &session_id);
-    let (previous_agent, record, removed_runs, removed_ids, persist) = {
+    let (previous_agent, record, removed_runs, removed_ids, project_change, persist) = {
         let mut guard = state.daemon.write().await;
         // Re-checked under the transaction, not just in the fast-path check
         // above (fix round 1, M2 review): a concurrent change -- for example
@@ -770,6 +804,15 @@ pub(super) async fn delete_session(
         if guard.runs.active_count_for_session(&agent_id, &session_id) > 0 {
             return rejected(ApiError::conflict(SESSION_RUN_IN_PROGRESS));
         }
+        let project_change = match crate::projects::ProjectSourceChange::prepare(
+            &mut guard,
+            &agent_id,
+            &session_id,
+            anima_core::primitives::now_millis(),
+        ) {
+            Ok(change) => change,
+            Err(error) => return rejected(ApiError::conflict(error.to_string())),
+        };
         let Some(runtime) = guard.agents.get_mut(&agent_id) else {
             return rejected(ApiError::not_found());
         };
@@ -789,16 +832,39 @@ pub(super) async fn delete_session(
             .runs
             .remove_terminal_for_session(&agent_id, &session_id);
         guard.record_history_deletion(deletion.clone());
+        let request = guard.control_plane_persist_request();
+        let persist = if project_change.changed() {
+            request
+                .with_project_candidate(
+                    project_change.registry.snapshot(),
+                    project_change.registry.creation_receipts_snapshot(),
+                    Vec::new(),
+                )
+                .expect("source deletion has no session binding overlay")
+        } else {
+            request
+        };
         (
             previous_agent,
             record,
             removed_runs,
             removed_ids,
-            guard.control_plane_persist_request(),
+            project_change,
+            persist,
         )
     };
-    if let Err(error) = persist.save().await {
+    let saved = if project_change.changed() {
+        persist.save_project_candidate().await
+    } else {
+        persist.save().await
+    };
+    if let Err(error) = saved {
         let mut guard = state.daemon.write().await;
+        if crate::control_plane_store::is_durability_uncertain(&error) {
+            project_change.fence_uncertain(&guard);
+        } else {
+            project_change.rollback(&mut guard);
+        }
         if let Err(restore_error) = guard.restore_removed_agent(previous_agent) {
             warn!(agent_id = %agent_id, error = %restore_error, "could not restore an agent after a failed session delete");
         }
@@ -808,6 +874,12 @@ pub(super) async fn delete_session(
         }
         guard.clear_history_deletion(&deletion);
         return rejected(ApiError::service_unavailable(error.to_string()));
+    }
+    {
+        let mut guard = state.daemon.write().await;
+        if let Err(error) = project_change.publish(&mut guard) {
+            return rejected(ApiError::service_unavailable(error.to_string()));
+        }
     }
     // Durable now: old review workers no longer have a conversation to publish to.
     crate::chat_review::cancel_records(&record.chat_reviews);

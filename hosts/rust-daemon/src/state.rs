@@ -1,7 +1,10 @@
 mod approval_state;
 mod automation_state;
+mod document_edit_persistence;
 mod live_state;
+mod project_persistence;
 mod run_commit;
+pub(crate) use document_edit_persistence::DocumentEditSaveOutcome;
 pub(crate) mod run_stop;
 mod runtime_events;
 mod session_import;
@@ -1255,6 +1258,160 @@ mod tests {
         }
     }
 
+    fn microsoft_file_fixture(
+        agent_id: &str,
+    ) -> crate::connectors::microsoft_files::model::MicrosoftFileRecord {
+        use crate::connectors::microsoft_files::model::{
+            MicrosoftFileMode, MicrosoftFileRecord, MicrosoftFileStatus, MicrosoftSelectedFile,
+        };
+
+        MicrosoftFileRecord {
+            id: "microsoft-files-one".into(),
+            agent_id: agent_id.into(),
+            mode: MicrosoftFileMode::OneDrive,
+            status: MicrosoftFileStatus::Active,
+            generation: "generation-one".into(),
+            selection_revision: 2,
+            oauth_config_revision: 1,
+            account_id: Some("fixture-account".into()),
+            account_label: Some("Fixture account".into()),
+            approved_site_id: None,
+            approved_site_url: None,
+            selected_files: vec![MicrosoftSelectedFile {
+                key: "selected-one".into(),
+                drive_id: "drive-one".into(),
+                item_id: "item-one".into(),
+                name: "Fixture.txt".into(),
+                site_id: None,
+            }],
+            created_at_ms: 10,
+            updated_at_ms: 20,
+            cleanup_generations: vec!["retired-generation".into()],
+        }
+    }
+
+    #[test]
+    fn microsoft_file_metadata_round_trips_without_adding_grants() {
+        let mut source = DaemonState::new();
+        let agent_id = source
+            .create_agent(test_config("file-owner"))
+            .unwrap()
+            .state
+            .id;
+        let record = microsoft_file_fixture(&agent_id);
+        source
+            .microsoft_file_records
+            .insert(record.id.clone(), record.clone());
+        let payload = serde_json::to_value(source.control_plane_snapshot()).unwrap();
+        assert_eq!(
+            payload["microsoftFileRecords"][0]["cleanupGenerations"][0],
+            "retired-generation"
+        );
+
+        let mut restored = DaemonState::new();
+        restored
+            .restore_control_plane_snapshot(serde_json::from_value(payload).unwrap())
+            .unwrap();
+        assert_eq!(
+            restored.microsoft_file_records.get(&record.id),
+            Some(&record)
+        );
+        assert!(restored.tool_grants_applied.is_empty());
+        let config = restored.agents.get(&agent_id).unwrap().config();
+        for tool in [
+            "microsoft_files_read",
+            "inspect_office_document",
+            "propose_document_edit",
+            "apply_document_edit",
+        ] {
+            assert!(
+                !config.allows_tool(tool),
+                "restoring metadata must not grant {tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_microsoft_file_records_reject_restore_before_publication() {
+        let mut source = DaemonState::new();
+        let agent_id = source
+            .create_agent(test_config("file-owner"))
+            .unwrap()
+            .state
+            .id;
+        let record = microsoft_file_fixture(&agent_id);
+        let mut snapshot = source.control_plane_snapshot();
+        snapshot.microsoft_file_records = vec![record.clone()];
+        let mut duplicate = snapshot.clone();
+        duplicate.microsoft_file_records.push(record);
+        let mut missing_owner = snapshot.clone();
+        missing_owner.microsoft_file_records[0].agent_id = "missing-agent".into();
+        let mut duplicate_cleanup = snapshot;
+        duplicate_cleanup.microsoft_file_records[0].cleanup_generations =
+            vec!["retired".into(), "retired".into()];
+
+        for candidate in [duplicate, missing_owner, duplicate_cleanup] {
+            let mut restored = DaemonState::new();
+            assert!(restored.restore_control_plane_snapshot(candidate).is_err());
+            assert_eq!(restored.agent_count(), 0);
+            assert!(restored.microsoft_file_records.is_empty());
+        }
+    }
+
+    #[test]
+    fn search_restore_fences_only_deep_legacy_sources_without_resetting_identity() {
+        use crate::connected_search::{HistoryDepth, SourceAuthority, SourceIndex};
+
+        let mut source = DaemonState::new();
+        let agent_id = source
+            .create_agent(test_config("search-owner"))
+            .unwrap()
+            .state
+            .id;
+        let mut recent = SourceIndex::new(&SourceAuthority {
+            agent_id,
+            connector_id: "mail-fixture".into(),
+            provider: "gmail".into(),
+            generation: "source-generation".into(),
+            enabled: true,
+            read_granted: true,
+            sync_started_at_ms: 10,
+        });
+        recent.baseline_at_ms = Some(10);
+        recent.stream_epoch = Some("stream-one".into());
+        recent.seen.insert("a".repeat(64), "b".repeat(64));
+        let mut deep = recent.clone();
+        deep.settings.history_depth = HistoryDepth::Days90;
+        deep.settings_revision = 3;
+        deep.imported.insert("c".repeat(64), "d".repeat(64));
+        let mut fenced = deep.clone();
+        fenced.live_event_fence_at_ms = Some(123);
+        let mut snapshot = source.control_plane_snapshot();
+        snapshot.version = 32;
+        snapshot.connected_search.sources = [
+            ("recent".into(), recent.clone()),
+            ("deep".into(), deep.clone()),
+            ("fenced".into(), fenced.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        let mut restored = DaemonState::new();
+        restored.restore_control_plane_snapshot(snapshot).unwrap();
+        assert_eq!(restored.connected_search.sources["recent"], recent);
+        assert_eq!(restored.connected_search.sources["fenced"], fenced);
+        let admitted = &restored.connected_search.sources["deep"];
+        assert!(admitted.live_event_fence_at_ms.is_some());
+        deep.live_event_fence_at_ms = admitted.live_event_fence_at_ms;
+        assert_eq!(admitted, &deep);
+
+        let mut restarted = DaemonState::new();
+        restarted
+            .restore_control_plane_snapshot(restored.control_plane_snapshot())
+            .unwrap();
+        assert_eq!(restarted.connected_search, restored.connected_search);
+    }
+
     fn test_config(name: &str) -> AgentConfig {
         AgentConfig {
             name: name.into(),
@@ -1626,6 +1783,12 @@ pub(crate) fn memory_query_expander_from_env() -> Option<QueryExpander> {
 }
 
 pub(crate) struct DaemonState {
+    pub(crate) document_edits: crate::document_edits::DocumentEditRegistry,
+    pub(crate) document_edit_store: Option<crate::document_edits::DocumentEditStore>,
+    pub(crate) document_edit_worker: crate::document_edits::DocumentEditWorker,
+    pub(crate) document_edit_service: Option<crate::document_edits::WeakDocumentEditService>,
+    pub(crate) projects: crate::projects::ProjectRegistry,
+    pub(crate) project_access: crate::projects::ProjectAccessRegistry,
     pub(crate) engine_bridge: Option<Arc<crate::engine_bridge::DaemonEngineBridge>>,
     pub(crate) memory: SharedMemoryStore,
     pub(crate) memory_embeddings: SharedMemoryEmbeddings,
@@ -1738,7 +1901,11 @@ pub(crate) struct DaemonState {
     calendar_manager: Option<crate::connectors::gcalendar::WeakCalendarManager>,
     pub(crate) mail_manager: Option<crate::connectors::mail::WeakMailManager>,
     pub(crate) drive_records: HashMap<String, crate::connectors::drive::DriveRecord>,
+    pub(crate) microsoft_file_records:
+        HashMap<String, crate::connectors::microsoft_files::model::MicrosoftFileRecord>,
     pub(crate) drive_manager: Option<crate::connectors::drive::WeakDriveManager>,
+    pub(crate) microsoft_files_manager:
+        Option<crate::connectors::microsoft_files::WeakMicrosoftFileManager>,
     pub(crate) mail_records: HashMap<String, crate::connectors::mail::MailRecord>,
     pub(crate) mail_drafts: HashMap<String, crate::connectors::mail::MailDraft>,
     pub(crate) connected_search: crate::connected_search::SearchRegistry,
@@ -1775,6 +1942,8 @@ pub(crate) struct ControlPlanePersistRequest {
     mcp_candidate: bool,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     bundle_candidate: bool,
+    project_candidate: Option<project_persistence::ProjectCandidateBase>,
+    document_edit_candidate: Option<crate::document_edits::DocumentEditRegistry>,
     execution_expected_generation: Option<u64>,
 }
 
@@ -1800,6 +1969,8 @@ struct ControlPlaneAcknowledged {
     mcp_removed_grants: Option<(String, Vec<String>)>,
     mcp_grants: HashMap<String, AcknowledgedMcpGrants>,
     bundles: Option<AcknowledgedBundles>,
+    projects: Option<project_persistence::AcknowledgedProjects>,
+    document_edits: Option<crate::document_edits::DocumentEditRegistry>,
 }
 
 struct AcknowledgedBundles {
@@ -1970,11 +2141,21 @@ impl ControlPlanePersistRequest {
         Some(request)
     }
 
-    async fn save_ordered(mut self, require_current: bool) -> std::io::Result<()> {
+    async fn save_ordered(self, require_current: bool) -> std::io::Result<()> {
+        self.save_ordered_with_document_observation(require_current, None)
+            .await
+    }
+
+    async fn save_ordered_with_document_observation(
+        mut self,
+        require_current: bool,
+        document_observation: Option<&mut Option<crate::document_edits::DocumentEditRegistry>>,
+    ) -> std::io::Result<()> {
         if let Some(owner) = &self.profile_owner {
             owner.verify_owned().await?;
         }
-        let mut acknowledged = self.order.acknowledged.lock().await;
+        let order = Arc::clone(&self.order);
+        let mut acknowledged = order.acknowledged.lock().await;
         self.snapshot
             .execution_budgets
             .validate()
@@ -2020,6 +2201,8 @@ impl ControlPlanePersistRequest {
             }
             return Ok(());
         }
+        self.merge_acknowledged_projects(&acknowledged)?;
+        self.merge_acknowledged_document_edits(&acknowledged)?;
         // Ordinary writers may prepare newer snapshots while the candidate
         // saves and before its public patch acquires the state write lock.
         // Merge acknowledged actions under the same persistence ordering,
@@ -2224,6 +2407,22 @@ impl ControlPlanePersistRequest {
             save_result
         };
         if let Err(error) = save_result {
+            if self.document_edit_candidate.is_some()
+                && crate::control_plane_store::is_durability_uncertain(&error)
+            {
+                acknowledged.revision = self.revision;
+                acknowledged.document_edits = Some(self.snapshot.document_edits.clone());
+                if let Some(observation) = document_observation {
+                    *observation = Some(self.snapshot.document_edits.clone());
+                }
+            }
+            if self.project_candidate.is_some()
+                && crate::control_plane_store::is_durability_uncertain(&error)
+            {
+                acknowledged.revision = self.revision;
+                acknowledged.projects =
+                    Some(project_persistence::acknowledged_projects(&self.snapshot));
+            }
             if self.execution_expected_generation.is_some()
                 && crate::control_plane_store::is_durability_uncertain(&error)
             {
@@ -2242,6 +2441,8 @@ impl ControlPlanePersistRequest {
             return Err(error);
         }
         acknowledged.revision = self.revision;
+        acknowledged.document_edits = Some(self.snapshot.document_edits.clone());
+        acknowledged.projects = Some(project_persistence::acknowledged_projects(&self.snapshot));
         acknowledged.execution_budgets = Some(self.snapshot.execution_budgets.clone());
         acknowledged.bundles = Some(acknowledged_bundles(&self.snapshot));
         if self.mcp_candidate || acknowledged.mcp_connections.is_some() {
@@ -2406,7 +2607,15 @@ impl DaemonState {
         let memory_embeddings = Arc::new(AsyncRwLock::new(MemoryEmbeddingRuntime::local_default()));
         Self {
             memory,
+            document_edits: crate::document_edits::DocumentEditRegistry::default(),
+            document_edit_store: None,
+            document_edit_service: None,
+            document_edit_worker: crate::document_edits::DocumentEditWorker::new(
+                crate::attachments::documents::worker::shared_physical_slot(),
+            ),
             engine_bridge: None,
+            projects: crate::projects::ProjectRegistry::default(),
+            project_access: crate::projects::ProjectAccessRegistry::default(),
             memory_embeddings,
             chatgpt_auth: crate::chatgpt_auth::ChatGptAuth::in_memory(),
             provider_keys: crate::provider_keys::KeyPool::open(None, &Default::default())
@@ -2495,7 +2704,9 @@ impl DaemonState {
             connected_search_service: None,
             account_workflows: Default::default(),
             drive_records: HashMap::new(),
+            microsoft_file_records: HashMap::new(),
             drive_manager: None,
+            microsoft_files_manager: None,
             mail_records: HashMap::new(),
             mail_drafts: HashMap::new(),
             workspace: None,
@@ -2611,6 +2822,8 @@ impl DaemonState {
             mcp_candidate: false,
             mcp_removed_grants: None,
             bundle_candidate: false,
+            project_candidate: None,
+            document_edit_candidate: None,
             execution_expected_generation: None,
         }
     }
@@ -2738,6 +2951,13 @@ impl DaemonState {
         snapshot.community_generation = self.community_generation;
         snapshot.drive_records = self.drive_records.values().cloned().collect();
         snapshot.drive_records.sort_by(|a, b| a.id.cmp(&b.id));
+        snapshot.microsoft_file_records = self.microsoft_file_records.values().cloned().collect();
+        snapshot.projects = self.projects.snapshot();
+        snapshot.document_edits = self.document_edits.clone();
+        snapshot.project_creation_receipts = self.projects.creation_receipts_snapshot();
+        snapshot
+            .microsoft_file_records
+            .sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_connectors = self.discord_connectors.values().cloned().collect();
         snapshot.discord_connectors.sort_by(|a, b| a.id.cmp(&b.id));
         snapshot.discord_credential_intents =
@@ -2855,15 +3075,20 @@ impl DaemonState {
         &mut self,
         mut snapshot: ControlPlaneSnapshot,
     ) -> Result<(usize, usize), String> {
+        crate::connected_search::migrate_legacy_event_fences(
+            &mut snapshot.connected_search,
+            anima_core::primitives::now_millis(),
+        );
         self.validate_control_plane_snapshot(&snapshot)?;
+        let persist_order = Arc::clone(&self.control_plane_persist_order);
+        let mut acknowledged = persist_order
+            .acknowledged
+            .try_lock()
+            .map_err(|_| "Control plane cannot be restored during a pending save")?;
         self.execution_budgets = snapshot.execution_budgets.clone();
         self.execution_budget_candidate_snapshot = None;
         self.execution_budget_failures.clear();
-        self.control_plane_persist_order
-            .acknowledged
-            .try_lock()
-            .map_err(|_| "Execution accounting cannot be restored during a pending save")?
-            .execution_budgets = Some(self.execution_budgets.clone());
+        acknowledged.execution_budgets = Some(self.execution_budgets.clone());
         let origin_pins = crate::runs::origin_pins(&snapshot);
         crate::connectors::discord::validate_snapshot(&snapshot)?;
         crate::connectors::drive::validate_snapshot(&snapshot)?;
@@ -2948,6 +3173,11 @@ impl DaemonState {
                 }
                 (r.id.clone(), r)
             })
+            .collect();
+        self.microsoft_file_records = snapshot
+            .microsoft_file_records
+            .into_iter()
+            .map(|record| (record.id.clone(), record))
             .collect();
         self.discord_connectors = snapshot
             .discord_connectors
@@ -3057,6 +3287,21 @@ impl DaemonState {
 
         self.sessions =
             crate::sessions::SessionRegistry::restored(snapshot.sessions, &self.live_agent_ids());
+        let projects = crate::projects::restore_projects(
+            snapshot.projects,
+            snapshot.project_creation_receipts,
+            self,
+        )
+        .map_err(|error| error.to_string())?;
+        // Retire all leases from the replaced state, even when its durable
+        // epochs happen to match. Restored access has a fresh publication root.
+        self.project_access
+            .publish_records(&crate::projects::ProjectRegistry::default())
+            .map_err(|error| error.to_string())?;
+        self.projects = projects.registry;
+        self.project_access = projects.access;
+        self.document_edits = snapshot.document_edits;
+        self.document_edits.recover_after_restart();
         let derived_sessions = self.derive_legacy_sessions();
         let derived_session_count = derived_sessions.len();
         for record in derived_sessions {
@@ -3170,6 +3415,10 @@ impl DaemonState {
             );
         }
 
+        acknowledged.projects = Some(project_persistence::acknowledged_projects(
+            &self.control_plane_snapshot(),
+        ));
+        acknowledged.document_edits = Some(self.document_edits.clone());
         Ok((restored_agents, restored_swarms))
     }
 
@@ -3177,7 +3426,15 @@ impl DaemonState {
         &self,
         snapshot: &ControlPlaneSnapshot,
     ) -> Result<(), String> {
+        crate::document_edits::workspace_boundary::ensure_state_separate(
+            self,
+            snapshot
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.as_path()),
+        )?;
         snapshot.execution_budgets.validate()?;
+        snapshot.document_edits.validate()?;
         let mut persisted_agents = self
             .list_agents()
             .into_iter()
@@ -3233,6 +3490,10 @@ impl DaemonState {
         }
 
         crate::jobs::validate_goals(&snapshot.goals, &snapshot.jobs)?;
+        crate::connectors::microsoft_files::model::validate_records(
+            &snapshot.microsoft_file_records,
+            snapshot.agents.iter().map(|agent| agent.state.id.as_str()),
+        )?;
         crate::connected_search::validate_snapshot(&snapshot.connected_search)?;
         crate::account_workflows::validate_snapshot(
             &snapshot.account_workflows,
@@ -3292,8 +3553,30 @@ impl DaemonState {
             }
         }
         crate::runs::RunLedger::validate(&snapshot.runs)?;
+        for run in &snapshot.runs {
+            crate::projects::validate_run_project_fields(run).map_err(|error| error.to_string())?;
+        }
+        let projects = crate::projects::ProjectRegistry::from_snapshot(
+            snapshot.projects.clone(),
+            snapshot.project_creation_receipts.clone(),
+        )
+        .map_err(|error| error.to_string())?;
+        for project in projects.records() {
+            for member in &project.members {
+                if !persisted_agents
+                    .get(&member.agent_id)
+                    .is_some_and(|agent| !crate::agent_runs::is_helper_config(&agent.state.config))
+                {
+                    return Err("Saved project member is not an existing independent agent".into());
+                }
+            }
+        }
         crate::runs::validate_origin_snapshot(snapshot)?;
         crate::sessions::SessionRegistry::validate(&snapshot.sessions)?;
+        for session in &snapshot.sessions {
+            crate::projects::validate_session_project_fields(session)
+                .map_err(|error| error.to_string())?;
+        }
         crate::runs::validate_helper_snapshot_links(
             &snapshot.runs,
             &persisted_agents,
@@ -4057,6 +4340,15 @@ impl DaemonState {
     /// The run copy owns this session/workspace binding and its fallback
     /// position; secondary calls keep the base adapter.
     fn session_model_adapter(&self, agent_id: &str, room_id: &str) -> Arc<dyn ModelAdapter> {
+        self.session_model_adapter_with_project(agent_id, room_id, None)
+    }
+
+    fn session_model_adapter_with_project(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        lease: Option<crate::projects::ProjectAccessLease>,
+    ) -> Arc<dyn ModelAdapter> {
         let attachments = crate::attachments::model::AttachmentModelAdapter::new(
             self.profile_model_adapter(),
             self.history.store(),
@@ -4066,9 +4358,9 @@ impl DaemonState {
             agent_id.to_string(),
             crate::sessions::session_id_for_room(room_id),
         );
-        Arc::new(crate::fallback_model::FallbackModelAdapter::new(Arc::new(
-            attachments,
-        )))
+        Arc::new(crate::fallback_model::FallbackModelAdapter::new(
+            crate::projects::bind_model_adapter(Arc::new(attachments), lease),
+        ))
     }
 
     fn restore_agent_snapshot(&mut self, mut snapshot: AgentRuntimeSnapshot) -> Result<(), String> {

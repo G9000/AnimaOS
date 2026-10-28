@@ -2,6 +2,8 @@
 //! keeps it away from the real launchd.
 #![cfg(target_os = "macos")]
 
+mod common;
+
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -21,7 +23,7 @@ fn config(home: &Path) -> String {
 
 #[test]
 fn autostart_on_and_off_install_and_remove_the_launch_agent() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let plist = home
         .path()
         .join("Library")

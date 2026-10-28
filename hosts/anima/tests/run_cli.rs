@@ -1,5 +1,7 @@
 //! Spawns the real `anima run` binary against a temporary HOME.
 
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
@@ -49,7 +51,7 @@ fn forward_lines(stream: impl Read + Send + 'static, tx: mpsc::Sender<String>) {
 
 #[test]
 fn anima_run_serves_health_with_temp_home() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let port = free_port();
     let mut child = Command::new(env!("CARGO_BIN_EXE_anima"))
         .arg("run")

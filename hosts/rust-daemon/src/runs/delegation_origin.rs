@@ -448,6 +448,16 @@ pub(crate) fn origin_pins(
             }
         }
     }
+    // Pending document publication needs its immutable native intent for
+    // read-only recovery. The registry bounds these scopes to eight drafts;
+    // prepared reviews and completed publication receipts retain no run pins.
+    for (run_id, agent_id, session_id) in snapshot.document_edits.pending_native_scopes() {
+        if let Some(source) = snapshot.runs.iter().find(|run| {
+            run.id == run_id && run.agent_id == agent_id && run.session_id == session_id
+        }) {
+            pins.insert(source.id.clone());
+        }
+    }
     pins
 }
 

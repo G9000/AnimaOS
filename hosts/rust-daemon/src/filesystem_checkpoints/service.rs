@@ -28,6 +28,13 @@ pub(crate) struct NativeCheckpointService {
 pub(crate) struct NativeMutationReceipt {
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
+    pub(crate) observed_sha256: String,
+}
+
+/// Historical, verified native publication data; this cannot authorize a write.
+#[derive(Debug)]
+pub(crate) struct NativePublicationEvidence {
+    pub(crate) checkpoint_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -322,11 +329,27 @@ impl NativeCheckpointService {
         call: &ToolCall,
         path: &str,
         transform: F,
-        mut validate: C,
+        validate: C,
     ) -> Result<NativeMutationReceipt, String>
     where
         F: FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String>,
         C: FnMut() -> Result<(), String>,
+    {
+        self.mutate_with_authority(workspace, run, call, path, transform, validate)
+    }
+
+    pub(crate) fn mutate_with_authority<F, C, G>(
+        &self,
+        workspace: &Path,
+        run: &RunLink,
+        call: &ToolCall,
+        path: &str,
+        transform: F,
+        mut validate: C,
+    ) -> Result<NativeMutationReceipt, String>
+    where
+        F: FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String>,
+        C: FnMut() -> Result<G, String>,
     {
         #[cfg(not(windows))]
         {
@@ -340,7 +363,11 @@ impl NativeCheckpointService {
             let groups = self.groups(&store, &session).map_err(error)?;
             if !matches!(
                 call.name.as_str(),
-                "write_file" | "write_document" | "edit_file" | "multi_edit"
+                "write_file"
+                    | "write_document"
+                    | "edit_file"
+                    | "multi_edit"
+                    | "apply_document_edit"
             ) || call.id.is_empty()
                 || call.id.len() > 128
                 || call.id.chars().any(char::is_control)
@@ -488,10 +515,13 @@ impl NativeCheckpointService {
             };
             // No persistence or await occurs between this current authority
             // check and the first target effect under the retained lease.
-            if let Err(reason) = validate() {
-                refuse(&directory, &intent).map_err(error)?;
-                return Err(reason);
-            }
+            let _authority = match validate() {
+                Ok(authority) => authority,
+                Err(reason) => {
+                    refuse(&directory, &intent).map_err(error)?;
+                    return Err(reason);
+                }
+            };
             if target.is_none() {
                 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
                 use cap_std::fs::{OpenOptions, OpenOptionsExt};
@@ -615,6 +645,7 @@ impl NativeCheckpointService {
             Ok(NativeMutationReceipt {
                 checkpoint_id: before.checkpoint_id,
                 path: path.clone(),
+                observed_sha256: core::checkpoint_digest(&bytes),
             })
         }
     }
@@ -640,6 +671,90 @@ impl NativeCheckpointService {
                 status: group.status.into(),
             })
             .collect())
+    }
+
+    /// Look up an exact immutable native acknowledgment without provisioning,
+    /// repairing, restoring, or mutating any checkpoint or workspace content.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn publication_evidence(
+        &self,
+        workspace: &Path,
+        run: &RunLink,
+        call: &ToolCall,
+        path: &str,
+        expected_preimage_sha256: Option<&str>,
+        expected_postimage_sha256: &str,
+        expected_postimage_bytes: u64,
+    ) -> Result<Option<NativePublicationEvidence>, String> {
+        if let Some(owner) = &self.owner {
+            owner
+                .ensure_owned()
+                .map_err(|_| error(CaptureError::InsecureStore))?;
+        }
+        if call.name != "apply_document_edit"
+            || call.id.is_empty()
+            || call.args.get("file_path") != Some(&DataValue::String(path.into()))
+            || !digest_valid(expected_postimage_sha256)
+            || expected_preimage_sha256.is_some_and(|hash| !digest_valid(hash))
+            || expected_postimage_bytes == 0
+        {
+            return Err(error(CaptureError::InvalidWitness));
+        }
+        let store = CheckpointStore::new(self.capture_config(workspace, run).map_err(error)?);
+        let session = store.read_session().map_err(error)?;
+        let request_digest = native_request_digest(call, store.config.policy.limits.manifest_bytes)
+            .map_err(error)?;
+        let mut found = None;
+        for group in self.groups(&store, &session).map_err(error)? {
+            if group.intent.native_run_id != run.run_id
+                || group.intent.native_tool_call_id != call.id
+            {
+                continue;
+            }
+            if group.status != "acknowledged"
+                || group.intent.path != path
+                || group.intent.request_digest != request_digest
+                || found.is_some()
+            {
+                return Err(error(CaptureError::InvalidWitness));
+            }
+            let authority = group
+                .authority
+                .ok_or_else(|| error(CaptureError::RecoveryRequired))?;
+            let [action] = authority.lineage.actions.as_slice() else {
+                return Err(error(CaptureError::InvalidWitness));
+            };
+            let [change] = action.changes.as_slice() else {
+                return Err(error(CaptureError::InvalidWitness));
+            };
+            let preimage = match &change.observed_preimage {
+                core::FileState::Absent => None,
+                core::FileState::File { content, .. } => Some(content.sha256.as_str()),
+            };
+            let Some(core::FileState::File { content, .. }) = &change.acknowledged_postimage else {
+                return Err(error(CaptureError::InvalidWitness));
+            };
+            if action.native_run_id != run.run_id
+                || action.native_tool_call_id != call.id
+                || action.request_digest != request_digest
+                || change.path != path
+                || action.outcome != core::MutationActionOutcome::Acknowledged
+                || preimage != expected_preimage_sha256
+                || content.sha256 != expected_postimage_sha256
+                || content.byte_count != expected_postimage_bytes
+            {
+                return Err(error(CaptureError::InvalidWitness));
+            }
+            found = Some(NativePublicationEvidence {
+                checkpoint_id: group.intent.checkpoint_id,
+            });
+        }
+        if let Some(owner) = &self.owner {
+            owner
+                .ensure_owned()
+                .map_err(|_| error(CaptureError::InsecureStore))?;
+        }
+        Ok(found)
     }
 
     /// Filesystem-only test entry; production dispatch uses `restore_checked`.
@@ -791,7 +906,11 @@ impl NativeCheckpointService {
         })
     }
 
-    fn store(&self, workspace: &Path, run: &RunLink) -> Result<CheckpointStore, CaptureError> {
+    fn capture_config(
+        &self,
+        workspace: &Path,
+        run: &RunLink,
+    ) -> Result<CaptureConfig, CaptureError> {
         for id in [&run.agent_id, &run.run_id, &run.session_id] {
             if id.is_empty() || id.len() > 128 || id.chars().any(char::is_control) {
                 return Err(CaptureError::InvalidScope);
@@ -828,12 +947,16 @@ impl NativeCheckpointService {
                 &policy,
             )?,
         };
-        let config = CaptureConfig {
+        Ok(CaptureConfig {
             workspace_root: workspace.into(),
             store_root: self.store_root.clone(),
             scope,
             policy,
-        };
+        })
+    }
+
+    fn store(&self, workspace: &Path, run: &RunLink) -> Result<CheckpointStore, CaptureError> {
+        let config = self.capture_config(workspace, run)?;
         match &self.owner {
             Some(owner) => owner
                 .with_directory(&self.store_root, || {

@@ -2,6 +2,8 @@ import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useEffect, useRef, useState } from 'react';
 import type { RunRecoverySummary } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
+import { RecoveryEvidence } from './RecoveryEvidence';
+import { ContinuationStatus } from './ContinuationStatus';
 
 export function RunRecovery(props: {
   agentId: string;
@@ -49,10 +51,10 @@ function Recovery({
         });
         if (alive.current) setContinuation(next.id);
       } else {
+        setReviewed(false);
         const result = await daemon.runs.recovery(agentId, runId);
         if (!alive.current) return;
         setView(result);
-        setReviewed(false);
         if (result.continuationRunId) setContinuation(result.continuationRunId);
       }
     } catch (failure) {
@@ -65,9 +67,11 @@ function Recovery({
   }
   if (continuation)
     return (
-      <p role="status">
-        Continuation saved. Follow the new attempt in this chat.
-      </p>
+      <ContinuationStatus
+        key={`${agentId}:${continuation}`}
+        agentId={agentId}
+        runId={continuation}
+      />
     );
   return (
     <section aria-label="Recover interrupted work">
@@ -83,14 +87,19 @@ function Recovery({
         <>
           <p>
             The new attempt will inspect saved progress and use your current
-            permissions. Completed actions must be preserved.
+            permissions and the remaining original limits. It starts a new
+            attempt, rather than resuming the exact interrupted operation.
+            Actions may be repeated; check their effects before continuing.
           </p>
+          <p>{view.remainingAttempts} recovery attempts remaining.</p>
+          {view.evidence && <RecoveryEvidence evidence={view.evidence} />}
           {view.unknownActionCount > 0 && (
             <p>
               {view.unknownActionCount} recorded action outcome(s) are unknown.
               Check their effects before continuing.
             </p>
           )}
+          {view.projectContextNotice && <p>{view.projectContextNotice}</p>}
           {view.reviewRequired && (
             <label>
               <input
@@ -98,10 +107,14 @@ function Recovery({
                 checked={reviewed}
                 onChange={(event) => setReviewed(event.target.checked)}
               />{' '}
-              I have reviewed the recorded actions and any unknown effects.
+              I have reviewed the recorded actions, any unknown effects, and any
+              changes to the shared project context.
             </label>
           )}
-          {view.eligible ? (
+          {view.eligible &&
+          view.recoveryState !== 'invalid_or_stale' &&
+          view.recoveryState !== 'stopped' &&
+          view.recoveryState !== 'already_completed' ? (
             <button
               className="studio-tool-button"
               disabled={busy || (view.reviewRequired && !reviewed)}
@@ -111,8 +124,8 @@ function Recovery({
             </button>
           ) : (
             <p>
-              This run cannot be continued. Recovery attempts may be exhausted
-              or its session is no longer eligible.
+              This run cannot be continued. Its saved state or permissions may
+              have changed, or its recovery attempts may be exhausted.
             </p>
           )}
           <button
@@ -121,6 +134,17 @@ function Recovery({
             onClick={() => void act(false)}
           >
             Refresh recovery
+          </button>
+          <button
+            className="studio-tool-button"
+            disabled={busy}
+            onClick={() => {
+              setView(null);
+              setReviewed(false);
+              setError('');
+            }}
+          >
+            Leave interrupted
           </button>
         </>
       )}

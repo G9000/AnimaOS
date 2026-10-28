@@ -78,7 +78,7 @@ pub(super) fn execute(
                 }],
                 _ => return Err("Search kind must be text".into()),
             };
-            let result = service
+            let mut result = service
                 .model_query(
                     &agent.id,
                     &crate::connected_search::SearchQuery {
@@ -90,7 +90,17 @@ pub(super) fn execute(
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-            serde_json::to_string(&result).map_err(|_| "Search result could not be encoded".into())
+            loop {
+                let json = serde_json::to_string(&result)
+                    .map_err(|_| "Search result could not be encoded".to_string())?;
+                if json.len() + PREFIX.len() <= 128 * 1024 {
+                    break Ok(json);
+                }
+                if result.sources.pop().is_none() {
+                    break Err("Search result exceeds its safe response limit".into());
+                }
+                result.omitted_source_count = result.omitted_source_count.saturating_add(1);
+            }
         }
         .await;
         match result {

@@ -78,7 +78,7 @@ impl ToolExecutionContext {
             {
                 hook();
             }
-            journal.checkpoint_revalidate_now(workspace, store, call, self.action_approved, false)
+            journal.checkpoint_mutation_authority(workspace, store, call, self.action_approved)
         };
         let bound_transform = |source: Option<&[u8]>| {
             if self
@@ -92,7 +92,7 @@ impl ToolExecutionContext {
         };
         let result = NativeCheckpointService::new(store.to_path_buf())
             .with_profile_owner(self.profile_owner.clone())
-            .mutate_checked(workspace, run, call, path, bound_transform, validate);
+            .mutate_with_authority(workspace, run, call, path, bound_transform, validate);
         if result
             .as_ref()
             .err()

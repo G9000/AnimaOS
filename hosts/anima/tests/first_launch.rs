@@ -16,13 +16,13 @@ fn free_port() -> u16 {
 }
 
 struct Profile {
-    dir: tempfile::TempDir,
+    dir: common::PrivateHome,
     port: u16,
 }
 
 impl Profile {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = common::PrivateHome::new().unwrap();
         let port = free_port();
         let control = free_port();
         let profile = Self { dir, port };

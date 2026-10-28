@@ -143,6 +143,11 @@ pub(crate) struct DriveTextBytes {
     pub(crate) bytes: Vec<u8>,
     pub(crate) representation: String,
 }
+
+pub(crate) struct DriveBinaryResult {
+    pub(crate) metadata: DriveFileMetadata,
+    pub(crate) bytes: Option<Vec<u8>>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum DriveError {

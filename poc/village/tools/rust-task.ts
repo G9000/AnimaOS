@@ -1,14 +1,14 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runTask } from '../../../tools/workspace-dev/src/task.js';
-import { villagePorts } from './config.js';
+import { villageCargoTarget, villagePorts } from './config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const manifest = resolve(root, 'Cargo.toml');
 const args = process.argv.slice(2);
 const task = args.shift();
 if (args[0] === '--') args.shift();
-process.env.CARGO_TARGET_DIR ??= resolve(root, '../../target/cargo');
+process.env.CARGO_TARGET_DIR = villageCargoTarget(root, process.env, task === 'test' ? 'validation' : 'dev');
 if (task === 'run') {
   const { apiPort } = villagePorts(process.env);
   process.env.VILLAGE_BIND ??= `127.0.0.1:${apiPort}`;
@@ -44,15 +44,20 @@ try {
     throw new Error(
       'Usage: rust-task.ts run|build|test|fmt|lint [-- extra cargo arguments]',
     );
-  for (const command of commandsForTask) {
-    const code = await runTask(
-      'cargo',
-      [...command, ...(task === 'run' && args.length ? ['--'] : []), ...args],
-      { cwd: root },
-    );
-    if (code !== 0) {
-      process.exitCode = code;
-      break;
+  if (task === 'run') {
+    const code = await runTask('cargo', ['build', '--manifest-path', manifest, '-p', 'anima-village-game'], { cwd: root });
+    if (code !== 0) process.exitCode = code;
+    else {
+      const binary = resolve(process.env.CARGO_TARGET_DIR!, 'debug', process.platform === 'win32' ? 'anima-village-game.exe' : 'anima-village-game');
+      process.exitCode = await runTask(binary, args, { cwd: root, rustCache: 'dev', rustCacheMonitor: false });
+    }
+  } else {
+    for (const command of commandsForTask) {
+      const code = await runTask('cargo', [...command, ...args], { cwd: root });
+      if (code !== 0) {
+        process.exitCode = code;
+        break;
+      }
     }
   }
 } catch (error) {

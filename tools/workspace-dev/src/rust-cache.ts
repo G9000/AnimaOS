@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-export const RUST_CACHE_WARNING_BYTES = 64 * 1024 ** 3;
+export const RUST_CACHE_WARNING_BYTES = 32 * 1024 ** 3;
 
 export function resolveRustCacheDir(workspaceRoot: string): string {
   return resolve(workspaceRoot, 'target', 'cargo');
@@ -38,7 +38,11 @@ export async function measureRustCacheBytes(cacheDir: string): Promise<number> {
       if (entry.isDirectory()) {
         pending.push(entryPath);
       } else if (entry.isFile()) {
-        total += (await stat(entryPath)).size;
+        try {
+          total += (await stat(entryPath)).size;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
       }
     }
   }
@@ -50,5 +54,5 @@ export function rustCacheSizeWarning(bytes: number): string | null {
   if (bytes < RUST_CACHE_WARNING_BYTES) return null;
 
   const gib = (bytes / 1024 ** 3).toFixed(1);
-  return `Rust build cache is ${gib} GiB by summed file size (warning threshold: 64 GiB). Run bun run rust:cache:clean to remove compiler outputs; files outside target/cargo are preserved.`;
+  return `Rust build cache is ${gib} GiB by summed file size (warning threshold: 32 GiB). Run bun run rust:cache:clean to remove compiler outputs; files outside target/cargo are preserved.`;
 }

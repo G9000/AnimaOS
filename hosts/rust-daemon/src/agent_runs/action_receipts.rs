@@ -201,6 +201,17 @@ impl RunActionJournal {
             .map(drop)
     }
 
+    /// Retain native authority through synchronous mutation and readback.
+    pub(crate) fn checkpoint_mutation_authority(
+        &self,
+        workspace: &std::path::Path,
+        store: &std::path::Path,
+        call: &ToolCall,
+        approved: bool,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<DaemonState>, String> {
+        self.native_file_authority(workspace, Some(store), call, approved, false)
+    }
+
     /// Hold current native authority across the atomic publication of a document
     /// when host checkpoint storage is disabled.
     pub(crate) fn document_revalidate_now(
@@ -294,6 +305,12 @@ impl RunActionJournal {
             crate::approvals::Verdict::Ask if approved => Ok(()),
             _ => Err("Checkpoint action is no longer approved".to_string()),
         }?;
+        crate::document_edits::validate_final(
+            &guard,
+            &self.run,
+            call,
+            anima_core::primitives::now_millis(),
+        )?;
         Ok(guard)
     }
 
@@ -502,6 +519,10 @@ impl RunActionJournal {
             ) || record.stop.is_some())
         {
             return Err("Native action run is no longer running".into());
+        }
+        if starting {
+            crate::projects::validate_active_lease(state, record)
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }

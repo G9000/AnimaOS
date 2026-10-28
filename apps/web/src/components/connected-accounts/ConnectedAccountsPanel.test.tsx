@@ -122,6 +122,29 @@ it('requires source opt-in, submits its generation, and opens escaped cited cont
   expect(screen.getByText(/Text was shortened/)).toBeInTheDocument();
 });
 
+it('saves older inbox search settings without disabling the account', async () => {
+  const settings = { historyDepth: 'recent', retainedItemLimit: 100, attachmentText: 'metadataOnly', historyPaused: false } as const;
+  vi.mocked(api.connectedSearch.sources).mockResolvedValue({
+    sources: [{ ...source, enabled: true, status: 'ready', settingsRevision: 1, settings,
+      capabilities: { history: true, attachmentFormats: ['text', 'pdf'], workflowEventKinds: ['mailObserved'] },
+      historyCoverage: { state: 'notRequested' } } as ConnectedSource],
+    pollIntervalMs: 120000,
+  });
+  render(<ConnectedAccountsPanel agentId="a" api={api} />);
+  await open();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Search back' }), { target: { value: 'days90' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Keep locally' }), { target: { value: '500' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Include attachment text' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save search settings' }));
+  await screen.findByText('Search settings saved.');
+  expect(api.connectedSearch.setSource).toHaveBeenCalledWith('a', 'mail', {
+    enabled: true,
+    expectedGeneration: 'g1',
+    expectedSettingsRevision: 1,
+    settings: { historyDepth: 'days90', retainedItemLimit: 500, attachmentText: 'supportedText', historyPaused: false },
+  });
+});
+
 it('creates a pinned workflow rule with literal filters and typed event bindings', async () => {
   vi.mocked(api.connectedSearch.sources).mockResolvedValue({
     sources: [{ ...source, enabled: true, status: 'ready' }],

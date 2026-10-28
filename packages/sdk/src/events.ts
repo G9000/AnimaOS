@@ -66,6 +66,14 @@ export type RunLifecycleEventType =
 
 export type AgentEvent =
   | (EventBase & {
+      type: 'project.updated';
+      projectId: string;
+      revision: number;
+      accessEpoch: number;
+      deleted: boolean;
+      membershipChanged: boolean;
+    })
+  | (EventBase & {
       type: 'stream.snapshot';
       runs: SnapshotRun[];
       /** The pending approvals of the snapshot's runs (spec §6). */

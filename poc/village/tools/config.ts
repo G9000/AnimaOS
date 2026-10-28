@@ -19,6 +19,9 @@ export function villagePorts(env: NodeJS.ProcessEnv) {
     throw new Error('Village API and browser must use different ports.');
   return { apiPort, webPort, apiOrigin: `http://127.0.0.1:${apiPort}` };
 }
+export function villageCargoTarget(root: string, env: NodeJS.ProcessEnv, mode: 'dev' | 'validation' = 'dev'): string {
+  return resolve(root, '../..', env.CARGO_TARGET_DIR ?? (mode === 'validation' ? 'target/cargo/validation' : 'target/cargo'));
+}
 export function villageProcessDefinitions(
   root: string,
   env: NodeJS.ProcessEnv,
@@ -27,18 +30,19 @@ export function villageProcessDefinitions(
   return [
     {
       name: 'Village Rust game host',
-      command: 'cargo',
+      command: 'bun',
       args: [
+        resolve(root, '../../tools/workspace-dev/scripts/run-task.ts'),
+        '--rust-cache-runtime',
+        'dev',
+        '--',
+        'bun',
+        resolve(root, 'tools/rust-task.ts'),
         'run',
-        '--manifest-path',
-        resolve(root, 'Cargo.toml'),
-        '-p',
-        'anima-village-game',
       ],
       cwd: root,
       env: {
-        CARGO_TARGET_DIR:
-          env.CARGO_TARGET_DIR ?? resolve(root, '../../target/cargo'),
+        CARGO_TARGET_DIR: villageCargoTarget(root, env),
         VILLAGE_BIND: `127.0.0.1:${apiPort}`,
         VILLAGE_DB_PATH:
           env.VILLAGE_DB_PATH ??

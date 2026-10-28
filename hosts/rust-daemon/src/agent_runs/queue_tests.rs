@@ -18,6 +18,76 @@ use crate::runs::{RunLedger, RunRecord, RunSource, RunStart, RunStatus};
 use crate::sessions::{SessionKind, SessionOrigin, SessionRecord, TitleSource, DEFAULT_CHAT_TITLE};
 
 #[tokio::test]
+async fn accepted_project_witness_is_saved_before_queue_dispatch_and_revision_change_fails_closed()
+{
+    let model = ScriptedModel::new(vec![]);
+    let (coordinator, agent) = coordinator_with(model.clone()).await;
+    add_chat(&coordinator, &agent, "chat:project").await;
+    let project_id = {
+        let mut state = coordinator.state.write().await;
+        let (project, _) = state
+            .projects
+            .create(
+                crate::projects::ProjectCreateRequest {
+                    request_key: "queue-project".into(),
+                    title: "Shared task".into(),
+                    member_agent_ids: vec![agent.clone()],
+                    instructions: "Original brief".into(),
+                },
+                1,
+            )
+            .unwrap();
+        let session = state.sessions.get_mut(&agent, "chat:project").unwrap();
+        session.project_id = Some(project.id.clone());
+        session.project_binding_revision = 1;
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        project.id
+    };
+    let reservation = coordinator
+        .try_reserve_room(&agent, "chat:project")
+        .unwrap();
+    let run_id = accept_web(&coordinator, &agent, "chat:project", "project-accepted").await;
+    {
+        let mut state = coordinator.state.write().await;
+        let saved = state.runs.get(&run_id).unwrap();
+        assert_eq!(saved.status, RunStatus::Queued);
+        let witness = saved
+            .project_witness
+            .as_ref()
+            .expect("acceptance save carries the witness");
+        assert_eq!(witness.session_binding_revision, 1);
+        assert_eq!(witness.project.as_ref().unwrap().project_id, project_id);
+        assert_eq!(witness.project.as_ref().unwrap().project_revision, 1);
+        state
+            .projects
+            .patch(
+                &project_id,
+                crate::projects::ProjectPatchRequest {
+                    expected_revision: 1,
+                    title: None,
+                    instructions: Some("Revised brief".into()),
+                    status: None,
+                },
+                2,
+            )
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+    }
+    drop(reservation);
+    wait_for(&coordinator, &run_id, RunStatus::Failed).await;
+    assert!(
+        model.requests().is_empty(),
+        "stale queued context cannot reach a model"
+    );
+}
+
+#[tokio::test]
 async fn cancelled_admission_waits_leave_no_room_or_slot_entries() {
     let gate = Gate::new();
     let (coordinator, agent_id) =

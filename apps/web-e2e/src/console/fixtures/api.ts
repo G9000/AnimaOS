@@ -583,6 +583,7 @@ export async function installConsoleFixture(
     }
     const get = method === 'GET';
     if (get && path === '/api/capabilities') return json(route, {});
+    if (get && (path === '/api/projects' || path === '/api/projects/manage')) return json(route, { projects: [] });
     if (options.chatSuite && get && path === '/api/skill-drafts')
       return json(route, { drafts: [] });
     if (options.chatSuite && get && path === `/api/agents/${AGENT}/workflows`)
@@ -1099,6 +1100,9 @@ export async function installConsoleFixture(
     assertClean() {
       expect(unexpected, 'Unexpected fixture requests').toEqual([]);
       expect(errors, 'Browser errors/warnings').toEqual([]);
+    },
+    expectHttpRefusal(url: string) {
+      refusedUrls.add(url);
     },
   };
 }

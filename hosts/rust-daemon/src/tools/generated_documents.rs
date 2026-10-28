@@ -10,6 +10,12 @@ use workspace_bytes::{InstructionReadError, WorkspaceBytes};
 const UNAVAILABLE: &str = "Generated document is unavailable or unsupported";
 static DOCUMENT_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+pub(super) fn publication_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    DOCUMENT_WRITES
+        .lock()
+        .map_err(|_| "Native document publication is unavailable".to_string())
+}
+
 pub(super) fn register(registry: &mut ToolRegistry) {
     let mut read = object_parameters(vec![required_parameter(
         "file_path",
@@ -311,7 +317,7 @@ pub(super) fn write_document(
             context.live_checks(&agent, &call).await.map_err(|error| error.error.unwrap_or_else(|| UNAVAILABLE.into()))?;
             // No await spans this lock. A competing native revision either sees
             // the newly published preimage or fails without changing a file.
-            let _mutation = DOCUMENT_WRITES.lock().map_err(|_| "Native document publication is unavailable")?;
+            let _mutation = publication_guard()?;
             let receipt = context.checkpoint_mutate(&call,path,|source| {
                 active(&context)?;
                 if snapshot()?.as_deref() != source { return Err("Document target changed before checkpoint capture".into()); }
@@ -321,23 +327,31 @@ pub(super) fn write_document(
             if receipt.is_none() {
                 let source = snapshot()?;
                 validate_preimage(source.as_deref(),expected,format)?;
+                let mut authority = None;
                 let authorize = || {
                     #[cfg(test)]
                     if let Some(hook) = context.checkpoint_validation_hook.as_ref().and_then(|slot|slot.lock().unwrap().take()) { hook(); }
                     active(&context).map_err(std::io::Error::other)?;
-                    let authority = if let Some(journal) = &context.action_journal {
+                    authority = if let Some(journal) = &context.action_journal {
                         if context.run_link.as_ref() != Some(journal.bound_run()) || context.approvals.is_none() {
                             return Err(std::io::Error::other("Native document run authority is unavailable"));
                         }
                         Some(journal.document_revalidate_now(root,&call,context.action_approved).map_err(std::io::Error::other)?)
                     } else { None };
-                    Ok(authority)
+                    Ok(())
                 };
                 if let Some(source) = source {
                     workspace.compare_replace_instruction_file(path,&source,&generated.bytes,authorize).map_err(|_| "Document source changed or replacement is unavailable")?;
                 } else {
                     workspace.create_new_bytes_atomic(path,&generated.bytes,authorize).map_err(|_| "Document destination already exists or is unavailable")?;
                 }
+                if snapshot()?.as_deref() != Some(generated.bytes.as_slice()) {
+                    if let Some(journal) = &context.action_journal {
+                        journal.stop_for_unproven_effects(crate::filesystem_checkpoints::NATIVE_RECOVERY_REQUIRED);
+                    }
+                    return Err(crate::filesystem_checkpoints::NATIVE_RECOVERY_REQUIRED.into());
+                }
+                drop(authority);
             }
             let output = serde_json::json!({"path":path,"sha256":digest(&generated.bytes),"size_bytes":generated.bytes.len(),"download_url":download_url(path)});
             Ok::<_,String>(super::checkpoints::mutation_success(output.to_string(),receipt))

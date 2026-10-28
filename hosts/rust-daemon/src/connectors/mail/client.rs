@@ -1,3 +1,7 @@
+#[path = "client_attachments.rs"]
+mod attachments;
+#[path = "client_backfill.rs"]
+mod backfill;
 #[path = "mime.rs"]
 mod mime;
 #[path = "client_search.rs"]
@@ -27,6 +31,30 @@ pub(crate) trait MailTransport: Send + Sync {
         _p: Provider,
         _access: &str,
     ) -> Result<Vec<crate::connected_search::IndexedDocument>, MailError> {
+        Err(MailError::Upstream)
+    }
+    async fn search_history(
+        &self,
+        _p: Provider,
+        _access: &str,
+        _request: &crate::connected_search::HistoryPageRequest,
+    ) -> Result<crate::connected_search::HistoryPage, MailError> {
+        Err(MailError::Upstream)
+    }
+    async fn inbox_membership(
+        &self,
+        _p: Provider,
+        _access: &str,
+        _ids: &[String],
+    ) -> Result<Vec<bool>, MailError> {
+        Err(MailError::Upstream)
+    }
+    async fn attachment_batch(
+        &self,
+        _p: Provider,
+        _access: &str,
+        _message_id: &str,
+    ) -> Result<crate::connected_search::AttachmentBatch, MailError> {
         Err(MailError::Upstream)
     }
     async fn send(&self, p: Provider, access: &str, draft: &MailDraft) -> Result<(), MailError>;
@@ -119,6 +147,30 @@ fn text(v: &Value, key: &str, max: usize) -> String {
 }
 #[async_trait]
 impl MailTransport for MailClient {
+    async fn attachment_batch(
+        &self,
+        p: Provider,
+        access: &str,
+        message_id: &str,
+    ) -> Result<crate::connected_search::AttachmentBatch, MailError> {
+        self.fetch_attachment_batch(p, access, message_id).await
+    }
+    async fn inbox_membership(
+        &self,
+        p: Provider,
+        access: &str,
+        ids: &[String],
+    ) -> Result<Vec<bool>, MailError> {
+        self.check_inbox_membership(p, access, ids).await
+    }
+    async fn search_history(
+        &self,
+        p: Provider,
+        access: &str,
+        request: &crate::connected_search::HistoryPageRequest,
+    ) -> Result<crate::connected_search::HistoryPage, MailError> {
+        self.search_history_page(p, access, request).await
+    }
     async fn search_inbox(
         &self,
         p: Provider,

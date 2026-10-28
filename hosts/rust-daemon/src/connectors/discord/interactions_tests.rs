@@ -5,6 +5,8 @@ use anima_core::MessageRole;
 mod attachment_tests;
 #[path = "rename_tests.rs"]
 mod rename_tests;
+#[path = "thread_history_tests.rs"]
+mod thread_history_tests;
 #[path = "title_tests.rs"]
 mod title_tests;
 

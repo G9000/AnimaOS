@@ -27,6 +27,7 @@ pub(crate) struct RunBuild {
     pub(crate) adapter: Arc<dyn anima_core::ModelAdapter>,
     pub(crate) base: RuntimeRunBase,
     pub(crate) context: RunContextReport,
+    pub(crate) project_context: Option<Arc<crate::projects::AdmittedProjectContext>>,
 }
 
 /// How a run's history was selected (spec §5).
@@ -86,6 +87,16 @@ impl DaemonState {
                 .as_ref()
                 .and_then(|manager| manager.upgrade()),
         )
+        .with_microsoft_files(
+            self.microsoft_files_manager
+                .as_ref()
+                .and_then(|manager| manager.upgrade()),
+        )
+        .with_document_edits(
+            self.document_edit_service
+                .as_ref()
+                .and_then(|service| service.upgrade()),
+        )
     }
 
     /// The room's hot messages the model may see, oldest first
@@ -140,14 +151,34 @@ impl DaemonState {
         config: Option<&AgentConfig>,
         files: &RenderedAgentFiles,
     ) -> Option<RunBuild> {
-        self.build_run_runtime_with_bindings(
+        self.build_run_runtime_with_files_and_project(agent_id, room_id, input, config, files, None)
+    }
+
+    pub(crate) fn build_run_runtime_with_files_and_project(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        input: &Content,
+        config: Option<&AgentConfig>,
+        files: &RenderedAgentFiles,
+        project: Option<Arc<crate::projects::AdmittedProjectContext>>,
+    ) -> Option<RunBuild> {
+        let lease = project.as_ref().map(|context| context.lease().clone());
+        self.build_run_runtime_with_project_bindings(
             agent_id,
             room_id,
             input,
             config,
             files,
             self.tool_execution_context(),
-            self.session_model_adapter(agent_id, room_id),
+            match lease {
+                Some(lease) => {
+                    self.session_model_adapter_with_project(agent_id, room_id, Some(lease))
+                }
+                None => self.session_model_adapter(agent_id, room_id),
+            },
+            project,
+            true,
         )
     }
 
@@ -162,6 +193,41 @@ impl DaemonState {
         files: &RenderedAgentFiles,
         tools: ToolExecutionContext,
         adapter: Arc<dyn anima_core::ModelAdapter>,
+    ) -> Option<RunBuild> {
+        self.build_run_runtime_with_bindings_and_project(
+            agent_id, room_id, input, config, files, tools, adapter, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_run_runtime_with_bindings_and_project(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        input: &Content,
+        config: Option<&AgentConfig>,
+        files: &RenderedAgentFiles,
+        tools: ToolExecutionContext,
+        adapter: Arc<dyn anima_core::ModelAdapter>,
+        project: Option<Arc<crate::projects::AdmittedProjectContext>>,
+    ) -> Option<RunBuild> {
+        self.build_run_runtime_with_project_bindings(
+            agent_id, room_id, input, config, files, tools, adapter, project, false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_run_runtime_with_project_bindings(
+        &self,
+        agent_id: &str,
+        room_id: &str,
+        input: &Content,
+        config: Option<&AgentConfig>,
+        files: &RenderedAgentFiles,
+        tools: ToolExecutionContext,
+        adapter: Arc<dyn anima_core::ModelAdapter>,
+        project: Option<Arc<crate::projects::AdmittedProjectContext>>,
+        select_project_history: bool,
     ) -> Option<RunBuild> {
         let canonical = self.agents.get(agent_id)?;
         let resolved_config;
@@ -191,8 +257,11 @@ impl DaemonState {
         let checkpoint_text = checkpoint
             .as_ref()
             .map(|checkpoint| checkpoint.prompt_text());
-        let agent_conversations =
-            crate::sessions::interactions::recent_context(self, agent_id, room_id);
+        let agent_conversations = if project.is_some() {
+            None
+        } else {
+            crate::sessions::interactions::recent_context(self, agent_id, room_id)
+        };
         let estimator = TokenEstimator::new(
             session
                 .and_then(|session| session.context_calibration_permille)
@@ -217,9 +286,23 @@ impl DaemonState {
                 .saturating_sub(
                     (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil()
                         as u64,
+                )
+                .saturating_sub(
+                    project
+                        .as_ref()
+                        .map_or(0, |context| context.estimated_tokens()),
                 ),
             &estimator,
         );
+        let project = project.map(|context| {
+            if select_project_history {
+                context.for_selected_history(&selection.messages)
+            } else {
+                context
+            }
+        });
+        let tools =
+            tools.with_project_lease(project.as_ref().map(|context| context.lease().clone()));
         let raw = TokenEstimator::default();
         let raw_estimate_tokens = selection
             .messages
@@ -234,6 +317,9 @@ impl DaemonState {
                 .as_ref()
                 .map_or(0, |text| raw.text_tokens(text))
             + files.estimated_tokens
+            + project
+                .as_ref()
+                .map_or(0, |context| raw.text_tokens(context.text()))
             + agent_conversations
                 .as_ref()
                 .map_or(0, |text| raw.text_tokens(text));
@@ -253,7 +339,11 @@ impl DaemonState {
         runtime.set_tool_output_pruning(pruning);
         runtime.set_agent_files(files.clone());
         self.wire_runtime(&mut runtime);
-        if summary.is_some() || checkpoint.is_some() || agent_conversations.is_some() {
+        if summary.is_some()
+            || checkpoint.is_some()
+            || agent_conversations.is_some()
+            || project.is_some()
+        {
             let mut providers = crate::components::default_providers_in_zone(
                 Arc::clone(&self.memory),
                 Arc::clone(&self.memory_embeddings),
@@ -274,6 +364,9 @@ impl DaemonState {
                         as Arc<dyn Provider>,
                 );
             }
+            if let Some(project) = &project {
+                providers.push(project.clone() as Arc<dyn Provider>);
+            }
             runtime.set_providers(providers);
         }
         let base = runtime.run_base();
@@ -283,6 +376,7 @@ impl DaemonState {
             adapter,
             base,
             context,
+            project_context: project,
         })
     }
 

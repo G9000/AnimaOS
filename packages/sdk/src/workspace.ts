@@ -91,9 +91,10 @@ export class WorkspaceClient {
     return this.client.requestJson('/api/workspace/files');
   }
 
-  readFile(path: string): Promise<WorkspaceFileResponse> {
+  readFile(path: string, options: { cursor?: string; signal?: AbortSignal } = {}): Promise<WorkspaceFileResponse> {
+    const query = `path=${encodeURIComponent(path)}${options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : ''}`;
     return this.client.requestJson(
-      `/api/workspace/file?path=${encodeURIComponent(path)}`,
+      `/api/workspace/file?${query}`, { signal: options.signal },
     );
   }
 
@@ -179,7 +180,9 @@ export interface WorkspaceFileResponse {
   content: string;
   truncated: boolean;
   /** Verified Anima-generated document content, rendered as safe Markdown. */
-  previewKind?: 'document';
+  previewKind?: 'document' | 'office_content';
+  /** Bounded structural content from an exact server publication receipt. */
+  officeContent?: import('./document-edits.js').OfficeInventoryPage;
   /** Hash of the exact file bytes captured for the document preview. */
   sha256?: string;
 }

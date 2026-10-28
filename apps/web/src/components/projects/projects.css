@@ -1,0 +1,26 @@
+.project-home { overflow: auto; height: 100%; padding: 28px clamp(16px, 5vw, 72px) 72px; color: var(--color-ink, inherit); max-width: 1200px; margin: auto; }
+.project-home h1 { font-size: clamp(24px, 3vw, 36px); line-height: 1.2; margin: 14px 0; }
+.project-home h2 { font-size: 18px; margin: 0 0 12px; }
+.project-heading, .project-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.project-home p { margin: 12px 0; line-height: 1.6; }
+.project-card { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 16px; padding: 20px; margin: 18px 0; background: color-mix(in srgb, var(--color-surface, #151518) 92%, transparent); text-align: left; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.project-grid .project-card { display: flex; flex-direction: column; gap: 10px; }
+.project-home label:not(.project-check):not(.project-message-choice), .project-move label { display: grid; gap: 7px; margin: 12px 0; }
+.project-home input:not([type=checkbox]), .project-home select, .project-home textarea, .project-move select { width: 100%; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 4%, transparent); color: inherit; border-radius: 8px; padding: 9px 12px; font: inherit; }
+.project-home select option, .project-move select option { color: #171719; background: #f5f4f0; }
+.project-home button:not(.studio-tool-button), .project-move button { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.project-home button:disabled, .project-move button:disabled { opacity: .45; cursor: default; }
+.project-home button:focus-visible, .project-home input:focus-visible, .project-home select:focus-visible, .project-home textarea:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.project-check { display: inline-flex; align-items: center; gap: 8px; margin: 8px 18px 8px 0; }
+.project-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+.project-tabs button[aria-selected=true] { background: color-mix(in srgb, currentColor 15%, transparent); font-weight: 600; }
+.project-note, .project-members-line { font-size: 13px; opacity: .7; }
+.project-source { padding: 16px 0; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.project-preview, .project-picker { padding: 18px; margin: 16px 0; border-radius: 12px; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+.project-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 400px; overflow: auto; }
+.project-message-choice { display: flex; align-items: flex-start; gap: 12px; padding: 12px; max-height: 180px; overflow: auto; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); white-space: pre-wrap; }
+.project-notice { padding: 12px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 8px; }
+.project-move { padding: 24px; width: min(500px, calc(100vw - 32px)); background: var(--color-surface, #202025); color: inherit; border-radius: 16px; }
+.project-move-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: #0008; }
+.session-project-line { display: flex; gap: 12px; padding: 8px 20px; font-size: 12px; }

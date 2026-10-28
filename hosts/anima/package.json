@@ -3,11 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build-native": "bun run --filter @animaos/sdk build && bun run --filter @animaos/web build && cargo build --release --locked -p anima --features native-install",
-    "package": "bun run build-native && bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/release/package.mjs",
+    "build-native": "bun ../../tools/workspace-dev/scripts/run-task.ts --rust-cache release -- bun run build-native:suite",
+    "package": "bun ../../tools/workspace-dev/scripts/run-task.ts --rust-cache release -- bun run package:suite",
     "package-check": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/release/package.mjs --check && bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun test tools/release/package.test.mjs",
     "build": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo build -p anima",
     "test": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo test -p anima",
-    "lint": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo fmt --all --check"
+    "lint": "bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo fmt --all --check",
+    "build-native:suite": "bun run --filter @animaos/sdk build && bun run --filter @animaos/web build && bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- cargo build --release --locked -p anima --features native-install",
+    "package:suite": "bun run build-native && bun ../../tools/workspace-dev/scripts/run-task.ts --cwd ../.. -- bun tools/release/package.mjs"
   }
 }

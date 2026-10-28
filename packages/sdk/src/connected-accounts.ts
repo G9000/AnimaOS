@@ -1,8 +1,32 @@
 import type { DaemonClient } from './client.js';
 
 export type ConnectedProvider =
-  'gdrive' | 'gmail' | 'outlook' | 'email' | 'gcalendar';
+  'gdrive' | 'gmail' | 'outlook' | 'email' | 'gcalendar' | 'onedrive' | 'sharepoint';
 export type ConnectedKind = 'file' | 'mail' | 'event';
+export interface ConnectedSearchSettings {
+  historyDepth: 'recent' | 'days30' | 'days90' | 'days365';
+  retainedItemLimit: 100 | 500 | 2000;
+  attachmentText: 'metadataOnly' | 'supportedText';
+  historyPaused: boolean;
+}
+export interface ConnectedHistoryCoverage {
+  state: 'notRequested' | 'pending' | 'running' | 'paused' | 'complete' | 'partial' | 'unsupported' | 'error';
+  requestedFromMs?: number | null;
+  requestedBeforeMs?: number | null;
+  reason?: string | null;
+  enumeratedCount?: number;
+  retainedCount?: number;
+  oldestRetainedAt?: string | null;
+  lastAttemptAtMs?: number | null;
+  lastSuccessAtMs?: number | null;
+  verifiedAtMs?: number | null;
+  retryAtMs?: number | null;
+}
+export interface ConnectedSourceCapabilities {
+  history: boolean;
+  attachmentFormats: string[];
+  workflowEventKinds: AccountEventKind[];
+}
 export interface ConnectedSource {
   connectorId: string;
   provider: ConnectedProvider;
@@ -24,6 +48,11 @@ export interface ConnectedSource {
   lastAttemptAtMs: number | null;
   lastSuccessAtMs: number | null;
   error: string | null;
+  settingsRevision?: number;
+  settings?: ConnectedSearchSettings;
+  historyCoverage?: ConnectedHistoryCoverage;
+  capabilities?: ConnectedSourceCapabilities;
+  attachmentCoverage?: { indexed: number; partial: number; omitted: number; failed: number; pending: number; error: string | null };
 }
 export interface ConnectedSources {
   sources: ConnectedSource[];
@@ -41,6 +70,11 @@ export interface ConnectedSearchHit {
   indexedAtMs: number;
   sourceModifiedAt: string | null;
   truncated: boolean;
+  contentRole?: 'body' | 'file' | 'event' | 'attachment' | 'documentText' | null;
+  parentCitationId?: string | null;
+  extractionStatus?: string | null;
+  omissions?: string[];
+  locators?: string[];
 }
 export interface ConnectedSearchItem extends Omit<
   ConnectedSearchHit,
@@ -60,6 +94,7 @@ export interface ConnectedSearchQuery {
 export interface ConnectedSearchResult {
   hits: ConnectedSearchHit[];
   sources: ConnectedSource[];
+  omittedSourceCount?: number;
 }
 type ReadOptions = { signal?: AbortSignal };
 
@@ -74,7 +109,7 @@ export class ConnectedSearchClient {
   async setSource(
     agentId: string,
     connectorId: string,
-    input: { enabled: boolean; expectedGeneration: string },
+    input: { enabled: boolean; expectedGeneration: string; expectedSettingsRevision?: number; settings?: ConnectedSearchSettings },
   ): Promise<ConnectedSource> {
     const result = await this.client.requestJson<{ source: ConnectedSource }>(
       `${searchPath(agentId)}/sources/${encodeURIComponent(connectorId)}`,
@@ -84,7 +119,7 @@ export class ConnectedSearchClient {
   }
   refresh(
     agentId: string,
-    input: { connectorId?: string } = {},
+    input: { connectorId?: string; work?: 'live' | 'history' | 'all' } = {},
   ): Promise<{ sources: ConnectedSource[] }> {
     return this.client.requestJson(`${searchPath(agentId)}/refresh`, {
       method: 'POST',

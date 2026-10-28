@@ -86,6 +86,7 @@ export function ContextNote({
                 ['Tool schemas', usage.breakdown.toolSchemasTokens],
                 ['Companion files', usage.breakdown.companionFilesTokens],
                 ['Memory', usage.breakdown.memoryTokens],
+                ...(usage.breakdown.projectContextTokens !== undefined ? [['Shared project context', usage.breakdown.projectContextTokens] as const] : []),
               ] as const
             ).map(([label, tokens]) => (
               <div key={label} className="contents">
@@ -109,6 +110,13 @@ export function ContextNote({
             </p>
           </>
         )}
+        {usage.projectContext && <div aria-label="Shared project context coverage">
+          <p>Project sources: current preview · about {usage.projectContext.estimatedTokens.toLocaleString()} tokens.</p>
+          <p>The next turn rechecks these sources and records its own admitted selection.</p>
+          {usage.projectContext.resources.map((source, index) => <p key={source.resourceId}>
+            Selected source {index + 1}: {source.state.replaceAll('_', ' ')}{source.shortened ? ' · shortened' : ''}
+          </p>)}
+        </div>}
       </details>
       {showNote && (
         <div className="session-context-note">

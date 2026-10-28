@@ -25,6 +25,9 @@ impl ConnectorManager {
                     return Err(ConnectorManagerError::AgentBusy);
                 }
                 if !crate::connectors::drive::can_tombstone_agent(&state,&agent_id){return Err(ConnectorManagerError::Persistence);}
+                if !crate::connectors::microsoft_files::can_tombstone_agent(&state, &agent_id) {
+                    return Err(ConnectorManagerError::Persistence);
+                }
                 if state.community_bundles.iter().any(|bundle|bundle.agent_id==agent_id){return Err(ConnectorManagerError::Persistence);}
             }
             let connectors = manager
@@ -79,6 +82,11 @@ impl ConnectorManager {
             if !crate::connectors::drive::can_tombstone_agent(&*manager.state.read().await,&agent_id) {
                 drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
             }
+            if !crate::connectors::microsoft_files::can_tombstone_agent(&*manager.state.read().await, &agent_id) {
+                drop(_transaction);
+                manager.restore_agent_delete_configuration(&previous).await?;
+                return Err(ConnectorManagerError::Persistence);
+            }
             if manager.state.read().await.community_bundles.iter().any(|bundle|bundle.agent_id==agent_id) {
                 drop(_transaction);manager.restore_agent_delete_configuration(&previous).await?;return Err(ConnectorManagerError::Persistence);
             }
@@ -96,8 +104,20 @@ impl ConnectorManager {
                 manager.restore_agent_delete_configuration(&previous).await?;
                 return Err(error);
             }
+            let project_removal = {
+                let mut state = manager.state.write().await;
+                crate::projects::ProjectAgentRemovalCandidate::prepare(&mut state, &agent_id, now_ms())
+            };
+            let project_removal = match project_removal {
+                Ok(candidate) => candidate,
+                Err(_) => {
+                    drop(_transaction);
+                    manager.restore_agent_delete_configuration(&previous).await?;
+                    return Err(ConnectorManagerError::Persistence);
+                }
+            };
             let deletion = HistoryDeletion::agent(&agent_id);
-            let (agent_snapshot, previous_connectors, previous_inbound, previous_outbound, previous_schedules, cancelled_queued, previous_runs, previous_sessions, previous_drive, persist) = {
+            let (agent_snapshot, previous_connectors, previous_inbound, previous_outbound, previous_schedules, cancelled_queued, previous_runs, previous_sessions, previous_drive, previous_microsoft_files, persist) = {
                 let mut state = manager.state.write().await;
                 let agent_snapshot = state.get_agent(&agent_id);
                 let previous_connectors = previous
@@ -136,6 +156,8 @@ impl ConnectorManager {
                 }
                 state.schedules.retain(|_, schedule| schedule.agent_id != agent_id);
                 let previous_drive=crate::connectors::drive::tombstone_agent_records(&mut state,&agent_id).map_err(|_|ConnectorManagerError::Persistence)?;
+                let previous_microsoft_files = crate::connectors::microsoft_files::tombstone_agent_records(&mut state, &agent_id)
+                    .map_err(|_| ConnectorManagerError::Persistence)?;
                 state.remove_agent(&agent_id);
                 // Without this, the deleted agent's terminal runs would stay
                 // in the ledger until a restart: `unmirrored_terminal` skips
@@ -150,7 +172,8 @@ impl ConnectorManager {
                 // registry until a restart (fix round 1, M2 review).
                 let previous_sessions = state.sessions.remove_for_agent(&agent_id);
                 state.record_history_deletion(deletion.clone());
-                let persist = state.control_plane_persist_request();
+                let persist = project_removal.persistence_request(&mut state)
+                    .map_err(|_| ConnectorManagerError::Persistence)?;
                 (
                     agent_snapshot,
                     previous_connectors,
@@ -161,11 +184,28 @@ impl ConnectorManager {
                     previous_runs,
                     previous_sessions,
                     previous_drive,
+                    previous_microsoft_files,
                     persist,
                 )
             };
 
-            if persist.save().await.is_err() {
+            let mut persist = Some(persist);
+            let mut saved = Err(std::io::Error::other("Project deletion save was superseded"));
+            for _ in 0..3 {
+                let request = match persist.take() {
+                    Some(request) => request,
+                    None => {
+                        let mut state = manager.state.write().await;
+                        match project_removal.persistence_request(&mut state) {
+                            Ok(request) => request,
+                            Err(_) => break,
+                        }
+                    }
+                };
+                saved = request.save_project_candidate().await;
+                if !saved.as_ref().is_err_and(crate::state::is_superseded_control_plane_save) { break; }
+            }
+            if let Err(error) = saved {
                 {
                     let mut state = manager.state.write().await;
                     for (connector_id, connector) in previous_connectors {
@@ -186,10 +226,16 @@ impl ConnectorManager {
                     }
                     state.clear_history_deletion(&deletion);
                     crate::connectors::drive::rollback_agent_records(&mut state,previous_drive);
+                    crate::connectors::microsoft_files::rollback_agent_records(&mut state, previous_microsoft_files);
                     if let Some(agent_snapshot) = agent_snapshot {
                         state
                             .restore_removed_agent(agent_snapshot)
                             .map_err(|_| ConnectorManagerError::Persistence)?;
+                    }
+                    if crate::control_plane_store::is_durability_uncertain(&error) {
+                        project_removal.fence_uncertain(&state);
+                    } else {
+                        project_removal.rollback(&mut state);
                     }
                 }
                 manager.restore_agent_delete_configuration(&previous).await?;
@@ -200,6 +246,7 @@ impl ConnectorManager {
             // announced; their controls go with them.
             {
                 let mut state = manager.state.write().await;
+                project_removal.publish(&mut state).map_err(|_| ConnectorManagerError::Persistence)?;
                 state.finalize_removed_agent_mcp(&agent_id);
                 for (_, cancelled) in &cancelled_queued {
                     if let Some(control) = state.live.runs().control(&cancelled.id) {
@@ -227,8 +274,12 @@ impl ConnectorManager {
                 manager.remove_delivery_authority(&connector.id);
             }
             let drive=manager.state.read().await.drive_manager.as_ref().and_then(|weak|weak.upgrade());
+            let microsoft_files = manager.state.read().await.microsoft_files_manager.as_ref().and_then(|weak| weak.upgrade());
             drop(_transaction);
             if let Some(drive)=drive {drive.cleanup_deleted_agent(&agent_id).await;}
+            if let Some(microsoft_files) = microsoft_files {
+                microsoft_files.cleanup_deleted_agent(&agent_id).await;
+            }
             Ok(())
         })
         .await

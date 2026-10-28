@@ -125,6 +125,8 @@ export interface SessionViewProps {
   onRename: (title: string) => Promise<boolean>;
   onToggleArchived: () => void;
   onExport: () => void;
+  onMoveToProject?: () => void;
+  onOpenProject?: (projectId: string) => void;
   /** A check-in's automation, for its header (spec §15.2). */
   automation?: Automation | null;
   /** Opens the automation's editor on the Automations page. */
@@ -351,6 +353,8 @@ export function SessionView({
   onToggleArchived,
   onExport,
   automation = null,
+  onMoveToProject,
+  onOpenProject,
   onEditAutomation,
   notice = null,
   browserTask,
@@ -593,6 +597,12 @@ export function SessionView({
           usageLine={sessionUsageLine(sessionDetails.usage)}
         />
       ) : null}
+      {session && (
+        <div className="session-project-line">
+          {session.projectId && onOpenProject && <button onClick={() => onOpenProject(session.projectId!)}>Open project</button>}
+          {onMoveToProject && <button onClick={onMoveToProject}>Move to project</button>}
+        </div>
+      )}
       {session && (
         <SessionContinuity
           key={`${session.agentId}\u0000${session.id}`}

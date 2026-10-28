@@ -13,6 +13,15 @@ pub(super) struct CapabilityInventory {
     extensions: Vec<PlannedExtension>,
     limitations: Vec<&'static str>,
     programmatic_tools: ProgrammaticToolsInventory,
+    projects: ProjectCapability,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ProjectCapability {
+    version: u32,
+    shared_agents: bool,
+    selected_context: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -65,6 +74,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
         .collect();
     CapabilityInventory {
         schema_version: 1,
+        projects: ProjectCapability { version: 1, shared_agents: true, selected_context: true },
         programmatic_tools: ProgrammaticToolsInventory {
             status: state.tool_rpc_service.configuration_status(), mode: "one_shot",
             interpreter_environment: crate::tool_rpc::PYTHON_PATH_ENV,
@@ -79,7 +89,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             ("camera", "Camera observation", "planned", "Observe an authorized camera through a bounded perception module."),
             ("voice", "Voice", "partial", "Selected WAV transcription, local audio capture, and selected-reply speech output require explicit opt-in and configuration. Device coverage and provider quality remain unverified."),
             ("smart-home", "Smart home", "planned", "Connect devices, inspect their state, and verify authorized actions."),
-            ("document-engine", "Document processing", "partial", "Bounded read_document extraction supports PDF, DOCX and XLSX with explicit opt-in. Granted write_document and read_document_source create and revise verified Anima-generated DOCX, XLSX, PPTX and PDF; owner content previews and downloads are available. Arbitrary Office editing and OCR remain unavailable."),
+            ("document-engine", "Document processing", "partial", "Explicitly granted document tools inspect and propose bounded structural DOCX, XLSX and PPTX changes in private durable storage. Applying requires an exact owner AllowOnce review and current native authority. Generated documents and PDF output remain available through write_document; OCR and rendered Office fidelity remain unavailable."),
             ("coding-agents", "External coding agents", "planned", "Connect an external coding worker through a bounded execution adapter."),
             ("community-bundles", "Community bundles", "partial", "Reviewed MCP and skill installation is implemented with explicit owner review and configuration. This does not provide an arbitrary execution bridge."),
         ].into_iter().map(|(id, label, status, description)| PlannedExtension { id, label, status, description }).collect(),
@@ -89,7 +99,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             "Storage labels describe configuration, not a successful storage health check.",
             "Saved tasks and memories do not imply automatic resumption of interrupted runs. Uncertain scheduled actions require review.",
             "Background shell processes are managed only while this daemon is running. Shell access is not an operating-system sandbox.",
-            "Native text tools and explicitly granted document tools retain workspace authority and approvals. Finished documents use a bounded structured subset; arbitrary Office editing, spreadsheet calculation and OCR remain unavailable.",
+            "Native text and document tools retain workspace authority and approvals. Imported Office edits cover a bounded structural subset with exact owner review; unsupported spreadsheet calculation, rendered fidelity and OCR remain unavailable.",
             "Community bundles support reviewed MCP and skill installation. A portable arbitrary execution bridge is not available.",
         ],
     }
@@ -97,6 +107,8 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
 
 fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
     match name {
+        "inspect_office_document" | "propose_document_edit" => ("documents", vec!["A direct ordinary owner run, an explicit tool grant, durable profile metadata, private local staging and the shared isolated document worker. Proposals do not authorize publication."]),
+        "apply_document_edit" => ("documents", vec!["The current exact source, destination and review, an explicit tool grant, and the actual owner AllowOnce decision. No helper, RPC or automatic restart publication."]),
         "execute_code" => ("terminal", vec!["Windows, an explicitly configured absolute Python interpreter (ANIMAOS_RS_TOOL_RPC_PYTHON_PATH), both execute_code and bash grants, and current Exec approval. One-shot local Python has the operating-system access of the daemon user; native calls retain separate grants and receipts."]),
         "browser_navigate"|"browser_observe"|"browser_act"|"browser_transfer"=>("browser",vec!["An owner-selected installed policy and live ordinary chat scope, explicit native tool grants and Exec approval. No helper access or restored browser session."]),
         "read_file" | "write_file" | "edit_file" | "multi_edit" | "list_dir" | "glob" | "grep" =>
@@ -131,6 +143,7 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
         name if name.starts_with("calendar_") =>
             ("productivity", vec!["A connected Google Calendar. Changes remain drafts until owner approval."]),
         name if name.starts_with("drive_") => ("productivity",vec!["Connected Google Drive, immutable selected file IDs, and a current agent tool grant."]),
+        "microsoft_files_read" => ("productivity", vec!["A separate connected Microsoft file account, owner-selected OneDrive files or an approved SharePoint site, and a current agent tool grant. Search requires separate opt-in; no file writes or workflow triggers."]),
         name if name.starts_with("mail_") =>
             ("productivity", vec!["A connected mailbox. Sending follows the connector's owner approval flow."]),
         _ => ("utility", vec!["An explicit agent tool grant."]),

@@ -2,7 +2,7 @@ use super::*;
 use crate::connected_search::providers::document;
 use crate::connected_search::{DocumentKind, IndexedDocument};
 use futures::{StreamExt, TryStreamExt};
-fn page_token(page: &Value, key: &str) -> Result<Option<String>, MailError> {
+pub(super) fn page_token(page: &Value, key: &str) -> Result<Option<String>, MailError> {
     match &page[key] {
         Value::Null => Ok(None),
         Value::String(t) if !t.is_empty() && t.len() <= 4096 => Ok(Some(t.clone())),
@@ -43,7 +43,7 @@ fn payload_text(payload: &Value, depth: usize) -> Result<String, MailError> {
     }
     Ok(fallback)
 }
-fn gmail_document(v: &Value) -> Result<IndexedDocument, MailError> {
+pub(super) fn gmail_document(v: &Value) -> Result<IndexedDocument, MailError> {
     let id = text(v, "id", 256);
     if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err(MailError::Upstream);
@@ -65,7 +65,7 @@ fn gmail_document(v: &Value) -> Result<IndexedDocument, MailError> {
     d.source_url = Some(format!("https://mail.google.com/mail/u/0/#all/{id}"));
     Ok(d)
 }
-fn graph_document(v: &Value) -> Result<IndexedDocument, MailError> {
+pub(super) fn graph_document(v: &Value) -> Result<IndexedDocument, MailError> {
     let id = text(v, "id", 1024);
     if id.is_empty() {
         return Err(MailError::Upstream);
@@ -85,7 +85,7 @@ fn graph_document(v: &Value) -> Result<IndexedDocument, MailError> {
         .is_some_and(|t| t.chars().count() > 64 * 1024);
     Ok(d)
 }
-fn next_graph(base: &str, next: &str) -> Result<reqwest::Url, MailError> {
+pub(super) fn next_graph(base: &str, next: &str) -> Result<reqwest::Url, MailError> {
     if next.len() > 8192 {
         return Err(MailError::Upstream);
     }

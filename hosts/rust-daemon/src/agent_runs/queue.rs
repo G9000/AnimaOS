@@ -702,11 +702,20 @@ impl AgentRunCoordinator {
             if !capabilities.send {
                 return Err(ApiError::conflict(SESSION_CANNOT_SEND));
             }
+            let project_witness = crate::projects::capture_run_witness(
+                &guard,
+                &request.agent_id,
+                &request.session_id,
+            )
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
             if request.mode == SessionRunMode::Steer && !capabilities.steer {
                 return Err(ApiError::bad_request_static(SESSION_CANNOT_STEER));
             }
             if request.mode == SessionRunMode::Steer {
                 if let Some(run_id) = joinable_run(&guard, &request.agent_id, &request.session_id) {
+                    let joining = guard.runs.get(&run_id).ok_or_else(ApiError::not_found)?;
+                    crate::projects::validate_active_lease(&guard, joining)
+                        .map_err(|error| ApiError::conflict(error.to_string()))?;
                     // A steer waits like a queued message, so it counts toward
                     // the same cap (M3 carry-over; controller ruling 5).
                     if waiting_count(&guard, &request.agent_id, None) >= MAX_QUEUED_RUNS_PER_AGENT {
@@ -754,6 +763,9 @@ impl AgentRunCoordinator {
             );
             record.input.skill = request.skill.clone();
             record.input.attachment_ids = request.attachment_ids.clone();
+            // This is the exact current scope reviewed at acceptance, including
+            // recovery children. It is persisted before the run can be dispatched.
+            record.project_witness = Some(project_witness);
             let previous_recovery_mirrored = recovery.as_ref().and_then(|admission| {
                 guard
                     .runs
@@ -981,6 +993,10 @@ impl AgentRunCoordinator {
             };
             let model = runtime.config().model.clone();
             let provider = runtime.config().provider.clone();
+            let project_witness = guard
+                .runs
+                .get(&left.run_id)
+                .and_then(|record| record.project_witness.clone());
             let now_ms = now_millis();
             // The run's own record holds only steers its transcript took in.
             let mut open_slots = MAX_QUEUED_RUNS_PER_AGENT.saturating_sub(waiting_count(
@@ -1014,8 +1030,13 @@ impl AgentRunCoordinator {
                         accepted_at_ms,
                     );
                     record.input = input;
+                    // A leftover was accepted into its parent's frozen context.
+                    // Never silently adopt a newer grant after that context ended.
+                    record.project_witness = project_witness.clone();
                     let refused = if stopped {
                         Some((STOPPED_BEFORE_START, STOPPED_BEFORE_START_MESSAGE))
+                    } else if crate::projects::validate_queued_witness(&guard, &record).is_err() {
+                        Some((RUN_FAILED, "Project sharing changed before this queued message could start. Review the project before sending again."))
                     } else if open_slots == 0 {
                         Some((QUEUE_FULL_BEFORE_START, QUEUE_FULL_BEFORE_START_MESSAGE))
                     } else {

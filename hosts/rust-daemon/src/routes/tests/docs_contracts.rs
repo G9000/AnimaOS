@@ -42,7 +42,17 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 331, "complete registered operation count");
+    assert_eq!(actual.len(), 355, "complete registered operation count");
+    let document_edit_additions = [
+        ("GET", "/api/document-edits/{proposal_id}"),
+        ("DELETE", "/api/document-edits/{proposal_id}"),
+    ];
+    for (method, path) in document_edit_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "exact document review operation must be registered"
+        );
+    }
     let connected_account_additions = [
         ("GET", "/api/agents/{agent_id}/connected-search/sources"),
         (
@@ -74,6 +84,67 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         assert!(
             actual.contains(&(method.to_string(), path.to_string())),
             "connected account owner operation must be registered"
+        );
+    }
+    let microsoft_file_additions = [
+        ("GET", "/api/agents/{agent_id}/connectors/microsoft-files"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/connectors/microsoft-files/connect",
+        ),
+        (
+            "GET",
+            "/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/files",
+        ),
+        (
+            "PUT",
+            "/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/selection",
+        ),
+        (
+            "DELETE",
+            "/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}",
+        ),
+        ("GET", "/api/connectors/microsoft-files/callback"),
+    ];
+    for (method, path) in microsoft_file_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "selected Microsoft file operation must be registered"
+        );
+    }
+    let project_additions = [
+        ("GET", "/api/projects"),
+        ("POST", "/api/projects"),
+        ("GET", "/api/projects/manage"),
+        ("GET", "/api/projects/{project_id}"),
+        ("PATCH", "/api/projects/{project_id}"),
+        ("DELETE", "/api/projects/{project_id}"),
+        ("PUT", "/api/projects/{project_id}/members"),
+        ("POST", "/api/projects/{project_id}/resources"),
+        (
+            "PATCH",
+            "/api/projects/{project_id}/resources/{resource_id}",
+        ),
+        (
+            "DELETE",
+            "/api/projects/{project_id}/resources/{resource_id}",
+        ),
+        ("PUT", "/api/projects/{project_id}/resource-order"),
+        (
+            "GET",
+            "/api/projects/{project_id}/resources/{resource_id}/preview",
+        ),
+        ("GET", "/api/projects/{project_id}/context"),
+        ("GET", "/api/projects/{project_id}/chats"),
+        (
+            "PUT",
+            "/api/agents/{agent_id}/sessions/{session_id}/project",
+        ),
+    ];
+    for (method, path) in project_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "shared project operation must be registered"
         );
     }
     let browser_expansion_additions = [
@@ -291,6 +362,10 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         ("GET", "/api/agents/{agent_id}/workflows"),
         ("POST", "/api/agents/{agent_id}/workflows"),
         ("GET", "/api/agents/{agent_id}/workflows/{workflow_id}"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/workflows/{workflow_id}/steps/{step_id}/attempts/{job_id}",
+        ),
         (
             "POST",
             "/api/agents/{agent_id}/workflows/{workflow_id}/resume",
@@ -579,6 +654,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                    && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
+                    && !project_additions.contains(&(method.as_str(), path.as_str()))
+                    && !document_edit_additions.contains(&(method.as_str(), path.as_str()))
                     && !browser_expansion_additions.contains(&(method.as_str(), path.as_str()))
                     && !oauth_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
@@ -637,6 +715,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| !connected_account_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
+                && !project_additions.contains(&(method.as_str(), path.as_str()))
+                && !document_edit_additions.contains(&(method.as_str(), path.as_str()))
                 && !browser_expansion_additions.contains(&(method.as_str(), path.as_str()))
                 && !oauth_additions.contains(&(method.as_str(), path.as_str()))
                 && !skill_learning_additions.contains(&(method.as_str(), path.as_str()))
@@ -686,7 +767,10 @@ fn docs_contracts_print_inventory() {
 }
 
 fn owner_console_path(path: &str) -> bool {
-    path == "/api/status"
+    path == "/api/projects"
+        || path.starts_with("/api/document-edits/")
+        || path.starts_with("/api/projects/")
+        || path == "/api/status"
         || path.starts_with("/api/logs")
         || path.starts_with("/api/usage")
         || path.starts_with("/api/pricing")
@@ -699,6 +783,8 @@ fn owner_console_path(path: &str) -> bool {
                 "/events",
                 "/automation-events",
                 "/runs",
+                "/workflows",
+                "/connectors/microsoft-files",
                 "/approvals",
                 "/approval-policy",
                 "/approval-rules",

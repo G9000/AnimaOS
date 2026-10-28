@@ -992,39 +992,42 @@ async fn resume_all_agents_exist_returns_409() {
 #[tokio::test]
 async fn resume_rolls_back_when_persist_fails() {
     let workspace = support::use_temp_workspace_root("resume-rollback");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     // Serialized against the other workspace tests by the root lock held in
     // `workspace`.
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let adopt_root = workspace.path().join("adopt");
     std::fs::create_dir_all(&adopt_root).expect("adopt root created");
     std::fs::write(adopt_root.join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
-    let app = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .expect("app configures persistence");
+    support::run_in_joined_runtime(move || async move {
+        let app = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .expect("app configures persistence");
 
-    // Force the next control-plane save to fail: replace the snapshot file
-    // with a directory so the atomic rename cannot replace it (mirrors the
-    // bootstrap rollback test's anima.yaml technique).
-    std::fs::remove_file(&control_plane_path).expect("startup snapshot exists");
-    std::fs::create_dir(&control_plane_path).expect("sabotage directory created");
+        // Force the next control-plane save to fail: replace the snapshot file
+        // with a directory so the atomic rename cannot replace it (mirrors the
+        // bootstrap rollback test's anima.yaml technique).
+        std::fs::remove_file(&control_plane_path).expect("startup snapshot exists");
+        std::fs::create_dir(&control_plane_path).expect("sabotage directory created");
 
-    let (status, body) = resume_workspace(&app, &adopt_root).await;
-    assert_eq!(status, 503, "{body}");
+        let (status, body) = resume_workspace(&app, &adopt_root).await;
+        assert_eq!(status, 503, "{body}");
 
-    // Full rollback: no agents, no live workspace configuration.
-    let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(
-        roster(&agents).len(),
-        0,
-        "agents must be rolled back: {agents}"
-    );
-    let (_, workspace_body) = send_empty_request(&app, "GET", "/api/workspace").await;
-    let workspace_body: serde_json::Value = serde_json::from_str(&workspace_body).unwrap();
-    assert_eq!(
-        workspace_body["configured"], false,
-        "workspace must be rolled back: {workspace_body}"
-    );
+        // Full rollback: no agents, no live workspace configuration.
+        let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
+        assert_eq!(
+            roster(&agents).len(),
+            0,
+            "agents must be rolled back: {agents}"
+        );
+        let (_, workspace_body) = send_empty_request(&app, "GET", "/api/workspace").await;
+        let workspace_body: serde_json::Value = serde_json::from_str(&workspace_body).unwrap();
+        assert_eq!(
+            workspace_body["configured"], false,
+            "workspace must be rolled back: {workspace_body}"
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1071,7 +1074,7 @@ async fn resume_rejects_whitespace_worker_system() {
 #[tokio::test]
 async fn resumed_agents_survive_restart() {
     let workspace = support::use_temp_workspace_root("resume-restart");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     std::fs::write(workspace.path().join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
 
@@ -1088,27 +1091,31 @@ async fn resumed_agents_survive_restart() {
 
     // Respawn against the same control-plane file (mirrors
     // control_plane_store_recovers_agents_and_swarms_after_restart).
-    let second_app = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .expect("second app should configure persistence");
-    let (_, agents) = send_empty_request(&second_app, "GET", "/api/agents").await;
-    assert_eq!(
-        roster(&agents)
-            .iter()
-            .map(|(_, name)| name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["Anima", "Scout"],
-        "resumed roster restored after restart: {agents}"
-    );
-    let (_, workspace_body) = send_empty_request(&second_app, "GET", "/api/workspace").await;
-    let workspace_body: serde_json::Value = serde_json::from_str(&workspace_body).unwrap();
-    assert_eq!(workspace_body["configured"], true, "{workspace_body}");
-    let canonical_root = workspace.path().canonicalize().expect("root canonicalizes");
-    assert_eq!(
-        workspace_body["workspace"]["rootPath"].as_str(),
-        Some(canonical_root.display().to_string().as_str()),
-        "{workspace_body}"
-    );
+    let second_root = workspace.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let second_app = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .expect("second app should configure persistence");
+        let (_, agents) = send_empty_request(&second_app, "GET", "/api/agents").await;
+        assert_eq!(
+            roster(&agents)
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Anima", "Scout"],
+            "resumed roster restored after restart: {agents}"
+        );
+        let (_, workspace_body) = send_empty_request(&second_app, "GET", "/api/workspace").await;
+        let workspace_body: serde_json::Value = serde_json::from_str(&workspace_body).unwrap();
+        assert_eq!(workspace_body["configured"], true, "{workspace_body}");
+        let canonical_root = second_root.canonicalize().expect("root canonicalizes");
+        assert_eq!(
+            workspace_body["workspace"]["rootPath"].as_str(),
+            Some(canonical_root.display().to_string().as_str()),
+            "{workspace_body}"
+        );
+    })
+    .await;
 }
 
 fn team_bootstrap_body(root: &std::path::Path) -> serde_json::Value {
@@ -1322,7 +1329,7 @@ async fn workspace_files_reject_directory_links_outside_the_configured_root() {
 #[tokio::test]
 async fn team_model_overrides_survive_yaml_resume_and_restart() {
     let root = support::use_temp_workspace_root("team-model-overrides");
-    let control_plane_path = root.path().join("control-plane.json");
+    let control_plane_path = root.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let mut request = team_bootstrap_body(root.path());
     request["agent"]["model"] = serde_json::json!("setup-model");
@@ -1362,10 +1369,13 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
     })
     .await;
 
-    let restarted = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .unwrap();
-    assert_team_model_overrides(&restarted).await;
+    support::run_in_joined_runtime(|| async {
+        let restarted = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .unwrap();
+        assert_team_model_overrides(&restarted).await;
+    })
+    .await;
 }
 
 async fn assert_team_model_overrides(app: &axum::Router) {
@@ -1388,7 +1398,7 @@ async fn assert_team_model_overrides(app: &axum::Router) {
 #[tokio::test]
 async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_restart() {
     let root = support::use_temp_workspace_root("settings-yaml-sync");
-    let control_plane_path = root.path().join("control-plane.json");
+    let control_plane_path = root.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let yaml_path = root.path().join("anima.yaml");
     let mut original: serde_yaml::Value = serde_yaml::from_str(VALID_AGENCY_YAML).unwrap();
@@ -1461,88 +1471,96 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
     })
     .await;
 
-    let restarted = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .unwrap();
-    let fresh = test_app();
-    let (status, body) = resume_workspace(&fresh, root.path()).await;
-    assert_eq!(status, 201, "{body}");
-    for instance in [&restarted, &fresh] {
-        let (_, body) = send_empty_request(instance, "GET", "/api/agents").await;
-        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-        for (name, model, provider) in [
-            ("Anima", "lead-new", "ollama"),
-            ("Scout renamed", "worker-final", "openai"),
-        ] {
-            let agent = body["agents"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|agent| agent["state"]["name"] == name)
-                .unwrap();
-            assert_eq!(agent["state"]["config"]["model"], model);
-            assert_eq!(agent["state"]["config"]["provider"], provider);
+    let resumed_root = root.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let restarted = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .unwrap();
+        let fresh = test_app();
+        let (status, body) = resume_workspace(&fresh, &resumed_root).await;
+        assert_eq!(status, 201, "{body}");
+        for instance in [&restarted, &fresh] {
+            let (_, body) = send_empty_request(instance, "GET", "/api/agents").await;
+            let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+            for (name, model, provider) in [
+                ("Anima", "lead-new", "ollama"),
+                ("Scout renamed", "worker-final", "openai"),
+            ] {
+                let agent = body["agents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|agent| agent["state"]["name"] == name)
+                    .unwrap();
+                assert_eq!(agent["state"]["config"]["model"], model);
+                assert_eq!(agent["state"]["config"]["provider"], provider);
+            }
         }
-    }
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn settings_yaml_and_persistence_failures_leave_runtime_unchanged() {
     let root = support::use_temp_workspace_root("settings-yaml-failure");
-    let control_plane_path = root.path().join("control-plane.json");
+    let control_plane_path = root.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
-    let app = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .unwrap();
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &team_bootstrap_body(root.path()).to_string(),
-    )
-    .await;
-    assert_eq!(status, 201, "{body}");
-    let (_, before) = send_empty_request(&app, "GET", "/api/agents").await;
-    let id = roster(&before)[0].0.clone();
-    let yaml_path = root.path().join("anima.yaml");
-    let yaml = std::fs::read_to_string(&yaml_path).unwrap();
-    for failure in ["malformed", "unwritable", "persistence"] {
-        match failure {
-            "malformed" => std::fs::write(&yaml_path, "invalid: [").unwrap(),
-            "unwritable" => {
-                std::fs::remove_file(&yaml_path).unwrap();
-                std::fs::create_dir(&yaml_path).unwrap();
-            }
-            _ => {
-                std::fs::remove_file(&control_plane_path).unwrap();
-                std::fs::create_dir(&control_plane_path).unwrap();
-            }
-        }
+    let workspace_root = root.path().to_path_buf();
+    support::run_in_joined_runtime(move || async move {
+        let app = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .unwrap();
         let (status, body) = send_json_request(
             &app,
-            "PATCH",
-            &format!("/api/agents/{id}"),
-            r#"{"model":"must-not-stick","provider":"ollama"}"#,
+            "POST",
+            "/api/workspace/bootstrap",
+            &team_bootstrap_body(&workspace_root).to_string(),
         )
         .await;
-        assert!(
-            status.is_client_error() || status.is_server_error(),
-            "{failure}: {status} {body}"
-        );
-        let (_, after) = send_empty_request(&app, "GET", "/api/agents").await;
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&before).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&after).unwrap(),
-            "{failure}"
-        );
-        if failure == "unwritable" {
-            std::fs::remove_dir(&yaml_path).unwrap();
+        assert_eq!(status, 201, "{body}");
+        let (_, before) = send_empty_request(&app, "GET", "/api/agents").await;
+        let id = roster(&before)[0].0.clone();
+        let yaml_path = workspace_root.join("anima.yaml");
+        let yaml = std::fs::read_to_string(&yaml_path).unwrap();
+        for failure in ["malformed", "unwritable", "persistence"] {
+            match failure {
+                "malformed" => std::fs::write(&yaml_path, "invalid: [").unwrap(),
+                "unwritable" => {
+                    std::fs::remove_file(&yaml_path).unwrap();
+                    std::fs::create_dir(&yaml_path).unwrap();
+                }
+                _ => {
+                    std::fs::remove_file(&control_plane_path).unwrap();
+                    std::fs::create_dir(&control_plane_path).unwrap();
+                }
+            }
+            let (status, body) = send_json_request(
+                &app,
+                "PATCH",
+                &format!("/api/agents/{id}"),
+                r#"{"model":"must-not-stick","provider":"ollama"}"#,
+            )
+            .await;
+            assert!(
+                status.is_client_error() || status.is_server_error(),
+                "{failure}: {status} {body}"
+            );
+            let (_, after) = send_empty_request(&app, "GET", "/api/agents").await;
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&before).unwrap(),
+                serde_json::from_str::<serde_json::Value>(&after).unwrap(),
+                "{failure}"
+            );
+            if failure == "unwritable" {
+                std::fs::remove_dir(&yaml_path).unwrap();
+            }
+            if failure == "persistence" {
+                assert_eq!(std::fs::read_to_string(&yaml_path).unwrap(), yaml);
+            }
+            std::fs::write(&yaml_path, &yaml).unwrap();
         }
-        if failure == "persistence" {
-            assert_eq!(std::fs::read_to_string(&yaml_path).unwrap(), yaml);
-        }
-        std::fs::write(&yaml_path, &yaml).unwrap();
-    }
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1744,7 +1762,7 @@ async fn bootstrap_team_rolls_back_every_agent_on_yaml_failure() {
 #[tokio::test]
 async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     let workspace = support::use_temp_workspace_root("bootstrap-team-persist");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let root = workspace.path().join("team");
     let first_root = root.clone();
@@ -1794,23 +1812,26 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
     })
     .await;
 
-    let restored = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .unwrap();
-    let (_, agents) = send_empty_request(&restored, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 2, "{agents}");
-    assert!(roster(&agents).iter().any(|(_, name)| name == "Researcher"));
-    let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
-    let lead = agents["agents"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|agent| agent["state"]["name"] == "Anima")
-        .unwrap();
-    assert_eq!(
-        lead["state"]["config"]["settings"]["additional"]["workspaceRole"],
-        "lead"
-    );
+    support::run_in_joined_runtime(|| async {
+        let restored = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .unwrap();
+        let (_, agents) = send_empty_request(&restored, "GET", "/api/agents").await;
+        assert_eq!(roster(&agents).len(), 2, "{agents}");
+        assert!(roster(&agents).iter().any(|(_, name)| name == "Researcher"));
+        let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
+        let lead = agents["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["state"]["name"] == "Anima")
+            .unwrap();
+        assert_eq!(
+            lead["state"]["config"]["settings"]["additional"]["workspaceRole"],
+            "lead"
+        );
+    })
+    .await;
 }
 
 #[tokio::test]

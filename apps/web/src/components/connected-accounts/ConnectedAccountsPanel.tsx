@@ -14,6 +14,7 @@ import {
 import { ownerFetch } from '../../lib/owner-fetch';
 import { useRenderScope } from '../../hooks/useRenderScope';
 import { AccountRuleEditor } from './AccountRuleEditor';
+import { SourceSearchSettings } from './SourceSearchSettings';
 import {
   accountButton,
   providerName,
@@ -208,6 +209,7 @@ function AccountContents({
   }
   const blocked = disabled || busy || loading;
   const eligibleSources = sources.filter((s) => s.enabled && s.available);
+  const ruleSources = eligibleSources.filter((source) => !source.capabilities || source.capabilities.workflowEventKinds.length > 0);
   const selectedFilter = eligibleSources.some(
     (s) => s.connectorId === sourceFilter,
   )
@@ -307,6 +309,28 @@ function AccountContents({
                 {source.error}
               </p>
             )}
+            {source.enabled && source.settings && source.settingsRevision && source.capabilities && (
+              <SourceSearchSettings
+                key={`${source.connectorId}:${source.generation}:${source.settingsRevision}`}
+                source={source}
+                disabled={blocked}
+                onSave={(settings) => {
+                  if (settings.historyDepth === 'recent' || settings.attachmentText === 'metadataOnly') {
+                    setHits(null);
+                    setItem(null);
+                  }
+                  void run(async () => {
+                    const next = await api.connectedSearch.setSource(agentId, source.connectorId, {
+                      enabled: true,
+                      expectedGeneration: source.generation,
+                      expectedSettingsRevision: source.settingsRevision,
+                      settings,
+                    });
+                    if (alive.current) acceptSources(currentSources.current.map((item) => item.connectorId === next.connectorId ? next : item));
+                  }, 'Search settings saved.');
+                }}
+              />
+            )}
           </article>
         ))}
       </div>
@@ -401,7 +425,7 @@ function AccountContents({
           <p className="text-xs text-ink-3">
             {hits.length
               ? `${hits.length} ${hits.length === 1 ? 'result' : 'results'} in retained account content`
-              : 'No matching indexed content.'}
+              : 'No match in retained account content. Some older or unsupported content may be missing.'}
           </p>
           {hits.map((hit) => (
             <article
@@ -431,6 +455,8 @@ function AccountContents({
               <p className="mt-2 text-xs text-ink-3">
                 {providerName(hit.provider)} · indexed {date(hit.indexedAtMs)}
                 {hit.truncated ? ' · shortened text' : ''}
+                {hit.contentRole === 'attachment' ? ' · attachment' : ''}
+                {hit.extractionStatus && hit.extractionStatus !== 'ready' ? ` · ${hit.extractionStatus}` : ''}
               </p>
             </article>
           ))}
@@ -469,6 +495,12 @@ function AccountContents({
               the complete content.
             </p>
           )}
+          {item.extractionStatus && item.extractionStatus !== 'ready' && (
+            <p className="text-xs text-ink-3">Some content could not be included: {item.extractionStatus}.</p>
+          )}
+          {item.omissions && item.omissions.length > 0 && (
+            <p className="text-xs text-ink-3">The retained text covers only supported parts of this document.</p>
+          )}
           {safeSourceUrl(item.sourceUrl) && (
             <a
               className="text-xs text-accent underline"
@@ -501,7 +533,7 @@ function AccountContents({
           <button
             type="button"
             className={accountButton}
-            disabled={blocked || !eligibleSources.length || !templates.length}
+            disabled={blocked || !ruleSources.length || !templates.length}
             onClick={() => setEditor('new')}
           >
             New account rule
@@ -515,7 +547,7 @@ function AccountContents({
         {editor && (
           <AccountRuleEditor
             key={editor === 'new' ? 'new' : `${editor.id}:${editor.revision}`}
-            sources={eligibleSources}
+            sources={ruleSources}
             templates={templates}
             rule={editor === 'new' ? undefined : editor}
             disabled={blocked}

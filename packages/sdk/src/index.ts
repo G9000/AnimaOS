@@ -110,8 +110,42 @@ export type {
 export { RunsClient, isTerminalRunStatus } from './runs.js';
 export { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
 export { ConnectedSearchClient, AccountWorkflowsClient } from './connected-accounts.js';
+export { MicrosoftFilesClient } from './microsoft-files.js';
+export { ProjectsClient } from './projects.js';
+export { DocumentEditsClient } from './document-edits.js';
+export type {
+  OfficeFormat, OfficeCalculationState, OfficeCellValue, OfficeRange, OfficeTargetValue,
+  OfficeTarget, OfficeInventory, OfficeChange, OfficePreservation, DocumentEditDestination,
+  DocumentEditSourceLabel, DocumentEditReview, OfficeInventoryPage, DocumentEditCancellation,
+} from './document-edits.js';
+export type {
+  Project,
+  ProjectMember,
+  ProjectStatus,
+  ProjectSummary,
+  ProjectTarget,
+  ProjectResourceState,
+  ProjectResource,
+  ProjectContextReport,
+  ProjectSourcePreview,
+  ProjectChatLink,
+  ProjectChatPage,
+  ProjectCreateInput,
+  ProjectPatchInput,
+  ProjectAddResourceInput,
+  ProjectResourcePatch,
+  ProjectMembersResult,
+} from './projects.js';
+export type {
+  MicrosoftFileMode,
+  MicrosoftFileConnector,
+  MicrosoftFileStatus,
+  MicrosoftFileChoice,
+  MicrosoftFileChoices,
+} from './microsoft-files.js';
 export type {
   ConnectedProvider, ConnectedKind, ConnectedSource, ConnectedSources,
+  ConnectedSearchSettings, ConnectedHistoryCoverage, ConnectedSourceCapabilities,
   ConnectedSearchHit, ConnectedSearchItem, ConnectedSearchQuery, ConnectedSearchResult,
   AccountEventKind, AccountEventField, AccountInputBinding, AccountWorkflowFilters,
   AccountWorkflowInput, AccountWorkflowRule, AccountWorkflowEvent,
@@ -128,6 +162,7 @@ export type {
   WorkflowStep,
   WorkflowDecision,
   WorkflowRun,
+  WorkflowAttemptEvidence,
   WorkflowTemplate,
   WorkflowTemplateInput,
   WorkflowTemplateRunInput,
@@ -136,6 +171,7 @@ export type {
 } from './workflows.js';
 export type {
   RunRecoverySummary,
+  RunContinuityEvidence,
   ContinueRecoveryInput,
   TurnSummary,
 } from './runs.js';

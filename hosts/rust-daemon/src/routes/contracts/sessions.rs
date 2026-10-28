@@ -108,6 +108,8 @@ pub(crate) struct SessionContextUsageResponse {
     pub(crate) breakdown: Option<SessionContextBreakdownResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) coverage: Option<SessionContextCoverageResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) project_context: Option<crate::projects::ProjectContextReport>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -120,6 +122,7 @@ pub(crate) struct SessionContextBreakdownResponse {
     pub(crate) tool_schemas_tokens: u64,
     pub(crate) companion_files_tokens: Option<u64>,
     pub(crate) memory_tokens: Option<u64>,
+    pub(crate) project_context_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -137,6 +140,7 @@ impl From<crate::sessions::context::ContextUsage> for SessionContextUsageRespons
             reply_reserve_tokens: value.reply_reserve_tokens,
             breakdown: None,
             coverage: None,
+            project_context: None,
         }
     }
 }
@@ -153,11 +157,13 @@ impl From<crate::sessions::context::ContextInspection> for SessionContextUsageRe
             tool_schemas_tokens: b.tool_schemas_tokens,
             companion_files_tokens: b.companion_files_tokens,
             memory_tokens: b.memory_tokens,
+            project_context_tokens: b.project_context_tokens,
         });
         response.coverage = Some(SessionContextCoverageResponse {
             basis: value.coverage.basis,
             omitted: value.coverage.omitted,
         });
+        response.project_context = value.project_context;
         response
     }
 }
@@ -233,6 +239,8 @@ pub(crate) struct SessionResponse {
     pub(crate) archived: bool,
     pub(crate) main_chat: bool,
     pub(crate) clear_generation: u64,
+    pub(crate) project_id: Option<String>,
+    pub(crate) project_binding_revision: u64,
     pub(crate) parent_session_id: Option<String>,
     pub(crate) parent_run_id: Option<String>,
     pub(crate) parent_agent_id: Option<String>,
@@ -292,6 +300,8 @@ impl From<&SessionView> for SessionResponse {
             archived: record.archived,
             main_chat: record.main_chat,
             clear_generation: record.clear_generation,
+            project_id: record.project_id.clone(),
+            project_binding_revision: record.project_binding_revision,
             parent_session_id: record.parent_session_id.clone(),
             parent_run_id: record.parent_run_id.clone(),
             parent_agent_id: record.parent_agent_id.clone(),
@@ -651,10 +661,16 @@ pub(crate) struct SessionMessageSearchEnvelope {
 
 /// `POST /api/agents/{id}/sessions`; an empty body means `{}`.
 #[derive(Clone, Debug, Default, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionCreateRequest {
     #[serde(default)]
     pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) project_id: Option<String>,
+    #[serde(default)]
+    pub(crate) project_revision: Option<u64>,
+    #[serde(default)]
+    pub(crate) member_generation: Option<u64>,
 }
 
 /// `POST /api/agents/{id}/main-chat`; an empty body means `{}`.

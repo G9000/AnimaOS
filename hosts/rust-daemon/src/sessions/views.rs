@@ -292,12 +292,40 @@ pub(crate) async fn list_sessions(
     agent_id: &str,
     query: &SessionListQuery,
 ) -> Option<SessionPage> {
+    list_sessions_for_project(state, agent_id, query, None).await
+}
+
+/// A project filter never broadens the original agent-owned session scope.
+pub(crate) async fn list_sessions_for_project(
+    state: &SharedDaemonState,
+    agent_id: &str,
+    query: &SessionListQuery,
+    project_id: Option<&str>,
+) -> Option<SessionPage> {
     let tokens = query.q.as_deref().map(search_tokens).unwrap_or_default();
-    let snapshot = {
+    let (snapshot, project_lease) = {
         let guard = state.read().await;
-        capture_list_snapshot(&guard, agent_id, query.include_helpers, |record| {
-            record.archived == query.archived && query.kind.map_or(true, |kind| record.kind == kind)
-        })?
+        let project_lease = match project_id {
+            Some("none") | None => None,
+            Some(id) => Some(crate::projects::member_read_lease(&guard, id, agent_id).ok()?),
+        };
+        let snapshot = capture_list_snapshot(
+            &guard,
+            agent_id,
+            query.include_helpers && project_id.is_none(),
+            |record| {
+                record.archived == query.archived
+                    && query.kind.map_or(true, |kind| record.kind == kind)
+                    && match project_id {
+                        None => true,
+                        Some("none") => record.agent_id == agent_id && record.project_id.is_none(),
+                        Some(id) => {
+                            record.agent_id == agent_id && record.project_id.as_deref() == Some(id)
+                        }
+                    }
+            },
+        )?;
+        (snapshot, project_lease)
     };
     let store = snapshot.store.clone();
     let mut candidates = derive_candidates(snapshot, &tokens);
@@ -340,8 +368,15 @@ pub(crate) async fn list_sessions(
     } else {
         None
     };
+    let sessions = complete(&*store, candidates).await;
+    if project_lease
+        .as_ref()
+        .is_some_and(|lease| lease.check().is_err())
+    {
+        return None;
+    }
     Some(SessionPage {
-        sessions: complete(&*store, candidates).await,
+        sessions,
         next_cursor,
     })
 }

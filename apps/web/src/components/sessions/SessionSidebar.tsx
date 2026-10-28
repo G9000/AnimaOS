@@ -44,11 +44,12 @@ export interface SessionSidebarProps {
   onExport: (session: Session) => Promise<void>;
   /** Resolves true once the session is deleted, false when it failed. */
   onDelete: (session: Session) => Promise<boolean>;
+  onMoveToProject?: (session: Session) => void;
 }
 
 type RowActions = Pick<
   SessionSidebarProps,
-  'onOpen' | 'onRename' | 'onArchive' | 'onExport' | 'onDelete'
+  'onOpen' | 'onRename' | 'onArchive' | 'onExport' | 'onDelete' | 'onMoveToProject'
 >;
 
 function rowLabel(session: Session, participants: string | null): string {
@@ -245,6 +246,10 @@ function SessionRow({
             </>
           ) : (
             <>
+              {actions.onMoveToProject && session.kind === 'chat' && !session.mainChat && !session.parentRunId
+                && ['web', 'api', 'import'].includes(session.origin) && session.activeRuns === 0 && (
+                <button type="button" role="menuitem" onClick={() => { closeMenuToTrigger(); actions.onMoveToProject?.(session); }}>Move to project</button>
+              )}
               {session.capabilities.rename && (
                 <button
                   type="button"

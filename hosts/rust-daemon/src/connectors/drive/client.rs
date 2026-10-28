@@ -39,6 +39,13 @@ pub(crate) trait DriveTransport: Send + Sync {
         access_token: &str,
         metadata: &DriveFileMetadata,
     ) -> Result<DriveTextBytes, DriveError>;
+    async fn read_binary(
+        &self,
+        _access_token: &str,
+        _metadata: &DriveFileMetadata,
+    ) -> Result<Vec<u8>, DriveError> {
+        Err(DriveError::InvalidInput)
+    }
 }
 pub(crate) struct DriveClient {
     client: Client,
@@ -259,6 +266,30 @@ struct Capabilities {
 }
 #[async_trait]
 impl DriveTransport for DriveClient {
+    async fn read_binary(
+        &self,
+        access: &str,
+        metadata: &DriveFileMetadata,
+    ) -> Result<Vec<u8>, DriveError> {
+        if metadata.trashed
+            || !metadata.can_download
+            || !matches!(
+                metadata.mime_type.as_str(),
+                "application/pdf"
+                    | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    | "text/csv"
+            )
+        {
+            return Err(DriveError::InvalidInput);
+        }
+        let mut url = self.file_url(&metadata.id, "")?;
+        url.query_pairs_mut().append_pair("alt", "media");
+        Ok(self
+            .bounded(self.get(access, url)?, 2 * 1024 * 1024, false)
+            .await?
+            .to_vec())
+    }
     async fn exchange_code(
         &self,
         config: &DriveOAuthConfig,

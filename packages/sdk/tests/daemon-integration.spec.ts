@@ -27,7 +27,7 @@ const daemonTargetDir = resolve(
   workspaceRoot,
   'target',
   'cargo',
-  'sdk-daemon-integration',
+  'validation',
 );
 const buildDaemon = promisify(execFile);
 

@@ -70,6 +70,7 @@ it('approves and answers in chat, then hides the completed workflow', async () =
   const create = vi.spyOn(daemon, 'createWorkflow');
   render(<ChatWorkflows agent={agent} online refreshKey="activity:1" />);
   expect(await screen.findByText('Saved output <script>')).toBeVisible();
+  fireEvent.click(screen.getByText('Attempt details'));
   expect(screen.getByText('Job: job-saved')).toBeVisible();
   expect(
     screen.queryByRole('button', { name: 'Create workflow' }),
@@ -422,6 +423,7 @@ it('refreshes the still-mounted chat when the owner creates a workflow under Wor
   const work = within(screen.getByTestId('work-surface'));
   await work.findByText('No workflows yet for this agent.');
   expect(chat).toBeEmptyDOMElement();
+  fireEvent.click(work.getByRole('button', { name: 'New workflow' }));
   fireEvent.change(work.getByLabelText('Workflow title'), {
     target: { value: 'New workflow' },
   });
@@ -473,6 +475,7 @@ it('refreshes only the originating agent chat after a creation resolves followin
   );
   const work = within(screen.getByTestId('work-surface'));
   await work.findByText('No workflows yet for this agent.');
+  fireEvent.click(work.getByRole('button', { name: 'New workflow' }));
   fireEvent.change(work.getByLabelText('Workflow title'), {
     target: { value: 'Alpha work' },
   });

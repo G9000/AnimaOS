@@ -1,0 +1,1 @@
+These deterministic, independently constructed OOXML containers contain only synthetic text. `build_fixtures.py` uses Python's standard ZIP writer to regenerate them. The header/notes credential markers are deliberately non-secret test strings. The fixtures assert the worker's complete retained-text policy, not desktop Office rendering or layout fidelity.

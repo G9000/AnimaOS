@@ -593,6 +593,8 @@ export interface WorkspaceResumeResponse {
 export const daemon = {
   chatModels: setupClient.chatModels,
   chatResults: setupClient.chatResults,
+  projects: setupClient.projects,
+  documentEdits: setupClient.documentEdits,
   runs: setupClient.runs,
   interactions: setupClient.interactions,
   voice: setupClient.voice,
@@ -616,7 +618,7 @@ export const daemon = {
     ),
   capabilities: () => setupClient.capabilities(),
   listWorkspaceFiles: () => setupClient.workspace.listFiles(),
-  readWorkspaceFile: (path: string) => setupClient.workspace.readFile(path),
+  readWorkspaceFile: (path: string, options: { cursor?: string; signal?: AbortSignal } = {}) => setupClient.workspace.readFile(path, options),
   downloadWorkspaceFile: (path: string, signal?: AbortSignal): Promise<Blob> =>
     setupClient.workspace.downloadFile(path, { signal }),
   agentTasks: (id: string) =>
@@ -632,6 +634,20 @@ export const daemon = {
     id: string,
     options: { signal?: AbortSignal } = {},
   ) => setupClient.workflows.get(agentId, id, options),
+  inspectWorkflowAttempt: (
+    agentId: string,
+    workflowId: string,
+    stepId: string,
+    jobId: string,
+    options: { signal?: AbortSignal } = {},
+  ) =>
+    setupClient.workflows.inspectAttempt(
+      agentId,
+      workflowId,
+      stepId,
+      jobId,
+      options,
+    ),
   createWorkflow: (agentId: string, input: WorkflowInput) =>
     setupClient.workflows.create(agentId, input),
   resumeWorkflow: (agentId: string, id: string, input: WorkflowResumeInput) =>
@@ -692,8 +708,13 @@ export const daemon = {
     setupClient.sessions.main(agentId),
   createSession: (
     agentId: string,
-    input: { title?: string } = {},
+    input: { title?: string; projectId?: string; projectRevision?: number; memberGeneration?: number } = {},
   ): Promise<Session> => setupClient.sessions.create(agentId, input),
+  setSessionProject: (
+    agentId: string,
+    sessionId: string,
+    input: { projectId: string | null; expectedBindingRevision: number; expectedProjectRevision?: number },
+  ): Promise<Session> => setupClient.sessions.setProject(agentId, sessionId, input),
   downloadAttachment: (
     agentId: string,
     attachmentId: string,

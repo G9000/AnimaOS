@@ -1,8 +1,15 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import * as filesystem from 'node:fs/promises';
+import type { PathLike } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, stat: vi.fn(original.stat) };
+});
 
 import {
   cargoCleanArgs,
@@ -14,6 +21,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true }),
@@ -50,7 +58,24 @@ describe('Rust build cache maintenance', () => {
   });
 
   it('warns at the cache budget and stays quiet below it', () => {
-    expect(rustCacheSizeWarning(64 * 1024 ** 3)).toContain('64 GiB');
-    expect(rustCacheSizeWarning(64 * 1024 ** 3 - 1)).toBeNull();
+    expect(rustCacheSizeWarning(32 * 1024 ** 3)).toContain('32 GiB');
+    expect(rustCacheSizeWarning(32 * 1024 ** 3 - 1)).toBeNull();
+  });
+
+  it('tolerates output disappearing while a concurrent build or prune changes it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'anima-rust-cache-race-'));
+    temporaryDirectories.push(root);
+    await mkdir(join(root, 'debug'));
+    const gone = join(root, 'debug', 'gone.rlib');
+    await writeFile(gone, 'gone');
+    const originalStat = (await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).stat;
+    vi.mocked(filesystem.stat).mockImplementation((async (path: PathLike) => {
+      if (path === gone) {
+        await rm(gone);
+        throw Object.assign(new Error('file disappeared'), { code: 'ENOENT' });
+      }
+      return originalStat(path);
+    }) as typeof filesystem.stat);
+    expect(await measureRustCacheBytes(root)).toBe(0);
   });
 });

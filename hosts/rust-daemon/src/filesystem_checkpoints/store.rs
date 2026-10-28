@@ -40,7 +40,9 @@ pub(super) struct Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.lock.take();
+        if self.lock.take().is_none() {
+            return;
+        }
         // Remove only our lock; preserve an observed substitution.
         if let Ok(metadata) = self.lock_directory.symlink_metadata("capture.lock") {
             if !linked(&metadata) && (metadata.dev(), metadata.ino()) == self.lock_identity {
@@ -282,6 +284,55 @@ impl CheckpointStore {
             self.config.policy.limits.store_bytes,
         )?;
         Ok(session)
+    }
+    /// Inspect only an existing partition. Immutable evidence reads must never
+    /// provision storage, create a capture lock, or repair partial metadata.
+    pub(super) fn read_session(&self) -> Result<Session, CaptureError> {
+        self.validate_config()?;
+        let workspace = HeldRoot::open(&self.config.workspace_root)?;
+        if workspace.identity()? != self.config.scope.root_identity_digest {
+            return Err(CaptureError::InvalidScope);
+        }
+        let store = HeldRoot::open(&self.config.store_root)?;
+        provision::verify_private_root(&self.config.store_root, &store, false)?;
+        let workspace_path = self
+            .config
+            .workspace_root
+            .canonicalize()
+            .map_err(io_error)?;
+        let store_path = self.config.store_root.canonicalize().map_err(io_error)?;
+        if store_path.starts_with(&workspace_path)
+            || workspace_path.starts_with(&store_path)
+            || store.identity()? == workspace.identity()?
+        {
+            return Err(CaptureError::InvalidScope);
+        }
+        match store.directory.symlink_metadata("capture.lock") {
+            Ok(_) => return Err(CaptureError::RecoveryRequired),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
+        }
+        let scopes = open_child(&store.directory, "scopes")?;
+        let partition = open_child(&scopes, &checkpoint_scope_digest(&self.config.scope))?;
+        let lock_directory = store.directory.try_clone().map_err(io_error)?;
+        let mut count = 200_000;
+        let mut bytes = 0;
+        inventory(
+            &store.directory,
+            0,
+            &mut count,
+            &mut bytes,
+            self.config.policy.limits.store_bytes,
+        )?;
+        Ok(Session {
+            workspace,
+            store,
+            partition,
+            _parents: vec![scopes],
+            lock_directory,
+            lock: None,
+            lock_identity: (0, 0),
+        })
     }
     pub(super) fn selections(
         &self,

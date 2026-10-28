@@ -34,9 +34,10 @@ cancellation, and configured native file checkpoints still apply. Enabling a
 tool does not approve a particular write.
 Existing custom grants are preserved until you explicitly change them.
 
-This first version creates and revises Anima-generated files. Arbitrary Office
-imports, images, charts, spreadsheet formulas/calculation, and a visual Office
-editor are outside its scope. Text beginning with `=` stays literal spreadsheet
+This creation path revises Anima-generated files. Images, charts, spreadsheet
+formulas/calculation, and a visual Office editor are outside its scope. For
+supported changes to existing Office files, see the editing section below.
+Text beginning with `=` stays literal spreadsheet
 text. The document source is limited to 48 KiB and the finished file to 4 MiB;
 oversized content is refused. PDF uses an embedded font for supported
 left-to-right text and refuses missing glyphs or scripts requiring complex
@@ -50,6 +51,47 @@ rendered source. Externally modified files, unknown source versions, and files
 without matching metadata are refused by this delivery path. Workspace path,
 hidden-file, link, and credential-field exclusions remain in effect. These
 checks establish content consistency, not authorship or business correctness.
+
+## Edit an existing Office document
+
+On Windows, enable **Edit existing documents** in the agent's built-in tool
+settings and save. This gives the agent access to inspect a supported document
+and propose edits; it does not approve a change. In your own chat, attach the
+Word (`.docx`), Excel (`.xlsx`) or PowerPoint (`.pptx`) file to your message, or
+name a file already in the workspace. Ask for the change and the workspace
+path where the result should be saved. The document's contents may enter the
+conversation and be sent to your selected model.
+
+Choose a workspace that excludes both private profile settings and private
+editing storage. A separate editing directory alone does not resolve a profile
+settings file inside the workspace. Keep existing editing data for recovery;
+do not redirect uncertain work to an empty directory or delete its evidence.
+
+When **Review document changes** appears, check the source, destination, all
+changes, and the before and after content. Choose **Apply these changes** to
+approve that specific change, or **Keep original** to decline it. Every new
+publication needs its own approval. If the review expires or the source or
+destination changes, ask for a fresh review. If a decision cannot be confirmed,
+refresh the chat and check its status before taking another action.
+
+An uploaded original remains unchanged. To keep an existing workspace source
+unchanged, ask for a new output path. The review identifies whether the result
+will create a new file or replace the reviewed existing file. After applying,
+use the download link or select the file in **Files** and choose
+**Download current file**. The content preview is structural; open the downloaded
+file in its usual Office application to check layout, appearance and calculations.
+
+Editing supports selected text changes in Word and PowerPoint, slide reordering,
+and supported Excel cell values, formulas and simple existing chart titles or
+series. Not every document feature or edit is supported. Complex or active
+content, unsafe links, protected or unsupported structures, and edits that
+cannot safely preserve dependent content can be refused. Formula support is
+limited, and some results need recalculation in a spreadsheet application.
+Documents and finished edited files are limited to 4 MiB. Existing PDF editing
+and a visual Office editor are not available here.
+
+The separate **Allow reading workspace documents** setting enables the reading
+workflow below; it is not a substitute for the editing permission.
 
 ## Download a generated report
 

@@ -113,3 +113,44 @@ it('propagates stale decision and unavailable persistence errors without retryin
   }
   expect(DaemonHttpError).toBeDefined();
 });
+
+it('inspects one saved workflow attempt using encoded identities and a cancellable read', async () => {
+  const requests: { url: string; init?: RequestInit }[] = [];
+  const evidence = {
+    workflowId: 'flow/one',
+    workflowRevision: 2,
+    stepId: 'step/one',
+    jobId: 'job/one',
+    stepAttempt: 1,
+    status: 'needs_review',
+    startedAtMs: 1,
+    finishedAtMs: 2,
+    result: null,
+    error: 'Interrupted',
+    resultTruncated: false,
+    evidenceState: 'unavailable',
+    run: null,
+  };
+  const client = createDaemonClient({
+    baseUrl: '',
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return Response.json(evidence);
+    },
+  });
+  const signal = new AbortController().signal;
+  expect(
+    await client.workflows.inspectAttempt(
+      'agent/a',
+      'flow/one',
+      'step/one',
+      'job/one',
+      { signal },
+    ),
+  ).toEqual(evidence);
+  expect(requests[0].url).toBe(
+    '/api/agents/agent%2Fa/workflows/flow%2Fone/steps/step%2Fone/attempts/job%2Fone',
+  );
+  expect(requests[0].init?.signal).toBe(signal);
+  expect(requests[0].init?.method).toBeUndefined();
+});

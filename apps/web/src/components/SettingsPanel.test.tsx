@@ -141,6 +141,34 @@ it('keeps tool chains unavailable without the existing shell grant', async () =>
 });
 afterEach(() => vi.restoreAllMocks());
 
+it('grants existing-document editing only by an explicit separate switch', async () => {
+  const saveSettings = vi.fn(async () => true);
+  const current = agent({ toolNames: ['read_file', 'custom_permission'] });
+  renderPanel(current, { sections: ['builtins'], saveSettings });
+  const editing = await screen.findByRole('switch', { name: 'Edit existing documents' });
+  expect(editing).not.toBeChecked();
+  fireEvent.click(editing);
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ tools: [
+    ...current.toolNames, 'inspect_office_document', 'propose_document_edit', 'apply_document_edit',
+  ] }));
+  for (const profile of ['observe', 'collaborate', 'operate'] as const)
+    expect(toolNamesForProfile(profile)).not.toContain('apply_document_edit');
+});
+
+it('preserves a partial document grant across access-profile changes', async () => {
+  const saveSettings = vi.fn(async () => true);
+  renderPanel(agent({ toolNames: [...toolNamesForProfile('collaborate'), 'inspect_office_document'] }), { sections: ['access'], saveSettings });
+  fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ tools: [...toolNamesForProfile('observe').filter((tool) => tool !== 'read_conversation_window'), 'inspect_office_document'] }));
+});
+
+it('does not offer document-editing grants to helpers', async () => {
+  renderPanel(agent({ workspaceRole: 'helper', toolNames: [] }), { sections: ['builtins'] });
+  expect(await screen.findByRole('switch', { name: 'Edit existing documents' })).toBeDisabled();
+});
+
 it('grants finished document creation only when the owner enables Files & documents', async () => {
   const saveSettings = vi.fn(async () => true);
   renderPanel(agent({ toolNames: ['read_file', 'custom_permission'] }), {

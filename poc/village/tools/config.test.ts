@@ -8,13 +8,15 @@ it('shares the Rust API origin with Vite without changing the assistant host', (
     VILLAGE_WEB_PORT: '4399',
   });
   expect(processes).toHaveLength(2);
-  expect(processes[0]?.args).toContain('anima-village-game');
+  expect(processes[0]?.command).toBe('bun');
   expect(processes[0]?.args).toEqual([
+    resolve('C:/game', '../../tools/workspace-dev/scripts/run-task.ts'),
+    '--rust-cache-runtime',
+    'dev',
+    '--',
+    'bun',
+    resolve('C:/game', 'tools/rust-task.ts'),
     'run',
-    '--manifest-path',
-    resolve('C:/game', 'Cargo.toml'),
-    '-p',
-    'anima-village-game',
   ]);
   expect(processes[0]?.cwd).toBe('C:/game');
   expect(processes[0]?.env?.CARGO_TARGET_DIR).toBe(
@@ -33,7 +35,7 @@ it('shares the Rust API origin with Vite without changing the assistant host', (
   expect(defaults[0]?.env?.VILLAGE_BIND).toBe(
     `127.0.0.1:${villageDefaults.apiPort}`,
   );
-  expect(defaults[0]?.env?.CARGO_TARGET_DIR).toBe('/cache');
+  expect(defaults[0]?.env?.CARGO_TARGET_DIR).toBe(resolve('/cache'));
   expect(defaults[1]?.env?.VILLAGE_WEB_PORT).toBe(
     String(villageDefaults.webPort),
   );
@@ -50,4 +52,10 @@ it('rejects invalid or conflicting listener ports before spawning', () => {
       VILLAGE_WEB_PORT: '4302',
     }),
   ).toThrow(/different/i);
+});
+
+it('resolves an explicit relative Cargo target against the repository for both build and launch', () => {
+  const gameRoot = resolve('C:/workspace/poc/village');
+  const processes = villageProcessDefinitions(gameRoot, { CARGO_TARGET_DIR: 'target/cargo' });
+  expect(processes[0]?.env?.CARGO_TARGET_DIR).toBe(resolve(gameRoot, '../../target/cargo'));
 });

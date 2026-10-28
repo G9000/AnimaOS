@@ -40,6 +40,9 @@ pub(super) struct WorkspaceFileResponse {
     preview_kind: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sha256: Option<String>,
+    #[serde(rename = "officeContent", skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Object)]
+    office_content: Option<crate::document_edits::projection::OfficeInventoryPage>,
 }
 
 async fn configured_root(state: &SharedDaemonState) -> Result<PathBuf, ApiError> {
@@ -63,10 +66,60 @@ pub(super) async fn preview(
     state: &SharedDaemonState,
     path: String,
 ) -> Result<WorkspaceFileResponse, ApiError> {
+    preview_with_cursor(state, path, None).await
+}
+
+pub(super) async fn preview_with_cursor(
+    state: &SharedDaemonState,
+    path: String,
+    cursor: Option<String>,
+) -> Result<WorkspaceFileResponse, ApiError> {
     let root = configured_root(state).await?;
-    tokio::task::spawn_blocking(move || preview_file(&root, &path))
+    let preview_root = root.clone();
+    let preview_path = path.clone();
+    let generated_or_text =
+        tokio::task::spawn_blocking(move || preview_file(&preview_root, &preview_path))
+            .await
+            .map_err(|_| ApiError::service_unavailable("Workspace file preview failed"))?;
+    if generated_or_text.is_ok() && cursor.is_none() {
+        return generated_or_text;
+    }
+    let service = state
+        .read()
         .await
-        .map_err(|_| ApiError::service_unavailable("Workspace file preview failed"))?
+        .document_edit_service
+        .as_ref()
+        .and_then(|service| service.upgrade());
+    if let Some(service) = service {
+        if matches!(
+            path.rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_lowercase())
+                .as_deref(),
+            Some("docx" | "xlsx" | "pptx")
+        ) {
+            if let Some(page) = service
+                .published_preview(&path, cursor.as_deref())
+                .await
+                .map_err(|_| {
+                    ApiError::bad_request_static(
+                        "Published document preview is unavailable or changed",
+                    )
+                })?
+            {
+                return Ok(WorkspaceFileResponse {
+                    path, content: "Structural content preview. Open the downloaded document to review its layout.".into(),
+                    truncated: !page.coverage.complete, preview_kind: Some("office_content"),
+                    sha256: Some(page.source_sha256.clone()), office_content: Some(page),
+                });
+            }
+        }
+    }
+    if cursor.is_some() {
+        return Err(ApiError::bad_request_static(
+            "This preview has no additional content page",
+        ));
+    }
+    generated_or_text
 }
 
 pub(super) async fn download(
@@ -96,14 +149,37 @@ pub(super) async fn download(
     .map_err(|_| ApiError::service_unavailable("Workspace download timed out"))??;
     let disposition = download_disposition(&path);
     let cancel = anima_core::CancelSignal::new();
-    let bytes = read_retained_with_slots(
-        move || capture_download(&root, &path),
+    let capture_root = root.clone();
+    let capture_path = path.clone();
+    let captured = read_retained_with_slots(
+        move || capture_download(&capture_root, &capture_path),
         &cancel,
         deadline,
         slots,
     )
     .await
-    .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))??;
+    .map_err(|_| ApiError::service_unavailable("Workspace download is unavailable"))?;
+    let bytes = match captured {
+        Ok(bytes) => bytes,
+        Err(original) => {
+            let service = state
+                .read()
+                .await
+                .document_edit_service
+                .as_ref()
+                .and_then(|service| service.upgrade());
+            let Some(service) = service else {
+                return Err(original);
+            };
+            tokio::time::timeout_at(deadline, service.published_download(&path))
+                .await
+                .map_err(|_| ApiError::service_unavailable("Workspace download timed out"))?
+                .map_err(|_| {
+                    ApiError::bad_request_static("Published document is unavailable or changed")
+                })?
+                .ok_or(original)?
+        }
+    };
     if tokio::time::Instant::now() >= deadline {
         return Err(ApiError::service_unavailable(
             "Workspace download timed out",
@@ -370,17 +446,28 @@ fn list_files(root: &Path) -> Result<WorkspaceFilesResponse, ApiError> {
 
 fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, ApiError> {
     if crate::tools::generated_documents::format_from_path(relative).is_some() {
-        use sha2::{Digest, Sha256};
-        let (bytes, document) = capture_generated(root, relative)?;
-        let generated = anima_document_content::render_document(&document).map_err(|_| {
-            ApiError::bad_request_static("Generated document preview is unavailable")
-        })?;
+        let preview = crate::workspace_file_preview::capture(root, relative, MAX_PREVIEW_BYTES)
+            .map_err(|error| match error {
+                crate::workspace_file_preview::PreviewError::Missing => ApiError::not_found(),
+                crate::workspace_file_preview::PreviewError::Unsafe => {
+                    ApiError::bad_request_static(
+                        "Documents containing credential fields cannot be previewed or downloaded",
+                    )
+                }
+                crate::workspace_file_preview::PreviewError::Oversized => {
+                    ApiError::bad_request_static("Generated document exceeds the 4 MiB limit")
+                }
+                _ => ApiError::bad_request_static(
+                    "Only verified Anima-generated documents can be previewed or downloaded",
+                ),
+            })?;
         return Ok(WorkspaceFileResponse {
-            path: relative.to_owned(),
-            content: generated.preview,
-            truncated: false,
+            path: preview.path,
+            content: preview.content,
+            truncated: preview.truncated,
             preview_kind: Some("document"),
-            sha256: Some(hex::encode(Sha256::digest(&bytes))),
+            sha256: Some(preview.capture_sha256),
+            office_content: None,
         });
     }
     if relative.is_empty()
@@ -461,6 +548,7 @@ fn preview_file(root: &Path, relative: &str) -> Result<WorkspaceFileResponse, Ap
         truncated,
         preview_kind: None,
         sha256: None,
+        office_content: None,
     })
 }
 

@@ -161,7 +161,7 @@ async fn get_agent_returns_runtime_snapshot() {
 async fn control_plane_store_recovers_agents_and_swarms_after_restart() {
     let _env_lock = env_lock().lock().await;
     let workspace = use_temp_workspace_root("control-plane-restart");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
 
     // Dropping a router leaves its owned workers alive until their runtime exits.
@@ -210,40 +210,43 @@ async fn control_plane_store_recovers_agents_and_swarms_after_restart() {
     .await
     .expect("first app runtime should fully shut down");
 
-    let second_app = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .expect("second app should configure persistence");
-    let (agent_status, agent_response) =
-        send_empty_request(&second_app, "GET", &format!("/api/agents/{agent_id}")).await;
-    let (swarm_status, swarm_response) =
-        send_empty_request(&second_app, "GET", &format!("/api/swarms/{swarm_id}")).await;
-    let (agent_run_status, agent_run_response) =
-        run_agent(&second_app, &agent_id, r#"{"text":"still there?"}"#).await;
-    let (swarm_run_status, swarm_run_response) = send_json_request(
-        &second_app,
-        "POST",
-        &format!("/api/swarms/{swarm_id}/run"),
-        r#"{"text":"continue after restart"}"#,
-    )
-    .await;
+    support::run_in_joined_runtime(move || async move {
+        let second_app = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .expect("second app should configure persistence");
+        let (agent_status, agent_response) =
+            send_empty_request(&second_app, "GET", &format!("/api/agents/{agent_id}")).await;
+        let (swarm_status, swarm_response) =
+            send_empty_request(&second_app, "GET", &format!("/api/swarms/{swarm_id}")).await;
+        let (agent_run_status, agent_run_response) =
+            run_agent(&second_app, &agent_id, r#"{"text":"still there?"}"#).await;
+        let (swarm_run_status, swarm_run_response) = send_json_request(
+            &second_app,
+            "POST",
+            &format!("/api/swarms/{swarm_id}/run"),
+            r#"{"text":"continue after restart"}"#,
+        )
+        .await;
 
-    assert_eq!(agent_status, StatusCode::OK);
-    let restored_agent = response_json(&agent_response);
-    assert_eq!(
-        restored_agent["agent"]["state"]["config"]["name"],
-        "restored-agent"
-    );
-    let restored_tools = agent_tools(&restored_agent);
-    assert_canonical_tool(&restored_tools[0], "read_file", &["file_path"]);
-    assert_canonical_tool(&restored_tools[1], "write_file", &["file_path", "content"]);
-    assert_canonical_tool(&restored_tools[2], "bash", &["command"]);
-    assert_eq!(swarm_status, StatusCode::OK);
-    assert!(swarm_response.contains(&format!("\"id\":\"{swarm_id}\"")));
-    assert!(swarm_response.contains("\"status\":\"idle\""));
-    assert_eq!(agent_run_status, StatusCode::OK);
-    assert!(agent_run_response.contains("restored-agent handled task: still there?"));
-    assert_eq!(swarm_run_status, StatusCode::OK);
-    assert!(swarm_run_response.contains("continue after restart"));
+        assert_eq!(agent_status, StatusCode::OK);
+        let restored_agent = response_json(&agent_response);
+        assert_eq!(
+            restored_agent["agent"]["state"]["config"]["name"],
+            "restored-agent"
+        );
+        let restored_tools = agent_tools(&restored_agent);
+        assert_canonical_tool(&restored_tools[0], "read_file", &["file_path"]);
+        assert_canonical_tool(&restored_tools[1], "write_file", &["file_path", "content"]);
+        assert_canonical_tool(&restored_tools[2], "bash", &["command"]);
+        assert_eq!(swarm_status, StatusCode::OK);
+        assert!(swarm_response.contains(&format!("\"id\":\"{swarm_id}\"")));
+        assert!(swarm_response.contains("\"status\":\"idle\""));
+        assert_eq!(agent_run_status, StatusCode::OK);
+        assert!(agent_run_response.contains("restored-agent handled task: still there?"));
+        assert_eq!(swarm_run_status, StatusCode::OK);
+        assert!(swarm_run_response.contains("continue after restart"));
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -792,25 +795,28 @@ async fn configured_persistence_helper_is_untrusted_even_with_valid_owner_bearer
 async fn configured_persistence_with_loopback_listener_requires_owner_bearer() {
     let _env_lock = env_lock().lock().await;
     let workspace = use_temp_workspace_root("configured-loopback-owner");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
-    let app = support::configured_loopback_test_app(DaemonConfig::default())
-        .await
-        .expect("configured loopback app builds");
+    support::run_in_joined_runtime(|| async {
+        let app = support::configured_loopback_test_app(DaemonConfig::default())
+            .await
+            .expect("configured loopback app builds");
 
-    let (raw_status, _) = send_request(
-        &app,
-        Request::builder()
-            .method("GET")
-            .uri("/api/agents")
-            .body(Body::empty())
-            .expect("request builds"),
-    )
+        let (raw_status, _) = send_request(
+            &app,
+            Request::builder()
+                .method("GET")
+                .uri("/api/agents")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await;
+        let (owner_status, _) = send_empty_request(&app, "GET", "/api/agents").await;
+
+        assert_eq!(raw_status, StatusCode::FORBIDDEN);
+        assert_eq!(owner_status, StatusCode::OK);
+    })
     .await;
-    let (owner_status, _) = send_empty_request(&app, "GET", "/api/agents").await;
-
-    assert_eq!(raw_status, StatusCode::FORBIDDEN);
-    assert_eq!(owner_status, StatusCode::OK);
 }
 
 #[tokio::test]

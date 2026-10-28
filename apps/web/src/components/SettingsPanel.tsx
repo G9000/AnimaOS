@@ -137,6 +137,12 @@ const BUILT_IN_TOOL_GROUPS = [
     ],
   },
   {
+    id: 'document-editing',
+    label: 'Edit existing documents',
+    help: 'Inspect and propose changes to supported documents; applying each change requires your review.',
+    tools: ['inspect_office_document', 'propose_document_edit', 'apply_document_edit'],
+  },
+  {
     id: 'apps-terminals',
     label: 'Apps & terminals',
     help: 'Run commands, background work, apps and coding agents.',
@@ -505,7 +511,12 @@ export function SettingsPanel({
           : [...agent.toolNames];
       for (const group of BUILT_IN_TOOL_GROUPS) {
         const enabled = toolGroupSelections[group.id];
-        if (enabled === undefined) continue;
+        if (enabled === undefined) {
+          if (accessDirty && group.id === 'document-editing') {
+            selectedTools = [...new Set([...selectedTools, ...group.tools.filter((tool) => agent.toolNames.includes(tool))])];
+          }
+          continue;
+        }
         selectedTools = enabled
           ? [...new Set([...selectedTools, ...group.tools])]
           : selectedTools.filter(
@@ -1463,7 +1474,7 @@ export function SettingsPanel({
                       aria-label={group.label}
                       aria-checked={group.mixed ? 'mixed' : group.enabled}
                       checked={group.enabled}
-                      disabled={controlsDisabled}
+                      disabled={controlsDisabled || (group.id === 'document-editing' && agent.workspaceRole === 'helper')}
                       onChange={(event) =>
                         setBuiltInToolGroup(group.id, event.target.checked)
                       }

@@ -41,10 +41,14 @@ mod chat_suite_upgrade_tests;
 /// 29 adds conversation model preferences, reviews, results and viewer grants;
 /// 30 adds owner delegation policies, routed assignments and JSON output contracts.
 /// 31 adds endpoint-bound opaque MCP OAuth credential references.
+/// 32 adds connected-account search and account workflow state; 33 adds
+/// deeper search settings, workflow holds and selected Microsoft file metadata.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 32;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 33;
+pub(crate) const PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX: &str =
+    ".pre-project-documents-search-continuity.bak";
 pub(crate) const PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX: &str = ".pre-connected-accounts.bak";
 pub(crate) const PRE_MCP_OAUTH_BACKUP_SUFFIX: &str = ".pre-mcp-oauth.bak";
 pub(crate) const PRE_CHAT_SUITE_BACKUP_SUFFIX: &str = ".pre-chat-suite.bak";
@@ -201,6 +205,15 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) outbound: Vec<TelegramOutboundRecord>,
     #[serde(default)]
     pub(crate) drive_records: Vec<crate::connectors::drive::DriveRecord>,
+    #[serde(default)]
+    pub(crate) microsoft_file_records:
+        Vec<crate::connectors::microsoft_files::model::MicrosoftFileRecord>,
+    #[serde(default)]
+    pub(crate) projects: Vec<crate::projects::ProjectRecord>,
+    #[serde(default)]
+    pub(crate) document_edits: crate::document_edits::DocumentEditRegistry,
+    #[serde(default)]
+    pub(crate) project_creation_receipts: Vec<crate::projects::ProjectCreationReceipt>,
     #[serde(default)]
     pub(crate) discord_connectors: Vec<crate::connectors::discord::DiscordConnectorRecord>,
     #[serde(default)]
@@ -581,8 +594,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_DELEGATION_CONTROLS_BACKUP_SUFFIX
             } else if loaded_version < 31 {
                 PRE_MCP_OAUTH_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 32 {
                 PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX
+            } else {
+                PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -820,6 +835,10 @@ impl ControlPlaneSnapshot {
             inbound,
             outbound,
             drive_records: vec![],
+            microsoft_file_records: vec![],
+            projects: vec![],
+            document_edits: crate::document_edits::DocumentEditRegistry::default(),
+            project_creation_receipts: vec![],
             discord_connectors: vec![],
             discord_credential_intents: vec![],
             discord_inbound: vec![],
@@ -1238,6 +1257,8 @@ mod tests {
             (23, ".pre-workflows.bak"),
             (29, ".pre-delegation-controls.bak"),
             (30, ".pre-mcp-oauth.bak"),
+            (31, ".pre-connected-accounts.bak"),
+            (32, ".pre-project-documents-search-continuity.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1245,6 +1266,73 @@ mod tests {
                 "loaded version {loaded}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn coordinated_upgrade_keeps_an_independent_exact_version_thirty_two_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("control-plane.json");
+        let original =
+            b"{\r\n  \"version\" : 32,\r\n  \"agents\": [],\r\n  \"swarms\": []\r\n}\r\n";
+        std::fs::write(&path, original).unwrap();
+        let previous_backup = super::pre_upgrade_backup_path(&path, 31);
+        let previous_bytes = b"earlier connected-accounts backup\r\n";
+        std::fs::write(&previous_backup, previous_bytes).unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let mut snapshot = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.version, 32);
+        assert!(snapshot.microsoft_file_records.is_empty());
+        assert!(snapshot.projects.is_empty());
+        assert!(snapshot.project_creation_receipts.is_empty());
+        assert_eq!(
+            snapshot.document_edits,
+            crate::document_edits::DocumentEditRegistry::default()
+        );
+        assert!(snapshot.runs.is_empty());
+        assert!(snapshot.workflows.is_empty());
+        assert!(snapshot.connected_search.sources.is_empty());
+        assert!(snapshot.tool_grants_applied.is_empty());
+
+        let backup = super::pre_upgrade_backup_path(&path, snapshot.version);
+        assert_eq!(
+            backup,
+            path.with_file_name("control-plane.json.pre-project-documents-search-continuity.bak")
+        );
+        assert_ne!(backup, previous_backup);
+        super::write_pre_upgrade_backup(&config, snapshot.version)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read(&previous_backup).unwrap(), previous_bytes);
+
+        snapshot.version = super::CONTROL_PLANE_STORE_VERSION;
+        super::save_control_plane_snapshot(Some(&config), &snapshot)
+            .await
+            .unwrap();
+        let upgraded = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(upgraded.version, 33);
+        assert!(upgraded.microsoft_file_records.is_empty());
+        assert!(upgraded.projects.is_empty());
+        assert!(upgraded.project_creation_receipts.is_empty());
+        assert_eq!(
+            upgraded.document_edits,
+            crate::document_edits::DocumentEditRegistry::default()
+        );
+        assert!(upgraded.connected_search.sources.is_empty());
+        assert!(upgraded.runs.is_empty());
+        assert!(upgraded.workflows.is_empty());
+        assert!(upgraded.tool_grants_applied.is_empty());
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(previous_backup).unwrap(), previous_bytes);
+        assert_eq!(super::postgres_backup_key(32), "control_plane.backup.32");
+        assert_no_temp_residue(&path);
     }
 
     #[tokio::test]

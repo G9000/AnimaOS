@@ -24,6 +24,11 @@ import {
 import { PLAN_TOOL, parsePlan } from '../../lib/plan';
 import { formatTime } from '../ui-bits';
 import { PlanCard } from './PlanCard';
+import { DocumentEditCard } from '../documents/DocumentEditCard';
+import { daemon } from '../../lib/daemon-api';
+
+const loadDocumentReview = (proposalId: string, agentId: string, sessionId: string, options: { signal: AbortSignal }): Promise<unknown> =>
+  daemon.documentEdits.review(proposalId, agentId, sessionId, options);
 
 const DECISIONS: readonly ApprovalDecision[] = [
   'allow_once',
@@ -98,6 +103,9 @@ function MatcherEditor({
  * editable scope for "for this session" and "always".
  */
 export function ApprovalCard(props: ApprovalCardProps) {
+  if (props.approval.tool === 'apply_document_edit') {
+    return <DocumentEditCard approval={props.approval} onDecide={props.onDecide} load={loadDocumentReview} />;
+  }
   // A plan reads as steps; one cut short falls back to the plain card.
   const plan =
     props.approval.tool === PLAN_TOOL ? parsePlan(props.approval.arguments) : null;

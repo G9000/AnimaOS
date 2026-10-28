@@ -121,7 +121,7 @@ Run `bun run build:cli-sdk` to build the SDK and CLI together, or `bun run --fil
 
 Run `bun run --filter @animaos/sdk test`.
 
-Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. `CARGO_TARGET_DIR` can select a build directory (otherwise `target/cargo/sdk-daemon-integration`).
+Integration tests build the Rust daemon with a separate compilation deadline, then run its binary on a temporary local port and workspace. They use an isolated environment and a local model stub; no developer credentials or persisted workspace data are inherited. The workspace test script holds a cache lease through the complete service-test lifetime and shares `target/cargo/validation` with Rust validation. `CARGO_TARGET_DIR` can explicitly select another build directory; the wrapper makes relative values absolute against the repository so package working directories cannot create extra caches.
 
 ## Wire contracts
 

@@ -1,5 +1,8 @@
 mod gdrive;
 pub(crate) use gdrive::*;
+pub(crate) mod document_edits;
+mod microsoft_files;
+pub(crate) use microsoft_files::*;
 mod discord;
 pub(crate) use discord::*;
 mod agencies;

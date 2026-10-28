@@ -11,7 +11,8 @@ use utoipa::ToSchema;
 
 use crate::{
     connected_search::{
-        source_authority, DocumentKind, SourceAuthority, SourceChange, SourceChangeKind,
+        source_authority, DocumentKind, IngestionOrigin, SourceAuthority, SourceChange,
+        SourceChangeKind,
     },
     jobs::{workflow_templates::template_key, JobError},
     state::DaemonState,
@@ -609,6 +610,7 @@ fn admit_current_changes(
             event.connector_id != source.connector_id
                 || event.generation != source.generation
                 || event.provider != source.provider
+                || event.origin != IngestionOrigin::LivePoll
                 || !bounded(&event.id, 256)
                 || event.observed_at_ms == 0
         })

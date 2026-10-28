@@ -9,6 +9,83 @@ use crate::{
     state::DaemonState,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectReview {
+    Unchanged,
+    Review,
+    Unavailable,
+}
+
+/// Old checkpoint data can contain project material. Only revision-only
+/// changes retain the same access grant and can be reviewed for continuation.
+fn project_review(
+    saved: &Option<crate::projects::QueuedProjectWitness>,
+    current: &crate::projects::QueuedProjectWitness,
+) -> ProjectReview {
+    let Some(saved) = saved else {
+        return if current.project.is_none() && current.session_binding_revision == 0 {
+            ProjectReview::Unchanged
+        } else {
+            ProjectReview::Unavailable
+        };
+    };
+    if saved == current {
+        return ProjectReview::Unchanged;
+    }
+    match (&saved.project, &current.project) {
+        (Some(old), Some(new))
+            if saved.session_binding_revision == current.session_binding_revision
+                && old.project_id == new.project_id
+                && old.access_epoch == new.access_epoch
+                && old.member_generation == new.member_generation =>
+        {
+            ProjectReview::Review
+        }
+        _ => ProjectReview::Unavailable,
+    }
+}
+
+fn project_review_fingerprint(
+    source_fingerprint: &str,
+    current: &crate::projects::QueuedProjectWitness,
+) -> String {
+    crate::runs::turn::digest(&(
+        "anima-recovery-project-review-v1",
+        source_fingerprint,
+        current,
+    ))
+}
+
+fn apply_project_review(state: &DaemonState, source: &RunRecord, view: &mut RecoverySummary) {
+    // Saved-child replay always uses the historical accepted fingerprint.
+    if source.recovery.is_some() {
+        return;
+    }
+    let current = crate::projects::capture_run_witness(state, &source.agent_id, &source.session_id);
+    match current
+        .as_ref()
+        .map(|witness| project_review(&source.project_witness, witness))
+    {
+        Ok(ProjectReview::Unchanged) => {}
+        Ok(ProjectReview::Review) => {
+            view.fingerprint =
+                project_review_fingerprint(&view.fingerprint, current.as_ref().unwrap());
+            view.review_required = true;
+            if view.recovery_state == "safely_recoverable" {
+                view.recovery_state = "owner_review_required".into();
+            }
+            view.project_context_notice = Some("The shared project has changed since this work stopped. Review the current project context before continuing.".into());
+        }
+        _ => {
+            if view.eligible {
+                view.recovery_state = "invalid_or_stale".into();
+            }
+            view.eligible = false;
+            view.project_context_notice = Some("The project's access or chat binding changed, so this saved work cannot be continued safely.".into());
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct RecoveryAdmission {
     pub(super) source_run_id: String,
@@ -29,7 +106,8 @@ impl RecoveryAdmission {
             .get(&self.source_run_id)
             .filter(|r| r.agent_id == request.agent_id && r.session_id == request.session_id)
             .ok_or_else(ApiError::not_found)?;
-        let view = summary(source);
+        let mut view = summary(source);
+        apply_project_review(state, source, &mut view);
         if view.fingerprint != self.fingerprint {
             return Err(ApiError::conflict(
                 "The recovery evidence changed; refresh it before continuing",
@@ -228,6 +306,7 @@ impl AgentRunCoordinator {
         agent: &str,
         run: &str,
     ) -> Result<RecoverySummary, ApiError> {
+        let _transaction = self.control_plane_transaction().await;
         let state = self.state.read().await;
         let source = state
             .runs
@@ -238,6 +317,7 @@ impl AgentRunCoordinator {
         view.recovery_state = crate::runs::turn::recovery_state(&state, source)
             .as_str()
             .into();
+        apply_project_review(&state, source, &mut view);
         Ok(view)
     }
 
@@ -311,6 +391,227 @@ mod tests {
     use super::*;
     use crate::agent_runs::test_support::{add_chat, coordinator_with, ScriptedModel, Step};
     use crate::runs::{RunStart, RunStatus};
+
+    #[test]
+    fn project_review_binds_current_witness_and_refuses_access_changes() {
+        use crate::projects::{QueuedProjectWitness, RunProjectBinding};
+
+        let old = QueuedProjectWitness {
+            session_binding_revision: 3,
+            project: Some(RunProjectBinding {
+                project_id: "project-a".into(),
+                project_revision: 4,
+                access_epoch: 5,
+                member_generation: 6,
+            }),
+        };
+        let mut current = old.clone();
+        assert_eq!(
+            project_review(&Some(old.clone()), &current),
+            ProjectReview::Unchanged
+        );
+        current.project.as_mut().unwrap().project_revision += 1;
+        assert_eq!(
+            project_review(&Some(old.clone()), &current),
+            ProjectReview::Review
+        );
+        let first = project_review_fingerprint("source-evidence", &current);
+        assert_ne!(
+            first,
+            project_review_fingerprint("other-evidence", &current)
+        );
+        current.project.as_mut().unwrap().project_revision += 1;
+        assert_ne!(
+            first,
+            project_review_fingerprint("source-evidence", &current)
+        );
+
+        current = old.clone();
+        current.project.as_mut().unwrap().access_epoch += 1;
+        assert_eq!(
+            project_review(&Some(old.clone()), &current),
+            ProjectReview::Unavailable
+        );
+        current = old.clone();
+        current.project.as_mut().unwrap().member_generation += 1;
+        assert_eq!(
+            project_review(&Some(old.clone()), &current),
+            ProjectReview::Unavailable
+        );
+        current = old.clone();
+        current.project.as_mut().unwrap().project_id = "project-b".into();
+        assert_eq!(
+            project_review(&Some(old.clone()), &current),
+            ProjectReview::Unavailable
+        );
+        current = old.clone();
+        current.session_binding_revision += 1;
+        assert_eq!(
+            project_review(&Some(old), &current),
+            ProjectReview::Unavailable
+        );
+        current.project = None;
+        assert_eq!(project_review(&None, &current), ProjectReview::Unavailable);
+        current.session_binding_revision = 0;
+        assert_eq!(project_review(&None, &current), ProjectReview::Unchanged);
+    }
+
+    #[tokio::test]
+    async fn project_recovery_rechecks_review_and_replays_only_saved_child() {
+        use crate::projects::{ProjectCreateRequest, ProjectPatchRequest};
+        let (coordinator, agent) = coordinator_with(ScriptedModel::new(vec![])).await;
+        let session_id = "chat:project-recovery";
+        add_chat(&coordinator, &agent, session_id).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = coordinator.state.write().await;
+        state.set_control_plane_store(Some(
+            crate::control_plane_store::ControlPlaneStoreConfig::Json(
+                dir.path().join("state.json"),
+            ),
+        ));
+        let (project, _) = state
+            .projects
+            .create(
+                ProjectCreateRequest {
+                    request_key: "recovery-project".into(),
+                    title: "Project".into(),
+                    member_agent_ids: vec![agent.clone()],
+                    instructions: "Original".into(),
+                },
+                1,
+            )
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        let session = state.sessions.get_mut(&agent, session_id).unwrap();
+        session.project_id = Some(project.id.clone());
+        session.project_binding_revision = 1;
+        let mut source = RunRecord::queued(
+            RunStart {
+                agent_id: agent.clone(),
+                session_id: session_id.into(),
+                source: RunSource::Web,
+                source_ref: None,
+                idempotency_key: Some("source".into()),
+                text: "Finish".into(),
+                model: "test".into(),
+                provider: None,
+                parent_run_id: None,
+            },
+            1,
+        );
+        source.project_witness =
+            Some(crate::projects::capture_run_witness(&state, &agent, session_id).unwrap());
+        source.finish(RunStatus::Interrupted, None, 2);
+        state.runs.insert(source.clone());
+        let request = crate::agent_runs::test_support::accept(&agent, session_id, "recovery");
+        let mut admission = RecoveryAdmission {
+            source_run_id: source.id.clone(),
+            fingerprint: summary(&source).fingerprint,
+            reviewed: false,
+            answers_json: "[]".into(),
+            automatic: false,
+        };
+        assert!(admission.validate(&state, &request).unwrap().is_none());
+        state
+            .projects
+            .patch(
+                &project.id,
+                ProjectPatchRequest {
+                    expected_revision: 1,
+                    title: None,
+                    instructions: Some("Updated".into()),
+                    status: None,
+                },
+                3,
+            )
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        let mut view = summary(&source);
+        apply_project_review(&state, &source, &mut view);
+        assert!(view.review_required && view.project_context_notice.is_some());
+        assert!(
+            admission.validate(&state, &request).is_err(),
+            "old evidence cannot authorize changed context"
+        );
+        admission.fingerprint = view.fingerprint;
+        assert!(
+            admission.validate(&state, &request).is_err(),
+            "changed context requires review"
+        );
+        admission.reviewed = true;
+        assert!(admission.validate(&state, &request).unwrap().is_none());
+        state
+            .projects
+            .patch(
+                &project.id,
+                ProjectPatchRequest {
+                    expected_revision: 2,
+                    title: None,
+                    instructions: Some("Changed again".into()),
+                    status: None,
+                },
+                4,
+            )
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        assert!(
+            admission.validate(&state, &request).is_err(),
+            "review must bind the latest revision"
+        );
+        let mut refreshed = summary(&source);
+        apply_project_review(&state, &source, &mut refreshed);
+        admission.fingerprint = refreshed.fingerprint;
+        assert!(admission.validate(&state, &request).unwrap().is_none());
+
+        let mut child = source.clone();
+        child.id = "saved-child".into();
+        child.recovery_of = Some(source.id.clone());
+        child.recovery_attempt = 1;
+        state.runs.insert(child.clone());
+        state.runs.get_mut(&source.id).unwrap().recovery =
+            Some(crate::runs::recovery::RecoveryRecord {
+                fingerprint: admission.fingerprint.clone(),
+                continuation_run_id: child.id.clone(),
+                reviewed_at_ms: 5,
+            });
+        state
+            .projects
+            .replace_members(&project.id, 3, vec![], 6)
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        state
+            .projects
+            .replace_members(&project.id, 4, vec![agent.clone()], 7)
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        assert!(
+            matches!(admission.validate(&state, &request), Ok(Some(AcceptedRun::Replayed(saved))) if saved.id == child.id)
+        );
+        state.runs.get_mut(&source.id).unwrap().recovery = None;
+        let mut after_readd = summary(&source);
+        apply_project_review(&state, &source, &mut after_readd);
+        assert!(!after_readd.eligible);
+        admission.fingerprint = after_readd.fingerprint;
+        assert!(
+            admission.validate(&state, &request).is_err(),
+            "re-added membership cannot rehydrate old evidence"
+        );
+    }
 
     #[tokio::test]
     async fn recovery_requires_review_and_duplicate_requests_keep_one_successor() {

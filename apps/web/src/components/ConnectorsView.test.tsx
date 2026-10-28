@@ -32,8 +32,9 @@ const api = vi.hoisted(() => ({
   configureOauthApp: vi.fn(),
   removeOauthApp: vi.fn(),
 }));
+const microsoftFiles = vi.hoisted(() => ({ status: vi.fn(), connect: vi.fn(), files: vi.fn(), select: vi.fn(), disconnect: vi.fn() }));
 vi.mock('@animaos/sdk', () => ({
-  createDaemonClient: () => ({ connectors: api }),
+  createDaemonClient: () => ({ connectors: api, microsoftFiles }),
 }));
 const connector = {
   id: 'gmail-1',
@@ -458,6 +459,7 @@ it('fp02 overlapping explicit status reconciliation cannot release a pending bun
 });
 beforeEach(() => {
   vi.resetAllMocks();
+  microsoftFiles.status.mockResolvedValue({ configured: false, connectors: [] });
   vi.spyOn(mcpOwnerApi, 'list').mockResolvedValue([]);
   vi.spyOn(mcpOwnerApi, 'toolNames').mockResolvedValue(['read_file']);
   vi.spyOn(communityBundlesOwnerApi, 'list').mockResolvedValue([]);
@@ -909,7 +911,7 @@ it('shows OAuth redirect URIs and accessible credential fields', async () => {
       'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.',
     ),
   ).toBeVisible();
-  expect(screen.getByText('Enables Outlook.')).toBeVisible();
+  expect(screen.getByText('Enables Outlook and Microsoft files.')).toBeVisible();
   expect(
     await screen.findByText(
       'http://127.0.0.1:8080/api/connectors/google/callback',

@@ -139,7 +139,7 @@ where
     let deadline = std::time::Instant::now() + super::DEFAULT_LOAD_DEADLINE;
     let deadline = helper_deadline.map_or(deadline, |helper| deadline.min(helper.into_std()));
     for attempt in 0..2 {
-        let (scope, budget) = {
+        let (scope, budget, project_scope, available_tokens, calibration_permille) = {
             let guard = state.read().await;
             let mut scope = capture_scope(&guard, agent_id, session_id, Some(run_id));
             if let Some(scope) = &mut scope {
@@ -163,6 +163,9 @@ where
             let chars = ((available as f64 / estimator.calibration()).floor() as u64)
                 .saturating_mul(anima_core::CHARS_PER_TOKEN)
                 .min(super::MAX_RENDER_CHARS as u64) as usize;
+            let run = guard.runs.get(run_id).ok_or_else(ApiError::not_found)?;
+            let project_scope = crate::projects::capture_context_scope(&guard, run)
+                .map_err(|error| ApiError::conflict(error.to_string()))?;
             (
                 scope,
                 AgentFileRenderBudget {
@@ -170,6 +173,9 @@ where
                     max_project_chars: chars,
                     max_total_chars: chars,
                 },
+                project_scope,
+                available,
+                (factor.max(1.0) * 1000.0).round() as u32,
             )
         };
         let mut accepted = if let Some(scope) = &scope {
@@ -182,11 +188,30 @@ where
         } else {
             AcceptedAgentFiles::empty(Availability::UnavailableWorkspace)
         };
+        let project_loaded = if let Some(project_scope) = &project_scope {
+            let budget = crate::projects::ProjectRenderBudget::from_remaining(
+                available_tokens.saturating_sub(accepted.rendered.estimated_tokens),
+                calibration_permille,
+            );
+            Some(
+                crate::projects::load_context(
+                    state,
+                    project_scope,
+                    budget,
+                    cancel.clone(),
+                    deadline,
+                )
+                .await
+                .map_err(|error| ApiError::conflict(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         if helper_deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
             cancel.cancel_with(anima_core::CancelCause::HelperDeadline);
         }
         let transaction = transactions.clone().lock_owned().await;
-        let (build, previous, persist) = {
+        let (build, previous, previous_project, persist) = {
             let mut guard = state.write().await;
             if !guard.agents.contains_key(agent_id)
                 || guard.sessions.get(agent_id, session_id).is_none()
@@ -207,13 +232,34 @@ where
             if cancel.is_cancelled() {
                 accepted = AcceptedAgentFiles::empty(Availability::Available);
             }
+            let project_context = match (&project_scope, project_loaded) {
+                (Some(scope), Some(loaded)) => {
+                    let run = guard.runs.get(run_id).ok_or_else(ApiError::not_found)?;
+                    match crate::projects::recheck_context(&guard, run, scope, loaded) {
+                        Ok(accepted) => Some(accepted),
+                        Err(crate::projects::ProjectError::ScopeChanged)
+                            if attempt == 0 && std::time::Instant::now() < deadline =>
+                        {
+                            continue
+                        }
+                        Err(error) => return Err(ApiError::conflict(error.to_string())),
+                    }
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(ApiError::conflict(
+                        "Project context selection was interrupted",
+                    ))
+                }
+            };
             let build = guard
-                .build_run_runtime_with_files(
+                .build_run_runtime_with_files_and_project(
                     agent_id,
                     room_id,
                     input,
                     Some(config),
                     &accepted.rendered,
+                    project_context,
                 )
                 .ok_or_else(ApiError::not_found)?;
             let session = guard
@@ -225,17 +271,30 @@ where
                 build.context.trimmed_through.as_deref(),
                 anima_core::primitives::now_millis(),
             );
-            let changed = session.context_trimmed != previous;
+            let mut changed = session.context_trimmed != previous;
+            let manifest = build
+                .project_context
+                .as_ref()
+                .map(|context| context.manifest().clone());
+            let run = guard.runs.get_mut(run_id).ok_or_else(ApiError::not_found)?;
+            let previous_project = run.project_context.clone();
+            changed |= previous_project != manifest;
+            run.project_context = manifest;
             (
                 build,
                 previous,
+                previous_project,
                 changed.then(|| guard.control_plane_persist_request()),
             )
         };
         if let Some(persist) = persist {
             if let Err(error) = persist.save().await {
-                if let Some(session) = state.write().await.sessions.get_mut(agent_id, session_id) {
+                let mut guard = state.write().await;
+                if let Some(session) = guard.sessions.get_mut(agent_id, session_id) {
                     session.context_trimmed = previous;
+                }
+                if let Some(run) = guard.runs.get_mut(run_id) {
+                    run.project_context = previous_project;
                 }
                 return Err(ApiError::service_unavailable(error.to_string()));
             }

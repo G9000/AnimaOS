@@ -32,7 +32,7 @@ fn text(bytes: &[u8]) -> String {
 /// setup started (which stops its server), and shuts the server down directly
 /// if one is left, so no process outlives the test.
 struct Home {
-    dir: tempfile::TempDir,
+    dir: common::PrivateHome,
     server_port: u16,
     control_port: u16,
     client: reqwest::blocking::Client,
@@ -40,7 +40,7 @@ struct Home {
 
 impl Home {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = common::PrivateHome::new().unwrap();
         let (server_port, control_port) = (free_port(), free_port());
         let root = dir.path().join(".animaos-swarm");
         std::fs::create_dir_all(&root).unwrap();

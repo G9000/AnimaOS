@@ -3,6 +3,9 @@ use super::*;
 use crate::runs::{RunLink, RunSource};
 use anima_core::CancelSignal;
 
+#[path = "thread_history.rs"]
+mod history;
+
 const REFUSED: &str = "Discord thread authority changed or this run is no longer active";
 
 #[derive(Clone)]

@@ -52,6 +52,8 @@ pub enum WorkflowResumeAction {
     Answer,
     Retry,
     Resolve,
+    Pause,
+    Continue,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -118,6 +120,9 @@ pub struct WorkflowRun {
     pub title: String,
     pub request_key: String,
     pub status: WorkflowStatus,
+    /// Holds new task admission while an already claimed attempt may settle.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub paused: bool,
     pub revision: u64,
     pub current_step: usize,
     pub steps: Vec<WorkflowStep>,
@@ -143,6 +148,7 @@ impl WorkflowRun {
             title: input.title,
             request_key: input.request_key,
             status: WorkflowStatus::Running,
+            paused: false,
             revision: 1,
             current_step: 0,
             steps: input
@@ -325,7 +331,8 @@ impl WorkflowRun {
         self.validate()?;
         let job_id = job_id.into();
         validate_reference(&job_id, "workflow job ID")?;
-        if self.status != WorkflowStatus::Running
+        if self.paused
+            || self.status != WorkflowStatus::Running
             || self.steps[self.current_step].status != WorkflowStepStatus::Pending
             || self.steps[self.current_step].attempt >= MAX_WORKFLOW_ATTEMPTS
         {
@@ -414,10 +421,28 @@ impl WorkflowRun {
             return Err("Workflow decision history limit reached".into());
         }
         let valid = match request.action {
-            WorkflowResumeAction::Approve => self.status == WorkflowStatus::AwaitingApproval,
-            WorkflowResumeAction::Answer => self.status == WorkflowStatus::AwaitingInput,
+            WorkflowResumeAction::Pause => {
+                !self.paused
+                    && !matches!(
+                        self.status,
+                        WorkflowStatus::Completed | WorkflowStatus::Cancelled
+                    )
+            }
+            WorkflowResumeAction::Continue => {
+                self.paused
+                    && !matches!(
+                        self.status,
+                        WorkflowStatus::Completed | WorkflowStatus::Cancelled
+                    )
+            }
+            WorkflowResumeAction::Approve => {
+                !self.paused && self.status == WorkflowStatus::AwaitingApproval
+            }
+            WorkflowResumeAction::Answer => {
+                !self.paused && self.status == WorkflowStatus::AwaitingInput
+            }
             WorkflowResumeAction::Retry | WorkflowResumeAction::Resolve => {
-                self.status == WorkflowStatus::NeedsReview
+                !self.paused && self.status == WorkflowStatus::NeedsReview
             }
         };
         if !valid {
@@ -428,8 +453,27 @@ impl WorkflowRun {
         {
             return Err("Workflow task has exhausted its three attempts".into());
         }
+        if request.action == WorkflowResumeAction::Pause
+            && self.decisions.len() + 2 > MAX_WORKFLOW_DECISIONS
+        {
+            return Err("Workflow has no room to save both pause and continue decisions".into());
+        }
         let revision = self.next_revision(now)?;
         let step_index = self.current_step;
+        if matches!(
+            request.action,
+            WorkflowResumeAction::Pause | WorkflowResumeAction::Continue
+        ) {
+            self.paused = request.action == WorkflowResumeAction::Pause;
+            self.decisions.push(WorkflowDecision {
+                step_index,
+                request,
+                decided_at_ms: now,
+            });
+            self.revision = revision;
+            self.updated_at_ms = now;
+            return Ok(true);
+        }
         let step = &mut self.steps[self.current_step];
         if request.action == WorkflowResumeAction::Retry {
             step.status = WorkflowStepStatus::Pending;
@@ -516,6 +560,7 @@ impl WorkflowRun {
             attached: false,
             decision: 0,
             revision: 1,
+            paused: false,
         }];
         let mut visited = HashSet::new();
         while let Some(state) = stack.pop() {
@@ -532,6 +577,7 @@ impl WorkflowRun {
                 }
                 if self.status == WorkflowStatus::Cancelled
                     && state.revision.checked_add(1) == Some(self.revision)
+                    && state.paused == self.paused
                     && self.replay_matches_attempt(state)
                 {
                     return true;
@@ -550,25 +596,39 @@ impl WorkflowRun {
                 next.revision += 1;
                 next.decision += 1;
                 match (state.phase, decision.request.action) {
+                    (_, WorkflowResumeAction::Pause)
+                        if !state.paused && state.decision + 2 <= MAX_WORKFLOW_DECISIONS =>
+                    {
+                        next.paused = true;
+                        stack.push(next);
+                    }
+                    (_, WorkflowResumeAction::Continue) if state.paused => {
+                        next.paused = false;
+                        stack.push(next);
+                    }
                     (WorkflowStepStatus::NeedsReview, WorkflowResumeAction::Retry)
-                        if state.attempt < MAX_WORKFLOW_ATTEMPTS =>
+                        if !state.paused && state.attempt < MAX_WORKFLOW_ATTEMPTS =>
                     {
                         next.phase = WorkflowStepStatus::Pending;
                         next.attached = false;
                         stack.push(next);
                     }
                     (WorkflowStepStatus::NeedsReview, WorkflowResumeAction::Resolve)
-                        if self.replay_can_complete(state, decision.request.value.as_deref()) =>
+                        if !state.paused
+                            && self
+                                .replay_can_complete(state, decision.request.value.as_deref()) =>
                     {
                         stack.push(self.replay_advance(next));
                     }
                     (WorkflowStepStatus::AwaitingApproval, WorkflowResumeAction::Approve)
-                        if self.replay_can_complete(state, None) =>
+                        if !state.paused && self.replay_can_complete(state, None) =>
                     {
                         stack.push(self.replay_advance(next));
                     }
                     (WorkflowStepStatus::AwaitingInput, WorkflowResumeAction::Answer)
-                        if self.replay_can_complete(state, decision.request.value.as_deref()) =>
+                        if !state.paused
+                            && self
+                                .replay_can_complete(state, decision.request.value.as_deref()) =>
                     {
                         stack.push(self.replay_advance(next));
                     }
@@ -583,7 +643,7 @@ impl WorkflowRun {
             next.revision += 1;
             match state.phase {
                 WorkflowStepStatus::Pending => {
-                    if (state.attempt as usize) < step.attempts.len() {
+                    if !state.paused && (state.attempt as usize) < step.attempts.len() {
                         let mut attached = next;
                         attached.attempt += 1;
                         attached.attached = true;
@@ -619,6 +679,9 @@ impl WorkflowRun {
     }
 
     fn replay_matches_current(&self, state: ReplayState) -> bool {
+        if state.paused != self.paused {
+            return false;
+        }
         if self.status == WorkflowStatus::Completed {
             return state.step == self.steps.len();
         }
@@ -656,6 +719,11 @@ struct ReplayState {
     attached: bool,
     decision: usize,
     revision: u64,
+    paused: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn initial_phase(kind: WorkflowStepKind) -> WorkflowStepStatus {
@@ -720,9 +788,19 @@ fn validate_resume_request(request: &WorkflowResumeRequest) -> Result<(), String
         return Err("Workflow decision revision must be positive".into());
     }
     match request.action {
-        WorkflowResumeAction::Approve | WorkflowResumeAction::Retry => {
+        WorkflowResumeAction::Approve
+        | WorkflowResumeAction::Retry
+        | WorkflowResumeAction::Pause
+        | WorkflowResumeAction::Continue => {
             if request.value.is_some() {
                 return Err("This workflow decision does not accept a value".into());
+            }
+            if matches!(
+                request.action,
+                WorkflowResumeAction::Pause | WorkflowResumeAction::Continue
+            ) && request.acknowledge_uncertain
+            {
+                return Err("Pause and continue do not accept an effects acknowledgement".into());
             }
         }
         WorkflowResumeAction::Answer | WorkflowResumeAction::Resolve => {

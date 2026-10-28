@@ -52,6 +52,7 @@ struct DaemonRuntime {
     connectors: ConnectorManager,
     discord: crate::connectors::discord::DiscordManager,
     drive: crate::connectors::drive::DriveManager,
+    microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
     calendar: crate::connectors::gcalendar::CalendarManager,
     mail: crate::connectors::mail::MailManager,
     oauth_apps: crate::connectors::oauth_apps::OAuthAppService,
@@ -179,6 +180,30 @@ fn configured_state(config: &DaemonConfig, model_adapter: Arc<dyn ModelAdapter>)
     state
 }
 
+/// Run before router construction starts any producer. The actual runtime
+/// transaction orders reconciliation with the other control-plane services.
+async fn recover_document_edits(
+    state: &SharedDaemonState,
+    coordinator: &AgentRunCoordinator,
+) -> io::Result<Option<crate::document_edits::DocumentEditService>> {
+    if state.read().await.document_edit_store.is_none() {
+        return Ok(None);
+    }
+    let service = crate::document_edits::DocumentEditService::new(
+        state.clone(),
+        coordinator.control_plane_transactions(),
+    );
+    state.write().await.document_edit_service = Some(service.weak());
+    // Ambiguous evidence remains reserved and is reported by the service.
+    // An uncertain metadata save refuses startup before any producer starts.
+    service
+        .reconcile_pending()
+        .await
+        .map_err(io::Error::other)?;
+    service.cleanup_staging().await.map_err(io::Error::other)?;
+    Ok(Some(service))
+}
+
 pub(crate) fn app_with_state(state: SharedDaemonState, config: DaemonConfig) -> Router {
     let runtime = deterministic_daemon_runtime(Arc::clone(&state), &config);
     app_with_runtime(state, config, runtime)
@@ -249,6 +274,7 @@ fn app_with_runtime(
     if let Ok(mut guard) = state.try_write() {
         guard.set_calendar_manager(Some(runtime.calendar.clone()));
         guard.drive_manager = Some(runtime.drive.weak());
+        guard.microsoft_files_manager = Some(runtime.microsoft_files.weak());
     }
     router_with_runtime(
         state,
@@ -270,6 +296,7 @@ fn app_with_runtime_for_owner_test(
     if let Ok(mut guard) = state.try_write() {
         guard.set_calendar_manager(Some(runtime.calendar.clone()));
         guard.drive_manager = Some(runtime.drive.weak());
+        guard.microsoft_files_manager = Some(runtime.microsoft_files.weak());
     }
     router_with_runtime_for_owner_test(state, config, runtime, true)
 }
@@ -308,6 +335,7 @@ async fn app_with_configured_persistence_for_bind(
     skip_memory_model_load(&state).await;
     state.write().await.chatgpt_auth = crate::chatgpt_auth::ChatGptAuth::new();
     let runtime = daemon_runtime(Arc::clone(&state), &config)?;
+    let document_edits = recover_document_edits(&state, &runtime.agent_runs).await?;
     let maintenance = runtime.agent_runs.memory_maintenance();
     maintenance.recover().await.map_err(|_| {
         io::Error::new(
@@ -325,9 +353,12 @@ async fn app_with_configured_persistence_for_bind(
     let connectors = runtime.connectors.clone();
     let discord = runtime.discord.clone();
     let drive = runtime.drive.clone();
+    let microsoft_files = runtime.microsoft_files.clone();
     let scheduler = runtime.scheduler.clone();
     // Install synchronous services before any producer can contend for state.
     let router = router_with_runtime(state, config, runtime, bind_is_loopback);
+    // The router now retains its installed service using the same transaction.
+    drop(document_edits);
     turn_recovery
         .recover_main_chat_clears()
         .await
@@ -343,6 +374,7 @@ async fn app_with_configured_persistence_for_bind(
     connectors.start_restored().await;
     discord.start_restored().await;
     drive.start_restored().await;
+    microsoft_files.start_restored().await;
     scheduler.start().await;
     let maintenance_worker = Arc::new(maintenance.start());
     Ok(router.layer(axum::Extension(maintenance_worker)))
@@ -505,6 +537,7 @@ async fn serve_with_state_and_voice(
 ) -> io::Result<()> {
     let bind_is_loopback = listener.local_addr()?.ip().is_loopback();
     let mut runtime = daemon_runtime(Arc::clone(&state), &config)?;
+    let document_edits = recover_document_edits(&state, &runtime.agent_runs).await?;
     runtime.voice = voice;
     runtime.speech = speech;
     if let Some(requested) = requested {
@@ -524,6 +557,7 @@ async fn serve_with_state_and_voice(
     let connectors = runtime.connectors.clone();
     let discord = runtime.discord.clone();
     let drive = runtime.drive.clone();
+    let microsoft_files = runtime.microsoft_files.clone();
     let scheduler = runtime.scheduler.clone();
     let agent_runs = runtime.agent_runs.clone();
     let maintenance = agent_runs.memory_maintenance();
@@ -540,6 +574,7 @@ async fn serve_with_state_and_voice(
     let live = state.read().await.live.clone();
     let browser_state = state.clone();
     let router = build_router(state, config, runtime, bind_is_loopback);
+    drop(document_edits);
     // Added last, so every daemon route wins over the host's UI.
     let router = match ui {
         Some(ui) => router.fallback_service(ui),
@@ -562,6 +597,7 @@ async fn serve_with_state_and_voice(
     connectors.start_restored().await;
     discord.start_restored().await;
     drive.start_restored().await;
+    microsoft_files.start_restored().await;
     scheduler.start().await;
     // Spec §8.1: the startup rescan, then one every 60 seconds.
     skills.start();
@@ -576,7 +612,9 @@ async fn serve_with_state_and_voice(
     let drain_expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workflow_expired = Arc::clone(&drain_expired);
     let (started, deadline_started) = tokio::sync::oneshot::channel();
-    let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+    // Keep the shutdown workflow off the host thread's stack without changing
+    // its producer-first close and drain ordering.
+    let server = axum::serve(listener, router).with_graceful_shutdown(Box::pin(async move {
         shutdown.await;
         let deadline = tokio::time::Instant::now() + lifecycle::SHUTDOWN_BUDGET;
         let _ = started.send(deadline);
@@ -611,6 +649,7 @@ async fn serve_with_state_and_voice(
                     agent_runs.doctor().shutdown().await;
                     agent_runs.standing_intents().shutdown().await;
                     mail.shutdown().await;
+                    microsoft_files.shutdown().await;
                     if let Some(browser) = &browser {
                         browser.shutdown().await;
                     }
@@ -629,11 +668,12 @@ async fn serve_with_state_and_voice(
         .await;
         workflow_expired.store(!drained, std::sync::atomic::Ordering::SeqCst);
         shutdown_live.close();
-    });
+    }));
     // The start-deadline future resolves to the shutdown deadline, which
     // `run_server_until_shutdown` awaits later; returning it unawaited is intended.
     #[allow(clippy::async_yields_async)]
-    let outcome = lifecycle::run_server_until_shutdown(async { server.await }, async {
+    // The server future contains the shutdown workflow and can be large.
+    let outcome = lifecycle::run_server_until_shutdown(Box::pin(async { server.await }), async {
         let deadline = match deadline_started.await {
             Ok(deadline) => deadline,
             Err(_) => std::future::pending().await,
@@ -726,6 +766,18 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         oauth_apps.clone(),
     );
     let jobs = JobService::new(Arc::clone(&state), agent_runs.clone());
+    let microsoft_files = crate::connectors::microsoft_files::MicrosoftFileManager::new(
+        &state,
+        agent_runs.control_plane_transactions(),
+        Arc::new(
+            crate::connectors::microsoft_files::store::OsMicrosoftFileCredentialStore::default(),
+        ),
+        Arc::new(
+            crate::connectors::microsoft_files::client::MicrosoftGraphClient::new()
+                .map_err(|_| io::Error::other("Microsoft files configuration failed"))?,
+        ),
+        oauth_apps.clone(),
+    );
     let history = crate::history::HistoryWorker::new(
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
@@ -746,6 +798,7 @@ fn daemon_runtime(state: SharedDaemonState, config: &DaemonConfig) -> io::Result
         connectors,
         discord,
         drive,
+        microsoft_files,
         calendar,
         mail,
         oauth_apps,
@@ -836,6 +889,11 @@ fn deterministic_daemon_runtime_with_mail_transport(
         oauth_apps.clone(),
     );
     let jobs = JobService::new(Arc::clone(&state), agent_runs.clone());
+    let microsoft_files = crate::connectors::microsoft_files::MicrosoftFileManager::unconfigured(
+        &state,
+        agent_runs.control_plane_transactions(),
+        oauth_apps.clone(),
+    );
     let history = crate::history::HistoryWorker::new(
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
@@ -856,6 +914,7 @@ fn deterministic_daemon_runtime_with_mail_transport(
         connectors,
         discord,
         drive,
+        microsoft_files,
         calendar,
         mail,
         oauth_apps,
@@ -894,6 +953,7 @@ fn router_with_runtime(
         bind_is_loopback,
         runtime.discord,
         runtime.drive,
+        runtime.microsoft_files,
         runtime.voice,
         runtime.speech,
         runtime.drain,
@@ -929,6 +989,7 @@ fn router_with_runtime_for_owner_test(
         bind_is_loopback,
         runtime.discord,
         runtime.drive,
+        runtime.microsoft_files,
         runtime.voice,
         runtime.speech,
         runtime.drain,
@@ -1067,6 +1128,41 @@ mod tests {
     use crate::connectors::oauth_apps::{OAuthAppCredentials, OAuthProvider};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use zeroize::Zeroizing;
+
+    #[tokio::test]
+    async fn document_startup_reconciles_before_retiring_unreferenced_staging() {
+        for invalid_registry in [false, true] {
+            let private = crate::document_edits::store::test_support::private_directory();
+            let workspace = tempfile::tempdir().unwrap();
+            let root = private.path().join("document-edits");
+            crate::document_edits::store::initialize_owned_directory(&root).unwrap();
+            let store = crate::document_edits::DocumentEditStore::open_existing(&root).unwrap();
+            let candidate = store.stage(b"retained startup evidence").unwrap();
+            let hash = candidate.hash().to_string();
+            drop(candidate);
+            let mut daemon = DaemonState::new();
+            daemon.workspace = Some(crate::control_plane_store::WorkspaceConfig {
+                root_path: workspace.path().to_path_buf(),
+                ..Default::default()
+            });
+            daemon.document_edit_store = Some(store.clone());
+            if invalid_registry {
+                daemon.document_edits = serde_json::from_value(serde_json::json!({
+                    "drafts":{}, "publications":{}, "reservations":{"unsealed":"proposal"}
+                }))
+                .unwrap();
+            }
+            let state = Arc::new(RwLock::new(daemon));
+            let coordinator = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(1)));
+            let recovered = recover_document_edits(&state, &coordinator).await;
+            assert_eq!(recovered.is_err(), invalid_registry);
+            assert_eq!(
+                store.candidate_hashes().unwrap().contains(&hash),
+                invalid_registry,
+                "failed reconciliation must retain staging before cleanup/producers"
+            );
+        }
+    }
 
     struct CountingMailTransport(Arc<AtomicUsize>);
 
@@ -1521,3 +1617,5 @@ mod tests {
 
 #[cfg(test)]
 mod turn_crash_tests;
+#[cfg(test)]
+mod workflow_continuity_crash_tests;

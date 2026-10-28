@@ -1,6 +1,8 @@
 //! Spawns the real `anima supervise --no-tray` against a temporary HOME, with
 //! its ports set in that home's `config.toml`.
 
+mod common;
+
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -61,7 +63,7 @@ fn spawn_supervisor(home: &Path) -> Child {
 /// the test.
 struct Supervisor {
     child: Child,
-    home: tempfile::TempDir,
+    home: common::PrivateHome,
     server_port: u16,
     control_port: u16,
     client: reqwest::blocking::Client,
@@ -69,13 +71,13 @@ struct Supervisor {
 
 impl Supervisor {
     fn start(extra_config: &str) -> Self {
-        let home = tempfile::tempdir().unwrap();
+        let home = common::PrivateHome::new().unwrap();
         Self::start_in(home, free_port(), extra_config)
     }
 
     /// `extra_config` may set `workspace`; otherwise a `ws` folder in the
     /// home is the workspace (the supervisor refuses to run without one).
-    fn start_in(home: tempfile::TempDir, server_port: u16, extra_config: &str) -> Self {
+    fn start_in(home: common::PrivateHome, server_port: u16, extra_config: &str) -> Self {
         let control_port = free_port();
         let root = home.path().join(".animaos-swarm");
         std::fs::create_dir_all(&root).unwrap();
@@ -384,7 +386,7 @@ fn stop_then_start() {
 fn server_port_in_use_reports_crash() {
     let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = occupied.local_addr().unwrap().port();
-    let supervisor = Supervisor::start_in(tempfile::tempdir().unwrap(), port, "");
+    let supervisor = Supervisor::start_in(common::PrivateHome::new().unwrap(), port, "");
     let message = format!("Port {port} is in use");
     let crashed = |status: &Value| {
         status["state"]["kind"] == "crashed" && status["state"]["message"] == message.as_str()
@@ -404,7 +406,7 @@ fn server_port_in_use_reports_crash() {
 
 #[test]
 fn missing_workspace_still_runs() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let missing = home.path().join("no-such-workspace");
     let config = format!("workspace = {:?}\n", missing.to_string_lossy());
     let supervisor = Supervisor::start_in(home, free_port(), &config);
@@ -418,23 +420,40 @@ fn missing_workspace_still_runs() {
 }
 
 #[test]
-fn file_workspace_is_reported_and_still_runs() {
-    let home = tempfile::tempdir().unwrap();
+fn file_workspace_is_refused_without_starting_the_server() {
+    let home = common::PrivateHome::new().unwrap();
     let file = home.path().join("afile");
     std::fs::write(&file, "x").unwrap();
     let config = format!("workspace = {:?}\n", file.to_string_lossy());
     let supervisor = Supervisor::start_in(home, free_port(), &config);
-    let status = supervisor.wait_for_kind("running");
-    let problem = status["workspaceProblem"].as_str().unwrap_or_default();
+    let status = supervisor.wait_for_kind("stopped");
+    let problem = format!("Workspace path is not a folder: {}", file.display());
+    assert_eq!(status["workspaceProblem"], problem, "{status}");
+    assert_eq!(status["pending"], Value::Null);
+    assert!(refuses_connections(supervisor.server_port));
+    assert_eq!(std::fs::read(&file).unwrap(), b"x");
+    let log_path = supervisor.root().join("logs").join("anima.log");
+    let log = std::fs::read_to_string(&log_path).unwrap();
     assert!(
-        problem.starts_with("Workspace path is not a folder"),
-        "workspaceProblem: {problem:?}"
+        log.contains(&format!("Not starting the server: {problem}")),
+        "log:\n{log}"
     );
+    assert!(!log.contains("Starting the server"), "log:\n{log}");
+
+    let (code, body) = supervisor.action("start", false);
+    assert_eq!(code, 202, "{body}");
+    let status = supervisor.wait_for_kind("stopped");
+    assert_eq!(status["workspaceProblem"], problem, "{status}");
+    assert_eq!(status["pending"], Value::Null);
+    assert!(refuses_connections(supervisor.server_port));
+    assert_eq!(std::fs::read(&file).unwrap(), b"x");
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert!(!log.contains("Starting the server"), "log:\n{log}");
 }
 
 #[test]
 fn home_folder_workspace_is_refused_without_starting_the_server() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let config = format!("workspace = {:?}\n", home.path().to_string_lossy());
     let supervisor = Supervisor::start_in(home, free_port(), &config);
     let status = supervisor.wait_for_kind("stopped");
@@ -460,7 +479,7 @@ fn home_folder_workspace_is_refused_without_starting_the_server() {
 
 #[test]
 fn supervise_without_a_workspace_refuses() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let control_port = free_port();
     let root = home.path().join(".animaos-swarm");
     std::fs::create_dir_all(&root).unwrap();
@@ -602,7 +621,7 @@ impl Drop for KillOnDrop {
 
 #[test]
 fn stale_server_on_the_port_is_shut_down_first() {
-    let home = tempfile::tempdir().unwrap();
+    let home = common::PrivateHome::new().unwrap();
     let port = free_port();
     let root = home.path().join(".animaos-swarm");
     std::fs::create_dir_all(&root).unwrap();

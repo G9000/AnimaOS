@@ -122,6 +122,148 @@ fn document_call(id: &str, title: &str, expected: Option<&str>) -> ToolCall {
     call
 }
 
+/// The real final-authority guard must exclude daemon source/project/profile
+/// mutations until synchronous publication and readback have both settled.
+#[tokio::test]
+async fn native_publication_fence_blocks_mutations_and_releases_on_errors() {
+    struct Probe {
+        guard: Option<tokio::sync::OwnedRwLockReadGuard<DaemonState>>,
+        release: std::sync::mpsc::SyncSender<()>,
+        writer: Option<std::thread::JoinHandle<()>>,
+        target: PathBuf,
+        expected: &'static [u8],
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            assert_eq!(std::fs::read(&self.target).unwrap(), self.expected);
+            self.guard.take();
+            self.release.send(()).unwrap();
+            self.writer.take().unwrap().join().unwrap();
+        }
+    }
+    for change in ["source", "project", "profile"] {
+        for refuse_after_authority in [false, true] {
+            let fixture = Fixture::new(false).await;
+            let project = {
+                let mut state = fixture.coordinator.state.write().await;
+                let (project, _) = state
+                    .projects
+                    .create(
+                        crate::projects::ProjectCreateRequest {
+                            request_key: "fence-project".into(),
+                            title: "Fence".into(),
+                            member_agent_ids: vec![fixture.run.agent_id.clone()],
+                            instructions: String::new(),
+                        },
+                        1,
+                    )
+                    .unwrap();
+                project.id
+            };
+            let call = call(
+                "publication-fence",
+                "write_file",
+                &[("file_path", "target.txt"), ("content", "reviewed")],
+            );
+            let journal = RunActionJournal::new(
+                &fixture.coordinator.state,
+                fixture.coordinator.control_plane_transactions(),
+                fixture.run.clone(),
+                CancelSignal::new(),
+                None,
+            );
+            journal.begin(&call).await.unwrap();
+            let target = fixture.workspace.join("target.txt");
+            let state = fixture.coordinator.state.clone();
+            let run = fixture.run.clone();
+            let expected: &'static [u8] = if refuse_after_authority {
+                b"concurrent file"
+            } else {
+                b"reviewed"
+            };
+            let service =
+                crate::filesystem_checkpoints::NativeCheckpointService::new(fixture.store.clone());
+            let result = service.mutate_with_authority(
+                &fixture.workspace,
+                &fixture.run,
+                &call,
+                "target.txt",
+                |_| Ok(b"reviewed".to_vec()),
+                || {
+                    let guard = journal.checkpoint_mutation_authority(
+                        &fixture.workspace,
+                        &fixture.store,
+                        &call,
+                        false,
+                    )?;
+                    let (blocked_tx, blocked_rx) = std::sync::mpsc::sync_channel(0);
+                    let (release, released) = std::sync::mpsc::sync_channel(0);
+                    let writer_state = state.clone();
+                    let writer_run = run.clone();
+                    let writer_project = project.clone();
+                    let writer = std::thread::spawn(move || {
+                        blocked_tx.send(writer_state.try_write().is_err()).unwrap();
+                        released
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .unwrap();
+                        let mut state = writer_state.blocking_write();
+                        match change {
+                            "source" => {
+                                state
+                                    .sessions
+                                    .remove(&writer_run.agent_id, &writer_run.session_id);
+                            }
+                            "project" => {
+                                state.projects.delete(&writer_project, 1, 2).unwrap();
+                            }
+                            "profile" => state.checkpoint_root = None,
+                            _ => unreachable!(),
+                        }
+                    });
+                    assert!(
+                        blocked_rx
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .unwrap(),
+                        "{change} crossed native publication authority"
+                    );
+                    if refuse_after_authority {
+                        std::fs::write(&target, expected).unwrap();
+                    }
+                    Ok(Probe {
+                        guard: Some(guard),
+                        release,
+                        writer: Some(writer),
+                        target: target.clone(),
+                        expected,
+                    })
+                },
+            );
+            assert_eq!(result.is_err(), refuse_after_authority, "{change}");
+            if let Ok(receipt) = result {
+                use sha2::{Digest, Sha256};
+                assert_eq!(
+                    receipt.observed_sha256,
+                    hex::encode(Sha256::digest(expected))
+                );
+            }
+            // Acquiring the state again also proves error unwinding released
+            // the guard before any asynchronous journal settlement.
+            let state = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                fixture.coordinator.state.write(),
+            )
+            .await
+            .unwrap();
+            match change {
+                "source" => assert!(!state.sessions.contains(&run.agent_id, &run.session_id)),
+                "project" => assert!(state.projects.records().next().is_none()),
+                "profile" => assert!(state.checkpoint_root.is_none()),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn finished_documents_binary_create_revise_and_undo_are_checkpointed() {
     use sha2::{Digest, Sha256};

@@ -39,7 +39,7 @@ pub(super) struct CreateWorkflowRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ResumeWorkflowRequest {
     revision: u64,
-    /// approve, answer, retry, or resolve. Only the owner can decide checkpoints.
+    /// approve, answer, retry, resolve, pause, or continue. Only the owner can decide checkpoints.
     #[schema(value_type=String)]
     action: WorkflowResumeAction,
     value: Option<String>,
@@ -130,6 +130,27 @@ pub(super) async fn get(
         return error;
     }
     response(state.jobs.get_workflow(&agent, &id).await)
+}
+
+#[utoipa::path(get, path="/api/agents/{agent_id}/workflows/{workflow_id}/steps/{step_id}/attempts/{job_id}", tag="workflows",
+    params(("agent_id"=String,Path),("workflow_id"=String,Path),("step_id"=String,Path),("job_id"=String,Path)),
+    responses((status=200,body=crate::jobs::workflows::continuity::WorkflowAttemptEvidence),(status=403,description="Local owner required"),(status=404,description="No owned attempt"),(status=409,description="Inconsistent saved linkage")))]
+pub(super) async fn inspect_attempt(
+    State(state): State<AppState>,
+    Path((agent, workflow, step, job)): Path<(String, String, String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(error) = authorize(&state, &request, true) {
+        return error;
+    }
+    match state
+        .jobs
+        .inspect_workflow_attempt(&agent, &workflow, &step, &job)
+        .await
+    {
+        Ok(evidence) => no_store(json_response(StatusCode::OK, &evidence)),
+        Err(error) => error_response(error),
+    }
 }
 
 #[utoipa::path(post, path="/api/agents/{agent_id}/workflows/{workflow_id}/resume", tag="workflows",

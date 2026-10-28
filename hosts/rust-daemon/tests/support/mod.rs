@@ -46,13 +46,144 @@ pub(crate) fn owner_request(builder: axum::http::request::Builder) -> axum::http
 
 pub(crate) struct WorkspaceRootGuard {
     previous: Option<OsString>,
+    previous_document_edits: Option<OsString>,
     path: PathBuf,
+    profile: OnceLock<PrivateProfile>,
     _lock: MutexGuard<'static, ()>,
+}
+
+struct PrivateProfile {
+    path: PathBuf,
+    canonical: PathBuf,
+    parent: PathBuf,
+    identity: (u64, u64),
+    held: Option<cap_std::fs::Dir>,
+}
+
+impl PrivateProfile {
+    fn create(workspace: &Path) -> std::io::Result<Self> {
+        use cap_fs_ext::{DirExt, MetadataExt};
+        let parent = workspace.parent().expect("workspace has a parent");
+        let mut name = workspace
+            .file_name()
+            .expect("workspace has a name")
+            .to_os_string();
+        name.push(".profile");
+        let path = parent.join(&name);
+        #[cfg(windows)]
+        {
+            use win_custody::{current_user_sid_string, SecurityDescriptor};
+            let user = current_user_sid_string()?;
+            SecurityDescriptor::from_sddl(&format!(
+                "O:{user}D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)"
+            ))?
+            .create_directory(&path)?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(&path)?;
+        }
+        #[cfg(not(any(windows, unix)))]
+        fs::create_dir(&path)?;
+        let parent = parent.canonicalize()?;
+        let canonical = path.canonicalize()?;
+        let workspace = workspace.canonicalize()?;
+        if canonical.parent() != Some(parent.as_path())
+            || canonical.starts_with(&workspace)
+            || workspace.starts_with(&canonical)
+        {
+            return Err(std::io::Error::other(
+                "private test profile is not a separate sibling",
+            ));
+        }
+        let parent_handle =
+            cap_std::fs::Dir::open_ambient_dir(&parent, cap_std::ambient_authority())?;
+        let named = parent_handle.symlink_metadata(&name)?;
+        if !regular_directory(&named) {
+            return Err(std::io::Error::other("private test profile is linked"));
+        }
+        let held = parent_handle.open_dir_nofollow(&name)?;
+        let metadata = held.dir_metadata()?;
+        if !regular_directory(&metadata)
+            || (named.dev(), named.ino()) != (metadata.dev(), metadata.ino())
+        {
+            return Err(std::io::Error::other(
+                "private test profile identity changed",
+            ));
+        }
+        Ok(Self {
+            path,
+            canonical,
+            parent,
+            identity: (metadata.dev(), metadata.ino()),
+            held: Some(held),
+        })
+    }
+
+    fn cleanup(&mut self) -> std::io::Result<()> {
+        use cap_fs_ext::{DirExt, MetadataExt};
+        let canonical = self.path.canonicalize()?;
+        if canonical != self.canonical || canonical.parent() != Some(self.parent.as_path()) {
+            return Err(std::io::Error::other("private test profile moved"));
+        }
+        let parent =
+            cap_std::fs::Dir::open_ambient_dir(&self.parent, cap_std::ambient_authority())?;
+        let name = self.path.file_name().expect("private profile has a name");
+        let named = parent.symlink_metadata(name)?;
+        if !regular_directory(&named) || (named.dev(), named.ino()) != self.identity {
+            return Err(std::io::Error::other("private test profile name changed"));
+        }
+        let fresh = parent.open_dir_nofollow(name)?;
+        let fresh_metadata = fresh.dir_metadata()?;
+        let held = self
+            .held
+            .as_ref()
+            .expect("private profile retains its directory");
+        let held_metadata = held.dir_metadata()?;
+        if !regular_directory(&fresh_metadata)
+            || !regular_directory(&held_metadata)
+            || (fresh_metadata.dev(), fresh_metadata.ino()) != self.identity
+            || (held_metadata.dev(), held_metadata.ino()) != self.identity
+        {
+            return Err(std::io::Error::other(
+                "private test profile custody changed",
+            ));
+        }
+        drop(fresh);
+        self.held
+            .take()
+            .expect("verified private profile handle")
+            .remove_open_dir_all()
+    }
+}
+
+fn regular_directory(metadata: &cap_std::fs::Metadata) -> bool {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use cap_std::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 impl WorkspaceRootGuard {
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub(crate) fn control_plane_path(&self) -> PathBuf {
+        self.profile
+            .get_or_init(|| {
+                PrivateProfile::create(&self.path).expect("private test profile creates atomically")
+            })
+            .path
+            .join("control-plane.json")
     }
 }
 
@@ -62,6 +193,14 @@ impl Drop for WorkspaceRootGuard {
             std::env::set_var("ANIMAOS_WORKSPACE_ROOT", previous);
         } else {
             std::env::remove_var("ANIMAOS_WORKSPACE_ROOT");
+        }
+        if let Some(previous) = &self.previous_document_edits {
+            std::env::set_var("ANIMAOS_RS_DOCUMENT_EDITS_DIR", previous);
+        } else {
+            std::env::remove_var("ANIMAOS_RS_DOCUMENT_EDITS_DIR");
+        }
+        if let Some(profile) = self.profile.get_mut() {
+            let _ = profile.cleanup();
         }
         let _ = fs::remove_dir_all(&self.path);
     }
@@ -79,11 +218,15 @@ pub(crate) fn use_temp_workspace_root(prefix: &str) -> WorkspaceRootGuard {
     fs::create_dir_all(&path).expect("workspace dir should be created");
 
     let previous = std::env::var_os("ANIMAOS_WORKSPACE_ROOT");
+    let previous_document_edits = std::env::var_os("ANIMAOS_RS_DOCUMENT_EDITS_DIR");
     std::env::set_var("ANIMAOS_WORKSPACE_ROOT", &path);
+    std::env::remove_var("ANIMAOS_RS_DOCUMENT_EDITS_DIR");
 
     WorkspaceRootGuard {
         previous,
+        previous_document_edits,
         path,
+        profile: OnceLock::new(),
         _lock: lock,
     }
 }
@@ -188,7 +331,7 @@ pub(crate) fn extract_sse_event_data<'a>(stream: &'a str, event_name: &str) -> O
     Some(&data[..end])
 }
 
-/// End all first-boot workers and blocking persistence before simulating a restart.
+/// End app workers and blocking persistence before restart or profile cleanup.
 #[allow(dead_code)]
 pub(crate) async fn run_in_joined_runtime<F, Fut, T>(make_work: F) -> T
 where

@@ -12,7 +12,7 @@ mod store;
 mod workspace;
 pub(crate) use service::{
     NativeCheckpointService, NativeCheckpointSummary, NativeMutationReceipt,
-    NATIVE_RECOVERY_REQUIRED,
+    NativePublicationEvidence, NATIVE_RECOVERY_REQUIRED,
 };
 use store::CheckpointStore;
 #[cfg(all(test, windows))]

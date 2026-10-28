@@ -48,6 +48,8 @@ impl DaemonState {
         let calendar = self.calendar_manager.clone();
         let mail = self.mail_manager.clone();
         let drive = self.drive_manager.clone();
+        let microsoft_files = self.microsoft_files_manager.clone();
+        let document_edits = self.document_edit_service.clone();
         let db = self.db.clone();
         let owner_time_zone = self.owner_time_zone.clone();
         let execution_contexts = self.swarm_execution_contexts.clone();
@@ -64,6 +66,8 @@ impl DaemonState {
             let calendar = calendar.clone();
             let mail = mail.clone();
             let drive = drive.clone();
+            let microsoft_files = microsoft_files.clone();
+            let document_edits = document_edits.clone();
             let event_stream = event_stream.clone();
             let db = db.clone();
             let owner_time_zone = owner_time_zone.clone();
@@ -147,6 +151,8 @@ impl DaemonState {
                         let calendar = calendar.clone();
                         let mail = mail.clone();
                         let drive = drive.clone();
+                        let microsoft_files = microsoft_files.clone();
+                        let document_edits = document_edits.clone();
                         let runtime_events = Arc::clone(&runtime_events);
                         let db = db.clone();
                         let execution_contexts = execution_contexts.clone();
@@ -172,6 +178,8 @@ impl DaemonState {
                             let calendar = calendar.clone();
                             let mail = mail.clone();
                             let drive = drive.clone();
+                            let microsoft_files = microsoft_files.clone();
+                            let document_edits = document_edits.clone();
                             let runtime_events = Arc::clone(&runtime_events);
                             let db = db.clone();
                             Box::pin(async move {
@@ -232,6 +240,16 @@ impl DaemonState {
                                     .with_mail(mail.as_ref().and_then(|manager| manager.upgrade()))
                                     .with_drive(
                                         drive.as_ref().and_then(|manager| manager.upgrade()),
+                                    )
+                                    .with_microsoft_files(
+                                        microsoft_files
+                                            .as_ref()
+                                            .and_then(|manager| manager.upgrade()),
+                                    )
+                                    .with_document_edits(
+                                        document_edits
+                                            .as_ref()
+                                            .and_then(|service| service.upgrade()),
                                     );
                                 tool_context.calendar =
                                     calendar.as_ref().and_then(|manager| manager.upgrade());

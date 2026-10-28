@@ -469,6 +469,7 @@ pub(super) async fn enforce_owner(
             && matches!(
                 path,
                 "/api/connectors/gdrive/callback"
+                    | "/api/connectors/microsoft-files/callback"
                     | "/api/connectors/gcalendar/callback"
                     | "/api/connectors/mail/gmail/callback"
                     | "/api/connectors/mail/outlook/callback"
@@ -530,6 +531,7 @@ pub(super) async fn enforce_api_key(
         && matches!(
             path,
             "/api/connectors/gdrive/callback"
+                | "/api/connectors/microsoft-files/callback"
                 | "/api/connectors/gcalendar/callback"
                 | "/api/connectors/mail/gmail/callback"
                 | "/api/connectors/mail/outlook/callback"
@@ -877,11 +879,19 @@ mod owner_read_tests {
                 enforce_api_key,
             ),
         );
-        for provider in ["mail/gmail", "mail/outlook", "gcalendar"] {
+        for provider in [
+            "mail/gmail",
+            "mail/outlook",
+            "gcalendar",
+            "gdrive",
+            "microsoft-files",
+        ] {
             let path = format!("/api/connectors/{provider}/callback");
             for (method, uri, expected) in [
                 ("GET", path.clone(), StatusCode::OK),
                 ("POST", path.clone(), StatusCode::UNAUTHORIZED),
+                ("HEAD", path.clone(), StatusCode::UNAUTHORIZED),
+                ("GET", format!("{path}/"), StatusCode::UNAUTHORIZED),
                 ("GET", format!("{path}/extra"), StatusCode::UNAUTHORIZED),
             ] {
                 let response = app
@@ -897,6 +907,61 @@ mod owner_read_tests {
                     .unwrap();
                 assert_eq!(response.status(), expected);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn only_exact_get_microsoft_callback_bypasses_the_owner_boundary() {
+        let app = Router::new().fallback(|| async { "callback" }).layer(
+            axum::middleware::from_fn_with_state(
+                LocalOwnerPolicy::for_test(false, None),
+                enforce_owner,
+            ),
+        );
+        for (method, uri, expected) in [
+            (
+                "GET",
+                "/api/connectors/microsoft-files/callback?state=nonce&code=code",
+                StatusCode::OK,
+            ),
+            (
+                "POST",
+                "/api/connectors/microsoft-files/callback",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "HEAD",
+                "/api/connectors/microsoft-files/callback",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "GET",
+                "/api/connectors/microsoft-files/callback/",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "GET",
+                "/api/connectors/microsoft-files/callback/extra",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "GET",
+                "/api/agents/a/connectors/microsoft-files",
+                StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{method} {uri}");
         }
     }
 }

@@ -78,6 +78,7 @@ fn change(source: &SourceAuthority, id: &str) -> SourceChange {
         generation: source.generation.clone(),
         provider: source.provider.clone(),
         kind: SourceChangeKind::Observed,
+        origin: crate::connected_search::IngestionOrigin::LivePoll,
         observed_at_ms: 30,
         document: IndexedDocument {
             citation_id: "citation-1".into(),
@@ -188,6 +189,24 @@ fn account_rules_changed_event_bytes_and_capacity_reject_without_partial_admissi
         before
     );
     assert_eq!(state.workflows.len(), MAX_WORKFLOWS);
+}
+
+#[test]
+fn account_rules_reject_history_and_enrichment_events() {
+    let (mut state, mut source) = setup();
+    install_rule(&mut state, &source);
+    admit_current_changes(&mut state, &source, &[], false).unwrap();
+    source.sync_started_at_ms = 40;
+    for origin in [
+        crate::connected_search::IngestionOrigin::HistoryBackfill,
+        crate::connected_search::IngestionOrigin::ContentEnrichment,
+    ] {
+        let mut event = change(&source, "historical");
+        event.origin = origin;
+        assert!(admit_current_changes(&mut state, &source, &[event], false).is_err());
+        assert!(state.workflows.is_empty());
+        assert!(state.account_workflows.events.is_empty());
+    }
 }
 
 #[test]

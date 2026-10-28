@@ -25,6 +25,9 @@ import {
 } from './components/learning/LearningReviewPanel';
 import { ConnectorsView } from './components/ConnectorsView';
 import { SessionSidebar } from './components/sessions/SessionSidebar';
+import { ProjectHome } from './components/projects/ProjectHome';
+import { ProjectsSidebar } from './components/projects/ProjectsSidebar';
+import { MoveChatDialog, canMoveProjectChat } from './components/projects/MoveChatDialog';
 import { SessionView } from './components/sessions/SessionView';
 import { TelegramSettings } from './components/TelegramSettings';
 import { DiscordSettings } from './components/DiscordSettings';
@@ -318,7 +321,7 @@ export function ViewHarness() {
   routeRef.current = route;
   // A page hides the conversation but keeps it: the last chat or session stays loaded.
   const lastConversationRef = useRef<HashRoute>({ kind: 'home' });
-  if (route.kind !== 'page') lastConversationRef.current = route;
+  if (route.kind === 'home' || route.kind === 'session') lastConversationRef.current = route;
   const conversationRoute = lastConversationRef.current;
 
   const [sessionQuery, setSessionQuery] = useState('');
@@ -409,6 +412,8 @@ export function ViewHarness() {
   const [sessionReadError, setSessionReadError] = useState<string | null>(null);
   // Bumped when the stream says the open session changed (S3b-G).
   const [sessionRereads, setSessionRereads] = useState(0);
+  const [movingProjectChat, setMovingProjectChat] = useState<Session | null>(null);
+  const closeProjectMove = useCallback(() => setMovingProjectChat(null), []);
   useEffect(() => {
     if (listedSession) setKnownSession(listedSession);
   }, [listedSession]);
@@ -778,7 +783,7 @@ export function ViewHarness() {
     setKnownSession(session);
     upsertMainSession(session);
     const resolved: HashRoute = { kind: 'session', sessionId: session.id };
-    if (availablePage(routeRef.current) !== null)
+    if (availablePage(routeRef.current) !== null || routeRef.current.kind === 'project')
       lastConversationRef.current = resolved;
     else navigate(resolved, { replace: true });
   }, [
@@ -975,7 +980,7 @@ export function ViewHarness() {
     });
   };
 
-  const conversationHidden = availablePage(route) !== null;
+  const conversationHidden = availablePage(route) !== null || route.kind === 'project';
   useConversationLifecycle({
     agentId,
     activeSession,
@@ -1330,7 +1335,7 @@ export function ViewHarness() {
     // that hides the chat stays open with the session behind it, and a page
     // that shows the chat moves to the session so a reload finds it.
     if (lastConversationRef.current.kind === 'home') {
-      if (availablePage(routeRef.current) !== null)
+      if (availablePage(routeRef.current) !== null || routeRef.current.kind === 'project')
         lastConversationRef.current = created;
       else navigate(created, { replace: true });
     }
@@ -1395,7 +1400,7 @@ export function ViewHarness() {
       // Judge by the route now: a page or another session may have opened meanwhile.
       const open = lastConversationRef.current;
       if (open.kind === 'session' && open.sessionId === session.id) {
-        if (routeRef.current.kind === 'page')
+        if (routeRef.current.kind === 'page' || routeRef.current.kind === 'project')
           lastConversationRef.current = { kind: 'home' };
         else navigate({ kind: 'home' }, { replace: true });
       }
@@ -1647,6 +1652,8 @@ export function ViewHarness() {
   );
 
   const sidebar = (
+    <>
+    <ProjectsSidebar agentId={agent.id} navigate={navigate} />
     <SessionSidebar
       agents={agents}
       // The main chat is where you are; History lists everything else.
@@ -1667,7 +1674,9 @@ export function ViewHarness() {
       onArchive={archiveSession}
       onExport={exportSession}
       onDelete={deleteSession}
+      onMoveToProject={setMovingProjectChat}
     />
+    </>
   );
 
   // A helper session's user turns came from the agent that delegated or
@@ -1701,6 +1710,8 @@ export function ViewHarness() {
           ),
       }}
       session={viewedSession}
+      onMoveToProject={viewedSession && canMoveProjectChat(viewedSession) ? () => setMovingProjectChat(viewedSession) : undefined}
+      onOpenProject={(projectId) => navigate({ kind: 'project', projectId })}
       extensions={
         viewedSession?.kind === 'chat' &&
         ['web', 'api'].includes(viewedSession.origin) &&
@@ -1982,6 +1993,9 @@ export function ViewHarness() {
     <>
       <div data-testid="workspace-background" className="contents">
         <WorkspaceShell
+          projectPage={route.kind === 'project'
+            ? <ProjectHome agentId={agent.id} agents={agents} projectId={route.projectId} onSelectAgent={selectAgent} navigate={navigate} />
+            : <span hidden />}
           mainAgent={mainAgent ?? agent}
           settingsAgent={agent}
           agents={agents}
@@ -2294,6 +2308,10 @@ export function ViewHarness() {
         onDone={automations.complete}
         onSnooze={automations.snooze}
       />
+      {movingProjectChat && <MoveChatDialog key={`${movingProjectChat.agentId}:${movingProjectChat.id}`}
+        session={movingProjectChat} onClose={closeProjectMove} onMoved={() => {
+          sessions.refresh(); setSessionRereads((value) => value + 1);
+        }} />}
       {reportOpen && agent && (
         <WeeklyReport
           agentId={agent.id}

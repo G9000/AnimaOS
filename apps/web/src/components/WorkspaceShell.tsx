@@ -273,6 +273,7 @@ export function WorkspaceShell({
   navigate,
   conversation,
   conversationRoute,
+  projectPage = null,
   sidebar = null,
   connectors = null,
   builtinTools = null,
@@ -315,6 +316,8 @@ export function WorkspaceShell({
   conversation: ReactNode;
   /** The chat or session a page returns to; defaults to the last one visited. */
   conversationRoute?: HashRoute;
+  /** Profile-owned shared work, rendered outside Settings while chat drafts stay mounted. */
+  projectPage?: ReactNode | null;
   /** The sessions list shown by the thread switcher. */
   sidebar?: ReactNode | null;
   connectors?:
@@ -379,6 +382,7 @@ export function WorkspaceShell({
   onExportConversation?: () => void;
 }) {
   const page = availablePage(route);
+  const projectShown = route.kind === 'project';
   const connectorContent =
     typeof connectors === 'function'
       ? connectors(page === 'capabilities' ? 'tools' : 'connections')
@@ -491,6 +495,8 @@ export function WorkspaceShell({
   }, [page, desktopNavigation]);
 
   const commands: StudioCommand[] = [
+    ...(projectPage !== null ? [{ id: 'projects', title: 'Projects', description: 'Shared work across selected agents',
+      group: 'Navigate', run: () => navigate({ kind: 'project', projectId: null }) }] : []),
     {
       id: 'new-chat',
       title: 'Main chat',
@@ -647,8 +653,10 @@ export function WorkspaceShell({
                   menuTriggerRef={sessionsButtonRef}
                 />
               </div>
-              {page === null && <HeaderContextLine />}
+              {page === null && !projectShown && <HeaderContextLine />}
               <div className="studio-topbar-actions">
+                {projectPage !== null && <button type="button" className="studio-tool-button" aria-pressed={projectShown}
+                  onClick={() => navigate({ kind: 'project', projectId: null })}>Projects</button>}
                 {inbox ? (
                   <InboxButton inbox={inbox} />
                 ) : (
@@ -682,9 +690,10 @@ export function WorkspaceShell({
             </div>
             <div className="studio-view">
               {/* Keep the conversation mounted so drafts and scroll survive page visits. */}
-              <div className="companion-chat-panel" hidden={page !== null}>
+              <div className="companion-chat-panel" hidden={page !== null || projectShown}>
                 {conversation}
               </div>
+              {projectShown && projectPage}
               {page !== null && (
                 <section
                   className="settings-window"

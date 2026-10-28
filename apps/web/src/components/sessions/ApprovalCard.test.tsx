@@ -4,8 +4,43 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { approvalFixture } from '../../test/live';
 import { ApprovalCard } from './ApprovalCard';
+import { daemon } from '../../lib/daemon-api';
 
 describe('ApprovalCard', () => {
+  it('never falls back to reusable approval for malformed document requests', async () => {
+    const onDecide = vi.fn().mockResolvedValue(null);
+    render(<ApprovalCard approval={approvalFixture('document', { tool: 'apply_document_edit', arguments: '{}', expiresAtMs: 4_000_000_000_000 })} onDecide={onDecide} canPersist />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('incomplete');
+    expect(screen.getByRole('button', { name: 'Apply these changes' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow for this session' })).toBeNull();
+  });
+
+  it('does not fetch private document reviews when the card is read only', async () => {
+    const load = vi.spyOn(daemon.documentEdits, 'review');
+    try {
+      render(<ApprovalCard approval={approvalFixture('document', { tool: 'apply_document_edit', arguments: '{}' })} />);
+      expect(await screen.findByText('Document review is available to the owner.')).toBeVisible();
+      expect(load).not.toHaveBeenCalled();
+    } finally { load.mockRestore(); }
+  });
+
+  it('loads the exact owner review through the approval card before allowing a decision', async () => {
+    const hash = 'a'.repeat(64);
+    const source = 'b'.repeat(64);
+    const args = { _anima_exact_document_edit: true, proposal_id: 'p1', review_sha256: hash, candidate_sha256: 'c'.repeat(64), source_sha256: source, file_path: 'report.docx', expected_destination: { state: 'absent' } };
+    const inventory = { version: 1 as const, format: 'docx' as const, targets: [], retained_hyperlinks: [], limitations: [] };
+    const load = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ version: 1, proposal_id: 'p1', review_sha256: hash, source: { kind: 'attachment', display_name: 'source.docx' }, source_sha256: source, file_path: 'report.docx', expected_destination: { state: 'absent' }, expires_at_ms: 4_000_000_000_000, preview_quality: 'structural_content', before: inventory, after: inventory, changes: [{ operation_index: 0, label: 'Text', before: 'old', after: 'new', derived: false }], preservation: { unchanged_parts: 2, edited_parts: 1, unchanged_bytes_verified: true, container_normalized: true } }));
+    const onDecide = vi.fn().mockResolvedValue(null);
+    const request = approvalFixture('document', { tool: 'apply_document_edit', arguments: JSON.stringify(args), expiresAtMs: 4_000_000_000_000 });
+    try {
+      render(<ApprovalCard approval={request} onDecide={onDecide} />);
+      expect(await screen.findByText('After: new')).toBeVisible();
+      expect(load).toHaveBeenCalledWith(`/api/document-edits/p1?agent_id=${encodeURIComponent(request.agentId)}&session_id=${encodeURIComponent(request.sessionId)}`, expect.objectContaining({ signal: expect.any(AbortSignal), credentials: 'same-origin', redirect: 'error' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Apply these changes' }));
+      expect(onDecide).toHaveBeenCalledWith(request, { decision: 'allow_once' });
+    } finally { load.mockRestore(); }
+  });
   it('shows the call’s arguments as text, never as markup', () => {
     const approval = approvalFixture('apr_1', {
       arguments: '{"command":"<img src=x onerror=alert(1)> **bold**"}',

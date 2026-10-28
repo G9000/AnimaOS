@@ -14,6 +14,14 @@ use crate::runs::{RunRecord, RunStatus};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LiveEventBody {
+    /// Invalidation metadata only; source payloads stay behind current membership.
+    ProjectUpdated {
+        project_id: String,
+        revision: u64,
+        access_epoch: u64,
+        deleted: bool,
+        membership_changed: bool,
+    },
     SessionCreated,
     SessionUpdated,
     SessionCleared,
@@ -94,6 +102,7 @@ pub(crate) enum LiveEventBody {
 impl LiveEventBody {
     pub(crate) const fn type_name(&self) -> &'static str {
         match self {
+            Self::ProjectUpdated { .. } => "project.updated",
             Self::SessionCreated => "session.created",
             Self::SessionUpdated => "session.updated",
             Self::SessionCleared => "session.cleared",
@@ -173,6 +182,19 @@ impl LiveEvent {
             value["runId"] = json!(run_id);
         }
         match &self.body {
+            LiveEventBody::ProjectUpdated {
+                project_id,
+                revision,
+                access_epoch,
+                deleted,
+                membership_changed,
+            } => {
+                value["projectId"] = json!(project_id);
+                value["revision"] = json!(revision);
+                value["accessEpoch"] = json!(access_epoch);
+                value["deleted"] = json!(deleted);
+                value["membershipChanged"] = json!(membership_changed);
+            }
             LiveEventBody::SessionCreated
             | LiveEventBody::SessionUpdated
             | LiveEventBody::SessionCleared

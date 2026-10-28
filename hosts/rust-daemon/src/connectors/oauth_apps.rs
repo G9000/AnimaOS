@@ -14,6 +14,7 @@ const GOOGLE_MAIL: &str = "http://127.0.0.1:8080/api/connectors/mail/gmail/callb
 const GOOGLE_DRIVE: &str = "http://127.0.0.1:8080/api/connectors/gdrive/callback";
 const GOOGLE_CALENDAR: &str = "http://127.0.0.1:8080/api/connectors/gcalendar/callback";
 const MICROSOFT_MAIL: &str = "http://127.0.0.1:8080/api/connectors/mail/outlook/callback";
+const MICROSOFT_FILES: &str = "http://127.0.0.1:8080/api/connectors/microsoft-files/callback";
 
 fn public_origin(value: Option<&str>) -> Result<String, std::io::Error> {
     let Some(value) = value else {
@@ -51,7 +52,7 @@ impl OAuthProvider {
     pub(crate) fn redirect_uris(self) -> &'static [&'static str] {
         match self {
             Self::Google => &[GOOGLE_MAIL, GOOGLE_CALENDAR, GOOGLE_DRIVE],
-            Self::Microsoft => &[MICROSOFT_MAIL],
+            Self::Microsoft => &[MICROSOFT_MAIL, MICROSOFT_FILES],
         }
     }
     fn account(self) -> &'static str {
@@ -993,7 +994,10 @@ mod tests {
         let microsoft = service.status(OAuthProvider::Microsoft).await.unwrap();
         assert_eq!(
             microsoft.redirect_uris,
-            vec!["https://companion.example.com/api/connectors/mail/outlook/callback"]
+            vec![
+                "https://companion.example.com/api/connectors/mail/outlook/callback",
+                "https://companion.example.com/api/connectors/microsoft-files/callback"
+            ]
         );
     }
 
@@ -1003,7 +1007,10 @@ mod tests {
             OAuthProvider::Google.redirect_uris(),
             &[GOOGLE_MAIL, GOOGLE_CALENDAR, GOOGLE_DRIVE]
         );
-        assert_eq!(OAuthProvider::Microsoft.redirect_uris(), &[MICROSOFT_MAIL]);
+        assert_eq!(
+            OAuthProvider::Microsoft.redirect_uris(),
+            &[MICROSOFT_MAIL, MICROSOFT_FILES]
+        );
         let c =
             OAuthAppCredentials::new(OAuthProvider::Microsoft, " id ", " secret ", None).unwrap();
         assert_eq!(

@@ -174,6 +174,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/connectors/gcalendar/{connector_id}`                                 |
 | `DELETE` | `/api/agents/{agent_id}/connectors/gdrive/{connector_id}`                                    |
 | `DELETE` | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}`                           |
+| `DELETE` | `/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}`                           |
 | `DELETE` | `/api/agents/{agent_id}/connectors/{connector_id}`                                           |
 | `DELETE` | `/api/agents/{agent_id}/core-memory/{block}/{entry_id}`                                      |
 | `DELETE` | `/api/agents/{agent_id}/mcp-connections/{connection_id}`                                     |
@@ -214,6 +215,8 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}`                                          |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `GET`    | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/messages`                  |
+| `GET`    | `/api/agents/{agent_id}/connectors/microsoft-files`                                          |
+| `GET`    | `/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/files`                     |
 | `GET`    | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `GET`    | `/api/agents/{agent_id}/core-memory`                                                         |
 | `GET`    | `/api/agents/{agent_id}/events`                                                              |
@@ -246,12 +249,14 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `GET`    | `/api/agents/{agent_id}/workflows`                                                           |
 | `GET`    | `/api/agents/{agent_id}/workflows/{workflow_id}`                                             |
+| `GET`    | `/api/agents/{agent_id}/workflows/{workflow_id}/steps/{step_id}/attempts/{job_id}`             |
 | `GET`    | `/api/approvals`                                                                             |
 | `GET`    | `/api/capabilities`                                                                          |
 | `GET`    | `/api/coding-apps`                                                                           |
 | `GET`    | `/api/connectors/gcalendar/callback`                                                         |
 | `GET`    | `/api/connectors/gdrive/callback`                                                            |
 | `GET`    | `/api/connectors/mail/{provider}/callback`                                                   |
+| `GET`    | `/api/connectors/microsoft-files/callback`                                                   |
 | `GET`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `GET`    | `/api/foreign-sessions`                                                                      |
 | `GET`    | `/api/foreign-sessions/{handle}/preview`                                                     |
@@ -340,6 +345,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts`                    |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/approve` |
 | `POST`   | `/api/agents/{agent_id}/connectors/mail/{provider}/{connector_id}/drafts/{draft_id}/reject`  |
+| `POST`   | `/api/agents/{agent_id}/connectors/microsoft-files/connect`                                  |
 | `POST`   | `/api/agents/{agent_id}/connectors/telegram`                                                 |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/messages`                                  |
 | `POST`   | `/api/agents/{agent_id}/connectors/{connector_id}/pairings/{chat_id}/approve`                |
@@ -442,6 +448,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/coding-keys`                                                         |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/credential`                        |
 | `PUT`    | `/api/agents/{agent_id}/connectors/discord/{connector_id}/settings`                          |
+| `PUT`    | `/api/agents/{agent_id}/connectors/microsoft-files/{connector_id}/selection`                 |
 | `PUT`    | `/api/agents/{agent_id}/connectors/{connector_id}/credential`                                |
 | `PUT`    | `/api/agents/{agent_id}/mcp-connections/{connection_id}/credential`                          |
 | `PUT`    | `/api/agents/{agent_id}/runs/{run_id}/browser-scope`                                         |
@@ -502,6 +509,24 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}/shares/{share_id}` |
 | `GET` | `/api/shared/conversations/{share_id}` |
 | `GET` | `/api/shared/conversations/{share_id}/messages` |
+
+| `GET` | `/api/projects` |
+| `POST` | `/api/projects` |
+| `GET` | `/api/projects/manage` |
+| `GET` | `/api/projects/{project_id}` |
+| `PATCH` | `/api/projects/{project_id}` |
+| `DELETE` | `/api/projects/{project_id}` |
+| `PUT` | `/api/projects/{project_id}/members` |
+| `POST` | `/api/projects/{project_id}/resources` |
+| `PATCH` | `/api/projects/{project_id}/resources/{resource_id}` |
+| `DELETE` | `/api/projects/{project_id}/resources/{resource_id}` |
+| `PUT` | `/api/projects/{project_id}/resource-order` |
+| `GET` | `/api/projects/{project_id}/resources/{resource_id}/preview` |
+| `GET` | `/api/projects/{project_id}/context` |
+| `GET` | `/api/projects/{project_id}/chats` |
+| `PUT` | `/api/agents/{agent_id}/sessions/{session_id}/project` |
+| `GET` | `/api/document-edits/{proposal_id}` |
+| `DELETE` | `/api/document-edits/{proposal_id}` |
 
 <!-- openapi-route-inventory:end -->
 
@@ -681,6 +706,27 @@ unlabeled tokens become `[redacted]`). Redaction is pattern-based, so treat
 `RUST_LOG=debug` (or `trace`) with care: it lets far more detail, such as
 request and provider payload fragments, into both the console and the log tail.
 
+### Existing document edit storage
+
+`ANIMAOS_RS_DOCUMENT_EDITS_DIR` selects the private directory used for existing
+document edits. Configured staging and the actual local JSON control-plane file
+must both be outside the effective workspace, including the workspace selected
+by configuration, environment or the launch directory. In JSON mode, the default
+staging directory is `document-edits` beside the control-plane file. A Postgres
+control plane without a JSON control-plane file needs an explicit local staging
+directory for editing.
+
+Unsafe or uncertain placement refuses startup even when document metadata is
+empty, before that state is restored or its producers start. Missing storage
+selection with nonempty document metadata also refuses startup. No storage is
+automatically relocated or deleted and no fallback storage or API grant is
+created. Preserve the original storage and metadata for recovery; do not redirect
+uncertain work to an empty directory or delete its evidence.
+
+On Windows, if both the workspace and private directory are uncreated siblings
+under the same existing parent, create the intended workspace folder first so
+their separation can be established before startup.
+
 ---
 
 ## HTTP API
@@ -719,7 +765,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 316 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 355 operations, including conversation model preferences, results, reviews, capabilities and viewer grants. See [conversation controls](../../docs/companion/chat-suite.md) for their authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 ### Agents
 
@@ -1222,13 +1268,15 @@ ANTHROPIC_API_KEY=sk-ant-... \
 cargo run -p anima-daemon
 ```
 
-On Windows, if a running daemon keeps `target/cargo/debug/anima-daemon.exe` locked during validation, rerun tests with an isolated cargo target dir:
+The workspace test command automatically uses the shared absolute `target/cargo/validation` directory, so it can validate on Windows while the development daemon is running:
 
 ```bash
-CI=1 CARGO_TARGET_DIR=target/cargo/validation-rust-daemon bun run --filter rust-daemon test
+bun run rust:test
 ```
 
 Contributor-focused local workflow docs live in `apps/contributor-docs/src/content/docs/hosts/rust-daemon/local.mdx`.
+
+Wrapped Rust commands enforce the combined 32 GiB cache budget described in the root README. Avoid per-feature target directories. The daemon's compilation is monitored separately from its running lifetime, so another build exceeding the budget does not stop the owner's idle Anima process.
 
 ---
 
@@ -1250,6 +1298,8 @@ ANIMAOS_RS_MEMORY_SQLITE_FILE=./data/runtime-memories.sqlite \
   cargo run -p anima-daemon
 
 # With restart recovery for the agent/swarm control plane
+mkdir -p ./workspace ./data
+ANIMAOS_WORKSPACE_ROOT=./workspace \
 ANIMAOS_RS_CONTROL_PLANE_FILE=./data/control-plane.json \
   ANTHROPIC_API_KEY=sk-ant-... \
   cargo run -p anima-daemon

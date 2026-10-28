@@ -246,6 +246,7 @@ pub(super) struct OwnedDaemon {
     child: Child,
     url: String,
     client: reqwest::Client,
+    log_path: PathBuf,
 }
 impl Drop for OwnedDaemon {
     fn drop(&mut self) {
@@ -308,6 +309,7 @@ impl OwnedDaemon {
         let mut d = Self {
             child,
             url: String::new(),
+            log_path: root.join("worker.log"),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(3))
                 .build()
@@ -360,7 +362,12 @@ impl OwnedDaemon {
         if let Some(k) = key {
             r = r.header("Idempotency-Key", k);
         }
-        let response = r.send().await.unwrap();
+        let response = r.send().await.unwrap_or_else(|error| {
+            panic!(
+                "{method} {route} failed: {error}; worker log: {}",
+                fs::read_to_string(&self.log_path).unwrap_or_default()
+            )
+        });
         let status = response.status().as_u16();
         let text = response.text().await.unwrap();
         let v = serde_json::from_str(&text).unwrap_or_else(|_| json!({"body":text}));
@@ -437,14 +444,43 @@ impl OwnedDaemon {
         }
     }
 }
-pub(super) fn profile() -> tempfile::TempDir {
-    let d = tempfile::Builder::new()
+pub(super) struct TestProfile {
+    _temporary: tempfile::TempDir,
+    root: PathBuf,
+}
+impl TestProfile {
+    pub(super) fn path(&self) -> &Path {
+        &self.root
+    }
+}
+pub(super) fn profile() -> TestProfile {
+    let temporary = tempfile::Builder::new()
         .prefix("anima-turn-crash-")
         .tempdir()
         .unwrap();
-    fs::create_dir_all(d.path().join("workspace")).unwrap();
-    fs::create_dir_all(d.path().join("home")).unwrap();
-    d
+    let root = temporary.path().join("profile");
+    #[cfg(windows)]
+    {
+        use win_custody::{current_user_sid_string, SecurityDescriptor};
+        let sid = current_user_sid_string().unwrap();
+        SecurityDescriptor::from_sddl(&format!("O:{sid}D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;SY)"))
+            .unwrap()
+            .create_directory(&root)
+            .unwrap();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    }
+    #[cfg(not(any(unix, windows)))]
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(root.join("workspace")).unwrap();
+    fs::create_dir(root.join("home")).unwrap();
+    TestProfile {
+        _temporary: temporary,
+        root,
+    }
 }
 pub(super) async fn marker(root: &Path, name: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);

@@ -22,6 +22,7 @@ mod controlled_model;
 pub(crate) mod conversation_shares;
 mod core_memory;
 mod doctor;
+mod document_edits;
 pub mod engine_bridge;
 mod events;
 pub(crate) mod execution_backends;
@@ -45,6 +46,7 @@ mod model;
 mod owned_model;
 mod paired_devices;
 mod profile_owner;
+mod projects;
 mod provider_keys;
 mod routes;
 mod runs;
@@ -63,10 +65,12 @@ mod tool_rpc;
 mod tools;
 mod usage;
 mod voice;
+mod workspace_file_preview;
 
 pub mod postgres;
 
 pub use attachments::documents::worker::document_worker_entry;
+pub use document_edits::worker::document_edit_worker_entry;
 pub use execution_backends::worker::execution_worker_entry;
 pub use logs::init_tracing;
 pub use paired_devices::node::node_serve;

@@ -15,6 +15,7 @@ import {
 } from '@animaos/sdk';
 import { primaryBtnCls } from './ui-bits';
 import { GoogleDriveCard } from './GoogleDriveCard';
+import { MicrosoftFilesCard } from './MicrosoftFilesCard';
 import { ConnectedAccountsPanel } from './connected-accounts/ConnectedAccountsPanel';
 import { GenericEmailSettings } from './GenericEmailSettings';
 import { McpConnectionsPanel } from './mcp/McpConnectionsPanel';
@@ -689,7 +690,7 @@ function OAuthAppCard({
         <p className="mt-1 text-xs leading-relaxed text-ink-3">
           {provider === 'google'
             ? 'One OAuth app enables Gmail, Google Calendar, and selected Google Drive files.'
-            : 'Enables Outlook.'}
+            : 'Enables Outlook and Microsoft files.'}
         </p>
       </div>
       <p role="status" className="text-xs font-medium text-accent">
@@ -1145,6 +1146,13 @@ export function ConnectorsView({
                     key={`${agentId}:outlook:${oauthGeneration.microsoft}`}
                     agentId={agentId}
                     provider="outlook"
+                  />
+                  <MicrosoftFilesCard
+                    key={`${agentId}:microsoft-files:${oauthGeneration.microsoft}`}
+                    agentId={agentId}
+                    online={online}
+                    epoch={epoch}
+                    disabled={disabled || ownerBusy}
                   />
                 </div>
               </section>

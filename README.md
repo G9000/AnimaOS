@@ -73,6 +73,10 @@ Run the optional surfaces explicitly from the repository root:
 
 Docs and game commands run independently of the assistant daemon. The game keeps its own ports, saves, model-connection resolution and explicit durable-engine configuration; see the [Village instructions](poc/village/README.md). Install its dependencies once from `poc/village` with `bun install`.
 
+Rust build outputs share a 32 GiB budget under `target/cargo`. The wrapped build and test commands clean inactive output when needed and check running builds every 15 seconds, stopping their own command if it exceeds the budget. Running Anima and Village instances are protected. Validation reuses `target/cargo/validation`; avoid creating a new target folder for each feature. Development and test profiles disable incremental state and keep only limited debug information.
+
+Use `bun run rust:cache:status` to inspect cache size. For an explicit full reset, stop programs/builds using the cache, then run `bun run rust:cache:clean`; later builds will recompile. The maximum managed cache budget is 32 GiB. `ANIMA_RUST_CACHE_BUDGET_GIB` can lower it; higher values, including inherited overrides, are capped at 32 GiB, and child commands receive the effective limit. Checks permit temporary overshoot between scans, and raw Cargo commands or explicitly selected external target directories are outside the wrapper's live monitoring.
+
 - **Run it on a server:** the [VPS deployment guide](deploy/vps/README.md) covers HTTPS, owner authentication, credentials, backups and current limits.
 - **Day-to-day setup:** [Anima daily-use setup](docs/companion/daily-use.md) covers identity files, memory, approvals, schedules and connectors.
 

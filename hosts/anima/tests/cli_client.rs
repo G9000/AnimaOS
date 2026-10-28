@@ -51,7 +51,7 @@ fn anima_command(executable: &Path, home: &Path, args: &[&str]) -> Command {
 /// does not exit, and shuts the server down directly if one is left, so no
 /// process outlives the test.
 struct Home {
-    dir: tempfile::TempDir,
+    dir: common::PrivateHome,
     executable: PathBuf,
     server_port: u16,
     control_port: u16,
@@ -76,7 +76,7 @@ impl Home {
 
     /// Before `anima setup`: ports, but no workspace.
     fn not_set_up() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = common::PrivateHome::new().unwrap();
         // Update recovery may replace the running binary. Never let one test
         // move or delete Cargo's shared executable, used by the other tests.
         let source = Path::new(env!("CARGO_BIN_EXE_anima"));
@@ -310,7 +310,13 @@ fn start_command_starts_a_stopped_server() {
 fn start_command_spawns_a_supervisor_when_none_runs() {
     let home = Home::new();
     let output = home.anima(&["start"]);
-    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}\nserver log: {}",
+        text(&output.stderr),
+        std::fs::read_to_string(home.root().join("logs").join("anima.log")).unwrap_or_default()
+    );
     assert_eq!(home.status().unwrap()["state"]["kind"], "running");
     // A second `start` finds it running and leaves it alone.
     let output = home.anima(&["start"]);

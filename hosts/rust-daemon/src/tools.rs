@@ -17,6 +17,7 @@ mod conversations;
 mod credential_paths;
 mod discord;
 mod doctor;
+mod document_edits;
 mod drive;
 mod execution;
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub(crate) mod mcp_refresh;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
+mod microsoft_files;
 mod output_safety;
 pub(crate) mod process;
 mod skills;
@@ -133,6 +135,7 @@ pub(crate) struct ToolExecutionContext {
     checkpoint_root: Option<PathBuf>,
     action_approved: bool,
     protected_write: Option<crate::agent_files::write_policy::ProtectedWrite>,
+    project_lease: Option<crate::projects::ProjectAccessLease>,
     #[cfg(test)]
     checkpoint_validation_hook: Option<Arc<std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>>>,
     #[cfg(test)]
@@ -143,6 +146,11 @@ pub(crate) struct ToolExecutionContext {
     pub(super) mail: Option<MailManager>,
     pub(super) connected_search: Option<crate::connected_search::SearchService>,
     pub(super) drive: Option<crate::connectors::drive::DriveManager>,
+    pub(super) microsoft_files: Option<crate::connectors::microsoft_files::MicrosoftFileManager>,
+    pub(super) document_edits: Option<crate::document_edits::DocumentEditService>,
+    pub(super) document_edit_witness: Option<crate::document_edits::approval::DocumentEditWitness>,
+    pub(super) document_edit_approval:
+        Option<crate::document_edits::approval::DocumentEditOwnerApproval>,
     pub(super) discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
     #[cfg(test)]
     pub(crate) web_search: Option<Arc<web_search::SearchExecutor>>,
@@ -169,6 +177,13 @@ pub(crate) struct ToolExecutionContext {
 }
 
 impl ToolExecutionContext {
+    pub(crate) fn with_project_lease(
+        mut self,
+        lease: Option<crate::projects::ProjectAccessLease>,
+    ) -> Self {
+        self.project_lease = lease;
+        self
+    }
     pub(crate) fn with_tool_results(
         mut self,
         store: Option<crate::tool_results::ToolResultStore>,
@@ -248,6 +263,7 @@ impl ToolExecutionContext {
             checkpoint_root: None,
             action_approved: false,
             protected_write: None,
+            project_lease: None,
             #[cfg(test)]
             checkpoint_preimage_hook: None,
             #[cfg(test)]
@@ -257,6 +273,10 @@ impl ToolExecutionContext {
             mail: None,
             connected_search: None,
             drive: None,
+            microsoft_files: None,
+            document_edits: None,
+            document_edit_witness: None,
+            document_edit_approval: None,
             discord_thread: None,
             #[cfg(test)]
             web_search: None,
@@ -311,6 +331,20 @@ impl ToolExecutionContext {
 
     pub(crate) fn with_mail(mut self, mail: Option<MailManager>) -> Self {
         self.mail = mail;
+        self
+    }
+    pub(crate) fn with_microsoft_files(
+        mut self,
+        microsoft_files: Option<crate::connectors::microsoft_files::MicrosoftFileManager>,
+    ) -> Self {
+        self.microsoft_files = microsoft_files;
+        self
+    }
+    pub(crate) fn with_document_edits(
+        mut self,
+        service: Option<crate::document_edits::DocumentEditService>,
+    ) -> Self {
+        self.document_edits = service;
         self
     }
     pub(crate) fn with_connected_search(
@@ -775,6 +809,32 @@ impl ToolExecutionContext {
         if protected.is_some() && self.approvals.is_none() {
             return TaskResult::error(crate::agent_files::write_policy::REFUSED, 0);
         }
+        let document_witness = if tool_call.name == crate::document_edits::approval::APPLY_TOOL {
+            if self.rpc_fence.is_some() || self.action_journal.is_none() || self.approvals.is_none()
+            {
+                return TaskResult::error("Document apply requires a direct native owner run", 0);
+            }
+            let (Some(service), Some(run)) = (&self.document_edits, &self.run_link) else {
+                return TaskResult::error("Document publication context is unavailable", 0);
+            };
+            if self.action_journal.as_ref().is_none_or(|journal| {
+                journal.bound_run() != run
+                    || !journal.owns_caller(&agent.id, &user_message.agent_id)
+            }) || self
+                .approvals
+                .as_ref()
+                .is_none_or(|gate| gate.bound_run() != run)
+                || self.has_upstream_tool_origin()
+            {
+                return TaskResult::error("Document publication run custody changed", 0);
+            }
+            match service.capture_apply(run, &tool_call).await {
+                Ok(witness) => witness,
+                Err(error) => return TaskResult::error(error, 0),
+            }
+        } else {
+            None
+        };
         let mut approved = false;
         let configured = if let Some(gate) = self
             .approvals
@@ -786,12 +846,32 @@ impl ToolExecutionContext {
             None
         };
         if let Some(gate) = &self.approvals {
-            let outcome = match &protected {
-                Some(target) => {
-                    gate.check_exact(&agent, &tool_call, &target.approval_call(&tool_call))
-                        .await
+            let outcome = if let Some(witness) = &document_witness {
+                let (outcome, record) = gate
+                    .check_exact_with_record(&agent, &tool_call, &witness.approval_call(&tool_call))
+                    .await;
+                if matches!(outcome, crate::approvals::GateOutcome::Approved) {
+                    let Some(record) = record else {
+                        return TaskResult::error(
+                            "Exact document owner decision is unavailable",
+                            0,
+                        );
+                    };
+                    self.document_edit_approval =
+                        match witness.resolved_approval(&tool_call, &record) {
+                            Ok(proof) => Some(proof),
+                            Err(error) => return TaskResult::error(error, 0),
+                        };
                 }
-                None => gate.check(&agent, &tool_call).await,
+                outcome
+            } else {
+                match &protected {
+                    Some(target) => {
+                        gate.check_exact(&agent, &tool_call, &target.approval_call(&tool_call))
+                            .await
+                    }
+                    None => gate.check(&agent, &tool_call).await,
+                }
             };
             match outcome {
                 crate::approvals::GateOutcome::Proceed => {}
@@ -812,6 +892,15 @@ impl ToolExecutionContext {
                 );
             }
         }
+        if let Some(witness) = &document_witness {
+            let (Some(service), Some(run)) = (&self.document_edits, &self.run_link) else {
+                return TaskResult::error("Document publication context is unavailable", 0);
+            };
+            if let Err(error) = service.revalidate_apply(run, &tool_call, witness).await {
+                return TaskResult::error(error, 0);
+            }
+        }
+        self.document_edit_witness = document_witness;
         if let Err(refused) = self.verify_profile_owner().await {
             return refused;
         }
@@ -870,6 +959,17 @@ impl ToolExecutionContext {
             }
         }
         // No awaited custody proof may follow the final grant/RPC checks.
+        if let Some(lease) = &self.project_lease {
+            if let Err(error) = lease.check() {
+                let refused = TaskResult::error(error.to_string(), 0);
+                if let Some(journal) = &journal {
+                    if let Err(error) = journal.finish(&tool_call, &refused, 0).await {
+                        return TaskResult::error(error, 0);
+                    }
+                }
+                return refused;
+            }
+        }
         if let Some(owner) = &self.profile_owner {
             if let Err(error) = owner.ensure_owned() {
                 return TaskResult::error(error.to_string(), 0);
@@ -917,6 +1017,7 @@ impl ToolExecutionContext {
         }
         self.action_approved = approved;
         self.protected_write = protected;
+        let project_lease = self.project_lease.clone();
         handler_started.store(true, Ordering::Release);
         let mut result = handler(self, agent, user_message, tool_call).await;
         // Sanitize before durable action receipts, spill projections, observers
@@ -933,6 +1034,14 @@ impl ToolExecutionContext {
                     );
                 }
                 return TaskResult::error(error, duration);
+            }
+        }
+        if let Some(lease) = project_lease {
+            if let Err(error) = lease.check() {
+                return TaskResult::error(
+                    error.to_string(),
+                    started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                );
             }
         }
         result
@@ -965,6 +1074,11 @@ impl ToolExecutionContext {
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
         self.verify_profile_owner().await?;
+        if let Some(lease) = &self.project_lease {
+            lease
+                .check()
+                .map_err(|error| TaskResult::error(error.to_string(), 0))?;
+        }
         if let Some(budget) = &self.execution_budget {
             budget
                 .check_authority()
@@ -2179,6 +2293,8 @@ impl ToolRegistry {
             optional_parameter("limit", bounded_integer_parameter("Page byte limit, 1 to 8192", 1, 8192)),
         ])), tool_results::handle);
         connected_search::register(&mut registry);
+        microsoft_files::register(&mut registry);
+        document_edits::register(&mut registry);
         browser::register(&mut registry);
         catalog::register(&mut registry);
         doctor::register(&mut registry);

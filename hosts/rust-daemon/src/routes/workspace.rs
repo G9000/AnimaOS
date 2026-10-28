@@ -18,6 +18,10 @@ use crate::app::SharedDaemonState;
 use crate::control_plane_store::WorkspaceConfig;
 use crate::runtime_model::provider_summaries_with_pool;
 
+#[cfg(test)]
+#[path = "workspace_boundary_tests.rs"]
+mod workspace_boundary_tests;
+
 pub(super) const MAX_WORKSPACE_AVATAR_BYTES: usize = 5 * 1024 * 1024;
 const WORKSPACE_AVATAR_DIRECTORY: &str = "assets";
 const WORKSPACE_AVATAR_FILE: &str = "workspace-avatar";
@@ -247,7 +251,18 @@ pub(crate) async fn handle_put_workspace(
 ) -> Result<WorkspaceResponse, ApiError> {
     let request: WorkspaceConfigRequest = super::parse_json_body(body)?;
     let root_existed = Path::new(request.root_path.trim()).exists();
-    let config = validate_workspace_request(&request)?;
+    let mut prospective_request = request.clone();
+    prospective_request.validate_only = true;
+    let prospective = validate_workspace_request(&prospective_request)?;
+    {
+        let guard = state.read().await;
+        validate_document_workspace(&guard, Some(&prospective.root_path))?;
+    }
+    let config = if request.validate_only {
+        prospective
+    } else {
+        validate_workspace_request(&request)?
+    };
 
     if request.validate_only {
         let currently_configured = {
@@ -264,6 +279,7 @@ pub(crate) async fn handle_put_workspace(
 
     let persist_request = {
         let mut guard = state.write().await;
+        validate_document_workspace(&guard, Some(&config.root_path))?;
         guard.set_workspace(Some(config));
         guard.control_plane_persist_request()
     };
@@ -273,6 +289,21 @@ pub(crate) async fn handle_put_workspace(
         .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
 
     handle_get_workspace(state).await
+}
+
+fn validate_document_workspace(
+    state: &crate::state::DaemonState,
+    workspace: Option<&Path>,
+) -> Result<(), ApiError> {
+    crate::document_edits::workspace_boundary::ensure_state_separate(state, workspace).map_err(
+        |message| {
+            if state.ensure_profile_owned().is_err() {
+                ApiError::service_unavailable(message)
+            } else {
+                ApiError::bad_request(message)
+            }
+        },
+    )
 }
 
 fn workspace_lead_settings() -> AgentSettings {
@@ -397,6 +428,8 @@ pub(crate) async fn handle_bootstrap_workspace(
         if guard.workspace.is_some() {
             return Err(ApiError::conflict("workspace is already bootstrapped"));
         }
+        // A failed bootstrap restores this unconfigured fallback.
+        validate_document_workspace(&guard, None)?;
     }
 
     if request.workers.len() > 9 {
@@ -435,6 +468,12 @@ pub(crate) async fn handle_bootstrap_workspace(
     }
     // Validate the complete team before creating even the workspace directory.
     let mut workspace_request = request.workspace;
+    workspace_request.validate_only = true;
+    let prospective = validate_workspace_request(&workspace_request)?;
+    {
+        let guard = state.read().await;
+        validate_document_workspace(&guard, Some(&prospective.root_path))?;
+    }
     workspace_request.validate_only = false;
     let workspace_config = validate_workspace_request(&workspace_request)?;
     let yaml_path = workspace_config.root_path.join("anima.yaml");
@@ -453,6 +492,8 @@ pub(crate) async fn handle_bootstrap_workspace(
         if guard.workspace.is_some() {
             return Err(ApiError::conflict("workspace is already bootstrapped"));
         }
+        validate_document_workspace(&guard, Some(&workspace_config.root_path))?;
+        validate_document_workspace(&guard, None)?;
         for (config, _) in &team {
             match guard.create_agent(config.clone()) {
                 Ok(snapshot) => {
@@ -537,6 +578,7 @@ async fn rollback_bootstrap(
         for snapshot in snapshots {
             guard.remove_agent(&snapshot.state.id);
         }
+        // Restore the fallback admitted before any bootstrap mutation.
         guard.set_workspace(None);
         guard.control_plane_persist_request()
     };
@@ -565,6 +607,17 @@ pub(crate) async fn handle_resume_workspace(
     // 1. Validate the folder WITHOUT creating it (validate_only=true): resume
     //    never creates directories; a missing folder or yaml is a 400.
     let root = validate_root_path(&request.root_path, true)?;
+    {
+        let guard = state.read().await;
+        validate_document_workspace(&guard, Some(&root))?;
+        validate_document_workspace(
+            &guard,
+            guard
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.as_path()),
+        )?;
+    }
     let yaml_path = root.join("anima.yaml");
     if !yaml_path.is_file() {
         return Err(ApiError::bad_request(format!(
@@ -728,6 +781,14 @@ pub(crate) async fn handle_resume_workspace(
     let mut created: Vec<(String, AgentRuntimeSnapshot)> = Vec::new();
     let (previous_workspace, persist_request) = {
         let mut guard = state.write().await;
+        validate_document_workspace(&guard, Some(&workspace_config.root_path))?;
+        validate_document_workspace(
+            &guard,
+            guard
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.root_path.as_path()),
+        )?;
         let mut failure: Option<ApiError> = None;
         for config in configs_to_create {
             let agent_name = config.name.clone();
@@ -811,6 +872,7 @@ async fn rollback_resume(
         for (id, _) in created {
             guard.remove_agent(id);
         }
+        // Restore the previous configuration admitted before creating agents.
         guard.set_workspace(previous_workspace);
         guard.control_plane_persist_request()
     };

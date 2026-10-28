@@ -407,16 +407,29 @@ impl DaemonState {
                     return Err(SettleRefusal::Stale);
                 }
                 let note = normalized_note(decision.note.as_deref())?;
+                let exact_document = previous.tool == crate::document_edits::approval::APPLY_TOOL
+                    && crate::document_edits::approval::exact_record(&previous.arguments);
+                if exact_document
+                    && !matches!(
+                        decision.kind,
+                        ApprovalDecisionKind::AllowOnce | ApprovalDecisionKind::Deny
+                    )
+                {
+                    return Err(SettleRefusal::Invalid(
+                        "Document review requires AllowOnce or Deny",
+                    ));
+                }
                 // An explicit matcher, or the approval's suggestion; either
                 // way it must pass for the tool (a suggestion may carry an
                 // empty value when no safe one exists).
-                let matcher =
-                    if crate::agent_files::write_policy::exact_record(&previous.arguments) {
-                        None
-                    } else {
-                        match decision.kind {
-                            ApprovalDecisionKind::AllowSession
-                            | ApprovalDecisionKind::AllowAlways => Some(
+                let matcher = if exact_document
+                    || crate::agent_files::write_policy::exact_record(&previous.arguments)
+                {
+                    None
+                } else {
+                    match decision.kind {
+                        ApprovalDecisionKind::AllowSession | ApprovalDecisionKind::AllowAlways => {
+                            Some(
                                 validate_matcher(
                                     &previous.tool,
                                     decision
@@ -425,10 +438,11 @@ impl DaemonState {
                                         .unwrap_or(&previous.suggested_matcher),
                                 )
                                 .map_err(SettleRefusal::Invalid)?,
-                            ),
-                            ApprovalDecisionKind::AllowOnce | ApprovalDecisionKind::Deny => None,
+                            )
                         }
-                    };
+                        ApprovalDecisionKind::AllowOnce | ApprovalDecisionKind::Deny => None,
+                    }
+                };
                 let status = if decision.kind == ApprovalDecisionKind::Deny {
                     ApprovalStatus::Denied
                 } else {
@@ -1411,5 +1425,52 @@ mod tests {
                 .session_allowances
                 .is_empty());
         }
+    }
+
+    #[test]
+    fn exact_document_decisions_reject_reusable_allows_and_preserve_the_pending_review() {
+        let (mut state, link) = daemon();
+        let anima_core::DataValue::Object(args) = crate::tools::generated_documents::schema_data(
+            serde_json::json!({
+                "_anima_exact_document_edit":true, "proposal_id":"proposal", "file_path":"report.docx",
+                "review_sha256":"a".repeat(64), "candidate_sha256":"b".repeat(64), "source_sha256":"c".repeat(64),
+                "expected_destination":{"state":"absent"}
+            }),
+        ) else {
+            unreachable!()
+        };
+        let call = ToolCall {
+            id: "exact-document".into(),
+            name: "apply_document_edit".into(),
+            args,
+        };
+        let pending = state.open_approval(&ask(&link, call), 10).unwrap().approval;
+        for kind in [
+            ApprovalDecisionKind::AllowSession,
+            ApprovalDecisionKind::AllowAlways,
+        ] {
+            assert!(matches!(
+                state.settle_approval(&pending.id, owner(kind, pending.revision), 11),
+                Err(SettleRefusal::Invalid(_))
+            ));
+            assert!(state.approvals.get(&pending.id).unwrap().is_pending());
+        }
+        let resolved = state
+            .settle_approval(
+                &pending.id,
+                owner(ApprovalDecisionKind::AllowOnce, pending.revision),
+                12,
+            )
+            .unwrap()
+            .approval;
+        assert_eq!(resolved.status, ApprovalStatus::Allowed);
+        assert!(resolved.resolution.unwrap().matcher.is_none());
+        assert!(state.approvals.rules_for(&link.agent_id).is_empty());
+        assert!(state
+            .sessions
+            .get(&link.agent_id, &link.session_id)
+            .unwrap()
+            .session_allowances
+            .is_empty());
     }
 }

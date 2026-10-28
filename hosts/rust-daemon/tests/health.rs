@@ -139,51 +139,54 @@ async fn metrics_endpoint_returns_prometheus_text() {
 #[tokio::test]
 async fn readiness_and_metrics_report_json_control_plane_store() {
     let workspace = use_temp_workspace_root("control-plane-health");
-    let control_plane_path = workspace.path().join("control-plane.json");
+    let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
-    let app = app_with_configured_persistence(DaemonConfig::default())
-        .await
-        .expect("app configures persistence");
+    support::run_in_joined_runtime(|| async {
+        let app = app_with_configured_persistence(DaemonConfig::default())
+            .await
+            .expect("app configures persistence");
 
-    let readiness = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/ready")
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("app responds");
-    let metrics = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/metrics")
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("app responds");
+        let readiness = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("app responds");
+        let metrics = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("app responds");
 
-    let readiness_body = to_bytes(readiness.into_body(), usize::MAX)
-        .await
-        .expect("body reads");
-    let readiness_body = std::str::from_utf8(&readiness_body).expect("body is utf-8");
-    assert!(
-        readiness_body.contains("\"controlPlaneDurability\":\"json\""),
-        "{readiness_body}"
-    );
+        let readiness_body = to_bytes(readiness.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let readiness_body = std::str::from_utf8(&readiness_body).expect("body is utf-8");
+        assert!(
+            readiness_body.contains("\"controlPlaneDurability\":\"json\""),
+            "{readiness_body}"
+        );
 
-    let metrics_body = to_bytes(metrics.into_body(), usize::MAX)
-        .await
-        .expect("body reads");
-    let metrics_body = std::str::from_utf8(&metrics_body).expect("body is utf-8");
-    assert!(
-        metrics_body.contains("anima_daemon_control_plane_durability_info{mode=\"json\"} 1"),
-        "{metrics_body}"
-    );
+        let metrics_body = to_bytes(metrics.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let metrics_body = std::str::from_utf8(&metrics_body).expect("body is utf-8");
+        assert!(
+            metrics_body.contains("anima_daemon_control_plane_durability_info{mode=\"json\"} 1"),
+            "{metrics_body}"
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -298,54 +301,62 @@ async fn serve_exposes_health_and_error_paths_over_real_http() {
     let workspace = use_temp_workspace_root("real-http-health");
     let _store = EnvVarGuard::set(
         "ANIMAOS_RS_CONTROL_PLANE_FILE",
-        workspace.path().join("control-plane.json"),
+        workspace.control_plane_path(),
     );
     // Health fixtures must not discover and verify the operator's installed
     // browser runtime before the server can answer its first request.
     let _local_app_data = EnvVarGuard::set("LOCALAPPDATA", workspace.path().join("local-app-data"));
     // serve loads the default search model in the background; tests never download it.
     let _embeddings = EnvVarGuard::set("ANIMAOS_RS_MEMORY_EMBEDDINGS", "local");
-    let listener = TcpListener::bind("127.0.0.1:0")
+    support::run_in_joined_runtime(|| async {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let addr = listener.local_addr().expect("listener has local addr");
+        let server = tokio::spawn(async move {
+            let result = serve(listener, DaemonConfig::default()).await;
+            if let Err(error) = &result {
+                eprintln!("test server failed: {error}");
+            }
+            result
+        });
+
+        let (health_response, malformed_response) = tokio::task::spawn_blocking(move || {
+            let health_response = send_raw_http(
+                addr,
+                b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            );
+            let owner_token = test_owner_token();
+            let malformed_request = format!(
+                "GET /api/memories/search?q=%GG HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {owner_token}\r\nConnection: close\r\n\r\n"
+            );
+            let malformed_response = send_raw_http(addr, malformed_request.as_bytes());
+            (health_response, malformed_response)
+        })
         .await
-        .expect("listener binds");
-    let addr = listener.local_addr().expect("listener has local addr");
-    let server = tokio::spawn(async move {
-        let result = serve(listener, DaemonConfig::default()).await;
-        if let Err(error) = &result {
-            eprintln!("test server failed: {error}");
-        }
-        result
-    });
+        .expect("HTTP clients should finish");
 
-    let health_response = send_raw_http(
-        addr,
-        b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-    );
-    let owner_token = test_owner_token();
-    let malformed_request = format!(
-        "GET /api/memories/search?q=%GG HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {owner_token}\r\nConnection: close\r\n\r\n"
-    );
-    let malformed_response = send_raw_http(addr, malformed_request.as_bytes());
+        server.abort();
+        let _ = server.await;
 
-    server.abort();
-    let _ = server.await;
-
-    assert!(
-        health_response.starts_with("HTTP/1.1 200 OK"),
-        "{health_response:?}"
-    );
-    assert!(
-        health_response.contains("{\"status\":\"ok\"}"),
-        "{health_response:?}"
-    );
-    assert!(
-        malformed_response.starts_with("HTTP/1.1 400 Bad Request"),
-        "{malformed_response:?}"
-    );
-    assert!(
-        malformed_response.contains("{\"error\":\"malformed request\"}"),
-        "{malformed_response:?}"
-    );
+        assert!(
+            health_response.starts_with("HTTP/1.1 200 OK"),
+            "{health_response:?}"
+        );
+        assert!(
+            health_response.contains("{\"status\":\"ok\"}"),
+            "{health_response:?}"
+        );
+        assert!(
+            malformed_response.starts_with("HTTP/1.1 400 Bad Request"),
+            "{malformed_response:?}"
+        );
+        assert!(
+            malformed_response.contains("{\"error\":\"malformed request\"}"),
+            "{malformed_response:?}"
+        );
+    })
+    .await;
 }
 
 fn send_raw_http(addr: SocketAddr, request: &[u8]) -> String {

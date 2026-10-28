@@ -47,6 +47,9 @@ fn finished_documents_are_native_strict_and_classified() {
     for (name, risk) in [
         ("write_document", crate::approvals::RiskClass::Write),
         ("read_document_source", crate::approvals::RiskClass::Read),
+        ("inspect_office_document", crate::approvals::RiskClass::Read),
+        ("propose_document_edit", crate::approvals::RiskClass::Read),
+        ("apply_document_edit", crate::approvals::RiskClass::Write),
     ] {
         let descriptor = registry
             .descriptor(name)
@@ -772,6 +775,11 @@ fn registry_defines_every_registered_tool_schema() {
         ("rename_discord_thread", &["title"][..], &[][..]),
         ("send_discord_file", &["path"][..], &["caption"][..]),
         (
+            "read_discord_thread",
+            &[][..],
+            &["limit", "before_message_id"][..],
+        ),
+        (
             "compact_chat",
             &[][..],
             &["keepLatestExchanges", "focus"][..],
@@ -950,6 +958,28 @@ fn registry_defines_every_registered_tool_schema() {
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
         ("read_document", &["file_path"][..], &[][..]),
         ("read_document_source", &["file_path"][..], &[][..]),
+        ("inspect_office_document", &["source"][..], &["cursor"][..]),
+        (
+            "propose_document_edit",
+            &[
+                "source",
+                "expected_sha256",
+                "file_path",
+                "expected_destination",
+                "operations",
+            ][..],
+            &[][..],
+        ),
+        (
+            "apply_document_edit",
+            &[
+                "proposal_id",
+                "review_sha256",
+                "file_path",
+                "expected_destination",
+            ][..],
+            &[][..],
+        ),
         ("list_dir", &["path"][..], &[][..]),
         ("glob", &["pattern"][..], &["path"][..]),
         ("grep", &["pattern"][..], &["path", "include"][..]),
@@ -1032,6 +1062,11 @@ fn registry_defines_every_registered_tool_schema() {
         ("skill_history", &[][..], &["slug"][..]),
         ("drive_search", &[][..], &["query"][..]),
         ("drive_read", &["file_id"][..], &[][..]),
+        (
+            "microsoft_files_read",
+            &["connector_id", "file_key"][..],
+            &[][..],
+        ),
         ("propose_plan", &["title", "steps"][..], &["estimate"][..]),
         ("browser_navigate", &[][..], &["routeId", "url"][..]),
         ("checkpoint_list", &[][..], &[][..]),

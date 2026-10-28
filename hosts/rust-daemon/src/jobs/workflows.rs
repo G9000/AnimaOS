@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+pub(crate) mod continuity;
+
 use anima_core::workflows::{
     WorkflowInput, WorkflowResumeRequest, WorkflowRun, WorkflowStatus, WorkflowStepKind,
     WorkflowStepStatus,
@@ -406,6 +408,7 @@ pub(crate) fn dispatch_allowed(state: &DaemonState, job: &AgentJobRecord) -> boo
         None => job.workflow.is_none(),
         Some(w) => {
             w.status == WorkflowStatus::Running
+                && (!w.paused || job.status == AgentJobStatus::Running)
                 && crate::account_workflows::dispatch_allowed(state, w)
                 && state.get_agent(&w.agent_id).is_some()
                 && w.steps.get(w.current_step).is_some_and(|s| {
@@ -439,7 +442,10 @@ fn needs_reconciliation(state: &DaemonState, workflow: &WorkflowRun) -> bool {
             });
     }
     match &step.job_id {
-        None => state.jobs.len() >= MAX_JOBS || ensure_capacity(&state.jobs).is_ok(),
+        None => {
+            !workflow.paused
+                && (state.jobs.len() >= MAX_JOBS || ensure_capacity(&state.jobs).is_ok())
+        }
         Some(id) => state.jobs.get(id).is_none_or(|job| {
             !matches!(
                 job.status,
@@ -622,3 +628,7 @@ pub(crate) fn validate_snapshot(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflows/continuity_tests.rs"]
+mod continuity_tests;

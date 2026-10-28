@@ -1409,14 +1409,16 @@ impl AgentRuntime {
                                                             observer.on_frame(RunFrame::ToolStarted { step_id: frame_step_id.clone(), tool_call: prepared_step.tool_call.clone() });
                                                         }
                                                         let started = std::sync::atomic::AtomicBool::new(false);
-                                                        let call = async {
+                                                        // Keep the tool future off the worker stack while retaining
+                                                        // custody through its real retirement below.
+                                                        let call = Box::pin(async {
                                                             if run_cancel.as_ref().is_some_and(CancelSignal::is_cancelled) {
                                                                 return Err(run_cancel.as_ref().unwrap().run_error().to_string());
                                                             }
                                                             if let Some(context) = &execution_context { context.check_live()?; }
                                                             started.store(true, std::sync::atomic::Ordering::SeqCst);
                                                             Ok(execute_tool(state, user_message, prepared_step.tool_call.clone()).await)
-                                                        };
+                                                        });
                                                         let outcome = match &execution_context {
                                                             Some(context) => context.until_retired(call, run_cancel.clone()).await.and_then(|result| result),
                                                             None => call.await,

@@ -157,6 +157,7 @@ pub(crate) fn select(
             "clear_main_chat"
                 | "rename_discord_thread"
                 | "send_discord_file"
+                | "read_discord_thread"
                 | "rename_chat"
                 | "compact_chat"
                 | "export_chat"
@@ -192,6 +193,7 @@ pub(crate) fn select(
     {
         tools.push(registry.descriptor("rename_discord_thread").unwrap());
         tools.push(registry.descriptor("send_discord_file").unwrap());
+        tools.push(registry.descriptor("read_discord_thread").unwrap());
     }
     tools
 }

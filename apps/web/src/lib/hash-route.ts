@@ -24,6 +24,7 @@ export type HashPage = (typeof HASH_PAGES)[number];
 
 export type HashRoute =
   | { kind: 'home' }
+  | { kind: 'project'; projectId: string | null }
   | {
       kind: 'session';
       sessionId: string;
@@ -53,6 +54,14 @@ export function parseHashRoute(hash: string): HashRoute {
       ? target
       : undefined;
   const anchor = messageId ? { messageId } : {};
+  if (path === '/projects') return { kind: 'project', projectId: null };
+  if (path.startsWith('/p/')) {
+    try {
+      const projectId = decodeURIComponent(path.slice(3));
+      if (ROUTE_ID.test(projectId) && projectId.startsWith('project_')) return { kind: 'project', projectId };
+    } catch { /* Invalid project links return to the existing home route. */ }
+    return { kind: 'home' };
+  }
   if (path.startsWith('/s/')) {
     try {
       const parts = path
@@ -85,6 +94,8 @@ export function formatHashRoute(route: HashRoute): string {
   switch (route.kind) {
     case 'home':
       return '#/';
+    case 'project':
+      return route.projectId ? `#/p/${encodeURIComponent(route.projectId)}` : '#/projects';
     case 'session':
       return (
         (route.agentId

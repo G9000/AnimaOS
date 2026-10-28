@@ -61,6 +61,7 @@ pub(crate) fn recent_context(state: &DaemonState, agent: &str, room: &str) -> Op
         .sessions
         .get(agent, &super::session_id_for_room(room))?;
     if current.kind != SessionKind::Chat
+        || current.project_id.is_some()
         || !matches!(current.origin, SessionOrigin::Web | SessionOrigin::Api)
         || current.parent_agent_id.is_some()
         || current.parent_run_id.is_some()
@@ -199,6 +200,19 @@ mod tests {
             .push(crate::history::HistoryDeletion::session(
                 &recipient, &record.id,
             ));
+        assert!(recent_context(&state, &recipient, "chat:main").is_none());
+    }
+
+    #[test]
+    fn project_chats_do_not_automatically_inherit_other_incoming_conversations() {
+        let (mut state, sender, recipient) = fixture();
+        add_contact(&mut state, &sender, &recipient, 1);
+        assert!(recent_context(&state, &recipient, "chat:main").is_some());
+        state
+            .sessions
+            .get_mut(&recipient, "chat:main")
+            .unwrap()
+            .project_id = Some(format!("project_{}", uuid::Uuid::new_v4()));
         assert!(recent_context(&state, &recipient, "chat:main").is_none());
     }
 

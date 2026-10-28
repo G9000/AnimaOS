@@ -1287,6 +1287,7 @@ async fn a_helper_deadline_ends_its_compaction() {
                 config: build.runtime.config(),
                 tools: &build.tools,
                 adapter: &build.adapter,
+                project_context: None,
                 files: &Arc::new(crate::agent_files::AcceptedAgentFiles::empty(
                     crate::agent_files::Availability::Available,
                 )),
@@ -1335,6 +1336,7 @@ async fn a_run_lets_go_of_its_dropped_turns_once_compaction_is_decided() {
                     config: build.runtime.config(),
                     tools: &build.tools,
                     adapter: &build.adapter,
+                    project_context: None,
                     files: &Arc::new(crate::agent_files::AcceptedAgentFiles::empty(
                         crate::agent_files::Availability::Available,
                     )),
@@ -1761,6 +1763,7 @@ async fn agent_files_compaction_keeps_admitted_workspace_tools_and_attachment_ad
                 files: &files,
                 tools: &build.tools,
                 adapter: &build.adapter,
+                project_context: None,
                 deadline: None,
             },
             &mut context,
@@ -1879,6 +1882,7 @@ async fn document_compaction_case(automatic: bool, source: &str) {
                     files: &Arc::new(AcceptedAgentFiles::empty(Availability::Available)),
                     tools: &build.tools,
                     adapter: &build.adapter,
+                    project_context: None,
                     deadline: None,
                 },
                 &mut context,

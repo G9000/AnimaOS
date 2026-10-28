@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionSummary } from '@animaos/sdk';
@@ -1556,6 +1557,53 @@ describe('Composer keyboard safety', () => {
     view.rerender(<Composer {...props} />);
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Composer message recall', () => {
+  function Harness({ conversationKey }: { conversationKey: string }) {
+    const [draft, setDraft] = useState('');
+    return (
+      <Composer
+        agentName="Nova"
+        conversationKey={conversationKey}
+        draft={draft}
+        setDraft={setDraft}
+        sending={false}
+        disabled={false}
+        onSend={() => setDraft('')}
+        error={null}
+        onDismissError={vi.fn()}
+      />
+    );
+  }
+
+  it('brings back sent messages with ↑ and returns to the draft with ↓', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    render(<Harness conversationKey="recall-1" />);
+    const input = screen.getByRole('textbox', { name: 'Message Nova' });
+    await user.type(input, 'first{Enter}');
+    await user.type(input, 'second{Enter}');
+    expect(input).toHaveValue('');
+
+    await user.keyboard('{ArrowUp}');
+    expect(input).toHaveValue('second');
+    await user.keyboard('{ArrowUp}');
+    expect(input).toHaveValue('first');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(input).toHaveValue('');
+  });
+
+  it('leaves ↑ alone while a draft is being written', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    render(<Harness conversationKey="recall-2" />);
+    const input = screen.getByRole('textbox', { name: 'Message Nova' });
+    await user.type(input, 'sent{Enter}');
+    await user.type(input, 'half written');
+    await user.keyboard('{ArrowUp}');
+    expect(input).toHaveValue('half written');
   });
 });
 

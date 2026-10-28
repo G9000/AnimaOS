@@ -77,6 +77,11 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    history_messages: StdMutex<Vec<DiscordMessage>>,
+    history_calls: StdMutex<Vec<(String, Option<String>, usize)>>,
+    history_gate: AtomicBool,
+    history_entered: SemaphoreHolder,
+    history_release: SemaphoreHolder,
     downloads: StdMutex<HashMap<String, Vec<u8>>>,
     download_calls: AtomicUsize,
     download_error: StdMutex<Option<DiscordTransportError>>,
@@ -124,6 +129,37 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn read_thread_history(
+        &self,
+        _: &DiscordBotToken,
+        channel: &str,
+        before: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<DiscordMessage>, DiscordTransportError> {
+        self.history_calls
+            .lock()
+            .unwrap()
+            .push((channel.into(), before.map(str::to_owned), limit));
+        self.history_entered.0.add_permits(1);
+        if self.history_gate.load(Ordering::SeqCst) {
+            self.history_release.0.acquire().await.unwrap().forget();
+        }
+        let before = before.map(|id| id.parse::<u64>().unwrap());
+        let mut messages = self
+            .history_messages
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|message| {
+                message.channel_id == channel
+                    && before.is_none_or(|id| message.id.parse::<u64>().unwrap() < id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        messages.sort_by_key(|message| std::cmp::Reverse(message.id.parse::<u64>().unwrap()));
+        messages.truncate(limit);
+        Ok(messages)
+    }
     async fn download_attachment(
         &self,
         _: &str,

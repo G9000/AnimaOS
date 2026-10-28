@@ -61,6 +61,171 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('pauses a saved workflow using its inspected revision', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([run()]);
+  const resume = vi.spyOn(daemon, 'resumeWorkflow').mockResolvedValue(run());
+  render(<WorkspaceWorkflows agents={agents} online />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pause work' }));
+  await waitFor(() =>
+    expect(resume).toHaveBeenCalledWith('alpha', 'flow', {
+      revision: 4,
+      action: 'pause',
+    }),
+  );
+});
+
+it('retries the original pause after a lost response without creating a new decision', async () => {
+  const list = vi
+    .spyOn(daemon, 'listWorkflows')
+    .mockResolvedValue([run('running')]);
+  const resume = vi
+    .spyOn(daemon, 'resumeWorkflow')
+    .mockRejectedValueOnce(new Error('Response lost'))
+    .mockResolvedValue({ ...run('running'), revision: 5, paused: true });
+  const view = render(<WorkspaceWorkflows agents={agents} online />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pause work' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Response lost');
+  view.unmount();
+  list.mockResolvedValue([{ ...run('running'), revision: 5, paused: true }]);
+  render(<WorkspaceWorkflows agents={agents} online />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Retry saved decision' }),
+  );
+  await waitFor(() => expect(resume).toHaveBeenCalledTimes(2));
+  expect(resume.mock.calls[1]).toEqual(resume.mock.calls[0]);
+  expect(resume.mock.calls[0][2]).toEqual({ revision: 4, action: 'pause' });
+});
+
+it('shows a held checkpoint and continuing does not approve it', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([
+    { ...run(), paused: true },
+  ]);
+  const resume = vi.spyOn(daemon, 'resumeWorkflow').mockResolvedValue(run());
+  render(<WorkspaceWorkflows agents={agents} online />);
+  expect(await screen.findByText(/^Paused\. No new task/)).toBeVisible();
+  expect(
+    screen.getByRole('button', { name: 'Approve checkpoint' }),
+  ).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue work' }));
+  await waitFor(() =>
+    expect(resume).toHaveBeenCalledWith('alpha', 'flow', {
+      revision: 4,
+      action: 'continue',
+    }),
+  );
+  expect(resume).toHaveBeenCalledTimes(1);
+});
+
+it('counts finished and remaining explicit steps', async () => {
+  const saved = run();
+  saved.steps = [
+    { ...saved.steps[0], id: 'done', status: 'completed' },
+    { ...saved.steps[0], id: 'waiting', status: 'awaiting_approval' },
+    { ...saved.steps[0], id: 'later', status: 'pending' },
+  ];
+  saved.currentStep = 1;
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([saved]);
+  render(<WorkspaceWorkflows agents={agents} online />);
+  expect(
+    await screen.findByText('1 of 3 steps finished · 2 remaining'),
+  ).toBeVisible();
+});
+
+it('shows saved attempt evidence and blocks decisions if the workflow changed', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([run('needs_review')]);
+  const inspect = vi.spyOn(daemon, 'inspectWorkflowAttempt').mockResolvedValue({
+    workflowId: 'flow',
+    workflowRevision: 8,
+    stepId: 'step',
+    jobId: 'job-old',
+    stepAttempt: 1,
+    status: 'needs_review',
+    startedAtMs: 1,
+    finishedAtMs: 2,
+    result: null,
+    error: 'Interrupted',
+    resultTruncated: false,
+    evidenceState: 'unavailable',
+    run: null,
+  });
+  render(<WorkspaceWorkflows agents={agents} online />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Inspect saved attempt 1' }),
+  );
+  expect(await screen.findByText(/workflow changed.*refresh/i)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Retry task' })).toBeDisabled();
+  expect(inspect).toHaveBeenCalledWith(
+    'alpha',
+    'flow',
+    'step',
+    'job-old',
+    expect.any(Object),
+  );
+});
+
+it('shows an uncertain saved effect before an explicit retry', async () => {
+  vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([run('needs_review')]);
+  const resume = vi
+    .spyOn(daemon, 'resumeWorkflow')
+    .mockResolvedValue(run('running'));
+  vi.spyOn(daemon, 'inspectWorkflowAttempt').mockResolvedValue({
+    workflowId: 'flow',
+    workflowRevision: 4,
+    stepId: 'step',
+    jobId: 'job-old',
+    stepAttempt: 1,
+    status: 'needs_review',
+    startedAtMs: 1,
+    finishedAtMs: 2,
+    result: null,
+    error: 'Interrupted',
+    resultTruncated: false,
+    evidenceState: 'retained',
+    run: {
+      id: 'saved-run',
+      sessionId: 'saved-session',
+      status: 'interrupted',
+      evidence: {
+        actionReceipts: [
+          {
+            toolCallId: 'send',
+            name: 'send_message',
+            status: 'started',
+            startedAtMs: 1,
+            finishedAtMs: null,
+            durationMs: null,
+            argumentsPreview: '',
+            argumentsTruncated: false,
+            resultPreview: null,
+            resultTruncated: false,
+            durability: 'persistent',
+          },
+        ],
+        unreceiptedTools: [],
+        omittedUnreceiptedToolCount: 0,
+        checkpoint: null,
+      },
+    },
+  });
+  render(<WorkspaceWorkflows agents={agents} online />);
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Inspect saved attempt 1' }),
+  );
+  expect(await screen.findByText(/Outcome unknown/)).toBeVisible();
+  expect(resume).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByLabelText(/I have reviewed the uncertain effects/),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Retry task' }));
+  await waitFor(() =>
+    expect(resume).toHaveBeenCalledWith('alpha', 'flow', {
+      revision: 4,
+      action: 'retry',
+      acknowledgeUncertain: true,
+    }),
+  );
+});
+
 it('approves the saved checkpoint then refreshes persisted state', async () => {
   const list = vi
     .spyOn(daemon, 'listWorkflows')
@@ -71,7 +236,7 @@ it('approves the saved checkpoint then refreshes persisted state', async () => {
     .mockResolvedValue(run('completed'));
   render(<WorkspaceWorkflows agents={agents} online />);
   expect(await screen.findByText('Saved output <script>')).toBeVisible();
-  expect(screen.getByText(/job-old/)).toBeVisible();
+  expect(screen.getByText(/job-old/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Approve checkpoint' }));
   await waitFor(() =>
     expect(resume).toHaveBeenCalledWith('alpha', 'flow', {
@@ -177,9 +342,7 @@ it('disables offline mutations and ignores pre-disconnect responses after reconn
   const view = render(<WorkspaceWorkflows agents={agents} online />);
   view.rerender(<WorkspaceWorkflows agents={agents} online={false} />);
   expect(screen.getByText(/Offline/)).toBeVisible();
-  expect(
-    screen.getByRole('button', { name: 'New workflow' }),
-  ).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'New workflow' })).toBeDisabled();
   expect(
     screen.getByRole('button', { name: 'Refresh workflows' }),
   ).toBeDisabled();

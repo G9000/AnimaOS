@@ -11,6 +11,7 @@ import type { AgentDetail } from '../lib/types';
 import { WorkflowTemplates } from './WorkflowTemplates';
 import { useLatest } from '../hooks/useLatest';
 import { useRenderScope } from '../hooks/useRenderScope';
+import { WorkflowAttemptInspector } from './workflows/WorkflowAttemptInspector';
 
 const buttonClass =
   'rounded-xl border border-line px-4 py-3 text-sm disabled:opacity-50';
@@ -453,12 +454,15 @@ export function WorkflowAgentView({
       {pending && (
         <div className="space-y-3 rounded-xl border border-line p-4 text-sm">
           <p>
-            A saved request may already have reached the daemon. Retry sends the
-            same request and original revision.
+            A saved request may already have been applied. Retry sends the same
+            request.
           </p>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
-            {JSON.stringify(pending.input, null, 2)}
-          </pre>
+          <details>
+            <summary>Request details</summary>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
+              {JSON.stringify(pending.input, null, 2)}
+            </pre>
+          </details>
           <button
             type="button"
             className={buttonClass}
@@ -611,6 +615,7 @@ export function WorkflowAgentView({
         visibleWorkflows.map((workflow) => (
           <WorkflowCard
             key={`${workflow.id}:${workflow.revision}`}
+            agentId={agentId}
             workflow={workflow}
             disabled={disabled || !!pending}
             onResume={(input) =>
@@ -630,11 +635,13 @@ export function WorkflowAgentView({
 }
 
 function WorkflowCard({
+  agentId,
   workflow,
   disabled,
   onResume,
   onCancel,
 }: {
+  agentId: string;
   workflow: WorkflowRun;
   disabled: boolean;
   onResume: (input: WorkflowResumeInput) => void;
@@ -642,9 +649,27 @@ function WorkflowCard({
 }) {
   const [value, setValue] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
+  const [evidenceStale, setEvidenceStale] = useState(false);
+  const [inspectionStepId, setInspectionStepId] = useState('');
+  const inspectAttempt = daemon.inspectWorkflowAttempt;
   const step = workflow.steps[workflow.currentStep];
+  const inspectable = workflow.steps.filter(
+    (item) => item.kind === 'task' && item.attempts.length > 0,
+  );
+  const inspectionStep =
+    inspectable.find((item) => item.id === inspectionStepId) ??
+    inspectable.find((item) => item.id === step?.id) ??
+    inspectable.at(-1);
   const terminal =
     workflow.status === 'completed' || workflow.status === 'cancelled';
+  const decisionDisabled = disabled || !!workflow.paused || evidenceStale;
+  const finished = workflow.steps.filter(
+    (item) => item.status === 'completed',
+  ).length;
+  const stopped = workflow.steps.filter(
+    (item) => item.status === 'cancelled',
+  ).length;
+  const remaining = workflow.steps.length - finished - stopped;
   return (
     <article
       aria-label={workflow.title}
@@ -652,11 +677,22 @@ function WorkflowCard({
     >
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-lg font-semibold">{workflow.title}</h3>
-        <span className="text-sm text-ink-3">{labels[workflow.status]}</span>
+        <span className="text-sm text-ink-3">
+          {workflow.paused && !terminal ? 'Paused' : labels[workflow.status]}
+        </span>
       </div>
+      <p className="text-sm text-ink-3">
+        {finished} of {workflow.steps.length} steps finished · {remaining}{' '}
+        remaining
+        {stopped > 0 && ` · ${stopped} stopped`}
+      </p>
+      {workflow.paused && !terminal && (
+        <p className="text-sm text-ink-3">
+          Paused. No new task will start. A task already started may finish.
+        </p>
+      )}
       <p className="text-xs text-ink-3">
-        Revision {workflow.revision} · Updated{' '}
-        {new Date(workflow.updatedAtMs).toLocaleString()}
+        Updated {new Date(workflow.updatedAtMs).toLocaleString()}
       </p>
       {workflow.sourceTemplate && (
         <details className="text-xs text-ink-3">
@@ -695,19 +731,22 @@ function WorkflowCard({
                   : 'Task'}
             </p>
             <p className="text-xs text-ink-3">
-              {labels[saved.status]}
+              {saved.status === 'running' && saved.kind === 'task'
+                ? 'In progress or waiting to start'
+                : labels[saved.status]}
               {saved.attempt ? ` · Attempt ${saved.attempt}/3` : ''}
             </p>
             <p className="whitespace-pre-wrap break-words text-sm">
               {saved.prompt}
             </p>
-            {saved.jobId && (
-              <p className="break-all text-xs text-ink-3">Job: {saved.jobId}</p>
-            )}
             {saved.attempts.length > 0 && (
-              <p className="break-all text-xs text-ink-3">
-                Saved job attempts: {saved.attempts.join(', ')}
-              </p>
+              <details className="text-xs text-ink-3">
+                <summary>Attempt details</summary>
+                {saved.jobId && <p className="break-all">Job: {saved.jobId}</p>}
+                <p className="break-all">
+                  Saved job attempts: {saved.attempts.join(', ')}
+                </p>
+              </details>
             )}
             {saved.result !== null && (
               <div className="space-y-1">
@@ -720,11 +759,51 @@ function WorkflowCard({
           </li>
         ))}
       </ol>
+      {inspectionStep && (
+        <div className="space-y-2">
+          {inspectable.length > 1 && (
+            <label className="block text-sm">
+              Inspect a step
+              <select
+                className="field"
+                value={inspectionStep.id}
+                disabled={disabled}
+                onChange={(event) => {
+                  setInspectionStepId(event.target.value);
+                  setEvidenceStale(false);
+                  setAcknowledged(false);
+                }}
+              >
+                {inspectable.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <WorkflowAttemptInspector
+            key={inspectionStep.id}
+            inspect={inspectAttempt}
+            agentId={agentId}
+            workflowId={workflow.id}
+            workflowRevision={workflow.revision}
+            stepId={inspectionStep.id}
+            stepTitle={inspectionStep.title}
+            attempts={inspectionStep.attempts}
+            disabled={disabled}
+            onFreshness={(stale) => {
+              setEvidenceStale(stale);
+              setAcknowledged(false);
+            }}
+          />
+        </div>
+      )}
       {workflow.status === 'awaiting_approval' && (
         <button
           type="button"
           className={buttonClass}
-          disabled={disabled}
+          disabled={decisionDisabled}
           onClick={() =>
             onResume({ revision: workflow.revision, action: 'approve' })
           }
@@ -738,7 +817,7 @@ function WorkflowCard({
             Your answer
             <textarea
               className="field"
-              disabled={disabled}
+              disabled={decisionDisabled}
               value={value}
               onChange={(event) => setValue(event.target.value)}
             />
@@ -747,7 +826,7 @@ function WorkflowCard({
           <button
             type="button"
             className={buttonClass}
-            disabled={disabled || !textValid(value)}
+            disabled={decisionDisabled || !textValid(value)}
             onClick={() =>
               onResume({ revision: workflow.revision, action: 'answer', value })
             }
@@ -766,7 +845,7 @@ function WorkflowCard({
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
-              disabled={disabled}
+              disabled={decisionDisabled}
               checked={acknowledged}
               onChange={(event) => setAcknowledged(event.target.checked)}
             />
@@ -776,7 +855,9 @@ function WorkflowCard({
           <button
             type="button"
             className={buttonClass}
-            disabled={disabled || !acknowledged || !step || step.attempt >= 3}
+            disabled={
+              decisionDisabled || !acknowledged || !step || step.attempt >= 3
+            }
             onClick={() =>
               onResume({
                 revision: workflow.revision,
@@ -796,7 +877,7 @@ function WorkflowCard({
             Verified result
             <textarea
               className="field"
-              disabled={disabled}
+              disabled={decisionDisabled}
               value={value}
               onChange={(event) => setValue(event.target.value)}
             />
@@ -805,7 +886,7 @@ function WorkflowCard({
           <button
             type="button"
             className={buttonClass}
-            disabled={disabled || !acknowledged || !textValid(value)}
+            disabled={decisionDisabled || !acknowledged || !textValid(value)}
             onClick={() =>
               onResume({
                 revision: workflow.revision,
@@ -820,14 +901,41 @@ function WorkflowCard({
         </div>
       )}
       {!terminal && (
-        <button
-          type="button"
-          className={buttonClass}
-          disabled={disabled}
-          onClick={onCancel}
-        >
-          Cancel workflow
-        </button>
+        <div>
+          <p className="text-xs text-ink-3">
+            Pausing prevents new tasks from starting. A task already started may
+            finish.
+          </p>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={disabled}
+            onClick={() =>
+              onResume({
+                revision: workflow.revision,
+                action: workflow.paused ? 'continue' : 'pause',
+              })
+            }
+          >
+            {workflow.paused ? 'Continue work' : 'Pause work'}
+          </button>
+        </div>
+      )}
+      {!terminal && (
+        <div>
+          <p className="text-xs text-ink-3">
+            Cancelling asks the current task to stop. Actions already performed
+            may remain.
+          </p>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={disabled}
+            onClick={onCancel}
+          >
+            Cancel workflow
+          </button>
+        </div>
       )}
       {workflow.decisions.length > 0 && (
         <details className="text-sm">

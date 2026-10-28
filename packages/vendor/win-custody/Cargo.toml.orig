@@ -1,0 +1,48 @@
+[package]
+name = "win-custody"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+description = "Take custody of Windows child processes: exact handle inheritance, kill-on-close jobs, launches into another session's token, and SDDL-secured pipes. Not a sandbox."
+repository = "https://github.com/115dkk/Win-Custody.rs"
+documentation = "https://docs.rs/win-custody"
+readme = "README.md"
+keywords = ["windows", "process", "job-object", "sddl", "named-pipe"]
+categories = ["os::windows-apis", "api-bindings"]
+include = ["src/**", "README.md", "CHANGELOG.md", "SECURITY.md", "LICENSE-MIT", "LICENSE-APACHE"]
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc", "i686-pc-windows-msvc"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+missing_safety_doc = "deny"

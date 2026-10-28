@@ -282,6 +282,12 @@ pub(crate) struct SessionRecord {
     /// Invalidates inputs that began waiting before the last conversation reset.
     #[serde(default)]
     pub(crate) clear_generation: u64,
+    /// Canonical project grouping; the transcript remains owned by this agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) project_id: Option<String>,
+    /// Invalidates queued and pinned-source bindings after a move or detachment.
+    #[serde(default)]
+    pub(crate) project_binding_revision: u64,
     /// Owner selection, independent of transcript content and compaction.
     #[serde(default)]
     pub(crate) model_preferences: crate::chat_models::ModelPreferences,
@@ -359,6 +365,8 @@ impl SessionRecord {
             main_chat: false,
             pending_clear_run_id: None,
             clear_generation: 0,
+            project_id: None,
+            project_binding_revision: 0,
             model_preferences: crate::chat_models::ModelPreferences::default(),
             chat_reviews: Vec::new(),
             conversation_shares: Vec::new(),
