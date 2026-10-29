@@ -59,6 +59,575 @@ fn ids(value: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn hermes_style_browse_includes_own_cross_platform_and_archived_cold_history() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    let other = daemon.create_agent(agent_config("other")).unwrap().state.id;
+    let store = Arc::new(MemoryHistoryStore::new());
+    daemon.set_history(HistoryService::new(store.clone()));
+    for (index, kind) in [
+        SessionKind::Chat,
+        SessionKind::Telegram,
+        SessionKind::Discord,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("{}:own", kind.as_str());
+        let mut record = session(&agent, &id, kind, "Saved exchange");
+        record.last_activity_at_ms = 100 + index as u64;
+        record.archived = true;
+        daemon.sessions.insert(record);
+        store
+            .upsert_messages(&[history_message(
+                &agent,
+                &id,
+                &format!("anchor-{index}"),
+                MessageRole::User,
+                "The exact promise survives in cold history",
+                100 + index as u64,
+            )])
+            .await
+            .unwrap();
+    }
+    daemon.sessions.insert(session(
+        &other,
+        "chat:foreign",
+        SessionKind::Chat,
+        "Private exchange",
+    ));
+    store
+        .upsert_messages(&[history_message(
+            &other,
+            "chat:foreign",
+            "foreign-anchor",
+            MessageRole::User,
+            "FOREIGN_SECRET",
+            200,
+        )])
+        .await
+        .unwrap();
+    let state = Arc::new(RwLock::new(daemon));
+    let found = discover_conversations(
+        &state,
+        &agent,
+        Some("chat:own"),
+        DiscoveryRequest {
+            query: String::new(),
+            limit: 5,
+            kind: None,
+            after_ms: None,
+            before_ms: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(found["mode"], "browse");
+    let results = found["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["kind"], "discord");
+    assert_eq!(results[1]["kind"], "telegram");
+    assert_eq!(results[0]["matchMessageId"], "anchor-2");
+    assert!(!found.to_string().contains("FOREIGN_SECRET"));
+    assert!(size(&found) <= DISCOVERY_BYTES);
+}
+
+#[tokio::test]
+async fn hermes_style_recent_read_scrolls_cold_and_hot_messages_for_each_chat_platform() {
+    for kind in [
+        SessionKind::Chat,
+        SessionKind::Telegram,
+        SessionKind::Discord,
+    ] {
+        let mut daemon = DaemonState::new();
+        let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+        let store = Arc::new(MemoryHistoryStore::new());
+        daemon.set_history(HistoryService::new(store.clone()));
+        let id = format!("{}:past", kind.as_str());
+        let mut record = session(&agent, &id, kind, "Past exchange");
+        record.archived = true;
+        daemon.sessions.insert(record);
+        let rows = (1..25)
+            .map(|index| {
+                history_message(
+                    &agent,
+                    &id,
+                    &format!("past-{index}"),
+                    MessageRole::User,
+                    &format!("Exact turn {index}"),
+                    index,
+                )
+            })
+            .collect::<Vec<_>>();
+        store.upsert_messages(&rows).await.unwrap();
+        seed_messages(
+            &mut daemon,
+            &agent,
+            vec![message(
+                &agent,
+                "past-25",
+                &id,
+                MessageRole::Assistant,
+                "The final agreement",
+                25,
+            )],
+        );
+        let state = Arc::new(RwLock::new(daemon));
+        let recent = read_latest_conversation(&state, &agent, &id, 19)
+            .await
+            .unwrap();
+        assert_eq!(recent["messages"].as_array().unwrap().len(), 20);
+        assert_eq!(recent["firstMessageId"], "past-6");
+        assert_eq!(recent["lastMessageId"], "past-25");
+        assert_eq!(recent["messages"][19]["text"], "The final agreement");
+        assert_eq!(recent["hasEarlier"], true);
+        assert_eq!(recent["hasLater"], false);
+        assert_eq!(recent["kind"], kind.as_str());
+        let earlier = read_conversation_window(&state, &agent, window(&id, "past-6", 19, 0))
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(&earlier),
+            (1..=6)
+                .map(|index| format!("past-{index}"))
+                .collect::<Vec<_>>()
+        );
+        let later = read_conversation_window(&state, &agent, window(&id, "past-6", 0, 19))
+            .await
+            .unwrap();
+        assert_eq!(later["lastMessageId"], "past-25");
+        assert_eq!(
+            later["messages"][0]["createdAt"],
+            "1970-01-01T00:00:00.006Z"
+        );
+    }
+}
+
+#[tokio::test]
+async fn hermes_style_browse_cursor_pages_equal_activity_without_duplicates() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    for id in ["chat:a", "chat:b", "chat:c"] {
+        let mut record = session(&agent, id, SessionKind::Chat, "Own");
+        record.last_activity_at_ms = 42;
+        daemon.sessions.insert(record);
+        seed_messages(
+            &mut daemon,
+            &agent,
+            vec![message(
+                &agent,
+                &format!("{id}-anchor"),
+                id,
+                MessageRole::User,
+                id,
+                42,
+            )],
+        );
+    }
+    let state = Arc::new(RwLock::new(daemon));
+    let request = DiscoveryRequest {
+        query: String::new(),
+        limit: 2,
+        kind: None,
+        after_ms: None,
+        before_ms: None,
+    };
+    let first = browse_conversations(&state, &agent, None, request.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(first["results"][0]["sessionId"], "chat:c");
+    assert_eq!(first["results"][1]["sessionId"], "chat:b");
+    let cursor = BrowseCursor::parse(first["nextCursor"].as_str().unwrap()).unwrap();
+    let second = browse_conversations(&state, &agent, None, request, Some(cursor))
+        .await
+        .unwrap();
+    assert_eq!(second["results"].as_array().unwrap().len(), 1);
+    assert_eq!(second["results"][0]["sessionId"], "chat:a");
+    assert_eq!(second["hasMore"], false);
+    assert_eq!(second["nextCursor"], Value::Null);
+}
+
+#[tokio::test]
+async fn hermes_style_title_only_search_can_open_real_context_within_discovery_budget() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    daemon.sessions.insert(session(
+        &agent,
+        "chat:past",
+        SessionKind::Chat,
+        "Nebula title",
+    ));
+    let messages = (1..=20)
+        .map(|index| {
+            message(
+                &agent,
+                &format!("message-{index}"),
+                "chat:past",
+                MessageRole::User,
+                &"字".repeat(3000),
+                index,
+            )
+        })
+        .collect();
+    seed_messages(&mut daemon, &agent, messages);
+    let state = Arc::new(RwLock::new(daemon));
+    let mut request = discovery();
+    request.after_ms = None;
+    request.before_ms = None;
+    let mut found = discover_conversations(&state, &agent, None, request)
+        .await
+        .unwrap();
+    assert_eq!(found["results"][0]["matchMessageId"], Value::Null);
+    hydrate_top_result(&state, &agent, &mut found)
+        .await
+        .unwrap();
+    assert_eq!(found["results"][0]["sessionId"], "chat:past");
+    assert_eq!(found["results"][0]["context"]["status"], "found");
+    assert!(size(&found) <= DISCOVERY_BYTES, "{} bytes", size(&found));
+    let context = &found["results"][0]["context"];
+    assert_eq!(context["shortened"], true);
+    assert_eq!(
+        context["lastMessageId"],
+        context["messages"].as_array().unwrap().last().unwrap()["messageId"]
+    );
+}
+
+#[tokio::test]
+async fn hermes_style_browse_rechecks_every_row_after_all_store_reads_and_keeps_cursor() {
+    for delete_first in [false, true] {
+        let mut daemon = DaemonState::new();
+        let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+        let store = Arc::new(ExactReadStore::new(None, false));
+        for id in ["chat:a", "chat:b", "chat:c"] {
+            let mut record = session(&agent, id, SessionKind::Chat, "Own exchange");
+            record.last_activity_at_ms = 42;
+            daemon.sessions.insert(record);
+            seed_messages(
+                &mut daemon,
+                &agent,
+                vec![message(
+                    &agent,
+                    &format!("{id}-source"),
+                    id,
+                    MessageRole::User,
+                    if id == "chat:c" {
+                        "PRIVATE_PREVIEW_SENTINEL"
+                    } else {
+                        "Other visible exchange"
+                    },
+                    10,
+                )],
+            );
+        }
+        store.page_reads_before_gate.store(
+            if delete_first { 0 } else { 1 },
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        daemon.set_history(HistoryService::new(store.clone()));
+        let state = Arc::new(RwLock::new(daemon));
+        let request = DiscoveryRequest {
+            query: String::new(),
+            limit: if delete_first { 1 } else { 2 },
+            kind: None,
+            after_ms: None,
+            before_ms: None,
+        };
+        let task_state = state.clone();
+        let task_agent = agent.clone();
+        let task_request = request.clone();
+        let task = tokio::spawn(async move {
+            browse_conversations(&task_state, &task_agent, None, task_request, None).await
+        });
+        tokio::time::timeout(Duration::from_secs(1), store.entered.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        {
+            let mut guard = state.write().await;
+            if delete_first {
+                guard.sessions.remove(&agent, "chat:c");
+            } else {
+                seed_messages(
+                    &mut guard,
+                    &agent,
+                    vec![
+                        crate::sessions::test_support::checkin_prompt(
+                            &agent,
+                            "chat:c-source",
+                            "chat:c",
+                            "s1",
+                            "PRIVATE_PREVIEW_SENTINEL",
+                            10,
+                        ),
+                        message(
+                            &agent,
+                            "silent",
+                            "chat:c",
+                            MessageRole::Assistant,
+                            "CHECKIN_OK",
+                            11,
+                        ),
+                    ],
+                );
+            }
+        }
+        store.release.add_permits(1);
+        let first = task.await.unwrap().unwrap();
+        assert!(!first.to_string().contains("PRIVATE_PREVIEW_SENTINEL"));
+        assert_eq!(first["hasMore"], true);
+        let cursor = BrowseCursor::parse(
+            first["nextCursor"]
+                .as_str()
+                .expect("skipped pages retain a continuation"),
+        )
+        .unwrap();
+        let second = browse_conversations(&state, &agent, None, request, Some(cursor))
+            .await
+            .unwrap();
+        assert_eq!(
+            second["results"][0]["sessionId"],
+            if delete_first { "chat:b" } else { "chat:a" }
+        );
+    }
+}
+
+#[tokio::test]
+async fn hermes_style_search_drops_snippets_hidden_deleted_or_replaced_during_hydration() {
+    for change in 0..3 {
+        let mut daemon = DaemonState::new();
+        let mut config = agent_config("owner");
+        config.tools = Some(
+            crate::tools::ToolRegistry::new()
+                .resolve_descriptors(["search_conversations", "read_conversation_window"])
+                .unwrap(),
+        );
+        let agent = daemon.create_agent(config).unwrap().state.id;
+        daemon
+            .sessions
+            .insert(session(&agent, "chat:past", SessionKind::Chat, "Past"));
+        seed_messages(
+            &mut daemon,
+            &agent,
+            vec![message(
+                &agent,
+                "source",
+                "chat:past",
+                MessageRole::User,
+                "Nebula PRIVATE_SEARCH_SENTINEL",
+                10,
+            )],
+        );
+        let store = Arc::new(ExactReadStore::new(None, false));
+        daemon.set_history(HistoryService::new(store.clone()));
+        let state = Arc::new(RwLock::new(daemon));
+        let mut found = discover_conversations(&state, &agent, None, discovery())
+            .await
+            .unwrap();
+        assert_eq!(found["results"][0]["matchMessageId"], "source");
+        store
+            .page_reads_before_gate
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+        let task_state = state.clone();
+        let task_agent = agent.clone();
+        let task = tokio::spawn(async move {
+            hydrate_top_result(&task_state, &task_agent, &mut found)
+                .await
+                .unwrap();
+            finalize_discovery(&task_state, &task_agent, &mut found).await;
+            found
+        });
+        tokio::time::timeout(Duration::from_secs(1), store.entered.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        {
+            let mut guard = state.write().await;
+            match change {
+                0 => {
+                    guard.sessions.remove(&agent, "chat:past");
+                }
+                1 => seed_messages(
+                    &mut guard,
+                    &agent,
+                    vec![
+                        crate::sessions::test_support::checkin_prompt(
+                            &agent,
+                            "source",
+                            "chat:past",
+                            "s1",
+                            "Nebula PRIVATE_SEARCH_SENTINEL",
+                            10,
+                        ),
+                        message(
+                            &agent,
+                            "silent",
+                            "chat:past",
+                            MessageRole::Assistant,
+                            "CHECKIN_OK",
+                            11,
+                        ),
+                    ],
+                ),
+                _ => {
+                    let adapter = guard.profile_model_adapter();
+                    let mut snapshot = guard.agents[&agent].snapshot();
+                    snapshot
+                        .messages
+                        .iter_mut()
+                        .find(|message| message.id == "source")
+                        .unwrap()
+                        .content
+                        .text = "Unrelated replacement".into();
+                    guard.agents.insert(
+                        agent.clone(),
+                        anima_core::AgentRuntime::from_snapshot(snapshot, adapter),
+                    );
+                }
+            }
+        }
+        store.release.add_permits(1);
+        let result = task.await.unwrap();
+        assert_eq!(result["status"], "not_found", "change {change}");
+        assert!(
+            !result.to_string().contains("PRIVATE_SEARCH_SENTINEL"),
+            "change {change}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn hermes_style_browse_caps_large_tool_previews() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    daemon.sessions.insert(session(
+        &agent,
+        "chat:large",
+        SessionKind::Chat,
+        "Large tool output",
+    ));
+    let text = format!(
+        "Visible prefix {} TAIL_SENTINEL",
+        "tool output ".repeat(300_000)
+    );
+    seed_messages(
+        &mut daemon,
+        &agent,
+        vec![message(
+            &agent,
+            "large",
+            "chat:large",
+            MessageRole::Tool,
+            &text,
+            10,
+        )],
+    );
+    let state = Arc::new(RwLock::new(daemon));
+    let result = discover_conversations(
+        &state,
+        &agent,
+        None,
+        DiscoveryRequest {
+            query: String::new(),
+            limit: 5,
+            kind: None,
+            after_ms: None,
+            before_ms: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["results"][0]["snippetShortened"], true);
+    assert!(result["results"][0]["snippet"]
+        .as_str()
+        .unwrap()
+        .starts_with("Visible prefix"));
+    assert!(!result.to_string().contains("TAIL_SENTINEL"));
+    assert!(size(&result) <= DISCOVERY_BYTES);
+}
+
+#[tokio::test]
+async fn hermes_style_final_refresh_bounds_expanding_metadata_and_retains_cursor() {
+    let mut daemon = DaemonState::new();
+    let agent = daemon.create_agent(agent_config("owner")).unwrap().state.id;
+    let mut session_ids = Vec::new();
+    for index in 0..10 {
+        let prefix = format!("chat:{index}");
+        let id = format!(
+            "{prefix}{}",
+            "s".repeat(crate::sessions::MAX_SESSION_ID_BYTES - prefix.len())
+        );
+        let mut record = session(&agent, &id, SessionKind::Chat, "x");
+        assert_eq!(record.id, id, "the fixture uses a native session ID");
+        record.last_activity_at_ms = 42;
+        assert!(daemon.sessions.insert(record).is_none());
+        seed_messages(
+            &mut daemon,
+            &agent,
+            vec![message(
+                &agent,
+                &format!("message-{index}{}", "m".repeat(220)),
+                &id,
+                MessageRole::User,
+                "x",
+                10,
+            )],
+        );
+        session_ids.push(id);
+    }
+    assert_eq!(
+        daemon
+            .sessions
+            .records()
+            .filter(|record| record.agent_id == agent)
+            .count(),
+        10
+    );
+    let state = Arc::new(RwLock::new(daemon));
+    let mut result = browse_conversations(
+        &state,
+        &agent,
+        None,
+        DiscoveryRequest {
+            query: String::new(),
+            limit: 10,
+            kind: None,
+            after_ms: None,
+            before_ms: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(size(&result) <= DISCOVERY_BYTES);
+    {
+        let mut guard = state.write().await;
+        for id in &session_ids {
+            guard.sessions.get_mut(&agent, id).unwrap().title = "\"\\".repeat(120);
+        }
+        let adapter = guard.profile_model_adapter();
+        let mut snapshot = guard.agents[&agent].snapshot();
+        for message in &mut snapshot.messages {
+            message.content.text = format!("Expanded preview {}", "\"\\".repeat(200));
+        }
+        guard.agents.insert(
+            agent.clone(),
+            anima_core::AgentRuntime::from_snapshot(snapshot, adapter),
+        );
+    }
+    finalize_discovery(&state, &agent, &mut result).await;
+    assert!(size(&result) <= DISCOVERY_BYTES, "{} bytes", size(&result));
+    assert_eq!(result["hasMore"], true);
+    assert_eq!(result["shortened"], true);
+    assert!(BrowseCursor::parse(result["nextCursor"].as_str().unwrap()).is_some());
+    assert!(result["results"][0]["snippet"]
+        .as_str()
+        .unwrap()
+        .starts_with("Expanded preview"));
+}
+
+#[tokio::test]
 async fn incoming_agent_conversations_are_searchable_and_readable_with_sender_evidence() {
     for origin in [SessionOrigin::Delegation, SessionOrigin::Peer] {
         let mut daemon = DaemonState::new();
@@ -795,6 +1364,7 @@ struct ExactReadStore {
     inner: MemoryHistoryStore,
     reply: Option<HistoryMessage>,
     wait: bool,
+    page_reads_before_gate: std::sync::atomic::AtomicUsize,
     entered: tokio::sync::Semaphore,
     release: tokio::sync::Semaphore,
     dropped: Arc<std::sync::atomic::AtomicBool>,
@@ -805,6 +1375,7 @@ impl ExactReadStore {
             inner: MemoryHistoryStore::new(),
             reply,
             wait,
+            page_reads_before_gate: std::sync::atomic::AtomicUsize::new(usize::MAX),
             entered: tokio::sync::Semaphore::new(0),
             release: tokio::sync::Semaphore::new(0),
             dropped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -919,6 +1490,20 @@ impl HistoryStore for ExactReadStore {
         &self,
         q: &MessagePageQuery,
     ) -> Result<Vec<HistoryMessage>, h::HistoryError> {
+        use std::sync::atomic::Ordering;
+        let previous =
+            self.page_reads_before_gate
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    (count != usize::MAX).then(|| if count == 0 { usize::MAX } else { count - 1 })
+                });
+        if previous == Ok(0) {
+            self.entered.add_permits(1);
+            self.release
+                .acquire()
+                .await
+                .map_err(|_| h::HistoryError::new("page release closed"))?
+                .forget();
+        }
         self.inner.page_messages(q).await
     }
     async fn page_messages_after(

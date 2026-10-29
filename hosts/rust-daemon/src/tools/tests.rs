@@ -914,13 +914,13 @@ fn registry_defines_every_registered_tool_schema() {
         ("clear_main_chat", &[][..], &[][..]),
         (
             "search_conversations",
-            &["query"][..],
-            &["limit", "kind", "after_ms", "before_ms"][..],
+            &[][..],
+            &["query", "limit", "kind", "after_ms", "before_ms", "cursor"][..],
         ),
         (
             "read_conversation_window",
-            &["session_id", "anchor_message_id"][..],
-            &["before_count", "after_count"][..],
+            &["session_id"][..],
+            &["anchor_message_id", "before_count", "after_count"][..],
         ),
         ("load_skill", &["name"][..], &["filePath"][..]),
         (

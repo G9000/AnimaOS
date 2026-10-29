@@ -1034,7 +1034,6 @@ export function SettingsPanel({
                               setAccessChanged(true);
                               setAllowMemoryRemove(false);
                               setAllowMemoryConsolidate(false);
-                              setAllowConversationRead(false);
                               setAllowDocumentRead(false);
                               setAllowWebSearch(profileName === 'operate');
                               setAllowWebFetch(false);
@@ -1410,7 +1409,6 @@ export function SettingsPanel({
                         setAccessChanged(true);
                         setAllowMemoryRemove(false);
                         setAllowMemoryConsolidate(false);
-                        setAllowConversationRead(false);
                         setAllowDocumentRead(false);
                         setAllowWebSearch(profileName === 'operate');
                         setAllowWebFetch(false);

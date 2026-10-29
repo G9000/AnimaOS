@@ -22,6 +22,14 @@ const DEADLINE: Duration = Duration::from_secs(5);
 const WINDOW_BYTES: usize = 16 * 1024;
 const DISCOVERY_BYTES: usize = 8 * 1024;
 
+mod recall;
+#[cfg(test)]
+pub(crate) use recall::finalize_discovery;
+pub(crate) use recall::{
+    browse_conversations, finalize_discovery_current, hydrate_top_result, read_latest_conversation,
+    BrowseCursor,
+};
+
 #[derive(Clone, Debug)]
 pub(crate) struct DiscoveryRequest {
     pub(crate) query: String,
@@ -143,6 +151,9 @@ pub(crate) async fn discover_conversations(
     current: Option<&str>,
     request: DiscoveryRequest,
 ) -> Result<Value, HistoryReadError> {
+    if request.query.is_empty() {
+        return browse_conversations(state, agent, current, request, None).await;
+    }
     if request.query.trim().is_empty()
         || request.query.len() > 800
         || request.query.chars().count() > 200
@@ -385,6 +396,8 @@ async fn discover_inner(
             let snippet = search_snippet(snippet_text(message), &tokens);
             results.push((MessageOrder::of(message),json!({"sessionId":record.id,"title":clip(&record.title,240),
                 "kind":record.kind.as_str(),"archived":record.archived,"matchMessageId":message.id,
+                "createdAt":format_time(record.created_at_ms),"lastActivityAt":format_time(record.last_activity_at_ms),
+                "matchedAt":format_time(message.created_at_ms),
                 "matchedAtMs":message.created_at_ms,"role":role_name(message.role),"snippet":snippet,
                 "titleShortened":record.title.len()>240,"snippetShortened":snippet!=display_text(message),
                 "matchKind":"message","anchorUnavailable":false,"contact":super::interactions::contact(&guard, record)})));
@@ -395,6 +408,7 @@ async fn discover_inner(
             results.push((MessageOrder {created_at_ms:record.last_activity_at_ms,ordinal:0,id:record.id.clone()},
                 json!({"sessionId":record.id,"title":clip(&record.title,240),"kind":record.kind.as_str(),"archived":record.archived,
                     "matchMessageId":null,"matchedAtMs":null,"role":null,"snippet":clip(&record.title,240),
+                    "createdAt":format_time(record.created_at_ms),"lastActivityAt":format_time(record.last_activity_at_ms),
                     "titleShortened":record.title.len()>240,"snippetShortened":record.title.len()>240,
                     "matchKind":"title","anchorUnavailable":true,"contact":super::interactions::contact(&guard, record)})));
         }
@@ -407,7 +421,7 @@ async fn discover_inner(
         .take(request.limit)
         .any(|(_, row)| row["titleShortened"] == true || row["snippetShortened"] == true);
     let mut output = json!({"guidance":GUIDANCE,"status":if results.is_empty(){"not_found"}else{"found"},
-        "query":request.query,"results":results.into_iter().take(request.limit).map(|(_,value)|value).collect::<Vec<_>>(),
+        "mode":"search","query":request.query,"results":results.into_iter().take(request.limit).map(|(_,value)|value).collect::<Vec<_>>(),
         "hasMore":has_more,"shortened":shortened});
     while size(&output) > DISCOVERY_BYTES {
         output["results"]
@@ -638,6 +652,10 @@ pub(crate) async fn read_conversation_window(
             return Ok(missing(&request.session_id, &request.anchor_message_id));
         };
         output["contact"] = super::interactions::contact(&guard, record).unwrap_or(Value::Null);
+        output["title"] = json!(clip(&record.title, 240));
+        output["kind"] = json!(record.kind.as_str());
+        output["createdAt"] = json!(format_time(record.created_at_ms));
+        output["lastActivityAt"] = json!(format_time(record.last_activity_at_ms));
     }
     bound_window(&mut output);
     output["pairingIncomplete"] = json!(
@@ -694,7 +712,7 @@ async fn window_inner(
         let hidden = hidden_message_ids(hot.iter());
         (record.clone(), hot, hidden, guard.history.store())
     };
-    let anchor = match hot
+    let mut anchor = match hot
         .iter()
         .find(|message| message.id == request.anchor_message_id)
     {
@@ -803,10 +821,32 @@ async fn window_inner(
             .iter()
             .filter(|message| message.room_id == record.room_id()),
     );
-    drop(guard);
     if live_hidden.contains(&anchor.id) {
         return Ok(None);
     }
+    for message in guard.agents[agent]
+        .messages()
+        .iter()
+        .filter(|message| message.room_id == record.room_id())
+    {
+        if message.id == anchor.id {
+            if message.role == MessageRole::System || message.agent_id != agent {
+                return Ok(None);
+            }
+            if MessageOrder::of(message) != order {
+                return Err(HistoryReadError::Unavailable);
+            }
+            anchor = message.clone();
+        }
+        if message.agent_id == agent
+            && message.role != MessageRole::System
+            && valid_id(&message.id)
+            && !live_hidden.contains(&message.id)
+        {
+            merged.insert(message.id.clone(), message.clone());
+        }
+    }
+    drop(guard);
     merged.retain(|id, _| !live_hidden.contains(id));
     merged.insert(anchor.id.clone(), anchor.clone());
     let mut older: Vec<_> = merged
@@ -842,7 +882,7 @@ async fn window_inner(
 }
 
 fn shape_message(message: &Message) -> Value {
-    let mut text = display_text(message).to_string();
+    let mut text = display_text(message);
     let metadata = message.content.metadata.as_ref();
     // Failed tools store an encoded TaskResult in their text. Expose only its
     // error text/status, never the whole duplicated taskResult metadata object.
@@ -853,13 +893,13 @@ fn shape_message(message: &Message) -> Value {
     if message.role == MessageRole::Tool {
         if let Some(result) = failure {
             text = match result.get("error") {
-                Some(DataValue::String(error)) => error.clone(),
-                _ => "Recorded tool error; details unavailable".into(),
+                Some(DataValue::String(error)) => error.as_str(),
+                _ => "Recorded tool error; details unavailable",
             };
         }
     }
-    let excerpt = clip(&text, 2048);
-    let mut row = json!({"messageId":message.id,"role":role_name(message.role),"createdAtMs":message.created_at_ms,
+    let excerpt = clip(text, 2048);
+    let mut row = json!({"messageId":message.id,"role":role_name(message.role),"createdAtMs":message.created_at_ms,"createdAt":format_time(message.created_at_ms),
         "text":excerpt,"textShortened":excerpt.len()!=text.len(),
         "toolResultEnvelopeOmitted":message.role==MessageRole::Tool && failure.is_some(),
         "attachmentContentOmitted":message.content.attachments.as_ref().is_some_and(|items|!items.is_empty())});
@@ -904,11 +944,36 @@ fn shape_message(message: &Message) -> Value {
 }
 
 fn bound_window(output: &mut Value) {
+    bound_window_to(output, WINDOW_BYTES);
+}
+
+fn format_time(created_at_ms: u64) -> String {
+    i64::try_from(created_at_ms)
+        .ok()
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .unwrap_or_default()
+}
+
+fn bound_window_to(output: &mut Value, max_bytes: usize) {
     let anchor = output["anchorMessageId"]
         .as_str()
         .expect("anchor string")
         .to_owned();
-    while size(output) > WINDOW_BYTES {
+    loop {
+        output["firstMessageId"] = output["messages"]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .map(|row| row["messageId"].clone())
+            .unwrap_or(Value::Null);
+        output["lastMessageId"] = output["messages"]
+            .as_array()
+            .and_then(|rows| rows.last())
+            .map(|row| row["messageId"].clone())
+            .unwrap_or(Value::Null);
+        if size(output) <= max_bytes {
+            break;
+        }
         let rows = output["messages"].as_array_mut().expect("message array");
         if let Some(row) = rows.iter_mut().rev().find(|row| {
             row["messageId"] != anchor && row["text"].as_str().is_some_and(|text| !text.is_empty())

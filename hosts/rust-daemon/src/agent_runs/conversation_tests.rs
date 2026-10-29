@@ -225,6 +225,221 @@ async fn tool_result(coordinator: &AgentRunCoordinator, agent_id: &str) -> Strin
 }
 
 #[tokio::test]
+async fn hermes_style_recall_browses_without_guessing_keywords_and_reads_session() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![search_call(&[])]),
+        Step::Tools(vec![read_call(&[(
+            "session_id",
+            DataValue::String("chat:trip".into()),
+        )])]),
+        Step::Text(vec!["We booked Lisbon for May."]),
+    ]);
+    let (coordinator, agent_id) = searcher(model).await;
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:now",
+            "Remember our other conversation?",
+        ))
+        .await
+        .unwrap();
+    let guard = coordinator.state.read().await;
+    let results: Vec<serde_json::Value> = guard.agents[&agent_id]
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Tool)
+        .map(|message| serde_json::from_str(&message.content.text).unwrap())
+        .collect();
+    assert_eq!(
+        results[0]["status"], "found",
+        "browsing needs no guessed keywords"
+    );
+    assert_eq!(results[0]["results"][0]["sessionId"], "chat:trip");
+    assert_eq!(
+        results[1]["status"], "found",
+        "a known session needs no search anchor"
+    );
+    assert_eq!(results[1]["messages"][0]["text"], "Book Lisbon for May");
+    assert_eq!(results[1]["messages"][1]["text"], "Booked the Lisbon flat");
+}
+
+#[tokio::test]
+async fn hermes_style_recall_hydrates_top_match_only_with_the_reader_grant() {
+    for reading in [true, false] {
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![search_call(&[(
+                "query",
+                DataValue::String("lisbon may".into()),
+            )])]),
+            Step::Text(vec!["Found the exchange."]),
+        ]);
+        let (coordinator, agent_id) = searcher(model).await;
+        if !reading {
+            let mut guard = coordinator.state.write().await;
+            let mut config = guard.get_agent(&agent_id).unwrap().state.config;
+            config
+                .tools
+                .as_mut()
+                .unwrap()
+                .retain(|tool| tool.name != "read_conversation_window");
+            guard.restore_agent_config(&agent_id, config);
+        }
+        coordinator
+            .run(chat_request(&agent_id, "chat:now", "What did we book?"))
+            .await
+            .unwrap();
+        let result: serde_json::Value =
+            serde_json::from_str(&tool_result(&coordinator, &agent_id).await).unwrap();
+        let first = &result["results"][0];
+        if reading {
+            assert_eq!(first["context"]["status"], "found");
+            assert_eq!(
+                first["context"]["messages"][0]["text"],
+                "Book Lisbon for May"
+            );
+            assert_eq!(
+                first["context"]["messages"][1]["text"],
+                "Booked the Lisbon flat"
+            );
+        } else {
+            assert!(
+                first.get("context").is_none(),
+                "search-only access cannot read surrounding messages"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn hermes_style_recall_uses_real_catalog_and_cold_history_across_web_discord_telegram() {
+    use crate::history::{HistoryService, HistoryStore, MemoryHistoryStore};
+    use std::sync::Arc;
+    for kind in [
+        SessionKind::Chat,
+        SessionKind::Discord,
+        SessionKind::Telegram,
+    ] {
+        let session_id = format!("{}:stored", kind.as_str());
+        let mut scroll = read_call(&[
+            ("session_id", DataValue::String(session_id.clone())),
+            ("anchor_message_id", DataValue::String("past-6".into())),
+            ("before_count", DataValue::Number(19.0)),
+            ("after_count", DataValue::Number(0.0)),
+        ]);
+        scroll.id = "scroll-earlier".into();
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![ToolCall {
+                id: "discover-search".into(),
+                name: "search_tools".into(),
+                args: BTreeMap::from([(
+                    "query".into(),
+                    DataValue::String("search_conversations".into()),
+                )]),
+            }]),
+            Step::Tools(vec![search_call(&[(
+                "kind",
+                DataValue::String(kind.as_str().into()),
+            )])]),
+            Step::Tools(vec![ToolCall {
+                id: "discover-read".into(),
+                name: "search_tools".into(),
+                args: BTreeMap::from([(
+                    "query".into(),
+                    DataValue::String("read_conversation_window".into()),
+                )]),
+            }]),
+            Step::Tools(vec![read_call(&[(
+                "session_id",
+                DataValue::String(session_id.clone()),
+            )])]),
+            Step::Tools(vec![scroll]),
+            Step::Text(vec!["The saved exchange records the exact agreement."]),
+        ]);
+        let (coordinator, agent) = searcher(model.clone()).await;
+        let store = Arc::new(MemoryHistoryStore::new());
+        let rows = (1..=25)
+            .map(|index| {
+                crate::history::conformance::history_message(
+                    &format!("past-{index}"),
+                    &agent,
+                    &session_id,
+                    MessageRole::User,
+                    &format!("Exact agreement turn {index}"),
+                    index,
+                )
+            })
+            .collect::<Vec<_>>();
+        store.upsert_messages(&rows).await.unwrap();
+        {
+            let mut guard = coordinator.state.write().await;
+            let mut config = guard.get_agent(&agent).unwrap().state.config;
+            config.tools.as_mut().unwrap().extend(
+                crate::tools::ToolRegistry::new()
+                    .resolve_descriptors(["search_tools", "describe_tool"])
+                    .unwrap(),
+            );
+            config
+                .settings
+                .as_mut()
+                .unwrap()
+                .additional
+                .insert("toolDiscovery".into(), DataValue::Bool(true));
+            guard.restore_agent_config(&agent, config);
+            let mut record = SessionRecord::new(
+                &agent,
+                &session_id,
+                kind,
+                SessionOrigin::Web,
+                "Stored exchange".into(),
+                TitleSource::Owner,
+                30,
+            );
+            record.archived = true;
+            guard.sessions.insert(record);
+            guard.set_history(HistoryService::new(store));
+        }
+        let response = coordinator
+            .run(chat_request(
+                &agent,
+                "chat:now",
+                "Do you remember our discussion in the other chat?",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.result.status, "success");
+        let guard = coordinator.state.read().await;
+        let results = guard.agents[&agent]
+            .messages()
+            .iter()
+            .filter(|message| message.room_id == "chat:now" && message.role == MessageRole::Tool)
+            .map(|message| {
+                serde_json::from_str::<serde_json::Value>(&message.content.text).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let browse = results
+            .iter()
+            .find(|result| result["mode"] == "browse")
+            .unwrap();
+        assert_eq!(browse["results"][0]["kind"], kind.as_str());
+        assert_eq!(
+            browse["results"][0]["context"]["status"], "found",
+            "catalog permits authorized context without advertising reader first"
+        );
+        let recent = results
+            .iter()
+            .find(|result| result["mode"] == "recent")
+            .unwrap();
+        assert_eq!(recent["firstMessageId"], "past-6");
+        assert_eq!(recent["lastMessageId"], "past-25");
+        let earlier = results.last().unwrap();
+        assert_eq!(earlier["messages"][0]["text"], "Exact agreement turn 1");
+        assert_eq!(earlier["lastMessageId"], "past-6");
+        assert!(!model.configs()[0].allows_tool("read_conversation_window"));
+        assert!(model.configs()[4].allows_tool("read_conversation_window"));
+    }
+}
+
+#[tokio::test]
 async fn the_companion_finds_excerpts_of_its_other_conversations() {
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![search_call(&[(

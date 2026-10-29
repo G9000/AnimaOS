@@ -161,7 +161,7 @@ it('preserves a partial document grant across access-profile changes', async () 
   renderPanel(agent({ toolNames: [...toolNamesForProfile('collaborate'), 'inspect_office_document'] }), { sections: ['access'], saveSettings });
   fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ tools: [...toolNamesForProfile('observe').filter((tool) => tool !== 'read_conversation_window'), 'inspect_office_document'] }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ tools: [...toolNamesForProfile('observe'), 'inspect_office_document'] }));
 });
 
 it('does not offer document-editing grants to helpers', async () => {
@@ -212,6 +212,7 @@ function renderPanel(
     saveSettings: (patch: AgentUpdateInput) => Promise<boolean>;
     resetAgent: () => void;
     sections: readonly SettingsSection[];
+    isMainAgent: boolean;
   }> = {},
 ) {
   const props = {
@@ -845,7 +846,11 @@ describe('SettingsPanel access', () => {
       'mail_list_messages',
     ];
     const saveSettings = vi.fn(async () => true);
-    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+    renderPanel(agent({ toolNames: currentTools }), {
+      saveSettings,
+      sections: ['builtins'],
+    });
+    await user.click(screen.getByText('Specific permissions'));
 
     const allowHistoryRead = screen.getByRole('checkbox', {
       name: 'Allow reading conversation context',
@@ -869,7 +874,11 @@ describe('SettingsPanel access', () => {
       'legacy_workspace_tool',
     ];
     const saveSettings = vi.fn(async () => true);
-    renderPanel(agent({ toolNames: currentTools }), { saveSettings });
+    renderPanel(agent({ toolNames: currentTools }), {
+      saveSettings,
+      sections: ['builtins'],
+    });
+    await user.click(screen.getByText('Specific permissions'));
 
     const allowHistoryRead = screen.getByRole('checkbox', {
       name: 'Allow reading conversation context',
@@ -883,35 +892,64 @@ describe('SettingsPanel access', () => {
     });
   });
 
-  it('M41_standard_profile_clears_conversation_read_but_allows_deliberate_reenable', async () => {
+  describe.each([true, false])('recall profile changes, main agent: %s', (isMainAgent) => {
+    it.each([
+      { stored: true, draft: true },
+      { stored: true, draft: false },
+      { stored: false, draft: false },
+      { stored: false, draft: true },
+    ])('preserves recall reading from stored $stored to draft $draft', async ({ stored, draft }) => {
+      const user = userEvent.setup();
+      const saveSettings = vi.fn(async () => true);
+      renderPanel(agent({
+        toolNames: toolNamesForProfile('observe').filter(
+          (tool) => tool !== 'read_conversation_window' || stored,
+        ),
+      }), {
+        saveSettings,
+        isMainAgent,
+        sections: isMainAgent ? ['access', 'builtins'] : ['profile', 'builtins'],
+      });
+      await user.click(screen.getByText('Specific permissions'));
+      const allowHistoryRead = screen.getByRole('checkbox', {
+        name: 'Allow reading conversation context',
+      });
+      expect(allowHistoryRead).toHaveProperty('checked', stored);
+      if (stored !== draft) await user.click(allowHistoryRead);
+
+      for (const profileLabel of [/^Edit files/, /^Run commands/, /^Look only/]) {
+        await user.click(screen.getByRole('radio', { name: profileLabel }));
+        expect(allowHistoryRead).toHaveProperty('checked', draft);
+      }
+      await user.click(screen.getByRole('radio', { name: /^Edit files/ }));
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: toolNamesForProfile('collaborate').filter(
+          (tool) => tool !== 'read_conversation_window' || draft,
+        ),
+      });
+    });
+  });
+
+  it('recall reading remains disabled for generated helpers through profile changes', async () => {
     const user = userEvent.setup();
     const saveSettings = vi.fn(async () => true);
-    renderPanel(
-      agent({
-        toolNames: [
-          ...toolNamesForProfile('observe'),
-          'read_conversation_window',
-        ],
-      }),
-      { saveSettings },
-    );
-
+    renderPanel(agent({ workspaceRole: 'helper', toolNames: ['read_file'] }), {
+      sections: ['profile', 'builtins'],
+      saveSettings,
+    });
+    await user.click(screen.getByText('Specific permissions'));
     const allowHistoryRead = screen.getByRole('checkbox', {
       name: 'Allow reading conversation context',
     });
-    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    expect(allowHistoryRead).toBeDisabled();
+    await user.click(screen.getByRole('radio', { name: /^Edit files/ }));
     expect(allowHistoryRead).not.toBeChecked();
-    expect(toolNamesForProfile('collaborate')).not.toContain(
-      'read_conversation_window',
-    );
-
-    await user.click(allowHistoryRead);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(saveSettings).toHaveBeenCalledWith({
-      tools: [
-        ...toolNamesForProfile('collaborate'),
-        'read_conversation_window',
-      ],
+      tools: toolNamesForProfile('collaborate').filter(
+        (tool) => tool !== 'read_conversation_window',
+      ),
     });
   });
 
@@ -921,7 +959,11 @@ describe('SettingsPanel access', () => {
       toolNames: ['read_file', 'legacy_workspace_tool'],
     });
     const saveSettings = vi.fn(async () => false);
-    const view = renderPanel(currentAgent, { saveSettings });
+    const view = renderPanel(currentAgent, {
+      saveSettings,
+      sections: ['builtins'],
+    });
+    await user.click(screen.getByText('Specific permissions'));
     const allowHistoryRead = screen.getByRole('checkbox', {
       name: 'Allow reading conversation context',
     });
@@ -946,8 +988,9 @@ describe('SettingsPanel access', () => {
         workspaceRole: 'helper',
         toolNames: ['read_file'],
       }),
+      { sections: ['builtins'] },
     );
-
+    fireEvent.click(screen.getByText('Specific permissions'));
     const allowHistoryRead = screen.getByRole('checkbox', {
       name: 'Allow reading conversation context',
     });

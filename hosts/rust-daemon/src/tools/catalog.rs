@@ -360,14 +360,24 @@ impl RunToolCatalog {
         run: &RunLink,
         name: &str,
     ) -> Result<(), String> {
+        let state = self.state.upgrade().ok_or(REFUSED)?;
+        let guard = state.read().await;
+        self.check_current(&guard, agent, run, name)
+    }
+
+    pub(crate) fn check_current(
+        &self,
+        state: &DaemonState,
+        agent: &AgentState,
+        run: &RunLink,
+        name: &str,
+    ) -> Result<(), String> {
         if run != &self.run || agent.id != self.run.agent_id {
             return Err(REFUSED.into());
         }
-        let state = self.state.upgrade().ok_or(REFUSED)?;
-        let guard = state.read().await;
-        self.scope_current(&guard).map_err(str::to_string)?;
+        self.scope_current(state).map_err(str::to_string)?;
         if matches!(name, SEARCH | DESCRIBE) {
-            let current = guard
+            let current = state
                 .agents
                 .get(&self.run.agent_id)
                 .ok_or(REFUSED)?
@@ -377,7 +387,7 @@ impl RunToolCatalog {
             .then_some(())
             .ok_or_else(|| REFUSED.into());
         }
-        self.entry_current(&guard, name).map_err(str::to_string)
+        self.entry_current(state, name).map_err(str::to_string)
     }
 
     fn hydrate(&self, names: &[String]) {
