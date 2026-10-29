@@ -15,7 +15,6 @@ export interface ComposerModelState {
   provider: string;
   current: string;
   busy?: boolean;
-  selectionLabel?: string;
   choices?: readonly string[];
   moreLabel?: string;
   error?: string | null;
@@ -93,9 +92,6 @@ export function ComposerMode({
           <span className="composer-chip-model">
             {model.current || model.provider}
           </span>
-        )}
-        {model?.selectionLabel && (
-          <small className="composer-chip-tag">{model.selectionLabel}</small>
         )}
         <ChevronIcon size={12} />
       </button>

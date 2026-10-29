@@ -4097,7 +4097,7 @@ it('M43 reconciles deleted aliases while preserving actual native and unrelated 
   );
   await waitFor(() =>
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled(),
   ); // empty form stays disabled after settlement
   await waitFor(() =>

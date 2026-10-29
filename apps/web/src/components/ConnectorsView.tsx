@@ -1243,7 +1243,7 @@ export function ConnectorsView({
     >
       <ServiceDirectoryContext.Provider value={directory}>
       <OAuthSetupContext.Provider value={openOAuthSetup}>
-      <section aria-label="Connectors" className="connections-page">
+      <section aria-label="Connectors" className="connections-page" data-mode={mode}>
         <div className="connections-stack">
           <h1 className="sr-only">Connectors</h1>
           {!online && (
@@ -1252,13 +1252,7 @@ export function ConnectorsView({
             </p>
           )}
           {(mode === 'all' || mode === 'tools') && (
-            <section className="connections-section" aria-labelledby="mcp-tools-heading">
-              <div className="connections-section-heading">
-                <div>
-                  <h2 id="mcp-tools-heading">From MCP servers</h2>
-                  <p>Tools from servers you connect, with their current permission state.</p>
-                </div>
-              </div>
+            <section className="connections-section" aria-label="External tools">
               <McpConnectionsPanel
                 key={`${agentId}:mcp`}
                 agentId={agentId}

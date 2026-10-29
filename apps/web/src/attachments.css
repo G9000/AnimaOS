@@ -30,6 +30,15 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.studio-message-attachment:has(.studio-attachment-image) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: fit-content;
+  max-width: min(100%, 25rem);
+}
+.studio-message-attachment .studio-attachment-image {
+  grid-column: 1 / -1;
+}
 .studio-attachment-chip strong,
 .studio-message-attachment strong {
   font-weight: 500;

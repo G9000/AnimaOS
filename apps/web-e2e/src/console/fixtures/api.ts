@@ -861,7 +861,7 @@ export async function installConsoleFixture(
         expect(['queue', 'steer']).toContain(body.mode);
         expect(
           Object.keys(body).every((k) =>
-            ['text', 'attachmentIds', 'skill', 'mode'].includes(k),
+            ['text', 'attachmentIds', 'skill', 'mode', 'plan', 'timeZone', 'browserSelection', 'documentEditContext'].includes(k),
           ),
         ).toBe(true);
         const attachments = (body.attachmentIds ?? []) as string[];

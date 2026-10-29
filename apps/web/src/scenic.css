@@ -210,23 +210,6 @@
   z-index: 2;
 }
 
-/* History fades out at the bottom of whatever is stacked above the chat (the
- * top bar, and any row under it), so it never runs behind those rows. */
-.scenic-shell .studio-message-scroller:has(.studio-messages) {
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent calc(var(--scenic-topbar-h) - 18px),
-    rgb(0 0 0 / 0.45) calc(var(--scenic-topbar-h) + 2px),
-    #000 calc(var(--scenic-topbar-h) + 22px)
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent calc(var(--scenic-topbar-h) - 18px),
-    rgb(0 0 0 / 0.45) calc(var(--scenic-topbar-h) + 2px),
-    #000 calc(var(--scenic-topbar-h) + 22px)
-  );
-}
-
 /* Settings sit over a dimmed orb. */
 .scenic-shell:has(.settings-window) .halo-backdrop-orb {
   opacity: 0.35;
@@ -254,8 +237,7 @@
   background: transparent;
 }
 
-/* The bar's middle: the day at the top of the screen, and what anima kept
- * from earlier. History fades out below it instead of ending in a row. */
+/* The bar's middle can show what anima kept from earlier. */
 .scenic-shell .header-context {
   display: flex;
   flex: 1 1 0;
@@ -269,18 +251,6 @@
   text-transform: uppercase;
   white-space: nowrap;
   text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
-}
-
-.scenic-shell .header-context-day {
-  flex: none;
-  color: rgb(236 230 218 / 0.7);
-}
-
-.scenic-shell .header-context-rule {
-  flex: none;
-  width: 1px;
-  height: 10px;
-  background: rgb(236 230 218 / 0.2);
 }
 
 .scenic-shell .header-context-note {
@@ -1824,7 +1794,7 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .scenic-shell .chat-turn .scenic-agent-text {
-  max-width: 68ch;
+  max-width: 100%;
   padding: 0;
   font-size: 15px;
   line-height: 1.7;
@@ -2040,6 +2010,10 @@ button.scenic-thread[aria-expanded='true'] {
   max-width: 760px;
 }
 
+.scenic-shell .studio-composer > .composer-inner {
+  position: relative;
+}
+
 /* The base studio sheet gives the box 12px padding and a 48px textarea;
  * the bar is 50px tall in all. */
 .scenic-shell [data-main-chat='true'] .studio-composer-box.composer-bar {
@@ -2226,18 +2200,6 @@ button.scenic-thread[aria-expanded='true'] {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--control-ink);
-}
-
-/* Where the model comes from (Inherited, Pinned…): a small tag, readable. */
-.scenic-shell .composer-chip-tag {
-  padding: 1px 5px;
-  border: 1px solid var(--control-line);
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--control-muted);
 }
 
 .scenic-shell .composer-chip > svg:last-child {
@@ -2662,6 +2624,109 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .composer-tray select {
   max-width: 100%;
+}
+
+/* Keep extra inputs close to the + button and out of the conversation. */
+.scenic-shell .composer-tray[data-open] {
+  position: absolute;
+  bottom: calc(100% - 8px);
+  left: 14px;
+  z-index: 5;
+  width: min(200px, calc(100% - 28px));
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border-color: rgb(255 255 255 / 0.13);
+  border-radius: 10px;
+  background: #1b1a19;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
+}
+
+.scenic-shell .composer-tray[data-open] .studio-audio-recording:not([data-live]) .studio-audio-note {
+  display: none;
+}
+
+.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-tool-button) {
+  border-radius: 8px;
+  background: transparent;
+}
+
+.scenic-shell .composer-tray[data-open] > :is(.studio-attachment-picker, .studio-audio-recording) {
+  width: 100%;
+}
+
+.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-audio-recording > button, .studio-dictation-button) {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.88);
+  text-align: left;
+  font-size: 13px;
+}
+
+.scenic-shell .composer-tray[data-open] .studio-attachment-picker button svg {
+  color: rgb(236 230 218 / 0.6);
+}
+
+.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-audio-recording > button, .studio-dictation-button):hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.07);
+}
+
+.scenic-shell .composer-tray[data-open] .studio-dictation-button::after {
+  content: attr(aria-label);
+}
+
+.scenic-shell .composer-tray[data-open] > :not(.studio-attachment-picker, .studio-audio-recording) {
+  width: 100%;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.scenic-shell .composer-tray[data-open] details > summary {
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.scenic-shell .composer-tray[data-open] > details {
+  padding-inline: 0;
+}
+
+.scenic-shell .composer-tray[data-open] details > summary:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+@media (max-width: 767px) {
+  .scenic-shell .composer-tray[data-open] {
+    left: 10px;
+    width: min(200px, calc(100% - 20px));
+  }
+}
+
+:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] {
+  border-color: rgb(26 26 24 / 0.14);
+  background: #fffefa;
+  box-shadow: 0 12px 32px rgb(26 26 24 / 0.14);
+}
+
+:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button {
+  color: #39362f;
+}
+
+:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button svg {
+  color: #777166;
+}
+
+:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button:hover:not(:disabled) {
+  background: rgb(26 26 24 / 0.06);
 }
 
 .scenic-shell .session-view-header button {
@@ -5171,6 +5236,13 @@ details.settings-item > :not(summary) {
   padding: 22px 32px 32px;
 }
 
+/* On Tools the server list follows the built-in tools in the page's own
+ * scroll; only the Connections page scrolls this section by itself. */
+.connections-page[data-mode='tools'] {
+  height: auto;
+  overflow: visible;
+}
+
 .connections-stack,
 .tools-page {
   display: flex;
@@ -6989,10 +7061,19 @@ details.settings-item > :not(summary) {
 
 /* Match the Pen main-chat transcript rhythm and composer internals. */
 .scenic-shell [data-main-chat='true'] .studio-messages {
-  gap: 26px;
+  gap: 14px;
   max-width: 808px;
   padding-top: 8px;
   padding-bottom: 20px;
+}
+
+.scenic-shell [data-main-chat='true'] .studio-message-anchor:has(> .chat-turn.is-user),
+.scenic-shell [data-main-chat='true'] .studio-message-anchor:has(> .chat-turn.is-user) + .studio-message-anchor {
+  margin-top: 4px;
+}
+
+.scenic-shell [data-main-chat='true'] .studio-message-anchor:first-of-type:has(> .chat-turn) {
+  margin-top: 0;
 }
 
 /* Keep the context inspector available to assistive tech and keyboard users

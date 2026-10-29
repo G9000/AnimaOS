@@ -673,11 +673,8 @@ describe('SessionView', () => {
         },
       });
 
-      expect(
-        screen.getByRole('button', {
-          name: 'Generate speech with OpenAI API',
-        }),
-      ).toBeVisible();
+      expect(screen.queryByText('Spoken replies')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Generate speech with OpenAI API' })).not.toBeInTheDocument();
       expect(ensureSession).not.toHaveBeenCalled();
       expect(audio).not.toHaveBeenCalled();
     } finally {

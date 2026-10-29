@@ -2,6 +2,7 @@ import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { useLatest } from '../../hooks/useLatest';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { McpOAuthAccount } from './McpOAuthAccount';
+import './mcp.css';
 import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   mcpOwnerApi,
@@ -11,10 +12,11 @@ import {
 } from '../../lib/daemon-api';
 
 export type McpOwnerApi = typeof mcpOwnerApi;
-const button =
-  'rounded-lg border border-line px-3 py-2 text-xs disabled:opacity-50';
-const inputClass =
-  'w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm';
+const button = 'ui-button';
+const primaryButton = 'ui-button is-primary';
+const quietButton = 'ui-button is-quiet';
+const dangerButton = 'ui-button is-danger';
+const inputClass = 'field';
 
 function failure(caught: unknown): string {
   const status = (caught as { status?: number } | null)?.status;
@@ -24,6 +26,18 @@ function failure(caught: unknown): string {
   if (status === 429)
     return 'The connection is busy or its limit has been reached. Refresh before trying again.';
   return 'The result could not be confirmed. Refresh status before taking another action.';
+}
+
+type Tone = 'ok' | 'wait' | 'off' | 'bad';
+
+function statusTone(connection: McpConnection): Tone {
+  if (connection.state === 'stopping' || connection.state === 'connecting')
+    return 'wait';
+  if (!connection.enabled || connection.state === 'disconnected') return 'off';
+  if (connection.state === 'degraded' || connection.toolAccess === 'denied')
+    return 'bad';
+  if (connection.state === 'needs_review') return 'wait';
+  return connection.state === 'ready' ? 'ok' : 'off';
 }
 
 function statusText(connection: McpConnection): string {
@@ -110,6 +124,8 @@ export function McpConnectionsPanel({
   const [argumentsText, setArgumentsText] = useState('');
   const [passEmptyArgument, setPassEmptyArgument] = useState(false);
   const [trustedLocalCode, setTrustedLocalCode] = useState(false);
+  // The add form opens on request; with nothing saved it is the page.
+  const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [needsRefresh, setNeedsRefresh] = useState(false);
@@ -285,54 +301,63 @@ export function McpConnectionsPanel({
     connectionType === 'stdio'
       ? launchIssue(label, executable, launchArgs)
       : null;
+  const showAddForm = adding || (!loading && !error && connections.length === 0);
   return (
-    <section
-      aria-label="External tools (MCP)"
-      className="space-y-4 connections-card"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section aria-label="External tools (MCP)" className="mcp-panel">
+      <header className="mcp-head">
         <div>
-          <h2 className="text-base font-semibold text-ink">
-            External tools (MCP)
-          </h2>
-          <p className="mt-1 max-w-3xl text-xs text-ink-3">
-            Save a server, enable it, and connect. Free mode allows its tools
-            automatically. Strict requires tool review and permission grants;
-            Custom follows your execution setting. Saving starts no connection.
+          <h2 className="mcp-title">External tools (MCP)</h2>
+          <p className="mcp-lede">
+            Servers that give this agent more tools. A new server starts off;
+            you connect it when you are ready. Whether its tools need your
+            review follows the agent’s permission level.
           </p>
         </div>
-        <button
-          className={button}
-          disabled={!online || busy || loading || permissionsBusy}
-          onClick={() => void refresh(undefined, true)}
-        >
-          Refresh status
-        </button>
-      </div>
+        <div className="mcp-head-actions">
+          <button
+            className={quietButton}
+            disabled={!online || busy || loading || permissionsBusy}
+            onClick={() => void refresh(undefined, true)}
+          >
+            Refresh status
+          </button>
+          {!showAddForm && (
+            <button
+              className={primaryButton}
+              disabled={blocked}
+              onClick={() => setAdding(true)}
+            >
+              Add a server
+            </button>
+          )}
+        </div>
+      </header>
       {loading && (
-        <p role="status" className="text-xs text-ink-3">
+        <p role="status" className="mcp-note">
           Reading saved connections and permissions…
         </p>
       )}
       {error && (
-        <p role="alert" className="text-sm text-ink">
+        <p role="alert" className="mcp-alert">
           {error}
         </p>
       )}
       {permissionsUncertain && (
-        <p className="text-xs text-ink-3">
+        <p className="mcp-note">
           Refresh status after the current request finishes to confirm
           permissions before making further changes.
         </p>
       )}
       {disabled && (
-        <p className="text-xs text-ink-3">
+        <p className="mcp-note">
           Connection changes are unavailable while this agent is busy or
           restricted.
         </p>
       )}
+      {showAddForm && (
       <form
-        className="grid gap-3 sm:grid-cols-2"
+        className="mcp-add"
+        aria-label="Add a server"
         onSubmit={(event) => {
           event.preventDefault();
           const savedLabel = label;
@@ -353,11 +378,13 @@ export function McpConnectionsPanel({
               setArgumentsText('');
               setPassEmptyArgument(false);
               setTrustedLocalCode(false);
+              setAdding(false);
             },
           );
         }}
       >
-        <label className="text-xs">
+        <h3 className="mcp-add-title">Add a server</h3>
+        <label className="mcp-field">
           Connection type
           <select
             className={inputClass}
@@ -375,7 +402,7 @@ export function McpConnectionsPanel({
             <option value="stdio">Local process</option>
           </select>
         </label>
-        <label className="text-xs">
+        <label className="mcp-field">
           Connection label
           <input
             className={inputClass}
@@ -386,7 +413,7 @@ export function McpConnectionsPanel({
           />
         </label>
         {connectionType === 'streamableHttp' ? (
-          <label className="text-xs">
+          <label className="mcp-field mcp-field-wide">
             Server URL
             <input
               className={inputClass}
@@ -398,14 +425,14 @@ export function McpConnectionsPanel({
             />
           </label>
         ) : (
-          <div className="space-y-3 sm:col-span-2">
-            <p className="text-xs text-ink-3">
+          <div className="mcp-field-wide mcp-local">
+            <p className="mcp-note">
               A local process runs code on this computer. Use an installed
               executable you trust. No shell commands, package launchers,
               installs or environment settings are supported. Saving stays
               disabled and does not start it.
             </p>
-            <label className="block text-xs">
+            <label className="mcp-field">
               Absolute executable path
               <input
                 className={inputClass}
@@ -418,7 +445,7 @@ export function McpConnectionsPanel({
                 }}
               />
             </label>
-            <label className="block text-xs">
+            <label className="mcp-field">
               Arguments — one per line
               <textarea
                 className={inputClass}
@@ -433,7 +460,7 @@ export function McpConnectionsPanel({
               />
             </label>
             {argumentsText === '' && (
-              <label className="flex items-start gap-2 text-xs">
+              <label className="mcp-check">
                 <input
                   type="checkbox"
                   checked={passEmptyArgument}
@@ -446,15 +473,15 @@ export function McpConnectionsPanel({
                 Pass one empty argument
               </label>
             )}
-            <p className="text-xs text-ink-3">
+            <p className="mcp-note">
               Each line is one argument. Spaces and quotes are passed literally;
               blank lines are empty arguments. Launch details cannot be edited
               after saving.
             </p>
             {executable && localIssue && (
-              <p className="text-xs text-ink-3">{localIssue}</p>
+              <p className="mcp-note">{localIssue}</p>
             )}
-            <label className="flex items-start gap-2 text-xs">
+            <label className="mcp-check">
               <input
                 type="checkbox"
                 checked={trustedLocalCode}
@@ -465,9 +492,19 @@ export function McpConnectionsPanel({
             </label>
           </div>
         )}
-        <div className="sm:col-span-2">
+        <div className="mcp-add-actions">
+          <p className="mcp-note">Saved servers start off.</p>
+          {connections.length > 0 && (
+            <button
+              type="button"
+              className={quietButton}
+              onClick={() => setAdding(false)}
+            >
+              Cancel
+            </button>
+          )}
           <button
-            className={button}
+            className={primaryButton}
             disabled={
               blocked ||
               !label.trim() ||
@@ -477,12 +514,13 @@ export function McpConnectionsPanel({
             }
             type="submit"
           >
-            Save disabled connection
+            Save server
           </button>
         </div>
       </form>
+      )}
       {!loading && !error && connections.length === 0 && (
-        <p className="text-sm text-ink-3">No external tool servers saved.</p>
+        <p className="mcp-empty">No servers yet.</p>
       )}
       {connections.map((row) => (
         <ConnectionCard
@@ -622,15 +660,13 @@ export function McpConnectionsPanel({
 
 function Descriptor({ tool }: { tool: McpToolDescriptor }) {
   return (
-    <div className="min-w-0 space-y-1">
-      <p className="break-words text-sm font-medium">{tool.remoteName}</p>
-      <p className="whitespace-pre-wrap break-words text-xs text-ink-3">
-        {tool.description}
-      </p>
-      <details className="text-xs text-ink-3">
+    <div className="mcp-tool-text">
+      <p className="mcp-tool-name">{tool.remoteName}</p>
+      <p className="mcp-tool-description">{tool.description}</p>
+      <details className="mcp-tool-details">
         <summary>Inspect tool details</summary>
-        <p className="mt-2 break-all">Descriptor: {tool.descriptorDigest}</p>
-        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">
+        <p>Descriptor: {tool.descriptorDigest}</p>
+        <pre>
           {JSON.stringify(
             { inputSchema: tool.inputSchema, outputSchema: tool.outputSchema },
             null,
@@ -717,253 +753,101 @@ function ConnectionCard({
     row.state === 'connecting' ||
     row.physicalCallsActive;
   const connected = row.state === 'ready' || row.state === 'needs_review';
+  const tone = stale ? 'off' : statusTone(row);
   return (
     <article
       aria-label={`External server ${row.label}`}
-      className="space-y-3 rounded-xl border border-line p-4"
+      className="mcp-server"
+      data-tone={tone}
     >
-      <h3 className="break-words font-medium">{row.label}</h3>
-      <p className="text-xs text-ink-3">
-        {stale ? 'Status unavailable — refresh to verify' : statusText(row)}
-      </p>
-      {local ? (
-        <div className="space-y-1 text-xs text-ink-3">
-          <p>Local process — saved launch</p>
-          <p className="whitespace-pre-wrap break-all">
-            {row.stdio?.executable ?? 'Launch details unavailable'}
-          </p>
-          {row.stdio &&
-            (row.stdio.args.length > 0 ? (
-              <ol className="list-decimal space-y-1 pl-5">
-                {row.stdio.args.map((arg, index) => (
-                  <li key={index} className="whitespace-pre-wrap break-all">
-                    {JSON.stringify(arg)}
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p>No arguments</p>
-            ))}
+      <div className="mcp-server-head">
+        <span className="mcp-server-dot" aria-hidden="true" />
+        <div className="mcp-server-name">
+          <h3>{row.label}</h3>
           <p>
-            Only start code you trust. To change the program or arguments,
-            remove this connection and save a new one.
+            {local
+              ? (row.stdio?.executable ?? 'Launch details unavailable')
+              : row.endpoint}
           </p>
         </div>
-      ) : (
-        <p className="break-all text-xs text-ink-3">{row.endpoint}</p>
+        <span className="mcp-status" data-tone={tone}>
+          {stale ? 'Status unavailable — refresh to verify' : statusText(row)}
+        </span>
+        <div className="mcp-server-actions">
+          {!row.enabled ? (
+            <button
+              className={button}
+              disabled={blocked || wireBusy}
+              onClick={() => save({ enabled: true })}
+            >
+              Enable connection
+            </button>
+          ) : connected || row.state === 'stopping' ? (
+            <button
+              className={button}
+              disabled={
+                blocked ||
+                row.state === 'stopping' ||
+                row.state === 'disconnected'
+              }
+              onClick={disconnect}
+            >
+              {local ? 'Stop local server' : 'Disconnect server'}
+            </button>
+          ) : (
+            <button
+              className={primaryButton}
+              disabled={blocked || wireBusy || (local && !row.stdio)}
+              onClick={connect}
+            >
+              {local ? 'Start local server' : 'Connect server'}
+            </button>
+          )}
+        </div>
+      </div>
+      {local && row.stdio && (
+        <p className="mcp-server-args">
+          {row.stdio.args.length > 0
+            ? row.stdio.args.map((arg, index) => (
+                <span key={index}>{JSON.stringify(arg)}</span>
+              ))
+            : 'No arguments'}
+        </p>
       )}
       {row.physicalCallsActive && (
-        <p className="text-xs">
+        <p className="mcp-note">
           Work or cleanup is still active. Disconnecting does not undo completed
           effects.
         </p>
       )}
       {row.error && (
-        <p className="text-xs">
+        <p className="mcp-alert">
           The connection reported an issue ({row.error.code}). Refresh to check
           its current state.
         </p>
       )}
       {row.toolAccess === 'automatic' && (
-        <p className="text-xs text-ink-3">
+        <p className="mcp-note">
           Tools from this connection become available automatically after it is
           enabled and connected. New tools are available on the next agent turn.
         </p>
       )}
       {row.toolAccess === 'denied' && (
-        <p className="text-xs text-ink-3">
+        <p className="mcp-note">
           MCP tools are blocked by the agent’s execution policy.
         </p>
       )}
-      {account}
-      {bearerEligible && !row.hasOAuthCredential && (
-        <div className="space-y-2 rounded-lg border border-line p-3 text-xs">
-          <p>
-            {row.hasBearerCredential
-              ? 'Bearer credential saved'
-              : 'No bearer credential saved'}
-          </p>
-          <p className="text-ink-3">
-            A saved credential does not confirm that this server accepts it.
-          </p>
-          <label className="block">
-            Bearer token
-            <input
-              className={inputClass}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={bearerToken}
-              maxLength={4096}
-              disabled={blocked || wireBusy}
-              onChange={(event) => setBearerToken(event.target.value)}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className={button}
-              disabled={blocked || wireBusy || bearerToken.length === 0}
-              onClick={() => {
-                const submitted = bearerToken;
-                setBearerToken('');
-                void saveBearerCredential(submitted);
-              }}
-            >
-              {row.hasBearerCredential
-                ? 'Replace bearer credential'
-                : 'Save bearer credential'}
-            </button>
-            {row.hasBearerCredential && (
-              <button
-                className={button}
-                disabled={blocked || wireBusy}
-                onClick={() => {
-                  setBearerToken('');
-                  void clearBearerCredential();
-                }}
-              >
-                Clear bearer credential
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-      <details>
-        <summary className="text-xs">Edit saved connection</summary>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <label className="text-xs">
-            Saved label
-            <input
-              className={inputClass}
-              value={label}
-              maxLength={80}
-              disabled={blocked || wireBusy}
-              onChange={(event) => {
-                setDirty((current) => ({ ...current, label: true }));
-                setLabel(event.target.value);
-              }}
-            />
-          </label>
-          {!local && (
-            <label className="text-xs">
-              Saved server URL
-              <input
-                className={inputClass}
-                value={endpoint}
-                maxLength={2048}
-                disabled={blocked || wireBusy}
-                onChange={(event) => {
-                  setDirty((current) => ({ ...current, endpoint: true }));
-                  setEndpoint(event.target.value);
-                }}
-              />
-            </label>
-          )}
-          <button
-            className={button}
-            disabled={
-              blocked ||
-              wireBusy ||
-              !label.trim() ||
-              (!local && !endpoint.trim())
-            }
-            onClick={() =>
-              save(local ? { label } : { label, endpoint }, (saved) => {
-                setDirty({ label: false, endpoint: false });
-                setLabel(saved.label);
-                setEndpoint(saved.endpoint);
-              })
-            }
-          >
-            Save connection changes
-          </button>
-        </div>
-      </details>
-      <div className="flex flex-wrap gap-2">
-        <button
-          className={button}
-          disabled={blocked || wireBusy}
-          onClick={() => save({ enabled: !row.enabled })}
-        >
-          {row.enabled ? 'Disable connection' : 'Enable connection'}
-        </button>
-        <button
-          className={button}
-          disabled={
-            blocked ||
-            wireBusy ||
-            !row.enabled ||
-            connected ||
-            (local && !row.stdio)
-          }
-          onClick={connect}
-        >
-          {local ? 'Start local server' : 'Connect server'}
-        </button>
-        <button
-          className={button}
-          disabled={blocked || wireBusy || !connected}
-          onClick={discover}
-        >
-          Refresh available tools
-        </button>
-        <button
-          className={button}
-          disabled={
-            blocked || row.state === 'stopping' || row.state === 'disconnected'
-          }
-          onClick={disconnect}
-        >
-          {local ? 'Stop local server' : 'Disconnect server'}
-        </button>
-        <button
-          className={button}
-          disabled={blocked || wireBusy}
-          onClick={() => setConfirmRemove(row.version)}
-        >
-          Remove saved connection
-        </button>
-      </div>
-      {confirmRemove !== null && (
-        <div className="space-y-2 text-xs">
-          <p>
-            Remove this saved connection? Completed tool effects are kept. Only
-            this connection will be removed.
-          </p>
-          {confirmRemove !== row.version && (
-            <p>
-              The connection changed. Choose Remove saved connection again to
-              confirm its current state.
-            </p>
-          )}
-          <div className="flex gap-2">
-            <button
-              className={button}
-              disabled={blocked || wireBusy || confirmRemove !== row.version}
-              onClick={remove}
-            >
-              Confirm removal
-            </button>
-            <button className={button} onClick={() => setConfirmRemove(null)}>
-              Keep connection
-            </button>
-          </div>
-        </div>
-      )}
       {showSavedTools && row.candidates.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="text-sm font-medium">Available tools</h4>
+        <div className="mcp-tools">
+          <h4>Available tools</h4>
           {row.candidates.map((tool) => {
             const reviewed = row.reviewedTools.some(
               (saved) => saved.descriptorDigest === tool.descriptorDigest,
             );
             return (
-              <div
-                key={tool.descriptorDigest}
-                className="space-y-2 border-t border-line pt-3"
-              >
+              <div key={tool.descriptorDigest} className="mcp-tool">
                 <Descriptor tool={tool} />
-                <p className="text-xs">
+                <p className="mcp-tool-state">
                   {row.toolAccess === 'automatic'
                     ? !stale && row.enabled && connected
                       ? 'Available automatically under the agent’s permissions.'
@@ -997,8 +881,8 @@ function ConnectionCard({
       {showSavedTools &&
         (row.toolAccess ?? 'review') === 'review' &&
         row.reviewedTools.length > 0 && (
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium">Reviewed permissions</h4>
+          <div className="mcp-tools">
+            <h4>Reviewed permissions</h4>
             {row.reviewedTools.map((tool) => {
               const granted = toolNames?.includes(tool.alias) ?? false;
               const usable =
@@ -1010,13 +894,12 @@ function ConnectionCard({
                     candidate.descriptorDigest === tool.descriptorDigest,
                 );
               return (
-                <div
-                  key={tool.alias}
-                  className="space-y-2 border-t border-line pt-3"
-                >
-                  <Descriptor tool={tool} />
-                  <p className="break-all text-xs">Saved tool: {tool.alias}</p>
-                  <p className="text-xs">
+                <div key={tool.alias} className="mcp-tool">
+                  <div className="mcp-tool-text">
+                    <Descriptor tool={tool} />
+                    <p className="mcp-tool-alias">Saved tool: {tool.alias}</p>
+                  </div>
+                  <p className="mcp-tool-state">
                     {toolNames === null
                       ? 'Permission unknown'
                       : granted
@@ -1028,7 +911,7 @@ function ConnectionCard({
                       : 'Currently unavailable; saved permission is retained'}
                   </p>
                   <button
-                    className={button}
+                    className={granted ? button : primaryButton}
                     disabled={blocked || toolNames === null}
                     onClick={() =>
                       grant(tool.alias, tool.descriptorDigest, !granted)
@@ -1041,6 +924,174 @@ function ConnectionCard({
             })}
           </div>
         )}
+      <details className="mcp-manage">
+        <summary>Manage</summary>
+        <div className="mcp-manage-body">
+          {account}
+          {bearerEligible && !row.hasOAuthCredential && (
+            <div className="mcp-token">
+              <p>
+                {row.hasBearerCredential ? 'Token saved' : 'No token saved'}
+                <span className="mcp-note">
+                  {' '}
+                  · A saved token does not confirm that this server accepts it.
+                </span>
+              </p>
+              <div className="mcp-inline">
+                <label className="mcp-field">
+                  API token
+                  <input
+                    className={inputClass}
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={bearerToken}
+                    maxLength={4096}
+                    disabled={blocked || wireBusy}
+                    onChange={(event) => setBearerToken(event.target.value)}
+                  />
+                </label>
+                <button
+                  className={button}
+                  disabled={blocked || wireBusy || bearerToken.length === 0}
+                  onClick={() => {
+                    const submitted = bearerToken;
+                    setBearerToken('');
+                    void saveBearerCredential(submitted);
+                  }}
+                >
+                  {row.hasBearerCredential ? 'Replace token' : 'Save token'}
+                </button>
+                {row.hasBearerCredential && (
+                  <button
+                    className={quietButton}
+                    disabled={blocked || wireBusy}
+                    onClick={() => {
+                      setBearerToken('');
+                      void clearBearerCredential();
+                    }}
+                  >
+                    Remove token
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          <details className="mcp-edit">
+            <summary>Edit saved connection</summary>
+            <div className="mcp-inline">
+              <label className="mcp-field">
+                Saved label
+                <input
+                  className={inputClass}
+                  value={label}
+                  maxLength={80}
+                  disabled={blocked || wireBusy}
+                  onChange={(event) => {
+                    setDirty((current) => ({ ...current, label: true }));
+                    setLabel(event.target.value);
+                  }}
+                />
+              </label>
+              {!local && (
+                <label className="mcp-field mcp-field-grow">
+                  Saved server URL
+                  <input
+                    className={inputClass}
+                    value={endpoint}
+                    maxLength={2048}
+                    disabled={blocked || wireBusy}
+                    onChange={(event) => {
+                      setDirty((current) => ({ ...current, endpoint: true }));
+                      setEndpoint(event.target.value);
+                    }}
+                  />
+                </label>
+              )}
+              <button
+                className={button}
+                disabled={
+                  blocked ||
+                  wireBusy ||
+                  !label.trim() ||
+                  (!local && !endpoint.trim())
+                }
+                onClick={() =>
+                  save(local ? { label } : { label, endpoint }, (saved) => {
+                    setDirty({ label: false, endpoint: false });
+                    setLabel(saved.label);
+                    setEndpoint(saved.endpoint);
+                  })
+                }
+              >
+                Save connection changes
+              </button>
+            </div>
+            {local && (
+              <p className="mcp-note">
+                Only start code you trust. To change the program or arguments,
+                remove this connection and save a new one.
+              </p>
+            )}
+          </details>
+          <div className="mcp-manage-actions">
+            <button
+              className={button}
+              disabled={blocked || wireBusy || !connected}
+              onClick={discover}
+            >
+              Refresh available tools
+            </button>
+            {row.enabled && (
+              <button
+                className={button}
+                disabled={blocked || wireBusy}
+                onClick={() => save({ enabled: false })}
+              >
+                Disable connection
+              </button>
+            )}
+            <button
+              className={dangerButton}
+              disabled={blocked || wireBusy}
+              onClick={() => setConfirmRemove(row.version)}
+            >
+              Remove saved connection
+            </button>
+          </div>
+          {confirmRemove !== null && (
+            <div className="mcp-confirm" role="group" aria-label="Confirm removal">
+              <p>
+                Remove this saved connection? Completed tool effects are kept.
+                Only this connection will be removed.
+              </p>
+              {confirmRemove !== row.version && (
+                <p>
+                  The connection changed. Choose Remove saved connection again
+                  to confirm its current state.
+                </p>
+              )}
+              <div className="mcp-inline">
+                <button
+                  className={dangerButton}
+                  disabled={
+                    blocked || wireBusy || confirmRemove !== row.version
+                  }
+                  onClick={remove}
+                >
+                  Confirm removal
+                </button>
+                <button
+                  className={quietButton}
+                  onClick={() => setConfirmRemove(null)}
+                >
+                  Keep connection
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </details>
     </article>
   );
 }

@@ -507,18 +507,19 @@ it('shows mail services with honest OAuth setup state', async () => {
   expect(screen.getByRole('button', { name: 'Connect Gmail' })).toBeDisabled();
   expect(api.approveMailDraft).not.toHaveBeenCalled();
 });
-it('M43_owner_connectors_expose_the_external_tools_review_section', () => {
+it('M43_owner_connectors_expose_the_external_tools_review_section', async () => {
   render(<ConnectorsView agentId="main" telegram={null} />);
 
   expect(
     screen.getByRole('heading', { name: 'External tools (MCP)' }),
   ).toBeVisible();
+  // With no servers saved, the add form is the section.
   expect(
-    screen.getByRole('textbox', { name: 'Connection label' }),
+    await screen.findByRole('textbox', { name: 'Connection label' }),
   ).toBeVisible();
   expect(screen.getByRole('textbox', { name: 'Server URL' })).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Save disabled connection' }),
+    screen.getByRole('button', { name: 'Save server' }),
   ).toBeVisible();
 });
 it('M45_owner_connectors_expose_the_community_bundles_review_region', () => {

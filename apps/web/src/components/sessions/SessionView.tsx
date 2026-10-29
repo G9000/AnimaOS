@@ -568,7 +568,9 @@ export function SessionView({
       {session?.kind === 'chat' &&
         composer.nativeVoice?.agentId === session.agentId &&
         composer.nativeVoice.sessionId === session.id && (
-          <NativeSpeech
+          <details className="composer-speech-options">
+            <summary>Spoken replies</summary>
+            <NativeSpeech
             agentId={session.agentId}
             sessionId={session.id}
             conversationKey={voiceKey}
@@ -581,7 +583,8 @@ export function SessionView({
               Boolean(composer.runActive) ||
               composer.voiceDisabled === true
             }
-          />
+            />
+          </details>
         )}
     </>
   );
@@ -821,7 +824,6 @@ export function SessionView({
           model={composer.model}
           tools={
             <>
-              {sessionTools}
               {session?.kind === 'chat' &&
                 /^\s*\/btw\s+\S/.test(composer.draft) && (
                   <button

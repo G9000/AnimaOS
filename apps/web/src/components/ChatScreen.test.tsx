@@ -1650,126 +1650,24 @@ describe('Composer commands and live replies', () => {
     };
   }
 
-  it('keeps extra inputs behind + and shows no hint while idle', async () => {
-    const user = userEvent.setup();
-    render(
-      <Composer
-        {...composerProps({
-          attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
-          tools: <p>Browser task controls</p>,
-        })}
-      />,
-    );
+  it('offers attachment in the plus menu and closes it with Escape', async () => {
+    const onAdd = vi.fn();
+    render(<Composer {...composerProps({
+      attachments: { items: [], onAdd, onRemove: vi.fn() },
+      sendAlways: true,
+    })} />);
     const more = screen.getByRole('button', { name: 'More input options' });
-    const tray = document.getElementById(more.getAttribute('aria-controls')!)!;
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(tray).not.toHaveAttribute('data-open');
-    expect(within(tray).getByText('Browser task controls')).toBeInTheDocument();
-    expect(
-      within(tray).getByRole('button', { name: 'Attach files' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/send · ⇧⏎/)).toBeNull();
-
-    await user.click(more);
+    await userEvent.click(more);
     expect(more).toHaveAttribute('aria-expanded', 'true');
-    expect(tray).toHaveAttribute('data-open');
-    within(tray).getByRole('button', { name: 'Attach files' }).focus();
-    await user.keyboard('{Escape}');
-    expect(tray).not.toHaveAttribute('data-open');
+    expect(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Record audio' })).not.toBeInTheDocument();
+    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+    await userEvent.upload(screen.getByLabelText('Choose attachments'), file);
+    expect(onAdd).toHaveBeenCalledWith([file]);
+    await userEvent.keyboard('{Escape}');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
     expect(more).toHaveFocus();
   });
-
-  it('keeps the main chat send control visible while the draft is empty', async () => {
-    class Recognition {
-      continuous = false;
-      interimResults = false;
-      lang = '';
-      onstart: (() => void) | null = null;
-      onend: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      onresult: (() => void) | null = null;
-      start() {}
-      stop() {}
-      abort() {}
-    }
-    vi.stubGlobal('SpeechRecognition', Recognition);
-    try {
-      render(
-        <Composer
-          {...composerProps({
-            sendAlways: true,
-            conversationKey: 'main-chat',
-            attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
-          })}
-        />,
-      );
-
-      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-      const more = screen.getByRole('button', { name: 'More input options' });
-      const tray = document.getElementById(more.getAttribute('aria-controls')!)!;
-      expect(tray).not.toHaveAttribute('data-open');
-      await userEvent.click(more);
-      expect(screen.getByRole('button', { name: 'Dictate message' })).toBeVisible();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('shows Record audio for an attach-capable composer without requesting microphone access', () => {
-    const getUserMedia = vi.fn();
-    vi.stubGlobal('navigator', {
-      ...navigator,
-      mediaDevices: { getUserMedia },
-    });
-    try {
-      render(
-        <Composer
-          {...composerProps({
-            attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn() },
-          })}
-        />,
-      );
-
-      expect(
-        screen.getByRole('button', { name: 'Record audio' }),
-      ).toBeVisible();
-      expect(getUserMedia).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('shows an inert Record control without a known conversation and enables it only in an active scoped composer', () => {
-    const onAdd = vi.fn();
-    const onSend = vi.fn();
-    const attachments = { items: [], onAdd, onRemove: vi.fn() };
-    const props = composerProps({ attachments, onSend });
-    const view = render(<Composer {...props} />);
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
-
-    view.rerender(<Composer {...props} conversationKey="conversation-a" />);
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeEnabled();
-
-    view.rerender(
-      <Composer {...props} conversationKey="conversation-a" offline />,
-    );
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
-    view.rerender(
-      <Composer {...props} conversationKey="conversation-a" sending />,
-    );
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
-    view.rerender(
-      <Composer {...props} conversationKey="conversation-a" disabled />,
-    );
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
-    view.rerender(
-      <Composer {...props} conversationKey="conversation-a" voiceDisabled />,
-    );
-    expect(screen.getByRole('button', { name: 'Record audio' })).toBeDisabled();
-    expect(onAdd).not.toHaveBeenCalled();
-    expect(onSend).not.toHaveBeenCalled();
-  });
-
   it('offers the matching commands and runs one with Enter', () => {
     const props = composerProps({ draft: '/co' });
     render(<Composer {...props} />);

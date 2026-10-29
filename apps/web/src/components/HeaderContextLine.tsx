@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useHeaderContextState } from '../lib/header-context';
 import { MarkdownMessage } from './MarkdownMessage';
 
-/** The top bar's middle: the day at the top of the screen and what anima kept
- *  from earlier. Its summary opens in a panel under the bar. */
+/** The top bar's summary opens in a panel under the bar. */
 export function HeaderContextLine() {
   const state = useHeaderContextState();
   const summary = state?.summaryInline ? null : (state?.summary ?? null);
@@ -31,13 +30,10 @@ export function HeaderContextLine() {
     };
   }, [open]);
 
-  const day = state?.day ?? null;
-  if (!day && !summary) return null;
+  if (!summary) return null;
   const count = summary?.sourceMessageCount ?? 0;
   return (
     <div className="header-context" ref={root}>
-      {day && <span className="header-context-day">{day}</span>}
-      {day && summary && <i className="header-context-rule" aria-hidden />}
       {summary && (
         <>
           <span className="header-context-note">

@@ -1828,12 +1828,6 @@ export function ViewHarness() {
                 ? chatModel.busy || !chatModel.view
                 : savingSettings,
               error: activeSession ? chatModel.error : settingsSaveError,
-              selectionLabel:
-                activeSession && chatModel.view
-                  ? chatModel.view.preferences.primary.mode === 'inherit'
-                    ? 'Inherited'
-                    : 'This chat'
-                  : undefined,
               choices:
                 activeSession && chatModel.view
                   ? chatModel.view.availableModels

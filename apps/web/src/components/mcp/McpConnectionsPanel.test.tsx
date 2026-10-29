@@ -81,12 +81,22 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+/** Opens every server's Manage fold, where credentials and editing live,
+ *  as the owner does before using them. */
+function openManage() {
+  for (const details of document.querySelectorAll<HTMLDetailsElement>(
+    'details.mcp-manage',
+  ))
+    details.open = true;
+}
+
 async function loaded() {
   await waitFor(() =>
     expect(
       screen.queryByText('Reading saved connections and permissions…'),
     ).not.toBeInTheDocument(),
   );
+  openManage();
 }
 
 describe('owner external tools', () => {
@@ -253,31 +263,31 @@ describe('owner external tools', () => {
     const https = within(
       screen.getByRole('article', { name: 'External server Local server' }),
     );
-    const token = https.getByLabelText('Bearer token');
+    const token = https.getByLabelText('API token');
     expect(token).toHaveAttribute('type', 'password');
     expect(
-      https.getByRole('button', { name: 'Save bearer credential' }),
+      https.getByRole('button', { name: 'Save token' }),
     ).toBeDisabled();
-    expect(https.getByText('No bearer credential saved')).toBeVisible();
+    expect(https.getByText('No token saved')).toBeVisible();
     expect(
       within(
         screen.getByRole('article', { name: 'External server Loopback' }),
-      ).queryByLabelText('Bearer token'),
+      ).queryByLabelText('API token'),
     ).toHaveAttribute('type', 'password');
     expect(
       within(
         screen.getByRole('article', { name: 'External server IPv6' }),
-      ).getByLabelText('Bearer token'),
+      ).getByLabelText('API token'),
     ).toHaveAttribute('type', 'password');
     expect(
       within(
         screen.getByRole('article', { name: 'External server Remote HTTP' }),
-      ).queryByLabelText('Bearer token'),
+      ).queryByLabelText('API token'),
     ).not.toBeInTheDocument();
     expect(
       within(
         screen.getByRole('article', { name: 'External server Local process' }),
-      ).queryByLabelText('Bearer token'),
+      ).queryByLabelText('API token'),
     ).not.toBeInTheDocument();
     expect(mock.saveBearerCredential).not.toHaveBeenCalled();
     expect(mock.clearBearerCredential).not.toHaveBeenCalled();
@@ -313,22 +323,22 @@ describe('owner external tools', () => {
     const card = within(
       screen.getByRole('article', { name: 'External server Local server' }),
     );
-    const password = card.getByLabelText('Bearer token');
+    const password = card.getByLabelText('API token');
     await user.type(password, token);
     expect(mock.saveBearerCredential).not.toHaveBeenCalled();
     await user.click(
-      card.getByRole('button', { name: 'Save bearer credential' }),
+      card.getByRole('button', { name: 'Save token' }),
     );
     expect(mock.saveBearerCredential).toHaveBeenCalledWith('main', 'server-1', {
       expectedVersion: 1,
       bearerToken: token,
     });
     await waitFor(() => expect(password).toHaveValue(''));
-    expect(card.getByText('Bearer credential saved')).toBeVisible();
+    expect(card.getByText('Token saved')).toBeVisible();
     expect(container.textContent).not.toContain(token);
     await user.type(password, 'replacement-token');
     await user.click(
-      card.getByRole('button', { name: 'Replace bearer credential' }),
+      card.getByRole('button', { name: 'Replace token' }),
     );
     expect(mock.saveBearerCredential).toHaveBeenLastCalledWith(
       'main',
@@ -340,7 +350,7 @@ describe('owner external tools', () => {
     );
     await waitFor(() => expect(password).toHaveValue(''));
     await user.click(
-      card.getByRole('button', { name: 'Clear bearer credential' }),
+      card.getByRole('button', { name: 'Remove token' }),
     );
     expect(mock.clearBearerCredential).toHaveBeenCalledWith(
       'main',
@@ -349,7 +359,7 @@ describe('owner external tools', () => {
         expectedVersion: 3,
       },
     );
-    expect(await card.findByText('No bearer credential saved')).toBeVisible();
+    expect(await card.findByText('No token saved')).toBeVisible();
     expect(mock.connect).not.toHaveBeenCalled();
   });
 
@@ -368,10 +378,10 @@ describe('owner external tools', () => {
     const card = within(
       screen.getByRole('article', { name: 'External server Local server' }),
     );
-    const password = card.getByLabelText('Bearer token');
+    const password = card.getByLabelText('API token');
     await user.type(password, token);
     await user.click(
-      card.getByRole('button', { name: 'Save bearer credential' }),
+      card.getByRole('button', { name: 'Save token' }),
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'This connection changed',
@@ -379,7 +389,7 @@ describe('owner external tools', () => {
     expect(password).toHaveValue('');
     expect(container.textContent).not.toContain(token);
     expect(
-      card.getByRole('button', { name: 'Save bearer credential' }),
+      card.getByRole('button', { name: 'Save token' }),
     ).toBeDisabled();
     expect(mock.saveBearerCredential).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: 'Refresh status' }));
@@ -410,11 +420,11 @@ describe('owner external tools', () => {
       screen.getByRole('article', { name: 'External server Local server' }),
     );
     await user.type(
-      card.getByLabelText('Bearer token'),
+      card.getByLabelText('API token'),
       'synthetic-pending-token',
     );
     await user.click(
-      card.getByRole('button', { name: 'Save bearer credential' }),
+      card.getByRole('button', { name: 'Save token' }),
     );
     expect(
       screen.getByRole('button', { name: 'Refresh status' }),
@@ -502,7 +512,7 @@ describe('owner external tools', () => {
       stdio.args.join('\n'),
     );
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled();
     await user.click(
       screen.getByRole('checkbox', {
@@ -510,7 +520,7 @@ describe('owner external tools', () => {
       }),
     );
     await user.click(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     );
     expect(mock.create).toHaveBeenCalledWith('main', {
       label: 'Local server',
@@ -522,16 +532,15 @@ describe('owner external tools', () => {
       }),
     );
     expect(card.getByText(stdio.executable)).toBeVisible();
+    // A saved server starts off: Start appears once it is enabled.
     expect(
-      card.getByRole('button', { name: 'Start local server' }),
-    ).toBeDisabled();
+      card.queryByRole('button', { name: 'Start local server' }),
+    ).not.toBeInTheDocument();
     expect(mock.connect).not.toHaveBeenCalled();
     await user.click(card.getByRole('button', { name: 'Enable connection' }));
-    await waitFor(() =>
-      expect(
-        card.getByRole('button', { name: 'Start local server' }),
-      ).toBeEnabled(),
-    );
+    expect(
+      await card.findByRole('button', { name: 'Start local server' }),
+    ).toBeEnabled();
     expect(mock.update).toHaveBeenCalledWith('main', 'server-1', {
       expectedVersion: 1,
       enabled: true,
@@ -614,7 +623,7 @@ describe('owner external tools', () => {
     expect(args).toHaveValue('');
     await user.click(trust);
     await user.click(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     );
     expect(mock.create).toHaveBeenNthCalledWith(1, 'main', {
       label: 'No arguments',
@@ -623,11 +632,25 @@ describe('owner external tools', () => {
     await screen.findByRole('article', {
       name: 'External server No arguments',
     });
-    await waitFor(() => expect(trust).toBeEnabled());
-
-    await user.type(label, 'One empty argument');
-    await user.type(path, executable);
-    await user.click(trust);
+    // The form closes after a save; Add a server opens it for the next one.
+    await user.click(screen.getByRole('button', { name: 'Add a server' }));
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Connection type' }),
+      'stdio',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Connection label' }),
+      'One empty argument',
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Absolute executable path' }),
+      executable,
+    );
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'I trust this local program and its arguments',
+      }),
+    );
     const oneEmpty = screen.getByRole('checkbox', {
       name: 'Pass one empty argument',
     });
@@ -638,7 +661,7 @@ describe('owner external tools', () => {
     expect(args).toHaveValue('');
     await user.click(trust);
     await user.click(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     );
     expect(mock.create).toHaveBeenNthCalledWith(2, 'main', {
       label: 'One empty argument',
@@ -677,7 +700,7 @@ describe('owner external tools', () => {
     await user.type(executable, 'relative.exe');
     await user.click(trust);
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled();
     expect(
       screen.getByText('Enter an absolute executable path.'),
@@ -687,7 +710,7 @@ describe('owner external tools', () => {
     expect(trust).not.toBeChecked();
     await user.click(trust);
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeEnabled();
     fireEvent.change(args, {
       target: {
@@ -699,19 +722,19 @@ describe('owner external tools', () => {
     expect(trust).not.toBeChecked();
     await user.click(trust);
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled();
     expect(screen.getByText(/Use at most 32 arguments/)).toBeVisible();
     fireEvent.change(args, { target: { value: 'é'.repeat(1025) } });
     await user.click(trust);
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled();
     expect(screen.getByText(/Use at most 32 arguments/)).toBeVisible();
     fireEvent.change(args, { target: { value: 'argument\twith-control' } });
     await user.click(trust);
     expect(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     ).toBeDisabled();
     expect(mock.create).not.toHaveBeenCalled();
     expect(mock.connect).not.toHaveBeenCalled();
@@ -820,7 +843,7 @@ describe('owner external tools', () => {
       'http://127.0.0.1:8089/mcp',
     );
     await user.click(
-      screen.getByRole('button', { name: 'Save disabled connection' }),
+      screen.getByRole('button', { name: 'Save server' }),
     );
     expect(mock.create).toHaveBeenCalledWith('main', {
       label: 'Local server',
@@ -1107,9 +1130,7 @@ describe('owner external tools', () => {
     ).not.toBeInTheDocument();
     expect(mock.setGrant).toHaveBeenCalledTimes(1);
     view.rerender(<McpConnectionsPanel agentId="main" api={mock} disabled />);
-    expect(
-      screen.getByRole('textbox', { name: 'Connection label' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add a server' })).toBeDisabled();
   });
 
   it('disconnects and removes only after explicit actions, using each acknowledged version and exact card', async () => {
@@ -1145,7 +1166,9 @@ describe('owner external tools', () => {
     expect(
       await card.findByText('Stopping — waiting for cleanup'),
     ).toBeVisible();
-    expect(card.getByRole('button', { name: 'Connect server' })).toBeDisabled();
+    expect(
+      card.getByRole('button', { name: 'Disconnect server' }),
+    ).toBeDisabled();
     expect(
       card.getByRole('button', { name: 'Remove saved connection' }),
     ).toBeDisabled();

@@ -1,12 +1,17 @@
 import { test, expect } from '@playwright/test';
-import { openConsole } from './fixtures/journeys';
 import { installConsoleFixture } from './fixtures/api';
 
 test('attachment-only send retains upload IDs and owner Blob thumbnail request', async ({
   page,
 }) => {
-  const fixture = await openConsole(page);
-  await page.getByLabel('Choose attachments').setInputFiles({
+  const fixture = await installConsoleFixture(page, undefined, { chatSuite: {} });
+  await page.goto('/');
+  await expect(page.getByPlaceholder('Message Anima…')).toBeVisible();
+  await fixture.waitForStream();
+  await page.getByRole('button', { name: 'More input options' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Attach files' }).click();
+  await (await chooser).setFiles({
     name: 'pixel.png',
     mimeType: 'image/png',
     buffer: Buffer.from(
@@ -37,7 +42,7 @@ test('attachment-only send retains upload IDs and owner Blob thumbnail request',
 test('status 404 alone shows Update the daemon and retains a draft on reload', async ({
   page,
 }) => {
-  const fixture = await installConsoleFixture(page);
+  const fixture = await installConsoleFixture(page, undefined, { chatSuite: {} });
   fixture.setRouteFailure('GET', '/api/status', 404);
   await page.addInitScript(() =>
     sessionStorage.setItem('animaos.draft.companion/home', 'A saved draft'),

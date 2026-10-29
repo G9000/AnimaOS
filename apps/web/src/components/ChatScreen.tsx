@@ -67,11 +67,7 @@ import { AttachmentChips } from './attachments/AttachmentChips';
 import { MessageAttachments } from './attachments/MessageAttachments';
 import type { AttachmentDraft } from '../lib/attachments';
 import { DictationControl } from './voice/DictationControl';
-import { MicrophoneCapture } from './voice/MicrophoneCapture';
-import {
-  NativeTranscription,
-  type NativeVoiceScope,
-} from './voice/NativeTranscription';
+import type { NativeVoiceScope } from './voice/NativeTranscription';
 import { ReadAloud } from './voice/ReadAloud';
 import type { ReadAloudController } from '../hooks/useReadAloud';
 import { revealInvisible } from '../lib/skills';
@@ -80,7 +76,6 @@ import {
   markSpokenInput,
   useVoiceSettings,
 } from '../lib/voice-settings';
-import { usePublishHeaderDay } from '../lib/header-context';
 import {
   EMPTY_RUN_ATTACHMENTS,
   type KnownRunAttachments,
@@ -778,7 +773,6 @@ export const MessageList = memo(function MessageList({
   }, [dayKeys]);
   const currentDay =
     topDay !== null && dayNames.has(topDay) ? topDay : newestDay;
-  usePublishHeaderDay(currentDay ? (dayNames.get(currentDay) ?? null) : null);
   const trackFrame = useRef<number | null>(null);
   const trackTopDay = useCallback(() => {
     const scroller = scrollerRef.current;
@@ -1109,7 +1103,6 @@ export function Composer({
   conversationKey,
   savedAttachmentCount = 0,
   voiceDisabled = false,
-  nativeVoice,
   tools,
   context,
   mode,
@@ -1148,8 +1141,7 @@ export function Composer({
   voiceDisabled?: boolean;
   nativeVoice?: NativeVoiceScope;
   savedAttachmentCount?: number;
-  /** The session's own input tools (browser task, spoken replies), kept
-   *  with Attach and Record behind the composer's + button. */
+  /** Additional session actions shown beside the composer. */
   tools?: ReactNode;
   /** Current quoted selection, kept visible beside the editable draft. */
   context?: ReactNode;
@@ -1218,7 +1210,27 @@ export function Composer({
   const trayId = useId();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
-  const hasTray = Boolean(attachments || tools || sendAlways);
+  const tray = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!tray.current?.contains(target) && !moreButton.current?.contains(target)) setMoreOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setMoreOpen(false);
+      moreButton.current?.focus();
+    };
+    document.addEventListener('pointerdown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [moreOpen]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const [blurred, setBlurred] = useState(false);
@@ -1292,7 +1304,7 @@ export function Composer({
 
   return (
     <div className="studio-composer safe-composer sticky bottom-0 z-10 bg-gradient-to-t from-abyss via-abyss/95 to-transparent px-4 pt-3 sm:px-6">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="composer-inner mx-auto w-full max-w-3xl">
         {recovery && (
           <div className="studio-draft-recovery">
             <div>
@@ -1360,57 +1372,10 @@ export function Composer({
             {attachments.error}
           </p>
         )}
-        {hasTray && (
-          // Closed, the tray shows only what is live: a recording, audio to
-          // transcribe. Opened from +, it offers every extra input.
-          <div
-            id={trayId}
-            className="composer-tray"
-            data-open={moreOpen || undefined}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape' || event.defaultPrevented) return;
-              event.preventDefault();
-              setMoreOpen(false);
-              moreButton.current?.focus();
-            }}
-          >
-            {attachments && (
-              <AttachmentControls
-                disabled={!canPick}
-                onAdd={attachments.onAdd}
-              />
-            )}
-            {attachments && (
-              <MicrophoneCapture
-                key={conversationKey ?? ''}
-                conversationKey={conversationKey ?? ''}
-                disabled={!conversationKey || !canPick || voiceDisabled}
-                onAdd={attachments.onAdd}
-              />
-            )}
-            {sendAlways && (
-              <DictationControl
-                compact
-                disabled={!canPick || voiceDisabled}
-                conversationKey={conversationKey}
-                onTranscript={appendDictation}
-              />
-            )}
-            {nativeVoice && attachments && (
-              <NativeTranscription
-                key={JSON.stringify([
-                  conversationKey,
-                  nativeVoice.agentId,
-                  nativeVoice.sessionId,
-                ])}
-                scope={nativeVoice}
-                conversationKey={conversationKey}
-                items={attachments.items}
-                disabled={!canPick || voiceDisabled}
-                onUse={appendDictation}
-              />
-            )}
-            {tools}
+        {tools}
+        {attachments && (
+          <div ref={tray} id={trayId} className="composer-tray" data-open={moreOpen || undefined} hidden={!moreOpen}>
+            <AttachmentControls disabled={!canPick} onAdd={attachments.onAdd} />
           </div>
         )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
@@ -1520,17 +1485,10 @@ export function Composer({
               />
             </div>
             <div className="composer-controls">
-              {hasTray && (
-                <button
-                  ref={moreButton}
-                  type="button"
-                  className="composer-icon composer-more"
-                  aria-label="More input options"
-                  aria-expanded={moreOpen}
-                  aria-controls={trayId}
-                  title="Attach files, record audio, and more"
-                  onClick={() => setMoreOpen((open) => !open)}
-                >
+              {attachments && (
+                <button ref={moreButton} type="button" className="composer-icon composer-more"
+                  aria-label="More input options" aria-expanded={moreOpen} aria-controls={trayId}
+                  onClick={() => setMoreOpen((open) => !open)}>
                   <PlusIcon size={16} />
                 </button>
               )}

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import '../mcp/mcp.css';
 import { useConnectorLifetime } from '../../hooks/useConnectorLifetime';
 import {
   communityBundlesOwnerApi,
@@ -9,10 +10,8 @@ import {
 } from '../../lib/daemon-api';
 
 export type CommunityBundlesOwnerApi = typeof communityBundlesOwnerApi;
-const button =
-  'rounded-lg border border-line px-3 py-2 text-xs disabled:opacity-50';
-const inputClass =
-  'w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm';
+const button = 'ui-button';
+const inputClass = 'field';
 const MANIFEST_BYTES = 128 * 1024;
 
 function localInput(text: string): {
@@ -387,23 +386,18 @@ export function CommunityBundlesPanel({
         target.version === review.expectedBundleVersion);
 
   return (
-    <section
-      aria-label="Community bundles"
-      className="space-y-4 connections-card"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section aria-label="Community bundles" className="mcp-panel mcp-bundles">
+      <header className="mcp-head">
         <div>
-          <h2 className="text-base font-semibold text-ink">
-            Community bundles
-          </h2>
-          <p className="mt-1 max-w-3xl text-xs text-ink-3">
-            Review configuration and skill content before installing. New
-            external servers stay disabled and skills wait for separate
-            approval. Saving adds no tool grants.
+          <h2 className="mcp-title">Community bundles</h2>
+          <p className="mcp-lede">
+            Ready-made sets of servers and skills. You review everything
+            before installing; new servers stay off and skills wait for your
+            approval.
           </p>
         </div>
         <button
-          className={button}
+          className="ui-button is-quiet"
           disabled={
             !online || busy || loading || inspecting !== null || permissionsBusy
           }
@@ -411,7 +405,7 @@ export function CommunityBundlesPanel({
         >
           Refresh bundle status
         </button>
-      </div>
+      </header>
       {loading && (
         <p role="status" className="text-xs text-ink-3">
           Reading saved bundles…

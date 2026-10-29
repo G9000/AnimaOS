@@ -42,21 +42,21 @@ describe('header context line', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows the day at the top of the screen and follows it', () => {
+  it('does not show a day label in the navigation bar', () => {
     const view = render(
       <HeaderContextProvider>
         <HeaderContextLine />
         <Day day="Yesterday" />
       </HeaderContextProvider>,
     );
-    expect(screen.getByText('Yesterday')).toBeInTheDocument();
+    expect(screen.queryByText('Yesterday')).not.toBeInTheDocument();
     view.rerender(
       <HeaderContextProvider>
         <HeaderContextLine />
         <Day day="Today" />
       </HeaderContextProvider>,
     );
-    expect(screen.getByText('Today')).toBeInTheDocument();
+    expect(screen.queryByText('Today')).not.toBeInTheDocument();
     expect(screen.queryByText('Yesterday')).not.toBeInTheDocument();
   });
 

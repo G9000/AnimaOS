@@ -14,6 +14,7 @@ import {
 } from '../../lib/audio-capture';
 import { useLatest } from '../../hooks/useLatest';
 import { useRenderScope } from '../../hooks/useRenderScope';
+import { MicIcon } from '../icons';
 
 const messages: Record<CaptureError, string> = {
   unsupported: 'Audio recording is unavailable in this browser.',
@@ -144,7 +145,7 @@ export function MicrophoneCapture({
           onClick={record}
           disabled={disabled}
         >
-          Record audio
+          <MicIcon size={14} /> Record audio
         </button>
       )}
       {(state.status === 'requesting' || state.status === 'stopping') && (
