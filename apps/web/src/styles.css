@@ -272,43 +272,180 @@ input[type='radio'] {
   );
 }
 
-/* Form controls */
+/* Form controls
+ * One shape for every control: 4px corners, a warm hairline, a faint fill.
+ * Page rules may tune size, but not invent a new look. */
+:root {
+  --control-radius: 4px;
+  --panel-radius: 6px;
+  --control-line: rgb(236 230 218 / 0.16);
+  --control-line-hover: rgb(236 230 218 / 0.32);
+  --control-fill: rgb(236 230 218 / 0.035);
+  --control-fill-hover: rgb(236 230 218 / 0.07);
+  --control-ink: rgb(236 230 218 / 0.86);
+  --control-muted: rgb(236 230 218 / 0.56);
+  --control-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ECE6DA' stroke-opacity='.6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
 .field {
   width: 100%;
-  border-radius: 6px;
-  border: 1px solid var(--color-line);
-  background: var(--color-abyss);
-  padding: 0.68rem 0.85rem;
-  font-size: 0.875rem;
+  min-height: 34px;
+  border-radius: var(--control-radius);
+  border: 1px solid var(--control-line);
+  background-color: var(--control-fill);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8125rem;
   color: var(--color-ink);
   outline: none;
   transition:
     border-color 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
+    background-color 160ms ease;
 }
 
 .field::placeholder {
-  color: var(--color-ink-3);
+  color: var(--control-muted);
 }
 
 .field:focus-visible {
-  border-color: rgb(var(--color-accent-rgb) / 0.58);
-  box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.12);
-  background: var(--color-panel);
+  border-color: rgb(var(--color-accent-rgb) / 0.7);
+  background-color: rgb(236 230 218 / 0.05);
 }
 
 select.field {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A8A29E' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: var(--control-chevron);
   background-repeat: no-repeat;
-  background-position: right 0.8rem center;
-  padding-right: 2.2rem;
+  background-position: right 0.7rem center;
+  padding-right: 2rem;
+  cursor: pointer;
 }
 
-select.field option {
-  background: var(--color-panel);
+/* Buttons. Secondary is the default; primary is the one action a panel is
+ * for; danger is only for destructive actions. */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--control-ink);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.ui-button:hover:not(:disabled) {
+  border-color: var(--control-line-hover);
+  background: var(--control-fill-hover);
   color: var(--color-ink);
+}
+
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-button.is-primary {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+  font-weight: 600;
+}
+
+.ui-button.is-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-accent) 86%, white);
+  color: var(--color-accent-fg);
+}
+
+.ui-button.is-danger {
+  border-color: rgb(240 140 140 / 0.36);
+  background: transparent;
+  color: var(--color-danger);
+}
+
+.ui-button.is-danger:hover:not(:disabled) {
+  border-color: rgb(240 140 140 / 0.7);
+  background: rgb(240 140 140 / 0.08);
+  color: var(--color-danger);
+}
+
+.ui-button.is-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--control-muted);
+}
+
+.ui-button.is-quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--control-fill);
+  color: var(--color-ink);
+}
+
+/* Native fallbacks sit in the base layer so any page rule or utility class
+ * still wins over them. */
+@layer base {
+  select option,
+  select optgroup {
+    background: var(--color-panel);
+    color: var(--color-ink);
+  }
+
+  input[type='checkbox'] {
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    border: 1px solid var(--control-line-hover);
+    border-radius: 2px;
+    background: var(--control-fill);
+    cursor: pointer;
+    transition:
+      border-color 140ms ease,
+      background-color 140ms ease;
+  }
+
+  input[type='checkbox']::after {
+    content: '';
+    width: 9px;
+    height: 5px;
+    margin-top: -2px;
+    border-bottom: 2px solid var(--color-accent-fg);
+    border-left: 2px solid var(--color-accent-fg);
+    transform: rotate(-45deg) scale(0);
+    transition: transform 120ms ease;
+  }
+
+  input[type='checkbox']:hover:not(:disabled) {
+    border-color: var(--control-muted);
+  }
+
+  input[type='checkbox']:checked {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+
+  input[type='checkbox']:checked::after {
+    transform: rotate(-45deg) scale(1);
+  }
+
+  input[type='checkbox']:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 }
 
 /* Responsive safe areas */

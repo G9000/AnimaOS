@@ -119,8 +119,11 @@ describe('Anima operator visual contract', () => {
     }
     expect(production).not.toMatch(/bg-accent[^'"\r\n]*text-white/);
     expect(read('components/ui-bits.tsx')).toMatch(
-      /bg-accent[^'"\r\n]*text-accent-fg/,
+      /primaryBtnCls = 'ui-button is-primary'/,
     );
+    const primary = cssRule(styles, '.ui-button.is-primary');
+    expect(primary).toMatch(/background:\s*var\(--color-accent\)/);
+    expect(primary).toMatch(/color:\s*var\(--color-accent-fg\)/);
   });
 
   it('binds every safe-area edge to active surfaces without double-padding', () => {

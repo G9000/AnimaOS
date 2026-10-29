@@ -36,13 +36,14 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
   const [createMembers, setCreateMembers] = useState<string[]>([agentId]);
   const createKey = useRef(crypto.randomUUID());
   const [manage, setManage] = useState<ProjectSummary[] | null>(null);
+  const [creating, setCreating] = useState(false);
   const scope = `${agentId}\0${projectId ?? ''}`;
   const token = useMemo(() => ({ scope }), [scope]);
   const lifetime = useLatest(token);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const isCurrent = () => mounted.current && lifetime.current === token;
-  useResetOnChange([scope], () => { setPicker(false); setAddingFolder(false); setMessage(null); setTab('Chats'); setManage(null); setBusy(false); });
+  useResetOnChange([scope], () => { setPicker(false); setAddingFolder(false); setMessage(null); setTab('Chats'); setManage(null); setCreating(false); setBusy(false); });
   const project = view.project;
   const draftKey = projectId ?? '';
   const draft = drafts.get(draftKey) ?? (project ? draftOf(project) : undefined);
@@ -69,14 +70,20 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
     if (isCurrent()) setPicker(false);
   };
 
+  const showCreate = creating || (!view.loading && !view.projects.length);
+
   return <section className="project-home" aria-label="Projects">
-    <div className="project-heading">
-      <div><button className="studio-tool-button" onClick={() => navigate({ kind: 'project', projectId: null })}>Projects</button>
-        <h1>{project?.title ?? (projectId ? 'Project' : 'A place for shared work')}</h1></div>
-      <label>Working as <select aria-label="Working as" value={agentId} onChange={(event) => onSelectAgent(event.target.value)}>
+    <header className="project-heading">
+      <div className="project-heading-title">
+        {projectId ? <button className="project-back" onClick={() => navigate({ kind: 'project', projectId: null })}>
+          <span aria-hidden="true">←</span>Projects</button>
+          : <p className="project-eyebrow">Shared work</p>}
+        <h1>{project?.title ?? (projectId ? 'Project' : 'Projects')}</h1>
+      </div>
+      <label className="project-working-as">Working as <select className="field" aria-label="Working as" value={agentId} onChange={(event) => onSelectAgent(event.target.value)}>
         {availableAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
       </select></label>
-    </div>
+    </header>
     {(view.error || message) && <p role="alert" className="project-notice">{message ?? view.error}</p>}
     {addingFolder && <ProjectFolderGrant key={scope} canGrant={Boolean(project && project.status === 'active' && view.live)} onClose={() => setAddingFolder(false)}
       onAdd={async (rootPath, label, requestKey) => {
@@ -86,34 +93,46 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
         if (isCurrent()) setAddingFolder(false);
       }} />}
     {!projectId ? <>
-      <p>Give selected agents a shared brief and selected sources. Each agent keeps its own chats, memory, and permissions.</p>
-      <form className="project-card project-create" onSubmit={(event) => { event.preventDefault(); void perform(async (current) => {
+      <p className="project-lede">Give selected agents a shared brief and selected sources. Each agent keeps its own chats, memory, and permissions.</p>
+      <div className="project-section-head">
+        <h2>Projects with {name(agentId)}{view.projects.length ? <span className="project-count">{view.projects.length}</span> : null}</h2>
+        {!showCreate && <button className="ui-button is-primary" onClick={() => setCreating(true)}>New project</button>}
+      </div>
+      {showCreate && <form className="project-card project-create" aria-label="New project" onSubmit={(event) => { event.preventDefault(); void perform(async (current) => {
         const created = await view.mutate((api) => api.create({ requestKey: createKey.current, title: createTitle, memberAgentIds: createMembers }));
         if (!current()) return;
-        createKey.current = crypto.randomUUID(); setCreateTitle('');
+        createKey.current = crypto.randomUUID(); setCreateTitle(''); setCreating(false);
         const member = created.members.find((row) => row.agentId === agentId) ?? created.members[0];
         if (member) onSelectAgent(member.agentId);
         navigate({ kind: 'project', projectId: created.id });
       }); }}>
-        <label>Project name<input required maxLength={120} value={createTitle} onChange={(event) => {
+        <h3>New project</h3>
+        {!view.projects.length && <p className="project-note">No projects with {name(agentId)} yet. Name one and pick who shares it.</p>}
+        <label>Project name<input className="field" required maxLength={120} placeholder="e.g. House research" value={createTitle} onChange={(event) => {
           setCreateTitle(event.target.value); createKey.current = crypto.randomUUID();
         }} /></label>
-        <fieldset><legend>Member agents</legend>{availableAgents.map((agent) => <label key={agent.id} className="project-check">
+        <fieldset><legend>Member agents</legend><div className="project-chips">{availableAgents.map((agent) => <label key={agent.id} className="project-check">
           <input type="checkbox" checked={createMembers.includes(agent.id)} onChange={(event) => {
             setCreateMembers((old) => event.target.checked ? [...old, agent.id] : old.filter((id) => id !== agent.id));
             createKey.current = crypto.randomUUID();
-          }} />{agent.name}</label>)}</fieldset>
-        <button disabled={busy || !createTitle.trim() || !createMembers.length}>Create project</button>
-      </form>
-      <div className="project-grid">{view.projects.map((item) => <button className="project-card" key={item.id}
+          }} />{agent.name}</label>)}</div></fieldset>
+        <div className="project-actions">
+          {view.projects.length > 0 && <button type="button" className="ui-button is-quiet" onClick={() => setCreating(false)}>Cancel</button>}
+          <button className="ui-button is-primary" disabled={busy || !createTitle.trim() || !createMembers.length}>Create project</button>
+        </div>
+      </form>}
+      {view.projects.length > 0 && <div className="project-grid">{view.projects.map((item) => <button className="project-tile" key={item.id}
         onClick={() => navigate({ kind: 'project', projectId: item.id })}>
-        <strong>{item.title}</strong><span>{item.chatCount} chats · {item.resourceCount} sources</span>
-        <span>{item.members.map((member) => name(member.agentId)).join(', ')}</span>
-      </button>)}</div>
-      {!view.loading && !view.projects.length && <p>No projects for this agent yet.</p>}
-      <button className="studio-tool-button" onClick={() => void perform(async (current) => { const items = await view.api.manage(); if (current()) setManage(items); })}>Manage all projects</button>
-      {manage && <div className="project-card"><h2>All projects</h2>{manage.map((item) => <div className="project-row" key={item.id}>
-        <span>{item.title} · {item.status} · {item.members.length} members</span>
+        <strong>{item.title}</strong>
+        <span className="project-tile-meta">{item.chatCount} {item.chatCount === 1 ? 'chat' : 'chats'} · {item.resourceCount} {item.resourceCount === 1 ? 'source' : 'sources'}</span>
+        <span className="project-tile-members">{item.members.map((member) => name(member.agentId)).join(', ')}</span>
+      </button>)}</div>}
+      {view.loading && !view.projects.length && <p className="project-note" role="status">Loading projects…</p>}
+      <div className="project-footer">
+        <button className="ui-button is-quiet" onClick={() => void perform(async (current) => { const items = await view.api.manage(); if (current()) setManage(items); })}>Manage all projects</button>
+      </div>
+      {manage && <div className="project-card"><h2>All projects</h2>{manage.map((item) => <div className="project-row project-manage-row" key={item.id}>
+        <span><strong>{item.title}</strong> · {item.status} · {item.members.length} {item.members.length === 1 ? 'member' : 'members'}</span>
         {item.members.length ? <button onClick={() => { onSelectAgent(item.members[0].agentId); navigate({ kind: 'project', projectId: item.id }); }}>Open</button>
           : <button disabled={busy} onClick={() => void perform(async (current) => {
             await view.mutate((api) => api.setMembers(item.id, { expectedRevision: item.revision, agentIds: [agentId] }));
@@ -129,15 +148,15 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
       <div className="project-tabs" role="tablist" aria-label="Project sections">{(['Chats', 'Sources', 'Outputs', 'Workflows', 'Members'] as const).map((item) =>
         <button role="tab" aria-selected={tab === item} key={item} onClick={() => { setTab(item); setPicker(false); setAddingFolder(false); }}>{item}</button>)}</div>
       {tab === 'Chats' && <div className="project-card"><div className="project-row"><h2>Project chats</h2>
-        <button disabled={busy || project.status !== 'active'} onClick={() => void perform(async (current) => {
+        <button className="ui-button is-primary" disabled={busy || project.status !== 'active'} onClick={() => void perform(async (current) => {
           const member = project.members.find((row) => row.agentId === agentId)!;
           const session = await daemon.createSession(agentId, { title: project.title, projectId: project.id,
             projectRevision: project.revision, memberGeneration: member.generation });
           if (!current()) return;
           openChat(agentId, session.id);
         })}>New chat with {name(agentId)}</button></div>
-        {view.chats.map((chat) => <div className="project-row" key={`${chat.ownerAgentId}:${chat.sessionId}`}>
-          <button onClick={() => openChat(chat.ownerAgentId, chat.sessionId)}>{chat.title}</button>
+        {view.chats.map((chat) => <div className="project-row project-chat-row" key={`${chat.ownerAgentId}:${chat.sessionId}`}>
+          <button className="project-chat-link" onClick={() => openChat(chat.ownerAgentId, chat.sessionId)}>{chat.title}</button>
           <span>{name(chat.ownerAgentId)}{chat.archived ? ' · archived' : ''}{chat.activeRuns ? ' · working' : ''}</span>
         </div>)}{!view.chats.length && <p>Start a project chat or move an existing chat here from its menu.</p>}
         {view.hasMore && <button disabled={view.loadingMore} onClick={() => void view.loadMore()}>Load more project chats</button>}
@@ -151,7 +170,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
           <h2>Shared brief</h2><label>Name<input disabled={busy} required maxLength={120} value={draft.title} onChange={(event) => edit({ title: event.target.value })} /></label>
           <label>Project instructions<textarea disabled={busy} maxLength={4000} rows={5} value={draft.instructions} onChange={(event) => edit({ instructions: event.target.value })} /></label>
           {draft.baseRevision !== project.revision && <p role="status">The project changed. Your draft is kept. Review the latest project before saving.</p>}
-          <div className="project-row"><button disabled={busy || draft.baseRevision !== project.revision}>Save brief</button>
+          <div className="project-row project-actions"><button className="ui-button is-primary" disabled={busy || draft.baseRevision !== project.revision}>Save brief</button>
             <button type="button" onClick={() => storeDraft(draftKey, { ...draft, baseRevision: project.revision })}>Use latest revision with my draft</button>
             <button type="button" onClick={() => storeDraft(draftKey, null)}>Reset draft</button></div>
         </form>}
@@ -199,10 +218,10 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
       </>}
       {tab === 'Members' && draft && <div className="project-card"><h2>Member agents</h2>
         <p>Changing members stops active project turns and detaches chats belonging to removed agents. Saved chats, files, results, and workflow records stay with their original owner.</p>
-        <fieldset disabled={busy}><legend>Share this project with</legend>{availableAgents.map((agent) => <label key={agent.id} className="project-check">
+        <fieldset disabled={busy}><legend>Share this project with</legend><div className="project-chips">{availableAgents.map((agent) => <label key={agent.id} className="project-check">
           <input type="checkbox" checked={draft.members.includes(agent.id)} onChange={(event) => edit({ members: event.target.checked
-            ? [...draft.members, agent.id] : draft.members.filter((id) => id !== agent.id) })} />{agent.name}</label>)}</fieldset>
-        <button disabled={busy || draft.baseRevision !== project.revision} onClick={() => void perform(async (current) => {
+            ? [...draft.members, agent.id] : draft.members.filter((id) => id !== agent.id) })} />{agent.name}</label>)}</div></fieldset>
+        <button className="ui-button is-primary" disabled={busy || draft.baseRevision !== project.revision} onClick={() => void perform(async (current) => {
           const result = await view.mutate((api) => api.setMembers(project.id, { expectedRevision: project.revision, agentIds: draft.members }));
           if (!current()) return;
           storeDraft(draftKey, null);
@@ -215,7 +234,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
           await view.mutate((api) => api.update(project.id, { expectedRevision: project.revision, status: project.status === 'active' ? 'archived' : 'active' }));
         })}>{project.status === 'active' ? 'Archive project' : 'Restore project'}</button>
         <details><summary>Delete project</summary><p>This removes the shared grouping and detaches its chats.</p>
-          <button disabled={busy} onClick={() => void perform(async (current) => {
+          <button className="ui-button is-danger" disabled={busy} onClick={() => void perform(async (current) => {
             await view.mutate((api) => api.remove(project.id, { expectedRevision: project.revision }));
             if (!current()) return;
             storeDraft(draftKey, null); navigate({ kind: 'project', projectId: null });
