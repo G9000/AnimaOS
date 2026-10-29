@@ -263,7 +263,9 @@ export function ApprovalsPage({
           {view.pending.length > 0 && (
             <section className="approvals-notice" aria-live="polite">
               <span>
-                {view.pending.length} request{view.pending.length === 1 ? '' : 's'} are waiting in your chats
+                {view.pending.length === 1
+                  ? '1 request is waiting in your chats'
+                  : `${view.pending.length} requests are waiting in your chats`}
               </span>
               <button
                 type="button"

@@ -103,7 +103,7 @@ beforeEach(() => {
 it('grants programmatic chains separately while preserving current custom permissions', async () => {
   const current = agent({ toolNames: ['read_file', 'bash', 'legacy_custom'] });
   const saveSettings = vi.fn(async () => true);
-  renderPanel(current, { sections: ['access'], saveSettings });
+  renderPanel(current, { sections: ['access', 'builtins'], saveSettings });
   const toggle = await screen.findByLabelText('Allow programmatic tool chains');
   fireEvent.click(toggle);
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -131,7 +131,7 @@ it('keeps tool chains unavailable without the existing shell grant', async () =>
       interpreterEnvironment: 'ANIMAOS_RS_TOOL_RPC_PYTHON_PATH',
     },
   });
-  renderPanel(agent({ toolNames: ['read_file'] }), { sections: ['access'] });
+  renderPanel(agent({ toolNames: ['read_file'] }), { sections: ['access', 'builtins'] });
   expect(
     screen.getByLabelText('Allow programmatic tool chains'),
   ).toBeDisabled();
@@ -158,7 +158,7 @@ it('grants existing-document editing only by an explicit separate switch', async
 
 it('preserves a partial document grant across access-profile changes', async () => {
   const saveSettings = vi.fn(async () => true);
-  renderPanel(agent({ toolNames: [...toolNamesForProfile('collaborate'), 'inspect_office_document'] }), { sections: ['access'], saveSettings });
+  renderPanel(agent({ toolNames: [...toolNamesForProfile('collaborate'), 'inspect_office_document'] }), { sections: ['access', 'builtins'], saveSettings });
   fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ tools: [...toolNamesForProfile('observe'), 'inspect_office_document'] }));
@@ -224,11 +224,34 @@ function renderPanel(
     resetError: null,
     saveSettings: vi.fn(async () => true),
     resetAgent: vi.fn(),
+    // Every part at once, so access and the built-in tool abilities that
+    // live on the Tools page can be checked together.
+    sections: ['profile', 'model', 'access', 'builtins'] as const,
     ...overrides,
   };
 
-  return { ...render(<SettingsPanel {...props} />), props };
+  const view = render(<SettingsPanel {...props} />);
+  revealFoldedControls(view.container);
+  return { ...view, props };
 }
+
+/** The page folds the name fields behind Change and the individual
+ *  abilities behind Specific permissions; open both, as the owner would. */
+function revealFoldedControls(container: HTMLElement) {
+  const identity = container.querySelector<HTMLButtonElement>(
+    '.profile-identity-row > .settings-item-action[aria-expanded="false"]',
+  );
+  if (identity && !identity.disabled) fireEvent.click(identity);
+  for (const details of container.querySelectorAll<HTMLDetailsElement>(
+    'details.settings-tools-advanced',
+  ))
+    details.open = true;
+}
+
+/** Choosing an access level keeps the separate conversation-reading grant
+ *  as it was; these agents never had it. */
+const withoutRecall = (tools: readonly string[]) =>
+  tools.filter((tool) => tool !== 'read_conversation_window');
 
 describe('workflow chat permissions', () => {
   const workflowTools = ['create_workflow', 'list_workflows'];
@@ -240,7 +263,7 @@ describe('workflow chat permissions', () => {
     const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
     renderPanel(agent({ toolNames: original }), {
       saveSettings,
-      sections: ['access'],
+      sections: ['access', 'builtins'],
     });
     expect(workflowToggle()).not.toBeChecked();
     fireEvent.click(workflowToggle());
@@ -262,7 +285,7 @@ describe('workflow chat permissions', () => {
       agent({ toolNames: ['legacy_custom', ...workflowTools, 'read_file'] }),
       {
         saveSettings,
-        sections: ['access'],
+        sections: ['access', 'builtins'],
       },
     );
     expect(workflowToggle()).toBeChecked();
@@ -288,12 +311,12 @@ describe('workflow chat permissions', () => {
         }),
         {
           saveSettings,
-          sections: ['access'],
+          sections: ['access', 'builtins'],
         },
       );
-      expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+      expect(screen.getByRole('radio', { name: /^Edit files/ })).toBeChecked();
       if (!stored) fireEvent.click(workflowToggle());
-      fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+      fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
       expect(workflowToggle()).toBeChecked();
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
       await waitFor(() =>
@@ -345,10 +368,10 @@ describe('workflow chat permissions', () => {
       const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
       renderPanel(
         agent({ toolNames: [...toolNamesForProfile('collaborate'), partial] }),
-        { saveSettings, sections: ['access'] },
+        { saveSettings, sections: ['access', 'builtins'] },
       );
       expect(workflowToggle()).not.toBeChecked();
-      fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+      fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
       expect(workflowToggle()).not.toBeChecked();
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
       await waitFor(() =>
@@ -365,7 +388,7 @@ describe('workflow chat permissions', () => {
       const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
       renderPanel(agent({ toolNames: ['legacy_custom', partial] }), {
         saveSettings,
-        sections: ['access'],
+        sections: ['access', 'builtins'],
       });
       expect(workflowToggle()).not.toBeChecked();
       fireEvent.click(workflowToggle());
@@ -386,7 +409,7 @@ describe('workflow chat permissions', () => {
     const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
     renderPanel(agent({ toolNames: ['legacy_custom', 'create_workflow'] }), {
       saveSettings,
-      sections: ['access'],
+      sections: ['access', 'builtins'],
     });
     fireEvent.click(workflowToggle());
     fireEvent.click(workflowToggle());
@@ -397,13 +420,13 @@ describe('workflow chat permissions', () => {
   });
 
   it('disables workflow permissions for helpers', () => {
-    renderPanel(agent({ workspaceRole: 'helper' }), { sections: ['access'] });
+    renderPanel(agent({ workspaceRole: 'helper' }), { sections: ['access', 'builtins'] });
     expect(workflowToggle()).toBeDisabled();
   });
 
   it('reseeds workflow drafts on stored tool changes and agent changes', () => {
     const original = agent({ toolNames: ['read_file'] });
-    const view = renderPanel(original, { sections: ['access'] });
+    const view = renderPanel(original, { sections: ['access', 'builtins'] });
     fireEvent.click(workflowToggle());
     view.rerender(
       <SettingsPanel
@@ -423,7 +446,7 @@ describe('workflow chat permissions', () => {
       />,
     );
     expect(workflowToggle()).toBeChecked();
-    expect(screen.getByRole('radio', { name: /^Observe/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Look only/ })).toBeChecked();
     expect(screen.getByRole('button', { name: 'No changes' })).toBeDisabled();
   });
 });
@@ -437,7 +460,7 @@ describe('model resilience settings', () => {
       }),
       { saveSettings, sections: ['model'] },
     );
-    expect(screen.getByRole('heading', { name: 'API keys' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Brains' })).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Side-task model' }),
     ).toBeVisible();
@@ -537,7 +560,7 @@ describe('m83 independent owner web permissions', () => {
       'web_fetch',
     ];
     const view = renderPanel(agent({ toolNames: original }), { saveSettings });
-    expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Edit files/ })).toBeChecked();
     expect(
       screen.getByRole('checkbox', { name: 'Allow web search' }),
     ).toBeChecked();
@@ -584,7 +607,7 @@ describe('m83 independent owner web permissions', () => {
       agent({ toolNames: ['custom_permission', 'web_search', 'web_fetch'] }),
       { saveSettings },
     );
-    fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
     expect(
       screen.getByRole('checkbox', { name: 'Allow web search' }),
     ).not.toBeChecked();
@@ -594,7 +617,7 @@ describe('m83 independent owner web permissions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
       expect(saveSettings).toHaveBeenCalledWith({
-        tools: toolNamesForProfile('observe'),
+        tools: withoutRecall(toolNamesForProfile('observe')),
       }),
     );
     view.rerender(
@@ -821,9 +844,11 @@ describe('M49 Settings subscription models', () => {
     await act(async () =>
       complete(metadata({ models: [{ id: 'old-account-model' }] })),
     );
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
-      'Other owner',
-    );
+    // Switching agents closes the name editor and shows the new identity.
+    expect(await screen.findByText('Other owner')).toBeVisible();
+    expect(
+      screen.queryByRole('textbox', { name: 'Name' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(
       'Other.Exact',
     );
@@ -1094,7 +1119,7 @@ describe('SettingsPanel access', () => {
     const consolidateFacts = screen.getByRole('checkbox', {
       name: 'Allow consolidating saved facts',
     });
-    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    await user.click(screen.getByRole('radio', { name: /^Edit files/ }));
     expect(removeFacts).not.toBeChecked();
     expect(consolidateFacts).not.toBeChecked();
     expect(toolNamesForProfile('collaborate')).not.toContain('memory_remove');
@@ -1105,7 +1130,7 @@ describe('SettingsPanel access', () => {
     await user.click(consolidateFacts);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(saveSettings).toHaveBeenCalledWith({
-      tools: [...toolNamesForProfile('collaborate'), 'memory_consolidate'],
+      tools: [...withoutRecall(toolNamesForProfile('collaborate')), 'memory_consolidate'],
     });
   });
 
@@ -1198,7 +1223,7 @@ describe('SettingsPanel access', () => {
       name: 'Allow removing saved facts',
     });
     expect(removeFacts).toBeChecked();
-    await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+    await user.click(screen.getByRole('radio', { name: /^Edit files/ }));
     expect(removeFacts).not.toBeChecked();
     expect(
       screen.getByText(/permanent removal of one active Fact only/i),
@@ -1207,7 +1232,7 @@ describe('SettingsPanel access', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(saveSettings).toHaveBeenCalledWith({
-      tools: [...toolNamesForProfile('collaborate'), 'memory_remove'],
+      tools: [...withoutRecall(toolNamesForProfile('collaborate')), 'memory_remove'],
     });
     expect(toolNamesForProfile('collaborate')).not.toContain('memory_remove');
   });
@@ -1273,8 +1298,8 @@ describe('SettingsPanel access', () => {
   });
 
   it('shows only the sections its page is about', () => {
-    const view = renderPanel(agent(), { sections: ['access'] });
-    expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeVisible();
+    const view = renderPanel(agent(), { sections: ['access', 'builtins'] });
+    expect(screen.getByRole('radio', { name: /^Edit files/ })).toBeVisible();
     expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
@@ -1282,17 +1307,18 @@ describe('SettingsPanel access', () => {
     view.rerender(<SettingsPanel {...view.props} sections={['model']} />);
     // The main model shows as one item; its controls open under Change model.
     expect(screen.getByTestId('main-model')).toBeVisible();
-    fireEvent.click(screen.getByText('Change model'));
+    fireEvent.click(screen.getByText('Change'));
     expect(screen.getByRole('combobox', { name: 'Provider' })).toBeVisible();
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
 
     view.rerender(<SettingsPanel {...view.props} sections={['profile']} />);
+    revealFoldedControls(view.container);
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeVisible();
     expect(
       screen.getByRole('region', { name: 'Active personality editor' }),
     ).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reset…' })).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
   });
 
@@ -1303,18 +1329,21 @@ describe('SettingsPanel access', () => {
         agent({ toolNames: toolNamesForProfile(profileName).toReversed() }),
       );
 
+      const copy = {
+        observe: ['Look only', 'Reads files and todos. Changes nothing.'],
+        collaborate: ['Edit files', 'Reads and edits files. Never runs commands.'],
+        operate: [
+          'Run commands',
+          'Edits files, runs commands, uses apps and searches the web.',
+        ],
+      }[profileName];
       const accessGroup = screen.getByRole('group', { name: 'Access profile' });
       expect(
         within(accessGroup).getByRole('radio', {
-          name: new RegExp(`^${ACCESS_PROFILES[profileName].label}`),
+          name: new RegExp(`^${copy[0]}`),
         }),
       ).toBeChecked();
-      expect(
-        within(accessGroup).getByText(ACCESS_PROFILES[profileName].summary),
-      ).toBeVisible();
-      expect(
-        within(accessGroup).getByText(ACCESS_PROFILES[profileName].risk),
-      ).toBeVisible();
+      expect(within(accessGroup).getByText(copy[1])).toBeVisible();
     },
   );
 
@@ -1366,7 +1395,7 @@ describe('SettingsPanel access', () => {
       saveSettings,
     });
 
-    await user.click(screen.getByRole('radio', { name: /^Operate/ }));
+    await user.click(screen.getByRole('radio', { name: /^Run commands/ }));
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Nova Prime');
@@ -1384,7 +1413,7 @@ describe('SettingsPanel access', () => {
       name: 'Nova Prime',
       provider: 'anthropic',
       model: 'anthropic/custom-model',
-      tools: toolNamesForProfile('operate'),
+      tools: withoutRecall(toolNamesForProfile('operate')),
     });
   });
 
@@ -1392,16 +1421,16 @@ describe('SettingsPanel access', () => {
     const user = userEvent.setup();
     const saveSettings = vi.fn(async () => true);
     const network = vi.spyOn(globalThis, 'fetch');
-    renderPanel(agent(), { saveSettings, sections: ['access'] });
-    await user.click(screen.getByRole('radio', { name: /^Operate/ }));
+    renderPanel(agent(), { saveSettings, sections: ['access', 'builtins'] });
+    await user.click(screen.getByRole('radio', { name: /^Run commands/ }));
     expect(
       screen.getByText(
-        'Operate lets Nova run commands and apps. Autonomy decides when it asks first.',
+        'Helpers get the same access as Nova. Commands run in a Docker sandbox.',
       ),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Change in Autonomy' }),
-    ).toBeVisible();
+      screen.getByRole('link', { name: 'Change in Runtime' }),
+    ).toHaveAttribute('href', '#/runtime');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
       expect(saveSettings).toHaveBeenCalledWith({
@@ -1422,7 +1451,7 @@ describe('SettingsPanel access', () => {
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
-    await user.click(screen.getByRole('radio', { name: /^Observe/ }));
+    await user.click(screen.getByRole('radio', { name: /^Look only/ }));
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     view.rerender(<SettingsPanel {...view.props} saveError="PATCH failed" />);
@@ -1436,7 +1465,7 @@ describe('SettingsPanel access', () => {
       screen.getByRole('button', { name: 'Save changes' }),
     ).toHaveAttribute('aria-describedby', 'settings-save-error');
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByRole('radio', { name: /^Observe/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Look only/ })).toBeChecked();
   });
 
   it('focuses and associates reset failures only with Reset', () => {
@@ -1448,7 +1477,7 @@ describe('SettingsPanel access', () => {
     expect(alert).toHaveTextContent('DELETE failed');
     expect(alert).toHaveAttribute('id', 'settings-reset-error');
     expect(alert).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Reset' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Reset…' })).toHaveAttribute(
       'aria-describedby',
       'settings-reset-error',
     );
@@ -1482,7 +1511,7 @@ describe('SettingsPanel access', () => {
     );
 
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByRole('radio', { name: /^Collaborate/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Edit files/ })).toBeChecked();
     expect(
       screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
     ).toBeChecked();
@@ -1498,9 +1527,10 @@ describe('SettingsPanel access', () => {
     const view = renderPanel(currentAgent, { saving: true });
 
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reset…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Change' })).toBeDisabled();
     for (const control of [
-      ...screen.getAllByRole('textbox'),
+      ...screen.queryAllByRole('textbox'),
       ...screen.getAllByRole('combobox'),
       ...screen.getAllByRole('radio'),
       ...screen.getAllByRole('checkbox'),
@@ -1511,9 +1541,9 @@ describe('SettingsPanel access', () => {
     view.rerender(<SettingsPanel {...view.props} saving={false} resetting />);
 
     expect(screen.getByRole('button', { name: 'No changes' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Resetting…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Working…' })).toBeDisabled();
     for (const control of [
-      ...screen.getAllByRole('textbox'),
+      ...screen.queryAllByRole('textbox'),
       ...screen.getAllByRole('combobox'),
       ...screen.getAllByRole('radio'),
       ...screen.getAllByRole('checkbox'),
@@ -1557,10 +1587,10 @@ it('M43 deliberate standard access selection replaces external grants without re
   renderPanel(agent({ toolNames: ['read_file', external, 'unknown_custom'] }), {
     saveSettings,
   });
-  await userEvent.click(screen.getByRole('radio', { name: /Collaborate/ }));
+  await userEvent.click(screen.getByRole('radio', { name: /Edit files/ }));
   await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   expect(saveSettings).toHaveBeenCalledWith({
-    tools: toolNamesForProfile('collaborate'),
+    tools: withoutRecall(toolNamesForProfile('collaborate')),
   });
 });
 
@@ -1659,13 +1689,13 @@ it('m67_read_document_profile_replacement_clears_the_opt_in_until_reselected', a
     name: 'Allow reading workspace documents',
   });
   expect(allowRead).toBeChecked();
-  await user.click(screen.getByRole('radio', { name: /^Collaborate/ }));
+  await user.click(screen.getByRole('radio', { name: /^Edit files/ }));
   expect(allowRead).not.toBeChecked();
   await user.click(allowRead);
   await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
   expect(saveSettings).toHaveBeenCalledWith({
-    tools: [...toolNamesForProfile('collaborate'), 'read_document'],
+    tools: [...withoutRecall(toolNamesForProfile('collaborate')), 'read_document'],
   });
   expect(toolNamesForProfile('collaborate')).not.toContain('read_document');
 });
@@ -1722,7 +1752,7 @@ describe('reusable work permissions', () => {
       ];
       const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
       const view = renderPanel(agent({ toolNames: original }), {
-        sections: ['access'],
+        sections: ['access', 'builtins'],
         saveSettings,
       });
       const toggle = screen.getByRole('checkbox', { name: label });
@@ -1736,7 +1766,7 @@ describe('reusable work permissions', () => {
       );
       view.unmount();
       renderPanel(agent({ toolNames: [...original, ...tools] }), {
-        sections: ['access'],
+        sections: ['access', 'builtins'],
         saveSettings,
       });
       fireEvent.click(screen.getByRole('checkbox', { name: label }));
@@ -1759,7 +1789,7 @@ describe('reusable work permissions', () => {
           'read_tool_result',
         ],
       }),
-      { sections: ['access'], saveSettings },
+      { sections: ['access', 'builtins'], saveSettings },
     );
     expect(
       screen.getByRole('checkbox', {
@@ -1769,7 +1799,7 @@ describe('reusable work permissions', () => {
     expect(
       screen.getByRole('checkbox', { name: 'Allow saved tool result reads' }),
     ).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: /^Observe/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Look only/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
       expect(saveSettings).toHaveBeenCalledWith({

@@ -64,9 +64,12 @@ describe('ProfileVoice', () => {
     expect(cancel).toHaveBeenCalled();
   });
 
-  it('is not shown where the browser has no voices', () => {
+  it('says so and disables preview where the browser has no voices', () => {
     vi.stubGlobal('speechSynthesis', undefined);
-    const { container } = render(<ProfileVoice agentName="Nova" />);
-    expect(container).toBeEmptyDOMElement();
+    render(<ProfileVoice agentName="Nova" />);
+    expect(
+      screen.getByText('Speech playback is unavailable in this browser'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: /Preview/ })).toBeDisabled();
   });
 });

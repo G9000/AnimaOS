@@ -57,11 +57,13 @@ describe('skill package review', () => {
     const { container } = render(
       <SkillDraftCard draft={draft} onApprove={approve} onReject={vi.fn()} />,
     );
+    // The proposal folds its steps and files under "See steps".
+    await userEvent.click(screen.getByText('See steps'));
     expect(screen.getByText('scripts/example.sh')).toBeVisible();
     expect(screen.getByText('echo inert')).toBeVisible();
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
     expect(container.querySelector('img')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Keep' }));
     expect(approve).toHaveBeenCalledWith(draft, {});
   });
 });

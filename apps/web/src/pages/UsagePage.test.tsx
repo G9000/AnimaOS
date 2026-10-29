@@ -139,22 +139,19 @@ describe('UsagePage', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
-  it('shows totals, cost, calls, today, and this chat', async () => {
+  it('shows totals, cost, calls, and this chat', async () => {
     renderPage({ sessionId: 'chat:1' });
     expect(
       await screen.findByRole('heading', { name: 'What your companion costs' }),
     ).toBeVisible();
 
-    const total = await screen.findByRole('group', { name: 'Total tokens' });
+    const total = await screen.findByRole('group', { name: 'Tokens' });
     expect(within(total).getByText('4.2k')).toBeVisible();
     expect(
-      within(total).getByText('3k prompt · 1.2k completion'),
+      within(total).getByText('3k in · 1.2k out'),
     ).toBeVisible();
     expect(within(card('Cost')).getByText('$1.23')).toBeVisible();
     expect(within(card('Calls')).getByText('4')).toBeVisible();
-    const today = card('Today');
-    expect(within(today).getByText('900')).toBeVisible();
-    expect(within(today).getByText('$0.25')).toBeVisible();
     const chat = await screen.findByRole('group', { name: 'This chat' });
     expect(within(chat).getByText('1.5k')).toBeVisible();
     expect(within(chat).getByText('$0.04')).toBeVisible();
@@ -165,7 +162,7 @@ describe('UsagePage', () => {
 
   it('hides This chat when no session was viewed', async () => {
     renderPage();
-    await screen.findByRole('group', { name: 'Total tokens' });
+    await screen.findByRole('group', { name: 'Tokens' });
     expect(
       screen.queryByRole('group', { name: 'This chat' }),
     ).not.toBeInTheDocument();
@@ -184,7 +181,7 @@ describe('UsagePage', () => {
   it('switching the range reads again and remembers it', async () => {
     const user = userEvent.setup();
     const view = renderPage();
-    await screen.findByRole('group', { name: 'Total tokens' });
+    await screen.findByRole('group', { name: 'Tokens' });
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -208,7 +205,7 @@ describe('UsagePage', () => {
       'aria-pressed',
       'true',
     );
-    await screen.findByRole('group', { name: 'Total tokens' });
+    await screen.findByRole('group', { name: 'Tokens' });
   });
 
   it('still renders when storage throws', async () => {
@@ -220,7 +217,7 @@ describe('UsagePage', () => {
       throw new Error('blocked');
     });
     renderPage();
-    await screen.findByRole('group', { name: 'Total tokens' });
+    await screen.findByRole('group', { name: 'Tokens' });
     await user.click(screen.getByRole('button', { name: '90 days' }));
     expect(screen.getByRole('button', { name: '90 days' })).toHaveAttribute(
       'aria-pressed',
@@ -240,8 +237,10 @@ describe('UsagePage', () => {
       ],
     });
     const { container } = renderPage();
+    // Models and sources fold under Other breakdowns, beside By chat.
+    await userEvent.click(await screen.findByText('Other breakdowns'));
     expect(
-      await screen.findByText('<img src=x onerror=alert(1)>/<b>gpt</b>'),
+      screen.getByText('<img src=x onerror=alert(1)>/<b>gpt</b>'),
     ).toBeVisible();
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('b')).toBeNull();
@@ -250,7 +249,7 @@ describe('UsagePage', () => {
     expect(within(models).getByText('$0.50 + unpriced')).toBeVisible();
     const sources = screen.getByRole('region', { name: 'By source' });
     expect(within(sources).getByText('Chat')).toBeVisible();
-    const sessions = screen.getByRole('region', { name: 'Top chats' });
+    const sessions = screen.getByRole('region', { name: 'By chat' });
     expect(within(sessions).getByText('No chat')).toBeVisible();
   });
 
@@ -263,7 +262,7 @@ describe('UsagePage', () => {
   it('exports the csv', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole('group', { name: 'Total tokens' });
+    await screen.findByRole('group', { name: 'Tokens' });
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => expect(download.downloadText).toHaveBeenCalled());
     expect(daemon.exportUsageCsv).toHaveBeenCalledWith(

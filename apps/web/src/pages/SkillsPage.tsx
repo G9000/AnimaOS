@@ -47,7 +47,7 @@ type Review = { skill: Skill; file: SkillFile; note: string | null };
 /** Shown when a save is refused (409) while a file draft waits in the folder
  *  it would write to. */
 const FILE_UNREVIEWED_HINT =
-  'It is listed under Waiting for review as a draft found in the skills folder.';
+  'It is listed under New skills to keep as a draft found in the skills folder.';
 
 /** Spec §15.4: skills with switches and status, drafts with a diff and
  *  Approve / Edit / Reject, an editor with a preview, New, Delete, and

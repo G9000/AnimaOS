@@ -286,7 +286,12 @@ export function registerAttachmentJourneys({
       createdAtMs: 1,
     }));
     render(<ViewHarness />);
-    const field = await screen.findByPlaceholderText('Message Alpha…');
+    // The composer is replaced once the session record loads; type into the
+    // one that stays.
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Message Alpha…')).toBeEnabled(),
+    );
+    const field = screen.getByPlaceholderText('Message Alpha…');
     await user.type(field, 'keep this draft');
     await user.upload(
       screen.getByLabelText('Choose attachments'),

@@ -554,14 +554,14 @@ describe('WorkspaceShell', () => {
     const { unmount } = render(
       <Shell initialRoute={{ kind: 'page', page: 'model' }} />,
     );
-    expect(screen.getByText('only this agent')).toBeInTheDocument();
+    expect(screen.getByText(/only this agent/)).toBeInTheDocument();
     expect(
       screen.getByText(/what to fall back on\. Each agent has its own\./),
     ).toBeInTheDocument();
     unmount();
     render(<Shell initialRoute={{ kind: 'page', page: 'runtime' }} />);
     expect(screen.getByText('All agents')).toBeInTheDocument();
-    expect(screen.queryByText('only this agent')).not.toBeInTheDocument();
+    expect(screen.queryByText(/only this agent/)).not.toBeInTheDocument();
   });
 
   it('opens the companion pages from the window', async () => {
@@ -608,7 +608,7 @@ describe('WorkspaceShell', () => {
   it.each([
     ['Skills', 'Skills page'],
     ['Memory', 'Memory page'],
-    ['Tools', null],
+    ['Tools', 'Registered tools and runtime details'],
     ['Connections', 'Connections page'],
     ['Automations', 'Automations page'],
     ['Usage', 'Usage page'],
@@ -646,7 +646,7 @@ describe('WorkspaceShell', () => {
       });
       await user.click(within(nav).getByRole('button', { name: label }));
       expect(
-        await screen.findByText(content || 'Tools follow your authority'),
+        await screen.findByText(content),
       ).toBeVisible();
       expect(within(nav).getByRole('button', { name: label })).toHaveAttribute(
         'aria-current',

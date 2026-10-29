@@ -30,7 +30,7 @@ describe('PersonalityEditor', () => {
       }),
     );
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => ({ ...saved, content })}
         savePersonality={save}
@@ -64,7 +64,7 @@ describe('PersonalityEditor', () => {
     );
     const user = userEvent.setup();
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => saved}
         savePersonality={save}
@@ -91,7 +91,7 @@ describe('PersonalityEditor', () => {
       }),
     );
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => saved}
         savePersonality={save}
@@ -117,7 +117,7 @@ describe('PersonalityEditor', () => {
 
   it('preserves raw text and unknown sections when switching views', async () => {
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => saved}
         savePersonality={vi.fn()}
@@ -149,7 +149,7 @@ describe('PersonalityEditor', () => {
       });
     });
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={load}
         savePersonality={save}
@@ -184,7 +184,7 @@ describe('PersonalityEditor', () => {
       throw new Error('Disk unavailable');
     });
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => saved}
         savePersonality={save}
@@ -216,14 +216,14 @@ describe('PersonalityEditor', () => {
         : Promise.resolve({ ...saved, content: '## Personality\nThoughtful.' }),
     );
     const { rerender } = render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={load}
         savePersonality={vi.fn()}
       />,
     );
     rerender(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="two"
         loadPersonality={load}
         savePersonality={vi.fn()}
@@ -244,7 +244,7 @@ describe('PersonalityEditor', () => {
       .mockRejectedValueOnce(new Error('Could not load'))
       .mockResolvedValue({ ...saved, maxChars: 20, content: 'Be curious.' });
     render(
-      <PersonalityEditor
+      <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={load}
         savePersonality={vi.fn()}

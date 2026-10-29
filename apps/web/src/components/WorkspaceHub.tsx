@@ -460,7 +460,7 @@ export function WorkspaceHub({
                       Refresh
                     </button>
                   </div>
-                  {section !== 'Notes' && section !== 'Tasks' && (
+                  {section !== 'Notes' && (
                     <div className="flex flex-wrap gap-3">
                       {agents
                         .filter(
@@ -534,9 +534,11 @@ export function WorkspaceHub({
                                 >
                                   {entry.taskStatus === 'in_progress'
                                     ? 'In progress'
-                                    : entry.taskStatus === 'completed' || entry.taskStatus === 'cancelled'
+                                    : entry.taskStatus === 'completed'
                                       ? 'Done'
-                                      : 'Pending'}
+                                      : entry.taskStatus === 'cancelled'
+                                        ? 'Cancelled'
+                                        : 'Pending'}
                                 </span>
                               )}
                               <div className="work-row-who">
@@ -566,7 +568,10 @@ export function WorkspaceHub({
                                 )}
                               </div>
                               <p className="work-row-text">{entry.content}</p>
-                              {section === 'Tasks' && entry.activeForm && (
+                              {section === 'Tasks' &&
+                                entry.taskStatus === 'in_progress' &&
+                                entry.activeForm &&
+                                entry.activeForm !== entry.content && (
                                 <p className="work-row-detail">{entry.activeForm}</p>
                               )}
                               {section !== 'Tasks' && (

@@ -41,17 +41,17 @@ function mockDaemon(initial: AgentAutonomy = FREE) {
 }
 
 describe('AutonomyCard', () => {
-  it('switches between Free and Strict and tells whoever shows the rules', async () => {
+  it('switches between the preset modes and tells whoever shows the rules', async () => {
     const user = userEvent.setup();
     const save = mockDaemon();
     const onModeChanged = vi.fn();
     render(<AutonomyCard agentId="agent-1" onModeChanged={onModeChanged} />);
-    const free = await screen.findByRole('radio', { name: /^Free/ });
+    const free = await screen.findByRole('radio', { name: /^Only for risky things/ });
     expect(free).toBeChecked();
     expect(screen.getByText('Recommended')).toBeVisible();
-    await user.click(screen.getByRole('radio', { name: /^Strict/ }));
+    await user.click(screen.getByRole('radio', { name: /^Before every change/ }));
     await waitFor(() =>
-      expect(screen.getByRole('radio', { name: /^Strict/ })).toBeChecked(),
+      expect(screen.getByRole('radio', { name: /^Before every change/ })).toBeChecked(),
     );
     expect(save).toHaveBeenCalledWith('agent-1', { mode: 'strict' });
     expect(onModeChanged).toHaveBeenCalledOnce();
@@ -62,16 +62,13 @@ describe('AutonomyCard', () => {
       .mockResolvedValueOnce(FREE)
       .mockResolvedValue({ ...FREE, mode: 'custom' });
     const { rerender } = render(<AutonomyCard agentId="agent-1" />);
-    expect(await screen.findByRole('radio', { name: /^Free/ })).toBeChecked();
-    expect(
-      screen.queryByText("You've set your own rules below."),
-    ).toBeNull();
+    expect(await screen.findByRole('radio', { name: /^Only for risky things/ })).toBeChecked();
+    const custom = () => screen.getByText('Custom').parentElement!;
+    expect(custom()).not.toHaveAttribute('aria-current');
     rerender(<AutonomyCard agentId="agent-1" revision={1} />);
-    expect(
-      await screen.findByText("You've set your own rules below."),
-    ).toBeVisible();
-    expect(screen.getByRole('radio', { name: /^Free/ })).not.toBeChecked();
-    expect(screen.getByRole('radio', { name: /^Strict/ })).not.toBeChecked();
+    await waitFor(() => expect(custom()).toHaveAttribute('aria-current', 'true'));
+    expect(screen.getByRole('radio', { name: /^Only for risky things/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Before every change/ })).not.toBeChecked();
   });
 
   it('turns the smart check on', async () => {
@@ -82,7 +79,7 @@ describe('AutonomyCard', () => {
     expect(smart).toHaveAttribute('aria-checked', 'false');
     expect(
       screen.getByText(
-        "Let anima's model approve risky commands it judges safe (extra model call each time).",
+        "Let anima's model approve risky commands it judges safe (an extra model call each time).",
       ),
     ).toBeVisible();
     await user.click(smart);

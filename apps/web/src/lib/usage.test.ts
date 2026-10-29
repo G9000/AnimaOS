@@ -150,7 +150,7 @@ describe('usageCsvFilename', () => {
 
 describe('owner-facing strings', () => {
   it('keeps the exact wording', () => {
-    expect(USAGE_RANGES_DAYS).toEqual([7, 30, 90]);
+    expect(USAGE_RANGES_DAYS).toEqual([7, 14, 30, 90]);
     expect(DEFAULT_USAGE_RANGE_DAYS).toBe(30);
     expect(UNPRICED).toBe('—');
     expect(USAGE_EMPTY).toBe('No model calls in this range yet.');

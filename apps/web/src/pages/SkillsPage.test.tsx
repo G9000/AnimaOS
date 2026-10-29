@@ -72,17 +72,20 @@ describe('SkillsPage', () => {
         learning={<p>Review switch</p>}
       />,
     );
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
     expect(screen.getByText('New skill to keep')).toBeVisible();
-    const headings = screen
-      .getAllByRole('heading', { level: 2 })
-      .map((heading) => heading.textContent);
-    expect(headings).toEqual([
-      'Waiting for review',
-      'Skills',
-      'How it learns',
-      'Recently decided',
-    ]);
+    const order = [
+      screen.getByRole('region', { name: 'New skills to keep' }),
+      screen.getByRole('region', { name: 'Your skills' }),
+      screen.getByRole('region', { name: 'How it learns' }),
+      screen.getByText('Recently decided'),
+    ];
+    for (const [index, element] of order.slice(1).entries()) {
+      expect(
+        order[index].compareDocumentPosition(element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 
   it('shows learning lineage and links a pending draft to its source task', async () => {
@@ -127,12 +130,12 @@ describe('SkillsPage', () => {
       .mockResolvedValue(skillFixture('notes', { enabled: false }));
     renderPage();
 
-    const list = await screen.findByRole('region', { name: 'Skills' });
-    const notes = within(list).getByRole('listitem', { name: 'Notes' });
+    const list = await screen.findByRole('region', { name: 'Your skills' });
+    const notes = within(list).getByRole('rowheader', { name: 'Notes' });
     expect(within(notes).getByText('/notes')).toBeVisible();
     expect(within(notes).getByText('Active')).toBeVisible();
     expect(
-      within(within(list).getByRole('listitem', { name: 'Plan' })).getByText(
+      within(within(list).getByRole('rowheader', { name: 'Plan' })).getByText(
         'Changed on disk — review it',
       ),
     ).toBeVisible();
@@ -141,11 +144,8 @@ describe('SkillsPage', () => {
     );
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
     expect(toggle).toHaveBeenCalledWith('notes', false);
-    expect(
-      within(
-        screen.getByRole('region', { name: 'Recently decided' }),
-      ).getByText('Old idea'),
-    ).toBeVisible();
+    await user.click(screen.getByText('Recently decided'));
+    expect(screen.getByText('Old idea')).toBeVisible();
   });
 
   it('renders untrusted draft text as text', async () => {
@@ -164,6 +164,7 @@ describe('SkillsPage', () => {
     const card = await screen.findByRole('region', {
       name: 'Skill draft: <b>Bold</b>',
     });
+    await userEvent.click(within(card).getByText('See steps'));
     expect(
       within(card).getByText('<img src=x onerror="alert(1)"> **not markdown**'),
     ).toBeVisible();
@@ -188,6 +189,7 @@ describe('SkillsPage', () => {
     const card = await screen.findByRole('region', {
       name: 'Skill draft: Wea⟨U+202E⟩ving',
     });
+    await userEvent.click(within(card).getByText('See steps'));
     expect(within(card).getByText('Wea⟨U+202E⟩ving')).toBeVisible();
     expect(within(card).getByText('safe⟨U+200B⟩hidden')).toBeVisible();
     expect(within(card).getByText(invisibleNote(2) ?? '')).toBeVisible();
@@ -215,7 +217,7 @@ describe('SkillsPage', () => {
       sessionId: 'chat:1',
       runId: 'run_1',
     });
-    await user.click(within(card).getByRole('button', { name: 'Approve' }));
+    await user.click(within(card).getByRole('button', { name: 'Keep' }));
     expect(approve).toHaveBeenLastCalledWith('skd_1', {});
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
 
@@ -231,10 +233,10 @@ describe('SkillsPage', () => {
     });
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(3));
 
-    await user.click(within(card).getByRole('button', { name: 'Reject' }));
+    await user.click(within(card).getByRole('button', { name: 'Discard' }));
     expect(reject).toHaveBeenCalledWith('skd_1');
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(4));
-    expect(within(card).getByRole('button', { name: 'Reject' })).toBeEnabled();
+    expect(within(card).getByRole('button', { name: 'Discard' })).toBeEnabled();
   });
 
   it('approves a file draft at the hash it shows and refuses one with a problem', async () => {
@@ -270,7 +272,7 @@ describe('SkillsPage', () => {
       name: 'Skill draft: Found',
     });
     expect(within(found).getByText(SOURCE_LABELS.file)).toBeVisible();
-    await user.click(within(found).getByRole('button', { name: 'Approve' }));
+    await user.click(within(found).getByRole('button', { name: 'Keep' }));
     expect(approve).toHaveBeenCalledWith('file:found', {
       hash: 'f'.repeat(64),
     });
@@ -281,11 +283,11 @@ describe('SkillsPage', () => {
       ),
     ).toBeVisible();
     expect(
-      within(broken).getByRole('button', { name: 'Approve' }),
+      within(broken).getByRole('button', { name: 'Keep' }),
     ).toBeDisabled();
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
     expect(
-      within(found).getByRole('button', { name: 'Approve' }),
+      within(found).getByRole('button', { name: 'Keep' }),
     ).toBeEnabled();
   });
 
@@ -350,7 +352,7 @@ describe('SkillsPage', () => {
       .spyOn(daemon, 'saveSkill')
       .mockResolvedValue(skillFixture('weekly-review'));
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
 
     await user.click(screen.getByRole('button', { name: 'New skill' }));
     const form = screen.getByRole('form', { name: 'Skill editor' });
@@ -414,7 +416,7 @@ describe('SkillsPage', () => {
       }),
     );
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
 
     await user.click(screen.getByRole('button', { name: 'New skill' }));
     const form = screen.getByRole('form', { name: 'Skill editor' });
@@ -432,7 +434,7 @@ describe('SkillsPage', () => {
     expect(save).toHaveBeenCalled();
     expect(await screen.findByText(/its own way/)).toBeVisible();
     expect(
-      screen.getByText(/Waiting for review.*found in the skills folder/),
+      screen.getByText(/New skills to keep.*found in the skills folder/),
     ).toBeVisible();
   });
 
@@ -443,11 +445,11 @@ describe('SkillsPage', () => {
       .mockResolvedValue(skillFixture('plan'));
     renderPage();
     const plan = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Plan' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Plan' });
 
     await user.click(
-      within(plan).getByRole('button', { name: 'Review changes' }),
+      within(plan).getByRole('button', { name: 'Review' }),
     );
     const review = await screen.findByRole('region', {
       name: 'Review changes to Plan',
@@ -471,8 +473,8 @@ describe('SkillsPage', () => {
     const save = vi.spyOn(daemon, 'saveSkill');
     renderPage();
     const plan = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Plan' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Plan' });
 
     await user.click(within(plan).getByRole('button', { name: 'Edit' }));
 
@@ -497,8 +499,8 @@ describe('SkillsPage', () => {
       .mockResolvedValue(skillFixture('notes'));
     renderPage();
     const notes = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Notes' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Notes' });
     await user.click(within(notes).getByRole('button', { name: 'Edit' }));
     expect(
       await screen.findByText(/will recreate.*no supporting files/i),
@@ -531,8 +533,8 @@ describe('SkillsPage', () => {
     });
     renderPage();
     const notes = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Notes' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Notes' });
 
     await user.click(within(notes).getByRole('button', { name: 'Edit' }));
 
@@ -554,7 +556,7 @@ describe('SkillsPage', () => {
       }),
     );
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
 
     await user.click(screen.getByRole('button', { name: 'New skill' }));
     const form = screen.getByRole('form', { name: 'Skill editor' });
@@ -577,7 +579,7 @@ describe('SkillsPage', () => {
     const user = userEvent.setup();
     const save = vi.spyOn(daemon, 'saveSkill');
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
 
     await user.click(screen.getByRole('button', { name: 'New skill' }));
     const form = screen.getByRole('form', { name: 'Skill editor' });
@@ -607,7 +609,7 @@ describe('SkillsPage', () => {
   it('reveals invisible characters in the editor preview', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
 
     await user.click(screen.getByRole('button', { name: 'New skill' }));
     const form = screen.getByRole('form', { name: 'Skill editor' });
@@ -648,9 +650,10 @@ describe('SkillsPage', () => {
     const card = await screen.findByRole('region', {
       name: 'Skill draft: Found',
     });
+    await user.click(within(card).getByText('See steps'));
     expect(within(card).getByText('Old body')).toBeVisible();
 
-    await user.click(within(card).getByRole('button', { name: 'Approve' }));
+    await user.click(within(card).getByRole('button', { name: 'Keep' }));
 
     expect(await screen.findByText('The file changed on disk')).toBeVisible();
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
@@ -687,10 +690,10 @@ describe('SkillsPage', () => {
       });
     renderPage();
     const plan = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Plan' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Plan' });
     await user.click(
-      within(plan).getByRole('button', { name: 'Review changes' }),
+      within(plan).getByRole('button', { name: 'Review' }),
     );
     const review = await screen.findByRole('region', {
       name: 'Review changes to Plan',
@@ -725,8 +728,8 @@ describe('SkillsPage', () => {
     });
     renderPage();
     const notes = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Notes' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Notes' });
 
     await user.click(within(notes).getByRole('button', { name: 'Edit' }));
 
@@ -742,8 +745,8 @@ describe('SkillsPage', () => {
     );
     renderPage();
     const notes = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Notes' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Notes' });
 
     await user.click(within(notes).getByRole('button', { name: 'Edit' }));
     expect(await screen.findByText('No skill in /notes')).toBeVisible();
@@ -772,8 +775,8 @@ describe('SkillsPage', () => {
     });
     renderPage();
     const plan = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Plan' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Plan' });
 
     await user.click(within(plan).getByRole('button', { name: 'Edit' }));
 
@@ -790,16 +793,17 @@ describe('SkillsPage', () => {
       .mockResolvedValue({ trashPath: '.anima-trash/skills/notes-1' });
     renderPage();
     const notes = within(
-      await screen.findByRole('region', { name: 'Skills' }),
-    ).getByRole('listitem', { name: 'Notes' });
+      await screen.findByRole('region', { name: 'Your skills' }),
+    ).getByRole('rowheader', { name: 'Notes' });
 
+    await user.click(within(notes).getByText('Manage'));
     await user.click(within(notes).getByRole('button', { name: 'Delete' }));
     expect(remove).not.toHaveBeenCalled();
     expect(
       within(notes).getByText(/moves to the workspace trash/),
     ).toBeVisible();
     await user.click(
-      within(notes).getByRole('button', { name: 'Delete /notes' }),
+      within(notes).getByRole('button', { name: 'Delete' }),
     );
     expect(remove).toHaveBeenCalledWith('notes');
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
@@ -816,7 +820,7 @@ describe('SkillsPage', () => {
       .spyOn(daemon, 'importSkill')
       .mockResolvedValue(skillDraftFixture('skd_9', { source: 'import' }));
     renderPage();
-    await screen.findByRole('region', { name: 'Skills' });
+    await screen.findByRole('region', { name: 'Your skills' });
     const file = new File(['---\nname: n\n---\n\nb'], 'SKILL.md', {
       type: 'text/markdown',
     });

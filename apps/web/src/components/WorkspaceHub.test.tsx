@@ -28,11 +28,12 @@ it('keeps Workflows in Work and lets owners select an agent without tool grants'
   const list = vi.spyOn(daemon, 'listWorkflows').mockResolvedValue([]);
   const schedules = vi.spyOn(daemon, 'listSchedules');
   render(<WorkspaceHub agents={agents} online initialSection="Workflows" />);
-  expect(screen.getByRole('tab', { name: 'Workflows' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: /^Workflows/ })).toHaveAttribute('aria-selected', 'true');
   expect(await screen.findByText('No workflows yet for this agent.')).toBeVisible();
   expect(list).toHaveBeenCalledWith('alpha', expect.anything());
   fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'beta' } });
   await waitFor(() => expect(list).toHaveBeenLastCalledWith('beta', expect.anything()));
+  fireEvent.click(screen.getByRole('button', { name: 'New workflow' }));
   expect(screen.getByRole('button', { name: 'Create workflow' })).toBeVisible();
   expect(schedules).not.toHaveBeenCalled();
 });
@@ -52,9 +53,10 @@ it('keeps Runs inside Work and scopes queueing to the selected agent', async () 
   const tasks = vi.spyOn(daemon, 'agentTasks');
   const schedules = vi.spyOn(daemon, 'listSchedules');
   render(<WorkspaceHub agents={agents} online initialSection="Runs" />);
-  expect(screen.getByRole('tab', { name: 'Runs' })).toHaveAttribute(
-    'aria-selected',
-    'true',
+  // Runs sits under More, beside the Tasks and Workflows tabs.
+  expect(screen.getByRole('button', { name: 'Runs' })).toHaveAttribute(
+    'aria-current',
+    'page',
   );
   expect(await screen.findByText('No runs yet.')).toBeVisible();
   expect(list).toHaveBeenCalledWith('alpha', expect.anything());
@@ -174,7 +176,7 @@ it('keeps the editor open during a save and retains a failed draft', async () =>
       }),
   );
   render(<WorkspaceHub agents={[agents[0]]} online />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Tasks' }));
+  fireEvent.click(screen.getByRole('tab', { name: /^Tasks/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Manage Alpha’s tasks' }));
   fireEvent.change(await screen.findByLabelText('New agent task'), {
     target: { value: 'Draft task' },
@@ -249,7 +251,7 @@ it('keeps successful agent data when another fails and retries explicitly', asyn
       };
     });
   render(<WorkspaceHub agents={agents} online />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Tasks' }));
+  fireEvent.click(screen.getByRole('tab', { name: /^Tasks/ }));
   expect(await screen.findByText('Write campaign')).toBeVisible();
   expect(screen.getByRole('alert')).toHaveTextContent('Beta: Unavailable');
   tasks.mockResolvedValue({ revision: '2', tasks: [] });
@@ -270,7 +272,7 @@ it('ignores a stale notes response after switching to schedules', async () => {
   );
   vi.spyOn(daemon, 'listSchedules').mockResolvedValue({ schedules: [] });
   render(<WorkspaceHub agents={[agents[0]]} online />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Schedules' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Schedules' }));
   expect(await screen.findByText('No schedules yet.')).toBeVisible();
   resolveNotes({ memories: [] });
   await waitFor(() =>

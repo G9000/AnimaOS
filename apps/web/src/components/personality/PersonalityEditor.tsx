@@ -509,6 +509,7 @@ export function PersonalityEditor({
                       </pre>
                       <textarea
                         className="field"
+                        aria-label="Personality document"
                         rows={18}
                         value={draft}
                         disabled={busy}

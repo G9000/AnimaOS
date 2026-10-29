@@ -37,6 +37,7 @@ import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
 /** The parts of the companion's own configuration. Each Settings page shows
  *  the ones it is about; one save covers whatever the page shows. */
 export type SettingsSection = 'profile' | 'model' | 'access' | 'builtins';
+type DangerAction = 'reset' | 'delete';
 const ALL_SECTIONS: readonly SettingsSection[] = ['profile', 'model', 'access'];
 
 const ACCESS_ORDER: readonly AccessProfile[] = [
@@ -339,7 +340,10 @@ export function SettingsPanel({
   const [toolChainStatus, setToolChainStatus] = useState('loading');
   const [savedFlash, setSavedFlash] = useState(false);
   const [orbStyleOpen, setOrbStyleOpen] = useState(false);
-  const [confirmDangerous, setConfirmDangerous] = useState(false);
+  // Which destructive action waits for confirmation, and which one ran last
+  // (it shows Working… while the shell finishes it).
+  const [confirmDanger, setConfirmDanger] = useState<DangerAction | null>(null);
+  const [lastDanger, setLastDanger] = useState<DangerAction | null>(null);
   const saveErrorRef = useRef<HTMLDivElement>(null);
   const resetErrorRef = useRef<HTMLDivElement>(null);
   const controlsDisabled = saving || resetting;
@@ -615,6 +619,51 @@ export function SettingsPanel({
       setTimeout(() => setSavedFlash(false), 2000);
     }
   };
+
+  // A main agent can be reset (it keeps its chats and files) or deleted; a
+  // helper can only be deleted.
+  const dangerActions: readonly {
+    id: DangerAction;
+    icon: 'arrow-counter-clockwise-fill' | 'x-circle-fill';
+    title: string;
+    help: string;
+    open: string;
+    confirmTitle: string;
+    confirmCopy: string;
+    confirm: string;
+    run: () => void;
+  }[] = [
+    ...(isMainAgent
+      ? [
+          {
+            id: 'reset' as const,
+            icon: 'arrow-counter-clockwise-fill' as const,
+            title: `Reset ${agent.name}`,
+            help: 'Clears personality and memory. Files stay.',
+            open: 'Reset…',
+            confirmTitle: `Reset ${agent.name}?`,
+            confirmCopy:
+              'This clears its personality and agent memory, then restores the Balanced personality. Its files and chats stay.',
+            confirm: 'Reset',
+            run: resetAgent,
+          },
+        ]
+      : []),
+    {
+      id: 'delete',
+      icon: 'x-circle-fill',
+      title: `Delete ${agent.name}`,
+      help: `Removes ${agent.name}, its chats and memories. Other agents stay.`,
+      open: 'Delete…',
+      confirmTitle: `Delete ${agent.name}?`,
+      confirmCopy:
+        'This permanently removes the agent and its conversations. This cannot be undone.',
+      confirm: 'Delete agent',
+      run: deleteAgent,
+    },
+  ];
+  const confirming =
+    dangerActions.find((action) => action.id === confirmDanger) ?? null;
 
   const abilities = [
     {
@@ -925,7 +974,7 @@ export function SettingsPanel({
                 </div>
               </AgentProfileDetails>
               <PersonalityEditor
-                key={agent.id}
+                key={agent.id + '-personality'}
                 agentId={agent.id}
                 disabled={controlsDisabled}
                 compactProfile
@@ -1102,38 +1151,38 @@ export function SettingsPanel({
                 </span>
                 <span className="settings-item-action">Edit</span>
               </button>
-              <section
-                className="settings-item settings-danger"
-                aria-labelledby="settings-reset"
-              >
-                <span
-                  className="settings-item-icon profile-reset-icon"
-                  aria-hidden="true"
+              {dangerActions.map((action) => (
+                <section
+                  key={action.id}
+                  className="settings-item settings-danger"
+                  aria-labelledby={`settings-${action.id}`}
                 >
-                  <PenIcon name="arrow-counter-clockwise-fill" size={16} />
-                </span>
-                <div className="settings-item-text">
-                  <h3 id="settings-reset">
-                    {isMainAgent ? `Reset ${agent.name}` : `Delete ${agent.name}`}
-                  </h3>
-                  <p>
-                    {isMainAgent
-                      ? 'Clears personality and memory. Files stay.'
-                      : `Removes ${agent.name}, its chats and memories. Other agents stay.`}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDangerous(true)}
-                  aria-describedby={
-                    resetError ? 'settings-reset-error' : undefined
-                  }
-                  disabled={resetting || saving}
-                >
-                  {resetting ? 'Working…' : isMainAgent ? 'Reset…' : 'Delete…'}
-                </button>
-              </section>
-              {confirmDangerous && (
+                  <span
+                    className="settings-item-icon profile-reset-icon"
+                    aria-hidden="true"
+                  >
+                    <PenIcon name={action.icon} size={16} />
+                  </span>
+                  <div className="settings-item-text">
+                    <h3 id={`settings-${action.id}`}>{action.title}</h3>
+                    <p>{action.help}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDanger(action.id)}
+                    aria-describedby={
+                      resetError ? 'settings-reset-error' : undefined
+                    }
+                    disabled={resetting || saving}
+                  >
+                    {resetting &&
+                    (lastDanger ?? dangerActions[0].id) === action.id
+                      ? 'Working…'
+                      : action.open}
+                  </button>
+                </section>
+              ))}
+              {confirming && (
                 <div
                   className="settings-danger-confirm"
                   role="alertdialog"
@@ -1142,27 +1191,25 @@ export function SettingsPanel({
                 >
                   <div>
                     <strong id="settings-danger-confirm-title">
-                      {isMainAgent ? `Reset ${agent.name}?` : `Delete ${agent.name}?`}
+                      {confirming.confirmTitle}
                     </strong>
                     <p id="settings-danger-confirm-copy">
-                      {isMainAgent
-                        ? 'This clears its personality and agent memory, then restores the Balanced personality. Its files and chats stay.'
-                        : 'This permanently removes the agent and its conversations. This cannot be undone.'}
+                      {confirming.confirmCopy}
                     </p>
                   </div>
-                  <button type="button" onClick={() => setConfirmDangerous(false)} disabled={resetting}>
+                  <button type="button" onClick={() => setConfirmDanger(null)} disabled={resetting}>
                     Cancel
                   </button>
                   <button
                     type="button"
                     disabled={resetting || saving}
                     onClick={() => {
-                      setConfirmDangerous(false);
-                      if (isMainAgent) resetAgent();
-                      else deleteAgent();
+                      setConfirmDanger(null);
+                      setLastDanger(confirming.id);
+                      confirming.run();
                     }}
                   >
-                    {isMainAgent ? 'Reset' : 'Delete agent'}
+                    {confirming.confirm}
                   </button>
                 </div>
               )}

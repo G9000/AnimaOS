@@ -68,10 +68,10 @@ describe('ProviderKeys', () => {
 
     render(<ProviderKeys providers={PROVIDERS} />);
     expect(await screen.findByText('sk-env…0000')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'API keys' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Brains' })).toBeVisible();
     expect(
       screen.getByText(
-        'Several keys for one provider take turns. A key that hits a limit rests and the next one is used.',
+        "Keys stay in the operating-system keychain, never in anima's files.",
       ),
     ).toBeVisible();
 

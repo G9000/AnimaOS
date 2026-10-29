@@ -401,10 +401,10 @@ select.field {
     color: var(--color-ink);
   }
 
-  input[type='checkbox'] {
+  /* The tick is a background image, so pages that draw their own switch
+   * knob in ::after keep it. */
+  input[type='checkbox']:not([role='switch']) {
     appearance: none;
-    display: inline-grid;
-    place-content: center;
     flex: none;
     width: 16px;
     height: 16px;
@@ -418,31 +418,18 @@ select.field {
       background-color 140ms ease;
   }
 
-  input[type='checkbox']::after {
-    content: '';
-    width: 9px;
-    height: 5px;
-    margin-top: -2px;
-    border-bottom: 2px solid var(--color-accent-fg);
-    border-left: 2px solid var(--color-accent-fg);
-    transform: rotate(-45deg) scale(0);
-    transition: transform 120ms ease;
-  }
-
-  input[type='checkbox']:hover:not(:disabled) {
+  input[type='checkbox']:not([role='switch']):hover:not(:disabled) {
     border-color: var(--control-muted);
   }
 
-  input[type='checkbox']:checked {
+  input[type='checkbox']:not([role='switch']):checked {
     border-color: var(--color-accent);
-    background: var(--color-accent);
+    background: var(--color-accent)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23191119' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12.5 9.5 18 20 6'/%3E%3C/svg%3E")
+      center / 10px no-repeat;
   }
 
-  input[type='checkbox']:checked::after {
-    transform: rotate(-45deg) scale(1);
-  }
-
-  input[type='checkbox']:disabled {
+  input[type='checkbox']:not([role='switch']):disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }

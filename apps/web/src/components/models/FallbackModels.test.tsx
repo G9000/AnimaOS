@@ -46,10 +46,10 @@ describe('FallbackModels', () => {
       />,
     );
     expect(
-      screen.getByRole('heading', { name: 'If this model fails' }),
+      screen.getByRole('heading', { name: "When it can't answer" }),
     ).toBeVisible();
     expect(
-      screen.getByText('Tried in order, only before the reply starts.'),
+      screen.getByText('If the main model fails or hits a limit, anima tries these in order and tells you in the chat.'),
     ).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Save fallbacks' }),

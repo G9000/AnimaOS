@@ -93,13 +93,14 @@ describe('ApprovalsPage', () => {
     const { onOpenSession } = renderPage({ live: streamWith(approval) });
     // The page's reads settle first, so no update lands outside act().
     expect(
-      await screen.findByText(
-        'Always allow bash commands starting with “git status”',
-      ),
+      await screen.findByText('bash commands starting with “git status”'),
+    ).toBeVisible();
+    expect(
+      screen.getByText('1 request is waiting in your chats'),
     ).toBeVisible();
 
-    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
-    const card = within(waiting).getByRole('region', {
+    await user.click(screen.getByText('Review requests here'));
+    const card = screen.getByRole('region', {
       name: 'Approval needed: bash',
     });
     await user.click(
@@ -176,10 +177,10 @@ describe('ApprovalsPage', () => {
   it('offers no rule for another agent’s approval', async () => {
     const helper = approvalFixture('apr_2', { agentId: 'helper-7' });
     const mine = approvalFixture('apr_1');
+    const user = userEvent.setup();
     renderPage({ live: streamWith(mine, helper) });
-    await screen.findByText(
-      'Always allow bash commands starting with “git status”',
-    );
+    await screen.findByText('bash commands starting with “git status”');
+    await user.click(screen.getByText('Review requests here'));
 
     const cards = screen.getAllByRole('region', {
       name: 'Approval needed: bash',
@@ -235,9 +236,8 @@ describe('ApprovalsPage', () => {
     );
     renderPage();
 
-    const decided = screen.getByRole('region', {
-      name: 'Decided in the last 30 days',
-    });
+    await user.click(screen.getByText('Decision history'));
+    const decided = screen.getByText('Decision history').closest('details')!;
     expect(await within(decided).findByText('Always allowed')).toBeVisible();
     await user.click(
       within(decided).getByRole('button', { name: 'Show older' }),
@@ -282,20 +282,38 @@ describe('ApprovalsPage', () => {
       policy: { write: 'allow', exec: 'allow', network: 'allow', delegate: 'allow' },
     });
     renderPage();
-    expect(await screen.findByRole('radio', { name: /^Strict/ })).toBeChecked();
-    const exec = await screen.findByRole('region', { name: 'Runs commands' });
-    const policy = within(exec).getByRole('combobox', {
-      name: 'Policy for Runs commands',
-    });
-    await waitFor(() => expect(policy).toBeEnabled());
-    await user.selectOptions(policy, 'Deny');
+    // Autonomy sits behind More permission settings, apart from the rules.
+    const openAutonomy = async () => {
+      await user.click(screen.getByText('More permission settings'));
+      await user.click(
+        screen.getByRole('button', { name: /When it checks with you/ }),
+      );
+    };
+    await openAutonomy();
     expect(
-      await screen.findByText("You've set your own rules below."),
-    ).toBeVisible();
+      await screen.findByRole('radio', { name: /^Before every change/ }),
+    ).toBeChecked();
+    await user.click(screen.getByRole('button', { name: /Permissions/ }));
+
+    const exec = screen.getByRole('group', {
+      name: 'Default decision for Runs commands',
+    });
+    const block = within(exec).getByRole('button', { name: 'Block' });
+    await waitFor(() => expect(block).toBeEnabled());
+    await user.click(block);
+    await openAutonomy();
+    await waitFor(() =>
+      expect(screen.getByText('Custom').parentElement).toHaveAttribute(
+        'aria-current',
+        'true',
+      ),
+    );
     expect(read).toHaveBeenCalledTimes(2);
 
     const policyReads = vi.mocked(daemon.approvalPolicy).mock.calls.length;
-    await user.click(screen.getByRole('radio', { name: /^Free/ }));
+    await user.click(
+      screen.getByRole('radio', { name: /^Only for risky things/ }),
+    );
     await waitFor(() =>
       expect(vi.mocked(daemon.approvalPolicy).mock.calls.length).toBe(
         policyReads + 1,
@@ -317,23 +335,24 @@ describe('ApprovalsPage', () => {
     const add = vi.spyOn(daemon, 'addApprovalRule').mockResolvedValue(added);
     renderPage();
 
-    const exec = await screen.findByRole('region', { name: 'Runs commands' });
-    const policy = within(exec).getByRole('combobox', {
-      name: 'Policy for Runs commands',
+    const exec = await screen.findByRole('group', {
+      name: 'Default decision for Runs commands',
     });
-    await waitFor(() => expect(policy).toBeEnabled());
-    await user.selectOptions(policy, 'Deny');
+    const block = within(exec).getByRole('button', { name: 'Block' });
+    await waitFor(() => expect(block).toBeEnabled());
+    await user.click(block);
     expect(setPolicy).toHaveBeenCalledWith('agent-main', {
       ...DEFAULT_APPROVAL_POLICY,
       exec: 'deny',
     });
+    await waitFor(() => expect(block).toHaveAttribute('aria-pressed', 'true'));
 
+    const rules = screen.getByRole('region', { name: 'Rules' });
     expect(
-      within(exec).getByText(
-        'Always allow bash commands starting with “git status”',
-      ),
+      within(rules).getByText('bash commands starting with “git status”'),
     ).toBeVisible();
-    const form = within(exec).getByRole('form', {
+    await user.click(within(rules).getByText('Add rule · Runs commands'));
+    const form = within(rules).getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
     await user.type(within(form).getByLabelText('Match value'), 'npm test');
@@ -343,28 +362,23 @@ describe('ApprovalsPage', () => {
       matcher: { kind: 'command_prefix', value: 'npm test' },
     });
     expect(
-      await within(exec).findByText(
-        'Always allow bash commands starting with “npm test”',
-      ),
+      await within(rules).findByText('bash commands starting with “npm test”'),
     ).toBeVisible();
 
     await user.click(
-      within(exec).getByRole('button', {
+      within(rules).getByRole('button', {
         name: 'Remove rule: bash commands starting with “git status”',
       }),
     );
     expect(remove).toHaveBeenCalledWith('agent-main', 'rule_1');
     await waitFor(() =>
       expect(
-        within(exec).queryByText(
-          'Always allow bash commands starting with “git status”',
-        ),
+        within(rules).queryByText('bash commands starting with “git status”'),
       ).not.toBeInTheDocument(),
     );
-    const write = screen.getByRole('region', {
-      name: 'Changes files and records',
-    });
-    expect(within(write).getByText('No rules yet.')).toBeVisible();
+    expect(
+      within(rules).getAllByRole('button', { name: /^Remove rule/ }),
+    ).toHaveLength(1);
   });
 
   it('shows why a change did not go through', async () => {
@@ -374,11 +388,12 @@ describe('ApprovalsPage', () => {
     );
     renderPage();
 
-    const policy = await screen.findByRole('combobox', {
-      name: 'Policy for Uses the internet',
+    const network = await screen.findByRole('group', {
+      name: 'Default decision for Uses the internet',
     });
-    await waitFor(() => expect(policy).toBeEnabled());
-    await user.selectOptions(policy, 'Ask me first');
+    const ask = within(network).getByRole('button', { name: 'Ask me first' });
+    await waitFor(() => expect(ask).toBeEnabled());
+    await user.click(ask);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'control plane save failed',
@@ -389,7 +404,8 @@ describe('ApprovalsPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const form = await screen.findByRole('form', {
+    await user.click(await screen.findByText('Add rule · Runs commands'));
+    const form = screen.getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
     const warning = /A rule this broad lets your companion run almost anything/;

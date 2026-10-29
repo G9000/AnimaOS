@@ -68,7 +68,9 @@ function panel(
       resetError={null}
       saveSettings={save}
       resetAgent={vi.fn()}
-      sections={[section]}
+      // Individual abilities such as background helpers live with the
+      // built-in tools, beside the access level.
+      sections={section === 'access' ? ['access', 'builtins'] : [section]}
     />
   );
 }
@@ -128,7 +130,7 @@ describe('Helper routing and limits', () => {
       ),
     );
     expect(screen.getByLabelText('Allow background helpers')).not.toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: /Observe/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Look only/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
     const patch = save.mock.calls[0][0] as { tools: string[] };
@@ -250,7 +252,7 @@ describe('DelegationSettings draft', () => {
         resetError={null}
         saveSettings={save}
         resetAgent={vi.fn()}
-        sections={['model', 'access']}
+        sections={['model', 'access', 'builtins']}
       />,
     );
     fireEvent.click(screen.getByLabelText('Allow background helpers'));

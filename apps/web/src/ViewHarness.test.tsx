@@ -152,15 +152,49 @@ async function pickFromAgentMenu(
   await user.click(await screen.findByRole('menuitem', { name }));
 }
 
+/** The chat remounts once the main chat's address settles, replacing the
+ *  first composer; wait for that, then return the composer that stays. */
+async function readyComposer(placeholder: string) {
+  await waitFor(() => expect(window.location.hash).toMatch(/^#\/s\//));
+  const input = screen.getByPlaceholderText(placeholder);
+  await waitFor(() => expect(input).toBeEnabled());
+  return input;
+}
+
 /** Opens the thread switcher, where the sessions list lives. */
 async function openSessions(user: ReturnType<typeof userEvent.setup>) {
   if (screen.queryByRole('dialog', { name: 'History' })) return;
   await pickFromAgentMenu(user, 'Other conversations');
 }
 
-/** Opens the agent's settings from its menu. */
+/** Opens the agent's settings from its menu, with the name fields open
+ *  (they fold behind Change, or Rename for a helper). */
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await pickFromAgentMenu(user, /'s settings$/);
+  const identity = await screen.findByRole('region', { name: 'Identity' });
+  const edit = within(identity).queryByRole('button', {
+    name: /^(Change|Rename)$/,
+    expanded: false,
+  });
+  if (edit && !(edit as HTMLButtonElement).disabled) await user.click(edit);
+}
+
+/** Individual abilities live on the Tools page under Specific permissions. */
+async function openSpecificPermissions(
+  user: ReturnType<typeof userEvent.setup>,
+) {
+  await user.click(screen.getByRole('button', { name: 'Tools' }));
+  await user.click(await screen.findByText('Specific permissions'));
+}
+
+/** Deleting an agent asks first: open it, then confirm. */
+async function confirmDelete(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Delete…' }));
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Delete agent',
+    }),
+  );
 }
 
 /** Opens a settings page the way the owner does: through the command menu. */
@@ -420,7 +454,7 @@ it('M46 sends browser selection from the resolved main session without creating 
   });
   mockProviders();
   render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Alpha…');
+  const input = await readyComposer('Message Alpha…');
   const details = screen.getByText('Browser task').closest('details')!;
   details.open = true;
   fireEvent(details, new Event('toggle'));
@@ -719,7 +753,7 @@ it('opens the main companion without automatically executing a prepared assignme
   mockProviders();
   const send = vi.mocked(daemon.startRun);
   render(<ViewHarness />);
-  expect(await screen.findByPlaceholderText('Message Alpha…')).toBeVisible();
+  expect(await readyComposer('Message Alpha…')).toBeVisible();
   expect(send).not.toHaveBeenCalled();
   expect(
     screen.queryByRole('button', { name: 'Team' }),
@@ -738,7 +772,7 @@ it('keeps the companion draft and failed send while opening Work', async () => {
   const run = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
   vi.mocked(daemon.startRun).mockReturnValue(run.promise);
   render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Alpha…');
+  const input = await readyComposer('Message Alpha…');
   // The main chat resolves first; typing before that goes nowhere.
   await waitFor(() => expect(input).toBeEnabled());
   await user.type(input, 'Alpha request');
@@ -788,7 +822,7 @@ it('retains a completed reply after opening Work and keeps settings on the compa
   const run = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
   vi.mocked(daemon.startRun).mockReturnValue(run.promise);
   render(<ViewHarness />);
-  const input = await screen.findByPlaceholderText('Message Alpha…');
+  const input = await readyComposer('Message Alpha…');
   // The main chat resolves first; typing before that goes nowhere.
   await waitFor(() => expect(input).toBeEnabled());
   await user.type(input, 'Alpha request');
@@ -1308,7 +1342,7 @@ describe('persistent main conversation', () => {
     render(<ViewHarness />);
     expect(await screen.findByPlaceholderText('Message First…')).toBeDisabled();
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
     await screen.findByRole('heading', { name: 'Say something to Next' });
     await waitFor(() => expect(window.location.hash).toBe('#/s/chat%3Anew-1'));
     await act(async () =>
@@ -1489,8 +1523,10 @@ describe('ViewHarness workspace controller', () => {
 
     render(<ViewHarness />);
 
-    const composer = await screen.findByPlaceholderText('Message Nova…');
-    // The main chat resolves first; typing before that goes nowhere.
+    // The main chat resolves and its address settles first; typing before
+    // that goes into a composer that is about to be replaced.
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/s\//));
+    const composer = screen.getByPlaceholderText('Message Nova…');
     await waitFor(() => expect(composer).toBeEnabled());
     await user.type(composer, 'Half-written thought');
     await openSettings(user);
@@ -1656,7 +1692,7 @@ describe('ViewHarness workspace controller', () => {
 
     await screen.findByRole('heading', { name: 'Say something to First' });
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
     expect(
       await screen.findByRole('heading', { name: 'Say something to Next' }),
@@ -1692,7 +1728,7 @@ describe('ViewHarness workspace controller', () => {
 
     await screen.findByRole('heading', { name: 'Say something to First' });
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
     expect(
       await screen.findByRole('heading', { name: 'Say something to Next' }),
@@ -1769,6 +1805,18 @@ describe('ViewHarness workspace controller', () => {
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Nova Prime');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(updateAgent).toHaveBeenLastCalledWith('agent-main', {
+      name: 'Nova Prime',
+    });
+    // A saved name closes the name fields and shows the new identity.
+    expect(
+      await within(
+        screen.getByRole('region', { name: 'Identity' }),
+      ).findByText('Nova Prime'),
+    ).toBeVisible();
+
+    // SOUL.md opens its own editor; its guided fields live there.
     const savePersonality = vi
       .spyOn(daemon, 'saveAgentPersonality')
       .mockImplementation(async (_id, input) => ({
@@ -1778,6 +1826,8 @@ describe('ViewHarness workspace controller', () => {
         revision: 'saved-personality',
         maxChars: 16000,
       }));
+    await user.click(screen.getByRole('button', { name: /^SOUL\.md/ }));
+    await user.click(await screen.findByRole('tab', { name: 'Guided' }));
     const communication = await screen.findByRole('textbox', {
       name: 'Communication',
     });
@@ -1788,13 +1838,9 @@ describe('ViewHarness workspace controller', () => {
       content: '## Communication\nBe concise',
       revision: 'offline-personality',
     });
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(updateAgent).toHaveBeenLastCalledWith('agent-main', {
-      name: 'Nova Prime',
-    });
-    expect(await screen.findByDisplayValue('Nova Prime')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Model' }));
+    await user.click(screen.getByText('Change', { selector: 'summary' }));
     await user.selectOptions(
       screen.getByRole('combobox', { name: 'Provider' }),
       'anthropic',
@@ -1810,14 +1856,18 @@ describe('ViewHarness workspace controller', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Permissions' }));
-    await user.click(await screen.findByRole('radio', { name: /^Operate/ }));
+    await user.click(
+      await screen.findByRole('radio', { name: /^Run commands/ }),
+    );
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(updateAgent).toHaveBeenLastCalledWith('agent-main', {
       tools: toolNamesForProfile('operate'),
     });
     expect(updateAgent).toHaveBeenCalledTimes(3);
     await waitFor(() =>
-      expect(screen.getByRole('radio', { name: /^Operate/ })).toBeChecked(),
+      expect(
+        screen.getByRole('radio', { name: /^Run commands/ }),
+      ).toBeChecked(),
     );
     await user.click(
       screen.getByRole('button', { name: 'Open companion chat' }),
@@ -1872,10 +1922,11 @@ describe('ViewHarness workspace controller', () => {
     expect(
       screen.getByRole('button', { name: 'Open companion chat' }),
     ).toBeDisabled();
-    const reset = within(panel).getByRole('button', { name: 'Reset' });
-    expect(reset).toBeDisabled();
-    reset.removeAttribute('disabled');
-    fireEvent.click(reset);
+    const remove = within(panel).getByRole('button', { name: 'Delete…' });
+    expect(remove).toBeDisabled();
+    remove.removeAttribute('disabled');
+    fireEvent.click(remove);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(deleteAgent).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -1883,8 +1934,13 @@ describe('ViewHarness workspace controller', () => {
       await update.promise;
     });
 
-    expect(await screen.findByDisplayValue('Nova Prime')).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeEnabled();
+    // The adopted name closes the name fields and shows the new identity.
+    expect(
+      await within(
+        screen.getByRole('region', { name: 'Identity' }),
+      ).findByText('Nova Prime'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete…' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Permissions' })).toBeEnabled();
   });
 
@@ -1907,9 +1963,9 @@ describe('ViewHarness workspace controller', () => {
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
     const save = screen.getByRole('button', { name: 'Save changes' });
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
-    expect(screen.getByRole('button', { name: 'Resetting…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Working…' })).toBeDisabled();
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeDisabled();
     expect(save).toBeDisabled();
     save.removeAttribute('disabled');
@@ -2064,12 +2120,7 @@ describe('ViewHarness workspace controller', () => {
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
-    const communication = await screen.findByRole('textbox', {
-      name: 'Communication',
-    });
-    await user.clear(communication);
-    await user.type(communication, 'Unsaved personality');
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
     const close = screen.getByRole('button', { name: 'Open companion chat' });
     expect(close).toBeDisabled();
@@ -2088,7 +2139,7 @@ describe('ViewHarness workspace controller', () => {
     expect(alert).toHaveAttribute('id', 'settings-reset-error');
     expect(alert).toHaveAttribute('aria-live', 'assertive');
     expect(alert).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Reset' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Delete…' })).toHaveAttribute(
       'aria-describedby',
       'settings-reset-error',
     );
@@ -2096,7 +2147,6 @@ describe('ViewHarness workspace controller', () => {
       screen.getByRole('button', { name: 'Save changes' }),
     ).not.toHaveAttribute('aria-describedby');
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByDisplayValue('Unsaved personality')).toBeVisible();
     expect(close).toBeEnabled();
     await user.click(close);
     expect(
@@ -2141,11 +2191,6 @@ describe('ViewHarness workspace controller', () => {
     const name = screen.getByDisplayValue('Nova');
     await user.clear(name);
     await user.type(name, 'Unsaved Nova');
-    const communication = await screen.findByRole('textbox', {
-      name: 'Communication',
-    });
-    await user.clear(communication);
-    await user.type(communication, 'Unsaved personality');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(updateAgent).toHaveBeenCalledWith('agent-main', {
@@ -2167,7 +2212,6 @@ describe('ViewHarness workspace controller', () => {
     expect(alert).toHaveAttribute('aria-live', 'assertive');
     expect(alert).toHaveFocus();
     expect(screen.getByDisplayValue('Unsaved Nova')).toBeVisible();
-    expect(screen.getByDisplayValue('Unsaved personality')).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Nova', level: 1, hidden: true }),
     ).toBeInTheDocument();
@@ -2193,7 +2237,7 @@ describe('ViewHarness workspace controller', () => {
 
     await screen.findByRole('heading', { name: 'Say something to Only' });
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
     expect(
       await screen.findByRole('heading', { name: "I'm at your command" }),
@@ -2219,7 +2263,7 @@ describe('ViewHarness workspace controller', () => {
 
     await screen.findByRole('heading', { name: 'Say something to Only' });
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
 
     expect(
       await screen.findByRole('heading', { name: "I'm at your command" }),
@@ -2257,7 +2301,7 @@ describe('ViewHarness workspace controller', () => {
 
     await screen.findByRole('heading', { name: 'Say something to Nova' });
     await openSettings(user);
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await confirmDelete(user);
     act(() => runPoll?.());
     expect(listAgents).toHaveBeenCalledTimes(2);
 
@@ -2433,10 +2477,7 @@ it('retries a message that did not reach the daemon with the same key', async ()
   );
   render(<ViewHarness />);
   await openChat();
-  await user.type(
-    await screen.findByPlaceholderText('Message Nova…'),
-    'Plan the week',
-  );
+  await user.type(await readyComposer('Message Nova…'), 'Plan the week');
   await user.click(screen.getByRole('button', { name: 'Send' }));
 
   expect(
@@ -2469,7 +2510,7 @@ it('cancels a message that is still retrying and offers it back with its key', a
   );
   render(<ViewHarness />);
   await openChat();
-  const input = await screen.findByPlaceholderText('Message Nova…');
+  const input = await readyComposer('Message Nova…');
   await user.type(input, 'Plan the week');
   await user.click(screen.getByRole('button', { name: 'Send' }));
   expect(
@@ -3017,10 +3058,7 @@ it('keeps drafts in memory when session storage refuses them', async () => {
   );
   render(<ViewHarness />);
 
-  await user.type(
-    await screen.findByPlaceholderText('Message Nova…'),
-    'Keep this thought',
-  );
+  await user.type(await readyComposer('Message Nova…'), 'Keep this thought');
   await goToPage(user, 'Work');
   await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
   expect(screen.getByPlaceholderText('Message Nova…')).toHaveValue(
@@ -3049,7 +3087,7 @@ it('offers a message still retrying when the page reloads before it is answered 
   mockProviders();
   vi.mocked(daemon.startRun).mockReturnValue(new Promise(() => {}));
   const first = render(<ViewHarness />);
-  const firstInput = await screen.findByPlaceholderText('Message Alpha…');
+  const firstInput = await readyComposer('Message Alpha…');
   await waitFor(() => expect(firstInput).toBeEnabled());
   await user.type(firstInput, 'Still on its way');
   await user.click(screen.getByRole('button', { name: 'Send' }));
@@ -3057,6 +3095,10 @@ it('offers a message still retrying when the page reloads before it is answered 
   first.unmount();
 
   render(<ViewHarness />);
+  // Restoring needs the chat's attachments ready; until then it is ignored.
+  await waitFor(() =>
+    expect(screen.getByLabelText('Choose attachments')).toBeEnabled(),
+  );
   await user.click(
     await screen.findByRole('button', { name: 'Restore message' }),
   );
@@ -3091,7 +3133,7 @@ it('keeps a follow-up draft in the same main session while the first send is acc
     });
   render(<ViewHarness />);
   await openChat();
-  const input = await screen.findByPlaceholderText('Message Nova…');
+  const input = await readyComposer('Message Nova…');
   await waitFor(() => expect(input).toBeEnabled());
   await user.type(input, 'First question');
   await user.click(screen.getByRole('button', { name: 'Send' }));
@@ -3245,7 +3287,7 @@ it('shows the companion’s memory at #/memory', async () => {
   expect(daemon.recentMemories).toHaveBeenCalledWith('agent-main', 200);
 });
 
-it('shows the companion’s usage at #/usage', async () => {
+it('shows usage for all agents at #/usage', async () => {
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
     agents: [snapshot('agent-main', 'Nova', 1)],
@@ -3264,12 +3306,15 @@ it('shows the companion’s usage at #/usage', async () => {
   window.history.replaceState(null, '', '/#/usage');
   render(<ViewHarness />);
 
+  // The per-model table folds under Other breakdowns.
+  fireEvent.click(await screen.findByText('Other breakdowns'));
   expect(await screen.findByText('openai/gpt-5.4')).toBeVisible();
+  // Usage now covers every agent, with the monthly limit beside it.
   expect(
-    screen.getByRole('heading', { name: 'What your companion costs' }),
-  ).toBeVisible();
+    screen.getByRole('heading', { name: 'What all agents cost' }),
+  ).toBeInTheDocument();
   expect(daemon.usageSummary).toHaveBeenCalledWith(
-    expect.objectContaining({ agentId: 'agent-main', groupBy: 'day' }),
+    expect.objectContaining({ groupBy: 'day' }),
   );
 });
 
@@ -3819,7 +3864,7 @@ it('M45 reconciles acknowledged bundle removal permissions without overwriting n
   });
   mockProviders();
   const poll = capturePollTimer();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   const card = within(
     await screen.findByRole('article', {
@@ -3882,7 +3927,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
   vi.spyOn(communityBundlesOwnerApi, 'get').mockResolvedValue(bundle);
   vi.spyOn(communityBundlesOwnerApi, 'remove').mockReturnValue(removal.promise);
   mockProviders();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   const card = within(
     await screen.findByRole('article', {
@@ -3912,7 +3957,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
   });
   expect(daemon.getAgent).not.toHaveBeenCalled();
   await openSettings(user);
-  await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await openSpecificPermissions(user);
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
   );
@@ -3927,7 +3972,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
     'read_file',
     'unknown_custom',
   ]);
-  await goToPage(user, 'Connections');
+  await goToPage(user, 'Tools');
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: 'Refresh bundle status' }),
@@ -3942,7 +3987,7 @@ it('M45 unmounted removal keeps Settings fenced until an explicit canonical bund
     ).not.toBeInTheDocument(),
   );
   await openSettings(user);
-  await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await openSpecificPermissions(user);
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
   );
@@ -3989,7 +4034,7 @@ it('M43 reconciles canonical grant descriptors without overwriting newer setting
   });
   mockProviders();
   const poll = capturePollTimer();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
   await waitFor(() =>
@@ -4043,7 +4088,7 @@ it('M43 reconciles deleted aliases while preserving actual native and unrelated 
     .mockResolvedValue(canonical.state.config.tools!.map((tool) => tool.name));
   vi.spyOn(mcpOwnerApi, 'remove').mockResolvedValue(undefined);
   mockProviders();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   await user.click(
     await screen.findByRole('button', { name: 'Remove saved connection' }),
@@ -4093,7 +4138,7 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
   vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
   vi.spyOn(mcpOwnerApi, 'setGrant').mockRejectedValue({ status: 503 });
   mockProviders();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
   await screen.findByText(
@@ -4115,7 +4160,7 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
   expect(
     screen.queryByRole('heading', { name: 'External tools (MCP)' }),
   ).not.toBeInTheDocument();
-  await goToPage(user, 'Connections');
+  await goToPage(user, 'Tools');
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: 'Refresh status' }),
@@ -4138,6 +4183,12 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
     ),
   ).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Profile' }));
+  await user.click(
+    within(screen.getByRole('region', { name: 'Identity' })).getByRole(
+      'button',
+      { name: 'Change' },
+    ),
+  );
   const nextName = screen.getByDisplayValue('Nova');
   await user.clear(nextName);
   await user.type(nextName, 'Edited Nova');
@@ -4167,7 +4218,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
   vi.mocked(mcpOwnerApi.list).mockResolvedValue([external]);
   vi.spyOn(mcpOwnerApi, 'setGrant').mockReturnValue(pending.promise);
   mockProviders();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
   await user.click(screen.getByRole('button', { name: 'Open companion chat' }));
@@ -4184,7 +4235,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
   });
   expect(daemon.getAgent).not.toHaveBeenCalled();
   await openSettings(user);
-  await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await openSpecificPermissions(user);
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
   );
@@ -4198,7 +4249,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
   vi.mocked(mcpOwnerApi.toolNames).mockResolvedValue(
     canonical.state.config.tools!.map((tool) => tool.name),
   );
-  await goToPage(user, 'Connections');
+  await goToPage(user, 'Tools');
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: 'Refresh status' }),
@@ -4209,7 +4260,7 @@ it('M43 an acknowledged grant after navigation blocks optional Settings writes u
     expect(screen.getByRole('button', { name: 'Revoke lookup' })).toBeEnabled(),
   );
   await openSettings(user);
-  await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await openSpecificPermissions(user);
   await user.click(
     await screen.findByRole('checkbox', { name: 'Allow removing saved facts' }),
   );
@@ -4245,7 +4296,7 @@ it('M43 never adds an old owner back when the canonical permission read settles 
   });
   mockProviders();
   const poll = capturePollTimer();
-  window.history.replaceState(null, '', '/#/connectors');
+  window.history.replaceState(null, '', '/#/capabilities');
   render(<ViewHarness />);
   await user.click(await screen.findByRole('button', { name: 'Grant lookup' }));
   await waitFor(() => expect(daemon.getAgent).toHaveBeenCalledWith('agent-a'));
@@ -4311,6 +4362,8 @@ it.each([
     );
     window.history.replaceState(null, '', '/#/connectors');
     render(<ViewHarness />);
+    // Discord's controls open in its drawer on the Connections page.
+    await user.click(await screen.findByRole('button', { name: 'Discord' }));
     await user.click(
       await screen.findByRole('button', {
         name: thread ? 'Open #topic' : 'Open conversation',

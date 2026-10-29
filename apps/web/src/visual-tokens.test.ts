@@ -97,9 +97,15 @@ describe('Anima operator visual contract', () => {
   });
 
   it('contains no legacy blue or purple accent tokens in production sources', () => {
+    // The owner-picked orb palette may offer violet; it is a choice, not an
+    // app accent.
+    const accents = productionPaths
+      .filter((path) => !path.replaceAll('\\', '/').endsWith('lib/orb-style-preferences.ts'))
+      .map((path) => readFileSync(path, 'utf8'))
+      .join('\n');
     expect(production).not.toMatch(/\b(?:sky|purple|violet)-/i);
-    expect(production).not.toMatch(/#(?:38bdf8|a78bfa|7dd3fc|0ea5e9)/i);
-    expect(production).not.toMatch(
+    expect(accents).not.toMatch(/#(?:38bdf8|a78bfa|7dd3fc|0ea5e9)/i);
+    expect(accents).not.toMatch(
       /rgba?\(\s*(?:56\s*,\s*189\s*,\s*248|167\s*,\s*139\s*,\s*250|125\s*,\s*211\s*,\s*252)/i,
     );
   });
