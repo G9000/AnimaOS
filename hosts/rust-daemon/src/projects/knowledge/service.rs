@@ -13,7 +13,7 @@ use tokio::time::Instant;
 use super::cache::Cache;
 use super::extraction;
 use super::folder::{self, FolderSnapshot};
-use super::scope::{DocumentWitness, KnowledgeWitness, Purpose, Scope, Source};
+use super::scope::{DocumentWitness, KnowledgeWitness, Purpose, Scope, Source, SourceGrant};
 use super::types::{
     KnowledgeCitation, KnowledgeHit, KnowledgeSearch, KnowledgeSourceState, KnowledgeSourceStatus,
     KnowledgeStatus,
@@ -26,6 +26,8 @@ use crate::projects::{ProjectError, ProjectRecord, ProjectResourceTarget};
 
 const DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
 const BUSY_BACKOFF: Duration = Duration::from_millis(50);
+const REMOTE_SOURCE_DEADLINE: Duration = Duration::from_secs(5);
+const REMOTE_PASS_RESERVE: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum IndexRefresh {
@@ -139,6 +141,16 @@ impl KnowledgeService {
         self.reconcile(state, project_id).await?;
         scope.check(state).await?;
         for source in &scope.sources {
+            if let SourceGrant::Connected(grant) = &source.grant {
+                if scope
+                    .check_source_state(&*state.read().await, source)
+                    .is_err()
+                    || crate::projects::connected::check(&*state.read().await, grant).is_err()
+                {
+                    self.mark_source_unavailable(&scope, source);
+                }
+                continue;
+            }
             let physical_scope = scope.clone();
             let checked_source = source.clone();
             let health = read_retained_with_slots(
@@ -279,7 +291,10 @@ impl KnowledgeService {
         witness.check(state).await?;
         Ok(KnowledgeSearch {
             binding: self.projection(&scope),
-            hits: hits.into_iter().map(public_hit).collect(),
+            hits: hits
+                .into_iter()
+                .map(|hit| public_hit(hit, &scope))
+                .collect(),
         })
     }
 
@@ -302,7 +317,10 @@ impl KnowledgeService {
             .await?;
         witness.check(state).await?;
         Ok(KnowledgeRetrieval {
-            passages: hits.into_iter().map(public_hit).collect(),
+            passages: hits
+                .into_iter()
+                .map(|hit| public_hit(hit, &scope))
+                .collect(),
             sources: self.projection(&scope).sources,
             witness,
         })
@@ -355,7 +373,7 @@ impl KnowledgeService {
             project_revision: scope.project.revision,
             access_epoch: scope.project.access_epoch,
             member_generation: scope.member_generation,
-            hit: public_hit(hit),
+            hit: public_hit(hit, &scope),
             text,
         })
     }
@@ -385,11 +403,8 @@ impl KnowledgeService {
                             .resources
                             .iter()
                             .filter_map(|resource| {
-                                matches!(
-                                    resource.target,
-                                    ProjectResourceTarget::KnowledgeFolder { .. }
-                                )
-                                .then_some(resource.id.clone())
+                                crate::projects::connected::is_knowledge(&resource.target)
+                                    .then_some(resource.id.clone())
                             })
                             .collect::<Vec<_>>()
                     })
@@ -489,17 +504,56 @@ impl KnowledgeService {
 
     async fn snapshot(
         &self,
+        state: &SharedDaemonState,
         scope: &Scope,
         source: &Source,
         cancel: &CancelSignal,
         deadline: Instant,
         budget: usize,
     ) -> Result<FolderSnapshot, ProjectError> {
+        if let SourceGrant::Connected(_) = &source.grant {
+            scope.check_source_state(&*state.read().await, source)?;
+            if deadline.saturating_duration_since(Instant::now()) <= REMOTE_PASS_RESERVE {
+                return Err(ProjectError::AccessUnavailable);
+            }
+            // Leave time to return already verified healthy sources after a remote timeout.
+            let source_deadline =
+                (deadline - REMOTE_PASS_RESERVE).min(Instant::now() + REMOTE_SOURCE_DEADLINE);
+            let snapshot = scope
+                .read_connected_retained(
+                    state,
+                    source,
+                    cancel,
+                    source_deadline,
+                    self.inner.reads.clone(),
+                )
+                .await
+                .map_err(|error| match error {
+                    ProjectError::Deadline | ProjectError::Busy => ProjectError::AccessUnavailable,
+                    error => error,
+                })?;
+            if snapshot.bytes.len() > budget {
+                return Ok(FolderSnapshot {
+                    documents: Vec::new(),
+                    omitted_count: 1,
+                });
+            }
+            return Ok(FolderSnapshot {
+                documents: vec![super::folder::FolderDocument {
+                    relative_path: snapshot.name,
+                    bytes: snapshot.bytes,
+                    sha256: snapshot.source_sha256,
+                }],
+                omitted_count: usize::from(snapshot.partial),
+            });
+        }
         loop {
             scope.check_physical()?;
             check(cancel, deadline)?;
             let physical_scope = scope.clone();
-            let grant = source.grant.clone();
+            let SourceGrant::Folder(grant) = source.grant.clone() else {
+                return Err(ProjectError::AccessUnavailable);
+            };
             let checked_source = source.clone();
             let signal = cancel.clone();
             let result = read_retained_with_slots(
@@ -538,13 +592,13 @@ impl KnowledgeService {
         for source in &scope.sources {
             scope.check(state).await?;
             let snapshot = self
-                .snapshot(scope, source, cancel, deadline, remaining)
+                .snapshot(state, scope, source, cancel, deadline, remaining)
                 .await;
             scope.check(state).await?;
             check(cancel, deadline)?;
             let snapshot = match snapshot {
                 Ok(value) => value,
-                Err(ProjectError::AccessUnavailable) => {
+                Err(ProjectError::AccessUnavailable | ProjectError::AccessRevoked) => {
                     self.mark_source_unavailable(scope, source);
                     continue;
                 }
@@ -667,25 +721,40 @@ impl KnowledgeService {
             let checked_source = source.clone();
             let signal = cancel.clone();
             let expected_manifest = manifest.clone();
+            if matches!(&source.grant, SourceGrant::Connected(_)) {
+                match self
+                    .snapshot(state, scope, source, cancel, deadline, read_bytes)
+                    .await
+                {
+                    Ok(verified) if fingerprint(&verified) == expected_manifest => {}
+                    Ok(_) | Err(ProjectError::AccessUnavailable | ProjectError::AccessRevoked) => {
+                        self.mark_source_unavailable(scope, source);
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             let publication = read_retained_with_slots(
                 move || {
                     let state = shared.blocking_read();
                     physical_scope.check_state(&state)?;
                     physical_scope.check_source(&checked_source)?;
-                    let verified = folder::scan_folder_with_budget(
-                        &checked_source.grant,
-                        &signal,
-                        read_bytes,
-                        || {
-                            physical_scope
-                                .check_physical()
-                                .map_err(|error| error.to_string())?;
-                            check(&signal, deadline).map_err(|error| error.to_string())
-                        },
-                    )
-                    .map_err(|_| ProjectError::AccessUnavailable)?;
-                    if fingerprint(&verified) != expected_manifest {
-                        return Err(ProjectError::ScopeChanged);
+                    if let SourceGrant::Connected(grant) = &checked_source.grant {
+                        physical_scope.check_source_state(&state, &checked_source)?;
+                        crate::projects::connected::check(&state, grant)?;
+                    }
+                    if let SourceGrant::Folder(grant) = &checked_source.grant {
+                        let verified =
+                            folder::scan_folder_with_budget(grant, &signal, read_bytes, || {
+                                physical_scope
+                                    .check_physical()
+                                    .map_err(|error| error.to_string())?;
+                                check(&signal, deadline).map_err(|error| error.to_string())
+                            })
+                            .map_err(|_| ProjectError::AccessUnavailable)?;
+                        if fingerprint(&verified) != expected_manifest {
+                            return Err(ProjectError::ScopeChanged);
+                        }
                     }
                     cache
                         .run(|store| {
@@ -893,7 +962,35 @@ impl KnowledgeService {
     }
 }
 
-fn public_hit(hit: SearchHit) -> KnowledgeHit {
+fn public_hit(hit: SearchHit, scope: &Scope) -> KnowledgeHit {
+    let origin = scope
+        .sources
+        .iter()
+        .find(|source| source.id == hit.source_id)
+        .and_then(|source| {
+            let SourceGrant::Connected(grant) = &source.grant else {
+                return None;
+            };
+            Some(super::types::ConnectedCitationOrigin {
+                owner_agent_id: grant.owner_agent_id.clone(),
+                connector_id: grant.connector_id.clone(),
+                provider: grant.provider.clone(),
+                owner_name: source.owner_name.clone(),
+                account_label: source.account_label.clone(),
+                remote_id: grant.remote_id.clone(),
+                revision_sha256: hit.source_sha256.clone(),
+                verified_at_ms: now_ms(),
+                coverage: if grant.provider == "email" {
+                    "Selected retained IMAP message only; full thread unavailable"
+                } else if grant.source_kind
+                    == anima_document_store_sqlite::connected::ConnectedSourceKind::EmailThread
+                {
+                    "Up to 25 messages and 1 MiB text; attachments omitted"
+                } else {
+                    "One selected file; supported bounded text"
+                },
+            })
+        });
     KnowledgeHit {
         citation_id: hit.citation_id,
         resource_id: hit.source_id,
@@ -901,6 +998,7 @@ fn public_hit(hit: SearchHit) -> KnowledgeHit {
         title: hit.title,
         locator: hit.locator,
         excerpt: hit.excerpt,
+        origin,
         source_sha256: hit.source_sha256,
         chunk_sha256: hit.chunk_sha256,
     }

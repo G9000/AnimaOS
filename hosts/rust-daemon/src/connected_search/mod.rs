@@ -1267,6 +1267,7 @@ pub(crate) fn reconcile_all(state: &mut DaemonState) {
         );
     }
     crate::account_workflows::reconcile_authority(state);
+    crate::projects::connected::reconcile_access(state);
 }
 
 /// Restore a conservative event fence for any deeper-search record predating it.

@@ -6,6 +6,8 @@ import {
   type StartRunResult,
   type UploadedAttachment,
   type BrowserSelection,
+  type PreviewEditContext,
+  validPreviewEditContext,
 } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
@@ -45,6 +47,8 @@ export interface SessionSend {
   skill?: string;
   /** One in-memory owner selection; never restored from sessionStorage. */
   browserSelection?: BrowserSelection;
+  /** Exact data restriction, retained across retry and recovery without adding grants. */
+  documentEditContext?: PreviewEditContext;
   /** Plan mode when this message was sent; not restored after a reload. */
   plan?: boolean;
   /** Telegram errors are scrubbed of bot tokens before they are shown. */
@@ -100,6 +104,7 @@ export interface PersistedSend {
   attachmentIds?: string[];
   attachments?: UploadedAttachment[];
   skill?: string;
+  documentEditContext?: PreviewEditContext;
 }
 
 const PENDING_SENDS_STORAGE_KEY = 'animaos.pendingSends';
@@ -128,6 +133,11 @@ function decodePersistedSend(value: unknown): PersistedSend | null {
     conversation: item.conversation,
     createdAtMs: item.createdAtMs as number,
   };
+  if (item.documentEditContext !== undefined) {
+    if (!validPreviewEditContext(item.documentEditContext) || typeof item.agentId !== 'string' || !validAttachmentId(item.agentId) || typeof item.sessionId !== 'string' || !validAttachmentId(item.sessionId) || item.conversation !== `${item.agentId}\u0000session:${item.sessionId}`) return null;
+    base.documentEditContext = item.documentEditContext;
+    base.agentId = item.agentId; base.sessionId = item.sessionId;
+  } else if (item.text.includes('BEGIN_PREVIEW_EDIT_CONTEXT')) return null;
   if (item.skill !== undefined) {
     if (
       typeof item.skill !== 'string' ||
@@ -222,6 +232,7 @@ function toPersisted(send: SessionSend): PersistedSend {
     conversation: send.conversation,
     createdAtMs: send.createdAtMs,
     ...(send.skill ? { skill: send.skill } : {}),
+    ...(send.documentEditContext ? { documentEditContext: send.documentEditContext, agentId: send.agentId, sessionId: send.sessionId } : {}),
     ...(send.attachmentIds?.length
       ? {
           agentId: send.agentId,
@@ -265,6 +276,10 @@ export class SendQueue {
 
   readonly send = (input: NewSessionSend): void => {
     if (this.sends.some((item) => item.key === input.key)) return;
+    if ((input.documentEditContext !== undefined && (!validPreviewEditContext(input.documentEditContext) || input.telegram || input.discord || input.mode !== 'queue' || input.skill || input.browserSelection || input.attachmentIds?.length || input.conversation !== `${input.agentId}\u0000session:${input.sessionId}`)) || (!input.documentEditContext && input.text.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
+      this.callbacks.onFailed({ ...input, createdAtMs: Date.now(), failures: 0, steeringRunId: null }, new Error('This edit needs a current content selection in its original web chat. Select the content again.'));
+      return;
+    }
     this.knownAttachments = rememberRunAttachments(
       this.knownAttachments,
       input.agentId,
@@ -276,6 +291,7 @@ export class SendQueue {
       ...this.sends,
       {
         ...input,
+        ...(input.documentEditContext ? { documentEditContext: JSON.parse(JSON.stringify(input.documentEditContext)) as PreviewEditContext } : {}),
         ...(input.browserSelection
           ? {
               browserSelection: {
@@ -415,6 +431,7 @@ export class SendQueue {
           ...(send.browserSelection
             ? { browserSelection: send.browserSelection }
             : {}),
+          ...(send.documentEditContext ? { documentEditContext: send.documentEditContext } : {}),
           timeZone: localTimeZone(),
         },
         send.key,

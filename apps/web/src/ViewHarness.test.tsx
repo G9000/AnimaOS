@@ -2678,6 +2678,53 @@ it('gives a restored message that was edited a new key', async () => {
   expect(editedKey).not.toBe(firstKey);
 });
 
+it('keeps a recovered preview edit restricted after reload and instruction changes', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [snapshot('agent-main', 'Nova', 1)] });
+  mockProviders();
+  routes.sessions.push(sessionFixture('room-7', { title: 'Document editing', origin: 'api', lastActivityAtMs: Date.now() }));
+  const documentEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
+  sessionStorage.setItem('animaos.pendingSends', JSON.stringify([{ key: 'recovered-edit', text: 'Rewrite this\nBEGIN_PREVIEW_EDIT_CONTEXT\n{}', conversation: 'agent-main\u0000session:room-7', agentId: 'agent-main', sessionId: 'room-7', createdAtMs: 1, documentEditContext }]));
+  window.history.replaceState(null, '', '/#/s/room-7');
+  render(<ViewHarness />);
+  await waitFor(() => expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled());
+  await user.click(await screen.findByRole('button', { name: 'Restore message' }));
+  const input = screen.getByPlaceholderText('Message Nova…');
+  expect(input).toHaveValue('Rewrite this\nBEGIN_PREVIEW_EDIT_CONTEXT\n{}');
+  expect(screen.getByRole('region', { name: 'Selected content for edit' })).toHaveTextContent('Hello');
+  fireEvent.change(input, { target: { value: 'Use a warmer tone' } });
+  await user.type(input, '{Enter}');
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledOnce());
+  expect(daemon.startRun).toHaveBeenCalledWith('agent-main', 'room-7', expect.objectContaining({ text: 'Use a warmer tone', mode: 'queue', documentEditContext }), expect.not.stringMatching('recovered-edit'));
+});
+
+it.each(['remove', 'clear'])('lets the owner %s a recovered preview selection before a new ordinary message', async (discard) => {
+  const user = userEvent.setup();
+  vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
+  vi.spyOn(daemon, 'listAgents').mockResolvedValue({ agents: [snapshot('agent-main', 'Nova', 1)] });
+  mockProviders();
+  routes.sessions.push(sessionFixture('room-7', { title: 'Document editing', origin: 'api', lastActivityAtMs: Date.now() }));
+  const documentEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
+  sessionStorage.setItem('animaos.pendingSends', JSON.stringify([{ key: 'recovered-edit', text: 'Rewrite this\nBEGIN_PREVIEW_EDIT_CONTEXT\n{}', conversation: 'agent-main\u0000session:room-7', agentId: 'agent-main', sessionId: 'room-7', createdAtMs: 1, documentEditContext }]));
+  window.history.replaceState(null, '', '/#/s/room-7');
+  render(<ViewHarness />);
+  await waitFor(() => expect(screen.getByPlaceholderText('Message Nova…')).toBeEnabled());
+  await user.click(await screen.findByRole('button', { name: 'Restore message' }));
+  const input = screen.getByPlaceholderText('Message Nova…');
+  expect(screen.getByRole('region', { name: 'Selected content for edit' })).toHaveTextContent('Hello');
+  if (discard === 'remove') {
+    await user.click(screen.getByRole('button', { name: 'Remove selected content' }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+  }
+  expect(daemon.startRun).not.toHaveBeenCalled();
+  await user.clear(input);
+  expect(screen.queryByRole('region', { name: 'Selected content for edit' })).toBeNull();
+  await user.type(input, 'A new ordinary request{Enter}');
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledOnce());
+  expect(vi.mocked(daemon.startRun).mock.calls[0][2]).not.toHaveProperty('documentEditContext');
+});
+
 it('replies to a check-in through the runs route', async () => {
   const user = userEvent.setup();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });

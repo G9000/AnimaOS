@@ -112,6 +112,8 @@ export { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
 export { ConnectedSearchClient, AccountWorkflowsClient } from './connected-accounts.js';
 export { MicrosoftFilesClient } from './microsoft-files.js';
 export { ProjectsClient } from './projects.js';
+export type { ProjectConnectedSourceGrant, ProjectConnectedSourceChoice, ProjectConnectedSourceChoices, ProjectAddConnectedSourceInput } from './project-connected-sources.js';
+export { previewEditMessage, validPreviewEditContext, type PreviewEditContext } from './preview-context.js';
 export { DocumentEditsClient } from './document-edits.js';
 export type {
   OfficeFormat, OfficeCalculationState, OfficeCellValue, OfficeRange, OfficeTargetValue,

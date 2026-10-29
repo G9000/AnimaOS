@@ -89,6 +89,39 @@ beforeEach(() => {
 });
 
 describe('artifact conversation layout', () => {
+  it('keeps a selected document target beside an editable draft and sends it only explicitly', async () => {
+    const path = 'artifacts/report.docx';
+    const sha256 = 'a'.repeat(64);
+    vi.spyOn(daemon.documentEdits, 'inspectWorkspace').mockResolvedValue({ version: 1, source_scope: 'd'.repeat(64), format: 'docx', source_sha256: sha256, source: { kind: 'workspace', display_name: path }, targets: [{ id: 'paragraph:one', label: 'Paragraph 1', editable: true, value: { kind: 'text', text: 'Keep this exact source' } }], coverage: { total_targets: 1, returned_targets: 1, complete: true }, retained_hyperlink_count: 0, limitations: [], next_cursor: null });
+    const composer = { draft: 'Make it clearer', setDraft: vi.fn(), sending: false, disabled: false, offline: false, onSend: vi.fn(), error: null, onDismissError: vi.fn() };
+    renderView({ session: sessionFixture('chat:edit'), composer, messages: [{ id: 'file', role: 'Assistant', content: { text: `Created \`${path}\`.` }, created_at_ms: 2 }] });
+    fireEvent.click(screen.getByRole('button', { name: `Open ${path}` }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Paragraph 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection to draft' }));
+    expect(composer.setDraft).not.toHaveBeenCalled();
+    expect(composer.onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Selected content for edit' })).toHaveTextContent('Paragraph 1');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message Nova' })).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(composer.onSend).toHaveBeenCalledOnce();
+    expect(composer.onSend.mock.calls[0][0]).toBe('Make it clearer');
+    expect(composer.onSend.mock.calls[0][1]).toEqual({ version: 1, source: { kind: 'workspace', path, sha256, scope: 'd'.repeat(64) }, selection: { kind: 'office_target', format: 'docx', target_id: 'paragraph:one', label: 'Paragraph 1', value: { kind: 'text', text: 'Keep this exact source' } } });
+  });
+
+  it('clears the selection on reload while preserving the instruction draft', async () => {
+    const path = 'report.docx';
+    vi.spyOn(daemon.documentEdits, 'inspectWorkspace').mockResolvedValue({ version: 1, source_scope: 'd'.repeat(64), format: 'docx', source_sha256: 'a'.repeat(64), source: { kind: 'workspace', display_name: path }, targets: [{ id: 'one', label: 'Paragraph 1', editable: true, value: { kind: 'text', text: 'Source' } }], coverage: { total_targets: 1, returned_targets: 1, complete: true }, retained_hyperlink_count: 0, limitations: [], next_cursor: null });
+    renderView({ session: sessionFixture('chat:edit'), composer: { draft: 'Rewrite this', setDraft: vi.fn(), sending: false, disabled: false, offline: false, onSend: vi.fn(), error: null, onDismissError: vi.fn() }, messages: [{ id: 'file', role: 'Assistant', content: { text: `\`${path}\`` }, created_at_ms: 2 }] });
+    fireEvent.click(screen.getByRole('button', { name: `Open ${path}` }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Paragraph 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add selection to draft' }));
+    expect(screen.getByRole('region', { name: 'Selected content for edit' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await screen.findByRole('button', { name: 'Select Paragraph 1' });
+    expect(screen.queryByRole('region', { name: 'Selected content for edit' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Message Nova' })).toHaveValue('Rewrite this');
+  });
+
   it('keeps the composer with the conversation and preserves its draft while previewing', async () => {
     vi.spyOn(daemon, 'downloadWorkspaceFile').mockImplementation(
       () => new Promise(() => {}),

@@ -155,7 +155,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
             <button type="button" onClick={() => storeDraft(draftKey, { ...draft, baseRevision: project.revision })}>Use latest revision with my draft</button>
             <button type="button" onClick={() => storeDraft(draftKey, null)}>Reset draft</button></div>
         </form>}
-        {tab === 'Sources' && <ProjectKnowledge key={`${scope}:${project.revision}:${project.accessEpoch}`} agentId={agentId} project={project} api={view.api} invalidate={view.refresh}
+        {tab === 'Sources' && <ProjectKnowledge key={`${scope}:${project.revision}:${project.accessEpoch}`} agentId={agentId} agents={agents} project={project} api={view.api} invalidate={view.refresh}
           onChooseFolder={() => setAddingFolder(true)}
           onRemove={(resourceId) => view.mutate((api) => api.removeResource(project.id, resourceId, { expectedRevision: project.revision, asAgentId: agentId }))}
           onUseInContext={(resourceId, useInContext) => view.mutate((api) => api.updateResource(project.id, resourceId, { expectedRevision: project.revision, asAgentId: agentId, useInContext }))} />}
@@ -165,7 +165,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
           {picker && <ProjectSourcePicker key={scope} agentId={agentId} project={project} chats={view.chats}
             workflowsOnly={tab === 'Workflows'} onAdd={addSource} onClose={() => setPicker(false)} />}
           {project.resources.filter((resource) => tab === 'Workflows' ? resource.target?.kind === 'workflow' || resource.target?.kind === 'workflow_template'
-            : resource.role === (tab === 'Outputs' ? 'output' : 'reference') && resource.target?.kind !== 'knowledge_folder' && resource.target?.kind !== 'workflow' && resource.target?.kind !== 'workflow_template')
+            : resource.role === (tab === 'Outputs' ? 'output' : 'reference') && resource.target?.kind !== 'knowledge_folder' && resource.target?.kind !== 'connected_source' && resource.target?.kind !== 'workflow' && resource.target?.kind !== 'workflow_template')
             .map((resource) => <div key={resource.id} className="project-source">
               <div className="project-row"><strong>{resource.label ?? (resource.target?.kind === 'workspace_file' ? resource.target.path : resource.state === 'ready' ? 'Selected source' : 'Unavailable source')}</strong>
                 <span>{resource.state.replaceAll('_', ' ')}</span>

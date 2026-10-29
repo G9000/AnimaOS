@@ -314,6 +314,71 @@ async fn project_knowledge_one_replaced_folder_does_not_block_healthy_sources() 
 }
 
 #[tokio::test]
+async fn project_knowledge_revoked_connected_source_does_not_hide_healthy_folder_passages() {
+    use anima_document_store_sqlite::connected::{ConnectedSourceGrant, ConnectedSourceKind};
+    let fixture = fixture("cobalt healthy folder evidence");
+    let remote = {
+        let mut state = fixture.state.write().await;
+        let project = state.projects.get(&fixture.project).unwrap().clone();
+        let resource = ProjectResourceRecord {
+            id: format!("resource_{}", uuid::Uuid::new_v4()),
+            target: ProjectResourceTarget::ConnectedSource {
+                grant: ConnectedSourceGrant {
+                    owner_agent_id: fixture.agent.clone(),
+                    connector_id: "removed-connection".into(),
+                    provider: "gdrive".into(),
+                    remote_id: "selected".into(),
+                    citation_id: "a".repeat(64),
+                    connection_generation: "native".into(),
+                    search_generation: "a".repeat(64),
+                    grant_epoch: "enrollment".into(),
+                    selection_revision: 0,
+                    stream_epoch: None,
+                    source_kind: ConnectedSourceKind::File,
+                },
+            },
+            role: ProjectResourceRole::Reference,
+            label: Some("Unavailable remote source".into()),
+            use_in_context: true,
+            created_at_ms: 2,
+            add_replay: ProjectMutationReplay {
+                request_key: "connected".into(),
+                request_sha256: "b".repeat(64),
+            },
+            donor: Some(crate::projects::ProjectDonorBinding {
+                agent_id: fixture.agent.clone(),
+                member_generation: project.member(&fixture.agent).unwrap().generation,
+            }),
+            source_project_binding_revision: None,
+            workspace_key: None,
+        };
+        let id = resource.id.clone();
+        state
+            .projects
+            .add_resource(&fixture.project, project.revision, resource, 3)
+            .unwrap();
+        state
+            .project_access
+            .publish_records(&state.projects)
+            .unwrap();
+        id
+    };
+    let found = search(&fixture, "cobalt").await;
+    assert_eq!(found.hits.len(), 1);
+    assert_eq!(found.hits[0].resource_id, fixture.resource);
+    assert_eq!(
+        found
+            .binding
+            .sources
+            .iter()
+            .find(|source| source.resource_id == remote)
+            .unwrap()
+            .status,
+        KnowledgeSourceState::Unavailable
+    );
+}
+
+#[tokio::test]
 async fn project_knowledge_status_restarts_only_unknown_source_jobs() {
     let fixture = fixture("cobalt restart coverage");
     let first = fixture

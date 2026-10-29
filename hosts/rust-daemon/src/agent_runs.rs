@@ -2411,6 +2411,24 @@ impl AgentRunCoordinator {
             ),
             None => (runtime, tool_context, base, context),
         };
+        if let Some(selected) = &started.effective_input().document_edit_context {
+            let state = self.state.read().await;
+            let link = crate::runs::RunLink {
+                agent_id: agent_id.clone(),
+                session_id: session_id.clone(),
+                run_id: run_id.clone(),
+            };
+            let current = crate::document_edits::preview_context::context_for_run(&state, &link)
+                .map_err(ApiError::conflict)?
+                .filter(|current| *current == selected)
+                .ok_or_else(|| {
+                    ApiError::conflict("Selected document context changed before the model request")
+                })?;
+            let provider =
+                crate::document_edits::preview_context::PreviewEditProvider::new(current)
+                    .map_err(ApiError::conflict)?;
+            runtime.register_provider(Arc::new(provider));
+        }
         runtime
             .begin_new_execution_context(execution_budget.clone())
             .map_err(ApiError::service_unavailable)?;

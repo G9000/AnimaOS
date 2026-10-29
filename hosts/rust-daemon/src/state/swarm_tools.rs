@@ -22,6 +22,9 @@ pub(super) async fn execute_swarm_tool(
     user_message: Message,
     tool_call: ToolCall,
 ) -> TaskResult<Content> {
+    if let Err(error) = tool_context.check_preview_tool(&tool_call).await {
+        return error;
+    }
     if let Err(error) = tool_context.verify_profile_owner().await {
         return error;
     }

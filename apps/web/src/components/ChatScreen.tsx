@@ -1098,6 +1098,7 @@ export function Composer({
   voiceDisabled = false,
   nativeVoice,
   tools,
+  context,
   mode,
   model,
   sendAlways = false,
@@ -1134,6 +1135,8 @@ export function Composer({
   /** The session's own input tools (browser task, spoken replies), kept
    *  with Attach and Record behind the composer's + button. */
   tools?: ReactNode;
+  /** Current quoted selection, kept visible beside the editable draft. */
+  context?: ReactNode;
   /** Plan or Do for what is sent next; with `model`, the chip under the
    *  message. */
   mode?: ComposerModeState;
@@ -1305,6 +1308,7 @@ export function Composer({
             onPick={(command) => pick(command)}
           />
         )}
+        {context}
         {attachments && (
           <AttachmentChips
             items={attachments.items}
@@ -1370,7 +1374,7 @@ export function Composer({
           </div>
         )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
-          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col gap-1 p-1.5 transition-all duration-200">
+          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col gap-1 p-1.5 transition-[background-color,border-color,box-shadow] duration-200">
             <div className="composer-row">
               {/* The agent's orb lives in the composer: it brightens while you
                 write and while the agent works. */}

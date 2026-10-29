@@ -6,7 +6,8 @@ use anima_document_content::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const PAGE_BYTES: usize = 12 * 1024;
+// Owner source inspection adds its fixed-size source scope after pagination.
+const PAGE_BYTES: usize = 12 * 1024 - 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +28,8 @@ pub(crate) struct OfficeInventoryPage {
     pub(crate) version: u8,
     pub(crate) format: OfficeFormat,
     pub(crate) source_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_scope: Option<String>,
     pub(crate) source: SourceLabel,
     pub(crate) targets: Vec<OfficeTarget>,
     pub(crate) coverage: InventoryCoverage,
@@ -109,6 +112,7 @@ pub(crate) fn inventory_page(
         version: 1,
         format: inventory.format,
         source_sha256: hash.into(),
+        source_scope: None,
         source,
         targets: Vec::new(),
         coverage: InventoryCoverage {

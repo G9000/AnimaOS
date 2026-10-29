@@ -59,6 +59,7 @@ mod oauth_apps;
 mod oauth_callback;
 mod personality;
 mod profile;
+mod project_connected_sources;
 mod project_knowledge;
 mod projects;
 mod provider_keys;
@@ -162,6 +163,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         projects::context, projects::chats, projects::set_chat_project,
         project_knowledge::add_source, project_knowledge::status, project_knowledge::refresh,
         project_knowledge::search, project_knowledge::citation,
+        project_connected_sources::choices, project_connected_sources::add,
         workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
         account_workflow_rules::list, account_workflow_rules::create, account_workflow_rules::update, account_workflow_rules::delete, account_workflow_rules::events,
         tool_results::get_tool_result, tool_results::download_tool_result,
@@ -223,7 +225,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         resume_workspace_entry,
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
         microsoft_files::status,microsoft_files::connect,microsoft_files::files,microsoft_files::selection,microsoft_files::disconnect,microsoft_files::callback,
-        document_edits::review,document_edits::cancel,
+        document_edits::source,document_edits::review,document_edits::cancel,
         connected_search::sources,connected_search::configure,connected_search::refresh,connected_search::search,connected_search::item,
         discord::list, discord::create, discord::check, discord::configure, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
@@ -1055,6 +1057,7 @@ fn router_with_services_with_policies_and_integrations(
                 ),
         );
     let timed_routes = Router::new()
+        .route("/api/document-edits/source", get(document_edits::source))
         .route("/api/document-edits/{proposal_id}", get(document_edits::review).delete(document_edits::cancel))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/projects/manage", get(projects::manage))
@@ -1066,6 +1069,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/projects/{project_id}/resources/{resource_id}/preview", get(projects::preview_resource))
         .route("/api/projects/{project_id}/context", get(projects::context))
         .route("/api/projects/{project_id}/knowledge/sources", axum::routing::post(project_knowledge::add_source))
+        .route("/api/projects/{project_id}/knowledge/connected-sources", get(project_connected_sources::choices).post(project_connected_sources::add))
         .route("/api/projects/{project_id}/knowledge/status", get(project_knowledge::status))
         .route("/api/projects/{project_id}/knowledge/refresh", axum::routing::post(project_knowledge::refresh))
         .route("/api/projects/{project_id}/knowledge/search", get(project_knowledge::search))

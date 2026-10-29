@@ -244,6 +244,7 @@ async fn discord_speaker_id_fallback_preserves_maximum_accepted_body_and_console
         .runs
         .accept_run(
             crate::agent_runs::AcceptRun {
+                document_edit_context: None,
                 agent_id: c.agent_id.clone(),
                 session_id: c.room_id.clone(),
                 text: "A message from the console".into(),

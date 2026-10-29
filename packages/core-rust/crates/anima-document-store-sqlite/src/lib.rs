@@ -1,5 +1,7 @@
 //! Persistent, bounded local document passages, independent of private agent memory.
 
+pub mod connected;
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;

@@ -10,6 +10,9 @@ import {
   useSessionSends,
   type NewSessionSend,
 } from './useSessionSends';
+import type { PreviewEditContext } from '@animaos/sdk';
+
+const editContext: PreviewEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
 
 function deferred<Value>() {
   let resolve!: (value: Value) => void;
@@ -55,6 +58,41 @@ describe('isRetryableSendError', () => {
 });
 
 describe('useSessionSends', () => {
+  it('retains exact edit context and owner scope through same-key retries and reload recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const startRun = vi.spyOn(daemon, 'startRun').mockRejectedValue(new DaemonConnectionError('', new Error('down')));
+    const { result, unmount } = renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn() }));
+    await act(async () => result.current.send({ ...message('edit-key'), documentEditContext: editContext }));
+    const persisted = JSON.parse(sessionStorage.getItem('animaos.pendingSends')!)[0];
+    expect(persisted).toMatchObject({ agentId: 'agent-main', sessionId: 'chat:1', documentEditContext: editContext });
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(startRun.mock.calls.map(([, , input, key]) => [input.documentEditContext, key])).toEqual([[editContext, 'edit-key'], [editContext, 'edit-key']]);
+    unmount();
+    const onRestore = vi.fn();
+    renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn(), onRestore }));
+    expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'agent-main', sessionId: 'chat:1', documentEditContext: editContext }));
+    expect(startRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops invalid, cross-scope and context-stripped preview recovery without replay', () => {
+    const base = { key: 'edit', text: 'Rewrite\nBEGIN_PREVIEW_EDIT_CONTEXT\n{}', conversation: 'agent-main\u0000session:chat:1', createdAtMs: 1, agentId: 'agent-main', sessionId: 'chat:1' };
+    sessionStorage.setItem('animaos.pendingSends', JSON.stringify([{ ...base, documentEditContext: { ...editContext, source: { ...editContext.source, sha256: '' } } }, { ...base, sessionId: 'foreign', documentEditContext: editContext }, base]));
+    const onRestore = vi.fn();
+    renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn(), onRestore }));
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it('never sends preview metadata through a connector or a steer', async () => {
+    const startRun = vi.spyOn(daemon, 'startRun');
+    const onFailed = vi.fn();
+    const { result } = renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed }));
+    await act(async () => {
+      result.current.send({ ...message('telegram'), telegram: true, documentEditContext: editContext });
+      result.current.send({ ...message('steer'), mode: 'steer', documentEditContext: editContext });
+    });
+    expect(startRun).not.toHaveBeenCalled();
+    expect(onFailed).toHaveBeenCalledTimes(2);
+  });
   it('carries one explicit browser selection without persisting browser authority for reload', async () => {
     const gate = deferred<Awaited<ReturnType<typeof daemon.startRun>>>();
     const startRun = vi.spyOn(daemon, 'startRun').mockReturnValue(gate.promise);

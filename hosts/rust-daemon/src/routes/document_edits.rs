@@ -1,5 +1,5 @@
 //! Authenticated complete structural review and explicit cancellation, never an apply endpoint.
-use super::contracts::document_edits::DocumentEditOwnerQuery;
+use super::contracts::document_edits::{DocumentEditOwnerQuery, DocumentEditSourceQuery};
 use super::{
     http::json_response,
     jobs::{authorize, no_store},
@@ -26,6 +26,29 @@ fn response<T: serde::Serialize>(value: Result<T, String>) -> Response {
             "Document review is unavailable, changed or expired",
         )),
     }
+}
+
+#[utoipa::path(get,path="/api/document-edits/source",tag="documents",
+    params(("agent_id"=String,Query),("session_id"=String,Query),("file_path"=String,Query),("cursor"=Option<String>,Query)),
+    responses((status=200,description="Inert paged source targets bound to the exact source SHA256 and current owner chat; never executes HTML"),(status=400,description="Source or owner scope unavailable, changed or unsupported"),(status=403,description="Owner authorization required")))]
+pub(super) async fn source(
+    State(state): State<AppState>,
+    Query(query): Query<DocumentEditSourceQuery>,
+    request: Request,
+) -> Response {
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    response(
+        service(&state)
+            .inspect_owner(
+                &query.agent_id,
+                &query.session_id,
+                &query.file_path,
+                query.cursor.as_deref(),
+            )
+            .await,
+    )
 }
 
 #[utoipa::path(get,path="/api/document-edits/{proposal_id}",tag="documents",

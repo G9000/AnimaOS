@@ -27,14 +27,14 @@ pub(super) fn register(registry: &mut ToolRegistry) {
     let DataValue::Object(inspect) = inspect else {
         unreachable!("schema is an object")
     };
-    registry.register(tool_descriptor("inspect_office_document","Inspect a selected uploaded or workspace DOCX, XLSX or PPTX as untrusted plain data. Requires an explicit read grant and an ordinary owner chat. Returns bounded hash-bound inventory pages; no file effect or Office rendering.",inspect),inspect_document);
+    registry.register(tool_descriptor("inspect_office_document","Inspect a selected uploaded or workspace DOCX, XLSX, PPTX or UTF-8 HTML as untrusted plain data. Requires an explicit read grant and an ordinary owner chat. Returns bounded hash-bound inventory pages; no file effect, executable HTML or Office rendering.",inspect),inspect_document);
     let propose = generated_documents::schema_data(
         serde_json::json!({"type":"object","properties":{"source":source,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"file_path":{"type":"string","minLength":1,"maxLength":1024},"expected_destination":expected,"operations":{"type":"array","minItems":1,"maxItems":128,"items":operation_schema()}},"required":["source","expected_sha256","file_path","expected_destination","operations"],"additionalProperties":false}),
     );
     let DataValue::Object(propose) = propose else {
         unreachable!("schema is an object")
     };
-    registry.register(tool_descriptor("propose_document_edit","Prepare supported edits to one exact existing Office source. Uploaded originals remain unchanged. Stores a private candidate and complete structural review for at most 30 minutes; never publishes a workspace file. Use only typed operations from the current inventory. Requires explicit grant.",propose),propose_document);
+    registry.register(tool_descriptor("propose_document_edit","Prepare supported edits to one exact existing Office or UTF-8 HTML source. Stores a private candidate and complete structural review for at most 30 minutes. Use typed operations from the current hash-bound inventory. html_replace_text uses absolute UTF-8 byte offsets and exact raw expected_text including entities; new_text is literal text escaped for HTML, never markup. HTML source/candidate limit 1 MiB; selected/replacement text 8 KiB. Requires explicit grant.",propose),propose_document);
     let apply = generated_documents::schema_data(
         serde_json::json!({"type":"object","properties":{"proposal_id":{"type":"string","minLength":1,"maxLength":128},"review_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"file_path":{"type":"string","minLength":1,"maxLength":1024},"expected_destination":expected},"required":["proposal_id","review_sha256","file_path","expected_destination"],"additionalProperties":false}),
     );
@@ -62,6 +62,7 @@ fn operation_schema() -> serde_json::Value {
         object(serde_json::json!({"type":{"const":"boolean"},"value":{"type":"boolean"}}),&["type","value"]),
         object(serde_json::json!({"type":{"const":"blank"}}),&["type"])]});
     let mut variants = Vec::new();
+    variants.push(object(serde_json::json!({"type":{"const":"html_replace_text"},"start_utf8":{"type":"integer","minimum":0,"maximum":1048576},"end_utf8":{"type":"integer","minimum":0,"maximum":1048576},"expected_text":{"type":"string","minLength":1,"maxLength":8192},"new_text":{"type":"string","maxLength":8192}}), &["type","start_utf8","end_utf8","expected_text","new_text"]));
     for kind in ["word_replace_text", "slide_replace_text"] {
         variants.push(object(serde_json::json!({"type":{"const":kind},"target_id":id,"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0},"expected_text":text,"new_text":text}),&["type","target_id","start","end","expected_text","new_text"]));
     }
@@ -109,13 +110,12 @@ fn proposal_arguments(call: &ToolCall) -> Result<ProposeRequest, String> {
             let Some(fields) = operation.as_object_mut() else {
                 continue;
             };
-            if !matches!(
-                fields.get("type").and_then(serde_json::Value::as_str),
-                Some("word_replace_text" | "slide_replace_text")
-            ) {
-                continue;
-            }
-            for key in ["start", "end"] {
+            let keys = match fields.get("type").and_then(serde_json::Value::as_str) {
+                Some("word_replace_text" | "slide_replace_text") => ["start", "end"],
+                Some("html_replace_text") => ["start_utf8", "end_utf8"],
+                _ => continue,
+            };
+            for key in keys {
                 if let Some(value) = fields.get_mut(key) {
                     let number = value
                         .as_f64()
@@ -370,6 +370,32 @@ mod argument_tests {
         assert!(
             matches!(&parsed.operations[0], OfficeEditOperation::SetChartSeriesRanges { categories, values, .. } if categories.start == "A1" && categories.end == "A2" && values.start == "B1" && values.end == "B2")
         );
+    }
+
+    #[test]
+    fn html_model_offsets_decode_as_utf8_byte_offsets_and_reject_unknown_markup_fields() {
+        let operation = serde_json::json!({"type":"html_replace_text","start_utf8":3,"end_utf8":6,"expected_text":"old","new_text":"<literal>"});
+        let parsed = proposal_arguments(&proposal(operation.clone())).unwrap();
+        assert!(matches!(
+            &parsed.operations[0],
+            OfficeEditOperation::HtmlReplaceText {
+                start_utf8: 3,
+                end_utf8: 6,
+                ..
+            }
+        ));
+        for invalid in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("3"),
+        ] {
+            let mut operation = operation.clone();
+            operation["start_utf8"] = invalid;
+            assert!(proposal_arguments(&proposal(operation)).is_err());
+        }
+        let mut unknown = operation;
+        unknown["new_html"] = serde_json::json!("<script>injected</script>");
+        assert!(proposal_arguments(&proposal(unknown)).is_err());
     }
 }
 

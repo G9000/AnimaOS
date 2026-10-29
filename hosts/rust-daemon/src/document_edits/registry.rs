@@ -188,6 +188,8 @@ impl DocumentEditDraft {
             || !valid_path(&self.file_path)
             || self.candidate_bytes == 0
             || self.candidate_bytes > 4 * 1024 * 1024
+            || (self.content_review.before.format == OfficeFormat::Html
+                && self.candidate_bytes > 1024 * 1024)
             || self.expires_at_ms <= self.created_at_ms
             || self.expires_at_ms.saturating_sub(self.created_at_ms) > 30 * 60 * 1000
             || self.content_review.version != 1
@@ -207,18 +209,7 @@ impl DocumentEditDraft {
                 return Err("Document proposal scope is invalid".into());
             }
         }
-        let expected_extension = match self.content_review.before.format {
-            OfficeFormat::Docx => "docx",
-            OfficeFormat::Xlsx => "xlsx",
-            OfficeFormat::Pptx => "pptx",
-        };
-        if self
-            .file_path
-            .rsplit_once('.')
-            .map(|(_, x)| x.to_ascii_lowercase())
-            .as_deref()
-            != Some(expected_extension)
-        {
+        if super::service::format(&self.file_path) != Ok(self.content_review.before.format) {
             return Err("Document destination format does not match".into());
         }
         if let ExpectedDestination::Present { sha256 } = &self.expected_destination {
@@ -342,6 +333,7 @@ impl DocumentEditRegistry {
                 || key != &publication_key(&scope, &receipt.file_path)
                 || receipt.size_bytes == 0
                 || receipt.size_bytes > 4 * 1024 * 1024
+                || (receipt.format == OfficeFormat::Html && receipt.size_bytes > 1024 * 1024)
             {
                 return Err("Document publication receipt is invalid".into());
             }
@@ -350,18 +342,7 @@ impl DocumentEditRegistry {
                     return Err("Document publication preimage is invalid".into());
                 }
             }
-            let expected_extension = match receipt.format {
-                OfficeFormat::Docx => "docx",
-                OfficeFormat::Xlsx => "xlsx",
-                OfficeFormat::Pptx => "pptx",
-            };
-            if receipt
-                .file_path
-                .rsplit_once('.')
-                .map(|(_, extension)| extension.to_ascii_lowercase())
-                .as_deref()
-                != Some(expected_extension)
-            {
+            if super::service::format(&receipt.file_path) != Ok(receipt.format) {
                 return Err("Document publication format is invalid".into());
             }
         }

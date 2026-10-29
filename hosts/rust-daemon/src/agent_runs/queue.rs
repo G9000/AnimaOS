@@ -84,6 +84,11 @@ pub(super) fn steer_content(
             DataValue::String(skill.clone()),
         );
     }
+    if let Some(context) = &steer.document_edit_context {
+        if let Ok(text) = serde_json::to_string(context) {
+            metadata.insert("documentEditContext".into(), DataValue::String(text));
+        }
+    }
     super::attachments::attachment_content(&steer.text, records, Some(metadata))
 }
 
@@ -110,6 +115,7 @@ pub(crate) fn steers_taken_in(messages: &[Message]) -> Vec<RunSteer> {
                 text: input.text,
                 attachment_ids: input.attachment_ids,
                 skill: input.skill,
+                document_edit_context: input.document_edit_context,
                 accepted_at_ms: accepted_at_ms(&message.content).unwrap_or(message.created_at_ms),
             })
         })
@@ -171,6 +177,8 @@ pub(crate) enum SessionRunMode {
 /// A message to accept into a session.
 #[derive(Clone, Debug)]
 pub(crate) struct AcceptRun {
+    pub(crate) document_edit_context:
+        Option<crate::document_edits::preview_context::PreviewEditContext>,
     pub(crate) agent_id: String,
     pub(crate) session_id: String,
     pub(crate) text: String,
@@ -278,6 +286,7 @@ fn replayed(
     idempotency_key: &str,
     attachment_ids: &[String],
     skill: Option<&str>,
+    document_edit_context: Option<&crate::document_edits::preview_context::PreviewEditContext>,
     now_ms: u64,
 ) -> Option<Result<AcceptedRun, ApiError>> {
     let original = state.runs.find_by_idempotency_key(
@@ -290,6 +299,7 @@ fn replayed(
             && original.input.text == text
             && original.input.attachment_ids == attachment_ids
             && original.input.skill.as_deref() == skill
+            && original.input.document_edit_context.as_ref() == document_edit_context
         {
             Ok(AcceptedRun::Replayed(
                 state.with_live_tools(original.clone()),
@@ -334,6 +344,7 @@ fn steer_replay(
             input.text == request.text
                 && input.attachment_ids == request.attachment_ids
                 && input.skill == request.skill
+                && input.document_edit_context == request.document_edit_context
         });
     if !same {
         return Err(ApiError::conflict(IDEMPOTENCY_KEY_REUSED));
@@ -544,6 +555,7 @@ impl AgentRunCoordinator {
                 &request.idempotency_key,
                 &request.attachment_ids,
                 request.skill.as_deref(),
+                request.document_edit_context.as_ref(),
                 now_ms,
             ) {
                 return answer;
@@ -605,6 +617,29 @@ impl AgentRunCoordinator {
             )?);
         }
         super::attachments::validate_attachment_ids(&request.attachment_ids)?;
+        let document_edit_scope = if let Some(context) = &request.document_edit_context {
+            if request.source != RunSource::Web
+                || request.source_ref.is_some()
+                || browser.is_some()
+                || request.skill.is_some()
+                || !request.attachment_ids.is_empty()
+            {
+                return Err(ApiError::bad_request_static(
+                    "Selected document edits require a dedicated ordinary owner web run",
+                ));
+            }
+            Some(
+                crate::document_edits::DocumentEditService::new(
+                    self.state.clone(),
+                    self.control_plane_transactions(),
+                )
+                .validate_preview_context(&request.agent_id, &request.session_id, context)
+                .await
+                .map_err(ApiError::conflict)?,
+            )
+        } else {
+            None
+        };
         if request.text.trim().is_empty() && request.attachment_ids.is_empty() {
             return Err(ApiError::bad_request_static(
                 "text or attachments are required",
@@ -649,6 +684,30 @@ impl AgentRunCoordinator {
             let Some(session) = guard.sessions.get(&request.agent_id, &request.session_id) else {
                 return Err(ApiError::not_found());
             };
+            if let Some(scope) = &document_edit_scope {
+                if &crate::document_edits::readonly_scope_in(
+                    &guard,
+                    &request.agent_id,
+                    &request.session_id,
+                )
+                .map_err(ApiError::conflict)?
+                    != scope
+                {
+                    return Err(ApiError::conflict(
+                        "Selected document owner scope changed before acceptance",
+                    ));
+                }
+                if let Some(admission) = &recovery {
+                    if guard
+                        .runs
+                        .get(&admission.source_run_id)
+                        .and_then(|record| record.document_edit_scope.as_ref())
+                        != Some(scope)
+                    {
+                        return Err(ApiError::conflict("Selected document workspace or owner scope changed before recovery; select the content again"));
+                    }
+                }
+            }
             if let Some(answer) = replayed(
                 &guard,
                 &request.agent_id,
@@ -657,6 +716,7 @@ impl AgentRunCoordinator {
                 &request.idempotency_key,
                 &request.attachment_ids,
                 request.skill.as_deref(),
+                request.document_edit_context.as_ref(),
                 now_ms,
             ) {
                 return answer;
@@ -714,6 +774,12 @@ impl AgentRunCoordinator {
             if request.mode == SessionRunMode::Steer {
                 if let Some(run_id) = joinable_run(&guard, &request.agent_id, &request.session_id) {
                     let joining = guard.runs.get(&run_id).ok_or_else(ApiError::not_found)?;
+                    if joining.effective_input().document_edit_context
+                        != request.document_edit_context
+                        || joining.document_edit_scope != document_edit_scope
+                    {
+                        return Err(ApiError::conflict("Selected document context cannot be introduced, removed or changed while steering; queue a new turn"));
+                    }
                     crate::projects::validate_active_lease(&guard, joining)
                         .map_err(|error| ApiError::conflict(error.to_string()))?;
                     // A steer waits like a queued message, so it counts toward
@@ -727,6 +793,7 @@ impl AgentRunCoordinator {
                         text: request.text.clone(),
                         attachment_ids: request.attachment_ids.clone(),
                         skill: request.skill.clone(),
+                        document_edit_context: request.document_edit_context.clone(),
                         accepted_at_ms: self.acceptance_clock.next(),
                     };
                     guard
@@ -763,6 +830,8 @@ impl AgentRunCoordinator {
             );
             record.input.skill = request.skill.clone();
             record.input.attachment_ids = request.attachment_ids.clone();
+            record.input.document_edit_context = request.document_edit_context.clone();
+            record.document_edit_scope = document_edit_scope.clone();
             // This is the exact current scope reviewed at acceptance, including
             // recovery children. It is persisted before the run can be dispatched.
             record.project_witness = Some(project_witness);
@@ -997,6 +1066,10 @@ impl AgentRunCoordinator {
                 .runs
                 .get(&left.run_id)
                 .and_then(|record| record.project_witness.clone());
+            let document_edit_scope = guard
+                .runs
+                .get(&left.run_id)
+                .and_then(|record| record.document_edit_scope.clone());
             let now_ms = now_millis();
             // The run's own record holds only steers its transcript took in.
             let mut open_slots = MAX_QUEUED_RUNS_PER_AGENT.saturating_sub(waiting_count(
@@ -1030,6 +1103,7 @@ impl AgentRunCoordinator {
                         accepted_at_ms,
                     );
                     record.input = input;
+                    record.document_edit_scope = document_edit_scope.clone();
                     // A leftover was accepted into its parent's frozen context.
                     // Never silently adopt a newer grant after that context ended.
                     record.project_witness = project_witness.clone();
@@ -1135,6 +1209,27 @@ impl AgentRunCoordinator {
         attachment_ids: &[String],
         skill: Option<&str>,
     ) -> Option<Result<AcceptedRun, ApiError>> {
+        self.replayed_run_with_document_context(
+            agent_id,
+            session_id,
+            text,
+            idempotency_key,
+            attachment_ids,
+            skill,
+            None,
+        )
+        .await
+    }
+    pub(crate) async fn replayed_run_with_document_context(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        text: &str,
+        idempotency_key: &str,
+        attachment_ids: &[String],
+        skill: Option<&str>,
+        document_edit_context: Option<&crate::document_edits::preview_context::PreviewEditContext>,
+    ) -> Option<Result<AcceptedRun, ApiError>> {
         // A replay observes only committed acceptance, including when its save is in flight.
         let _transaction = self.control_plane_transaction().await;
         let guard = self.state.read().await;
@@ -1146,6 +1241,7 @@ impl AgentRunCoordinator {
             idempotency_key,
             attachment_ids,
             skill,
+            document_edit_context,
             now_millis(),
         ) {
             return Some(answer);
@@ -1160,6 +1256,7 @@ impl AgentRunCoordinator {
             source: RunSource::Web,
             source_ref: None,
             skill: skill.map(str::to_string),
+            document_edit_context: document_edit_context.cloned(),
         };
         match steer_replay(&guard, &request, now_millis()) {
             Ok(Some(answer)) => Some(Ok(answer)),

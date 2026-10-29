@@ -14,6 +14,7 @@ export function validOfficeTargetValue(value: unknown): boolean {
   if (!object(value)) return false;
   switch (value.kind) {
     case 'text': return text(value.text);
+    case 'html_text': return text(value.text) && count(value.start_utf8) && count(value.end_utf8) && value.end_utf8 > value.start_utf8 && value.end_utf8 - value.start_utf8 === new TextEncoder().encode(value.text).length;
     case 'chart': return text(value.title) && text(value.chart_type);
     case 'series': return range(value.categories) && range(value.values);
     case 'slide': return count(value.ordinal) && typeof value.hidden === 'boolean';
@@ -27,7 +28,7 @@ export function validOfficeTargetValue(value: unknown): boolean {
   }
 }
 function inventory(value: unknown): value is OfficeInventory {
-  return object(value) && value.version === 1 && ['docx', 'xlsx', 'pptx'].includes(String(value.format)) && Array.isArray(value.targets) && value.targets.every((target: unknown) => object(target) && text(target.id) && text(target.label) && typeof target.editable === 'boolean' && validOfficeTargetValue(target.value)) && Array.isArray(value.retained_hyperlinks) && value.retained_hyperlinks.every((link: unknown) => object(link) && text(link.relationship_id) && text(link.target)) && strings(value.limitations);
+  return object(value) && value.version === 1 && ['docx', 'xlsx', 'pptx', 'html'].includes(String(value.format)) && Array.isArray(value.targets) && value.targets.every((target: unknown) => object(target) && text(target.id) && text(target.label) && typeof target.editable === 'boolean' && validOfficeTargetValue(target.value)) && Array.isArray(value.retained_hyperlinks) && value.retained_hyperlinks.every((link: unknown) => object(link) && text(link.relationship_id) && text(link.target)) && strings(value.limitations);
 }
 function destination(value: unknown): boolean {
   return object(value) && ((value.state === 'absent' && Object.keys(value).length === 1) || (value.state === 'present' && hash(value.sha256) && Object.keys(value).length === 2));
@@ -51,6 +52,7 @@ const safe = (value: string) => revealHiddenCharacters(value);
 export function officeTargetText(value: OfficeTargetValue): string {
   switch (value.kind) {
     case 'text': return value.text;
+    case 'html_text': return value.text;
     case 'chart': return `${value.chart_type}: ${value.title}`;
     case 'slide': return `Slide ${value.ordinal}${value.hidden ? ' (hidden)' : ''}`;
     case 'series': return `Categories: ${formatRange(value.categories)}; values: ${formatRange(value.values)}`;

@@ -173,6 +173,37 @@ fn validate_sources(manifest: &ProjectContextManifest) -> Result<(), ProjectErro
                             .len()
                             == passages.len()
                 }
+                ProjectSourceWitness::ConnectedSource {
+                    grant,
+                    query_sha256,
+                    passages,
+                } => {
+                    manifest.version == 2
+                        && grant.is_valid()
+                        && valid_id(&grant.owner_agent_id)
+                        && valid_hash(query_sha256)
+                        && !passages.is_empty()
+                        && passages.len() <= 8
+                        && passages.iter().all(|passage| {
+                            passage
+                                .citation_id
+                                .strip_prefix("cite_")
+                                .is_some_and(valid_hash)
+                                && valid_message_id(&passage.document_id)
+                                && valid_hash(&passage.source_sha256)
+                                && valid_hash(&passage.chunk_sha256)
+                                && valid_hash(&passage.included_sha256)
+                                && !passage.locator.is_empty()
+                                && passage.locator.len() <= 256
+                                && !passage.locator.chars().any(char::is_control)
+                        })
+                        && passages
+                            .iter()
+                            .map(|p| &p.citation_id)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == passages.len()
+                }
                 ProjectSourceWitness::WorkspaceFile {
                     workspace_key,
                     path,

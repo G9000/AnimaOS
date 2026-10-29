@@ -1068,12 +1068,41 @@ impl ToolExecutionContext {
     /// The checks every call passes before it may run, and again after an
     /// approval: the tool is configured, a helper runs no process tool, and a
     /// delegating manager or peer still permits it.
+    pub(crate) async fn check_preview_tool(
+        &self,
+        call: &ToolCall,
+    ) -> Result<(), TaskResult<Content>> {
+        if let Some(journal) = &self.action_journal {
+            journal
+                .check_preview_tool(
+                    call,
+                    self.rpc_fence.is_none() && !self.has_upstream_tool_origin(),
+                )
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        } else if let (Some(service), Some(run)) = (&self.document_edits, &self.run_link) {
+            if service
+                .preview_context(run)
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?
+                .is_some()
+            {
+                return Err(TaskResult::error(
+                    crate::document_edits::preview_context::REFUSED,
+                    0,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     async fn live_checks(
         &self,
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
         self.verify_profile_owner().await?;
+        self.check_preview_tool(tool_call).await?;
         if let Some(lease) = &self.project_lease {
             lease
                 .check()

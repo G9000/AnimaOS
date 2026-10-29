@@ -70,6 +70,23 @@ impl Drop for SaveWork {
 }
 
 impl RunActionJournal {
+    pub(crate) async fn check_preview_tool(
+        &self,
+        call: &ToolCall,
+        direct_owner: bool,
+    ) -> Result<(), String> {
+        let state = self
+            .state
+            .upgrade()
+            .ok_or("Native document turn authority is unavailable")?;
+        let state = state.read().await;
+        if crate::document_edits::preview_context::context_for_run(&state, &self.run)?.is_some()
+            && (!direct_owner || !crate::document_edits::preview_context::tool_allowed(&call.name))
+        {
+            return Err(crate::document_edits::preview_context::REFUSED.into());
+        }
+        Ok(())
+    }
     pub(crate) fn rpc_deadline(&self) -> Option<tokio::time::Instant> {
         self.deadline
     }

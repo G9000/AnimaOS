@@ -279,6 +279,7 @@ async fn bot_wide_discovers_trigger_and_keeps_two_native_threads_and_outboxes_is
         .runs
         .accept_run(
             crate::agent_runs::AcceptRun {
+                document_edit_context: None,
                 agent_id: c.agent_id.clone(),
                 session_id: first.room_id.clone(),
                 source: crate::runs::RunSource::Discord,

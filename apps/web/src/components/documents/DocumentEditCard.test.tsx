@@ -14,6 +14,14 @@ function approval(overrides: Record<string, unknown> = {}) {
 }
 
 describe('document edit approval', () => {
+  it('reviews HTML source text as inert content before exact approval', async () => {
+    const html = { ...inventory, format: 'html', targets: [{ id: 'text', label: 'Text 1', editable: true, value: { kind: 'html_text', start_utf8: 3, end_utf8: 8, text: 'A & B' } }] };
+    const request = approval({ arguments: JSON.stringify({ ...args, file_path: 'report.html' }) });
+    const { container } = render(<DocumentEditCard approval={request} load={vi.fn().mockResolvedValue({ ...review, source: { kind: 'workspace', display_name: 'report.html' }, file_path: 'report.html', before: html, after: html })} onDecide={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply these changes' })).toBeEnabled());
+    expect(screen.getAllByText('A & B', { exact: false })).toHaveLength(2);
+    expect(container.querySelector('script, iframe, img')).toBeNull();
+  });
   it('requires the full matching review, displays plain text, and only offers one-time approval or denial', async () => {
     const load = vi.fn().mockResolvedValue(review);
     const decide = vi.fn().mockResolvedValue(null);

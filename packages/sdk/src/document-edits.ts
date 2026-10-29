@@ -1,11 +1,12 @@
 import type { DaemonClient } from './client.js';
 
-export type OfficeFormat = 'docx' | 'xlsx' | 'pptx';
+export type OfficeFormat = 'docx' | 'xlsx' | 'pptx' | 'html';
 export type OfficeCalculationState = 'not_applicable' | 'literal' | 'stored_unverified' | 'calculated' | 'needs_external_recalculation' | 'calculation_error';
 export type OfficeCellValue = { type: 'string'; value: string } | { type: 'number'; value: number } | { type: 'boolean'; value: boolean } | { type: 'blank' };
 export interface OfficeRange { sheet_id: string; start: string; end: string }
 export type OfficeTargetValue =
   | { kind: 'text'; text: string }
+  | { kind: 'html_text'; start_utf8: number; end_utf8: number; text: string }
   | { kind: 'cell'; sheet_id: string; address: string; value: OfficeCellValue; formula: string | null; calculation: OfficeCalculationState }
   | { kind: 'chart'; title: string; chart_type: string }
   | { kind: 'series'; categories: OfficeRange | null; values: OfficeRange | null }
@@ -27,6 +28,8 @@ export interface DocumentEditReview {
 }
 export interface OfficeInventoryPage {
   version: 1; format: OfficeFormat; source_sha256: string; source: DocumentEditSourceLabel;
+  /** Present on the owner-scoped inspection endpoint; required for a selected edit. */
+  source_scope?: string;
   targets: OfficeTarget[]; coverage: { total_targets: number; returned_targets: number; complete: boolean };
   retained_hyperlink_count: number; limitations: string[]; next_cursor: string | null;
 }
@@ -40,6 +43,11 @@ function reviewPath(proposalId: string, agentId: string, sessionId: string): str
 /** Owner-only review and cancellation. Applying uses the exact approval decision. */
 export class DocumentEditsClient {
   constructor(private readonly client: DaemonClient) {}
+  inspectWorkspace(path: string, agentId: string, sessionId: string, options: { cursor?: string; signal?: AbortSignal } = {}): Promise<OfficeInventoryPage> {
+    const query = new URLSearchParams({ agent_id: agentId, session_id: sessionId, file_path: path });
+    if (options.cursor !== undefined) query.set('cursor', options.cursor);
+    return this.client.requestJson(`/api/document-edits/source?${query}`, { signal: options.signal });
+  }
   review(proposalId: string, agentId: string, sessionId: string, options: { signal?: AbortSignal } = {}): Promise<DocumentEditReview> {
     return this.client.requestJson(reviewPath(proposalId, agentId, sessionId), { signal: options.signal });
   }

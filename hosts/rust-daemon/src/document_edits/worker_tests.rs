@@ -129,3 +129,44 @@ async fn document_edit_worker_never_sends_source_before_ready() {
     assert!(data.is_empty());
     assert!(task.await.unwrap().is_err());
 }
+
+#[test]
+fn html_document_worker_prepares_exact_literal_text_with_complete_review() {
+    let source = b"<p class='keep'>old &amp; same</p><script>retained()</script>";
+    let edits: OfficeEditSpec = serde_json::from_value(serde_json::json!({"operations":[{
+        "type":"html_replace_text","start_utf8":16,"end_utf8":19,"expected_text":"old","new_text":"<literal> & new"
+    }]})).unwrap();
+    let request = Request::prepare(OfficeFormat::Html, edits, source).unwrap();
+    let header = serde_json::to_vec(&request).unwrap();
+    let (response, candidate) = process_request(request.clone(), &header, source);
+    validate_response(&request, &header, &response, &candidate).unwrap();
+    assert_eq!(
+        candidate,
+        b"<p class='keep'>&lt;literal&gt; &amp; new &amp; same</p><script>retained()</script>"
+    );
+    let ResponseKind::Prepared { review } = response.result else {
+        panic!("expected prepared HTML")
+    };
+    assert_eq!(review.changes.len(), 1);
+    assert_eq!(review.changes[0].before, "old");
+    assert_eq!(review.changes[0].after, "&lt;literal&gt; &amp; new");
+    assert!(!review.preservation.container_normalized);
+}
+
+#[test]
+fn html_document_worker_bounds_input_and_screens_retained_private_bytes() {
+    assert!(Request::inspect(OfficeFormat::Html, &vec![b'a'; MAX_HTML_BYTES + 1]).is_err());
+    for source in [
+        b"<p title='password=synthetic-fixture'>Public</p>".as_slice(),
+        b"<script>password=synthetic-fixture</script><p>Public</p>".as_slice(),
+    ] {
+        let request = Request::inspect(OfficeFormat::Html, source).unwrap();
+        let header = serde_json::to_vec(&request).unwrap();
+        let (response, candidate) = process_request(request, &header, source);
+        assert!(matches!(response.result, ResponseKind::Rejected { .. }));
+        assert!(candidate.is_empty());
+        assert!(!serde_json::to_string(&response)
+            .unwrap()
+            .contains("synthetic-fixture"));
+    }
+}

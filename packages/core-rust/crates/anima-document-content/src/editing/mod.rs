@@ -1,6 +1,7 @@
 //! Targeted edits to admitted inert Office packages, independent of hosts and storage.
 mod charts;
 mod formulas;
+mod html;
 mod package;
 mod policy;
 mod presentation;
@@ -24,6 +25,9 @@ pub use types::{
 /// # Errors
 /// Rejects malformed, active, unsupported or over-budget containers.
 pub fn inspect_office_document(format: OfficeFormat, source: &[u8]) -> Result<OfficeInventory> {
+    if format == OfficeFormat::Html {
+        return html::inventory(source);
+    }
     inventory(&Package::open(format, source)?, format)
 }
 fn inventory(package: &Package, format: OfficeFormat) -> Result<OfficeInventory> {
@@ -31,6 +35,7 @@ fn inventory(package: &Package, format: OfficeFormat) -> Result<OfficeInventory>
         OfficeFormat::Docx => word::inventory(package)?,
         OfficeFormat::Xlsx => spreadsheet::inventory(package)?,
         OfficeFormat::Pptx => presentation::inventory(package)?,
+        OfficeFormat::Html => return Err(OfficeEditError::InvalidPackage),
     };
     let result=OfficeInventory{version:1,format,targets,retained_hyperlinks:package.links.clone(),limitations:vec!["Content preview only. Open in Office to check page layout and text fitting.".into(),"Internal images and inert hyperlinks are retained without rendering or following them.".into()]};
     if serde_json::to_vec(&result)
@@ -65,6 +70,9 @@ pub fn prepare_office_edit(
     {
         return Err(OfficeEditError::ResourceLimit);
     }
+    if format == OfficeFormat::Html {
+        return html::prepare(source, edits);
+    }
     let package = Package::open(format, source)?;
     let before = inventory(&package, format)?;
     let (replacements, removed, changes) = match format {
@@ -80,6 +88,7 @@ pub fn prepare_office_edit(
             let result = spreadsheet::apply(&package, &edits.operations)?;
             (result.replacements, result.removed, result.changes)
         }
+        OfficeFormat::Html => return Err(OfficeEditError::InvalidPackage),
     };
     let bytes = package.encode(&replacements, &removed)?;
     let candidate = Package::open(format, &bytes)?;

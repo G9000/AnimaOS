@@ -23,6 +23,7 @@ pub(crate) struct RevisionRequest {
 pub(crate) struct RevisionResponse {
     session: SessionResponse,
     retry_prompt: Option<String>,
+    retry_document_edit_context: Option<crate::document_edits::preview_context::PreviewEditContext>,
     attachments_omitted: bool,
     notice: String,
 }
@@ -49,6 +50,7 @@ pub(super) async fn revise_session(
             None=>super::sessions::rejected(ApiError::not_found()),
             Some(view)=>no_store(json_response(StatusCode::CREATED,&RevisionResponse {
                 session: SessionResponse::from(&view), retry_prompt:revision.retry_prompt,
+                retry_document_edit_context: revision.retry_document_edit_context,
                 attachments_omitted: revision.attachments_omitted,
                 notice: if revision.attachments_omitted {
                     "Original chat preserved. Completed actions are unchanged. Attachment files stay in the original chat; reattach any needed files before sending."

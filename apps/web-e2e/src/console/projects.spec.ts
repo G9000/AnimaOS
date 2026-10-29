@@ -183,7 +183,7 @@ test('read-only folder grant, indexed search and citation remain usable before s
   await expect(citation).toHaveCount(0); await expect(result).toBeFocused();
   await knowledge.getByRole('button', { name: 'Unlink Owner research', exact: true }).click();
   await expect.poll(() => removeCalls.length).toBe(1);
-  await expect(knowledge.getByText('Add a folder to search its documents here.', { exact: true })).toBeVisible();
+  await expect(knowledge.getByText('Add a folder or connected source to search its documents here.', { exact: true })).toBeVisible();
   await expect(page.getByText(passage, { exact: true })).toHaveCount(0);
   await expect(knowledge.getByRole('button', { name: `${title} · ${locator}`, exact: true })).toHaveCount(0);
   await expect(knowledge.getByRole('button', { name: 'Search knowledge', exact: true })).toBeDisabled();

@@ -42,6 +42,8 @@ pub(super) enum StartRunMode {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct StartRunRequest {
+    #[serde(default)]
+    document_edit_context: Option<crate::document_edits::preview_context::PreviewEditContext>,
     #[serde(default, deserialize_with = "crate::browser::optional_selection")]
     browser_selection: Option<crate::browser::BrowserSelection>,
     #[serde(default)]
@@ -117,6 +119,17 @@ async fn start_body(state: &AppState, request: Request) -> Result<StartRunReques
 }
 
 fn validate_input(input: &StartRunRequest) -> Result<(), ApiError> {
+    if let Some(context) = &input.document_edit_context {
+        context.validate().map_err(ApiError::bad_request)?;
+        if input.browser_selection.is_some()
+            || input.skill.is_some()
+            || !input.attachment_ids.is_empty()
+        {
+            return Err(ApiError::bad_request_static(
+                "A selected document edit must use a dedicated ordinary chat turn",
+            ));
+        }
+    }
     if input.text.trim().is_empty() && input.attachment_ids.is_empty() {
         return Err(ApiError::bad_request_static(
             "text or attachments are required",
@@ -204,13 +217,14 @@ pub(super) async fn start_session_run(
     }
     if let Some(replayed) = state
         .agent_runs
-        .replayed_run_with_attachments(
+        .replayed_run_with_document_context(
             &agent_id,
             &session_id,
             &input.text,
             &idempotency_key,
             &input.attachment_ids,
             input.skill.as_deref(),
+            input.document_edit_context.as_ref(),
         )
         .await
     {
@@ -225,13 +239,14 @@ pub(super) async fn start_session_run(
         if let Err(message) = state.agent_runs.skills().check_runnable(skill).await {
             return match state
                 .agent_runs
-                .replayed_run_with_attachments(
+                .replayed_run_with_document_context(
                     &agent_id,
                     &session_id,
                     &input.text,
                     &idempotency_key,
                     &input.attachment_ids,
                     input.skill.as_deref(),
+                    input.document_edit_context.as_ref(),
                 )
                 .await
             {
@@ -383,13 +398,14 @@ pub(super) async fn start_session_run(
         Some(None) => {
             return match state
                 .agent_runs
-                .replayed_run_with_attachments(
+                .replayed_run_with_document_context(
                     &agent_id,
                     &session_id,
                     &input.text,
                     &idempotency_key,
                     &input.attachment_ids,
                     input.skill.as_deref(),
+                    input.document_edit_context.as_ref(),
                 )
                 .await
             {
@@ -433,6 +449,7 @@ pub(super) async fn start_session_run(
         source,
         source_ref,
         skill: input.skill,
+        document_edit_context: input.document_edit_context,
     };
     let accepted = match browser {
         Some(prepared) => {

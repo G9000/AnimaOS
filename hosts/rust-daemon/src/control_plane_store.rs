@@ -43,11 +43,14 @@ mod chat_suite_upgrade_tests;
 /// 31 adds endpoint-bound opaque MCP OAuth credential references.
 /// 32 adds connected-account search and account workflow state; 33 adds
 /// deeper search settings, workflow holds and selected Microsoft file metadata;
-/// 34 adds explicit project knowledge folder grants and passage evidence.
+/// 34 adds explicit project knowledge folder grants and passage evidence;
+/// 35 adds selected connected project grants and reviewed HTML document edits.
 /// Runtime transport sessions/processes are never persisted. Older
 /// daemons refuse a newer version, so the first start of
 /// a new version writes a backup (spec §13.3).
-pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 34;
+pub(crate) const CONTROL_PLANE_STORE_VERSION: u32 = 35;
+pub(crate) const PRE_CONNECTED_PROJECT_PREVIEWS_BACKUP_SUFFIX: &str =
+    ".pre-connected-project-previews.bak";
 pub(crate) const PRE_PROJECT_KNOWLEDGE_BACKUP_SUFFIX: &str = ".pre-project-knowledge.bak";
 pub(crate) const PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX: &str =
     ".pre-project-documents-search-continuity.bak";
@@ -600,8 +603,10 @@ pub(crate) fn pre_upgrade_backup_path(path: &Path, loaded_version: u32) -> PathB
                 PRE_CONNECTED_ACCOUNTS_BACKUP_SUFFIX
             } else if loaded_version < 33 {
                 PRE_PROJECT_DOCUMENTS_SEARCH_CONTINUITY_BACKUP_SUFFIX
-            } else {
+            } else if loaded_version < 34 {
                 PRE_PROJECT_KNOWLEDGE_BACKUP_SUFFIX
+            } else {
+                PRE_CONNECTED_PROJECT_PREVIEWS_BACKUP_SUFFIX
             }
         });
         path.with_file_name(name)
@@ -1264,6 +1269,7 @@ mod tests {
             (31, ".pre-connected-accounts.bak"),
             (32, ".pre-project-documents-search-continuity.bak"),
             (33, ".pre-project-knowledge.bak"),
+            (34, ".pre-connected-project-previews.bak"),
         ] {
             assert_eq!(
                 super::pre_upgrade_backup_path(path, loaded),
@@ -1271,6 +1277,48 @@ mod tests {
                 "loaded version {loaded}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn connected_project_preview_upgrade_preserves_exact_version_thirty_four_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("control-plane.json");
+        let original = b"{\r\n  \"version\": 34, \"agents\": [], \"swarms\": []\r\n}\r\n";
+        std::fs::write(&path, original).unwrap();
+        let previous = super::pre_upgrade_backup_path(&path, 33);
+        std::fs::write(&previous, b"retained folder-knowledge backup").unwrap();
+        let config = super::ControlPlaneStoreConfig::Json(path.clone());
+        let mut snapshot = super::load_control_plane_snapshot(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.version, 34);
+        let backup = super::pre_upgrade_backup_path(&path, snapshot.version);
+        assert_ne!(backup, previous);
+        super::write_pre_upgrade_backup(&config, snapshot.version)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        snapshot.version = super::CONTROL_PLANE_STORE_VERSION;
+        super::save_control_plane_snapshot(Some(&config), &snapshot)
+            .await
+            .unwrap();
+        assert_eq!(
+            super::load_control_plane_snapshot(&config)
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            super::CONTROL_PLANE_STORE_VERSION
+        );
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(
+            std::fs::read(&previous).unwrap(),
+            b"retained folder-knowledge backup"
+        );
+        assert_eq!(super::postgres_backup_key(34), "control_plane.backup.34");
+        assert_no_temp_residue(&path);
     }
 
     #[tokio::test]

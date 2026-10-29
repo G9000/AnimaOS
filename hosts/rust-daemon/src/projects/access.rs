@@ -1,6 +1,6 @@
 //! Revocable project reads layered on existing model and native authority.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::{Arc, RwLock, Weak};
 
@@ -31,6 +31,7 @@ struct PublishedProjectAccess {
     members: BTreeMap<String, u64>,
     epoch_cancel: CancelSignal,
     closed_uncertain: bool,
+    revoked_sources: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +101,7 @@ impl ProjectAccessRegistry {
                     members: member_map(record),
                     epoch_cancel: CancelSignal::new(),
                     closed_uncertain: false,
+                    revoked_sources: BTreeSet::new(),
                 },
             );
         }
@@ -116,6 +118,26 @@ impl ProjectAccessRegistry {
         {
             record.closed_uncertain = true;
             record.epoch_cancel.cancel();
+        }
+    }
+
+    /// Cancel captured content once per revoked source while allowing fresh healthy-source turns.
+    pub(super) fn publish_source_revocations(&self, project_id: &str, revoked: BTreeSet<String>) {
+        let mut published = self
+            .inner
+            .published
+            .write()
+            .expect("project access publication lock poisoned");
+        if let Some(current) = published.get_mut(project_id) {
+            if revoked
+                .iter()
+                .any(|id| !current.revoked_sources.contains(id))
+                && !current.closed_uncertain
+            {
+                current.epoch_cancel.cancel();
+                current.epoch_cancel = CancelSignal::new();
+            }
+            current.revoked_sources = revoked;
         }
     }
 
@@ -391,6 +413,42 @@ mod tests {
         let access = ProjectAccessRegistry::default();
         access.publish_records(&registry).unwrap();
         (registry, access, record)
+    }
+
+    #[tokio::test]
+    async fn selected_account_revocation_stops_old_runs_once_and_keeps_future_healthy_turns_available(
+    ) {
+        let (registry, access, record) = fixture();
+        let old = access.acquire_run(&record, "a").unwrap();
+        access.publish_source_revocations(
+            &record.id,
+            BTreeSet::from(["selected-account-source".into()]),
+        );
+        assert_eq!(old.check(), Err(ProjectError::AccessRevoked));
+        tokio::time::timeout(std::time::Duration::from_millis(100), old.cancelled())
+            .await
+            .unwrap();
+        let healthy = access.acquire_run(&record, "a").unwrap();
+        access.publish_source_revocations(
+            &record.id,
+            BTreeSet::from(["selected-account-source".into()]),
+        );
+        access.publish_records(&registry).unwrap();
+        assert!(
+            healthy.check().is_ok(),
+            "reconciliation of an already revoked source cannot starve healthy new turns"
+        );
+        access.publish_source_revocations(&record.id, BTreeSet::new());
+        assert_eq!(
+            old.check(),
+            Err(ProjectError::AccessRevoked),
+            "rotation never revives a captured lease"
+        );
+        access.publish_source_revocations(
+            &record.id,
+            BTreeSet::from(["another-selected-source".into()]),
+        );
+        assert_eq!(healthy.check(), Err(ProjectError::AccessRevoked));
     }
 
     #[tokio::test]

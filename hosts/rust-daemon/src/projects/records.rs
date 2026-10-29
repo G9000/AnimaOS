@@ -123,6 +123,9 @@ pub(crate) enum ProjectResourceRole {
     deny_unknown_fields
 )]
 pub(crate) enum ProjectResourceTarget {
+    ConnectedSource {
+        grant: anima_document_store_sqlite::connected::ConnectedSourceGrant,
+    },
     KnowledgeFolder {
         root_path: String,
         root_identity: String,
@@ -155,6 +158,7 @@ pub(crate) enum ProjectResourceTarget {
 impl ProjectResourceTarget {
     pub(crate) fn owner_agent_id(&self) -> Option<&str> {
         match self {
+            Self::ConnectedSource { grant } => Some(&grant.owner_agent_id),
             Self::WorkspaceFile { .. } | Self::KnowledgeFolder { .. } => None,
             Self::ChatExcerpt { owner_agent_id, .. }
             | Self::ChatResult { owner_agent_id, .. }
@@ -179,6 +183,9 @@ impl ProjectResourceTarget {
             ));
         }
         match self {
+            Self::ConnectedSource { grant } if !grant.is_valid() => Err(
+                ProjectError::InvalidRecord("selected connected source grant is invalid"),
+            ),
             Self::KnowledgeFolder {
                 root_path,
                 root_identity,
@@ -269,6 +276,9 @@ impl ProjectResourceRecord {
             ));
         }
         let valid_shape = match &self.target {
+            ProjectResourceTarget::ConnectedSource { .. } => {
+                self.source_project_binding_revision.is_none() && self.workspace_key.is_none()
+            }
             ProjectResourceTarget::KnowledgeFolder { .. } => {
                 self.donor.is_none()
                     && self.source_project_binding_revision.is_none()
@@ -415,6 +425,11 @@ pub(crate) struct RunProjectBinding {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum ProjectSourceWitness {
+    ConnectedSource {
+        grant: anima_document_store_sqlite::connected::ConnectedSourceGrant,
+        query_sha256: String,
+        passages: Vec<ProjectKnowledgePassageWitness>,
+    },
     KnowledgeFolder {
         root_identity: String,
         query_sha256: String,

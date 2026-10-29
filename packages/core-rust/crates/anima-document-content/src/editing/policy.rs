@@ -36,6 +36,9 @@ pub fn check_office_document_text(
     source: &[u8],
     mut policy: impl FnMut(&str) -> bool,
 ) -> Result<bool> {
+    if format == OfficeFormat::Html {
+        return super::html::check_text(source, policy);
+    }
     let package = Package::open(format, source)?;
     for part in &package.parts {
         if part.xml.is_some() && !scan_xml(&part.bytes, &mut policy)? {

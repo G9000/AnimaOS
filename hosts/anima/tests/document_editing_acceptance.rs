@@ -12,6 +12,7 @@ use std::{
     future::IntoFuture,
     io::{Cursor, Read, Write},
     net::TcpListener,
+    os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -158,6 +159,150 @@ fn hash(bytes: &[u8]) -> String {
         .collect()
 }
 
+// Diagnostics read only this synthetic fixture after its owned process exits.
+// Keep file reads and traversal finite, and do not traverse observed links.
+fn diagnostic_bytes(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.file_attributes() & 0x400 != 0
+        || metadata.len() > limit
+    {
+        return Err(format!(
+            "not an ordinary bounded file (bytes={})",
+            metadata.len()
+        ));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|error| error.to_string())?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > limit {
+        return Err("file exceeded diagnostic read bound".into());
+    }
+    Ok(bytes)
+}
+
+fn diagnostic_json(path: &Path, limit: u64) -> Value {
+    match diagnostic_bytes(path, limit) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .unwrap_or_else(|error| json!({"diagnostic_error":error.to_string()})),
+        Err(error) => json!({"diagnostic_error":error}),
+    }
+}
+
+fn diagnostic_file(path: &Path, limit: u64) -> Value {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => json!({
+            "exists":true,
+            "is_file":metadata.is_file(),
+            "is_symlink":metadata.file_type().is_symlink(),
+            "bytes":metadata.len(),
+            "read":match diagnostic_bytes(path, limit) {
+                Ok(bytes) => json!({"sha256":hash(&bytes)}),
+                Err(error) => json!({"error":error}),
+            },
+        }),
+        Err(error) => json!({"exists":false,"error":error.to_string()}),
+    }
+}
+
+fn diagnostic_fields(value: &Value, fields: &[&str]) -> Value {
+    Value::Object(
+        fields
+            .iter()
+            .filter_map(|field| {
+                value
+                    .get(*field)
+                    .map(|value| ((*field).into(), value.clone()))
+            })
+            .collect(),
+    )
+}
+
+fn checkpoint_diagnostics(root: &Path) -> Value {
+    let mut pending = vec![(root.to_path_buf(), 0)];
+    let mut entries = Vec::new();
+    let mut remaining_bytes = 128 * 1024_u64;
+    while let Some((path, depth)) = pending.pop() {
+        if entries.len() >= 128 {
+            entries.push(json!({"diagnostic_limit":"128 checkpoint entries"}));
+            break;
+        }
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                entries.push(json!({"path":relative,"error":error.to_string()}));
+                continue;
+            }
+        };
+        if metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0 {
+            entries.push(json!({"path":relative,"diagnostic_error":"link not followed"}));
+        } else if metadata.is_dir() {
+            entries.push(json!({"path":relative,"directory":true}));
+            if depth >= 6 {
+                continue;
+            }
+            match std::fs::read_dir(&path) {
+                Ok(children) => {
+                    let mut children: Vec<_> = children.take(128).collect();
+                    children
+                        .sort_by_key(|entry| entry.as_ref().ok().map(|entry| entry.file_name()));
+                    for entry in children.into_iter().rev() {
+                        match entry {
+                            Ok(entry) => pending.push((entry.path(), depth + 1)),
+                            Err(error) => {
+                                entries.push(json!({"path":relative,"error":error.to_string()}))
+                            }
+                        }
+                    }
+                }
+                Err(error) => entries.push(json!({"path":relative,"error":error.to_string()})),
+            }
+        } else {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            let include = path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+                || matches!(
+                    name,
+                    "prepared-ack" | "refused" | "index-ack" | "capture.lock"
+                )
+                || path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|name| name == "acks");
+            let mut evidence = json!({"path":relative,"bytes":metadata.len()});
+            if include && metadata.len() <= remaining_bytes && metadata.len() <= 16 * 1024 {
+                match diagnostic_bytes(&path, remaining_bytes.min(16 * 1024)) {
+                    Ok(bytes) => {
+                        remaining_bytes = remaining_bytes.saturating_sub(bytes.len() as u64);
+                        evidence["sha256"] = json!(hash(&bytes));
+                        evidence["content"] = serde_json::from_slice(&bytes)
+                            .unwrap_or_else(|_| json!(String::from_utf8_lossy(&bytes)));
+                    }
+                    Err(error) => evidence["read_error"] = json!(error),
+                }
+            }
+            entries.push(evidence);
+        }
+    }
+    json!({"entries":entries,"remaining_read_budget":remaining_bytes})
+}
+
+struct PublicationDiagnostic {
+    run: String,
+    proposal: String,
+    destination: String,
+    candidate_sha256: String,
+}
+
 #[derive(Clone)]
 struct Case {
     format: String,
@@ -247,12 +392,47 @@ struct Daemon {
     log: PathBuf,
     base: String,
     client: reqwest::Client,
+    home: PathBuf,
+    workspace: PathBuf,
+    publication: Option<PublicationDiagnostic>,
 }
 impl Drop for Daemon {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        let exit = self.child.wait();
         if std::thread::panicking() {
+            eprintln!("packaged owned process exit: {exit:?}");
+            if let Some(publication) = &self.publication {
+                let data = self.home.join(".animaos-swarm/data");
+                let control = diagnostic_json(&data.join("control-plane.json"), 4 * 1024 * 1024);
+                let registry = &control["documentEdits"];
+                let record = &registry["drafts"][&publication.proposal];
+                let receipt = registry["publications"].as_object().and_then(|items| {
+                    items
+                        .values()
+                        .find(|item| item["proposal_id"] == publication.proposal)
+                });
+                let run = control["runs"]
+                    .as_array()
+                    .and_then(|runs| runs.iter().find(|run| run["id"] == publication.run));
+                eprintln!(
+                    "packaged publication diagnostics (observations only; never replay): {}",
+                    json!({
+                        "run_id":publication.run,
+                        "proposal_id":publication.proposal,
+                        "expected_candidate_sha256":publication.candidate_sha256,
+                        "destination":diagnostic_file(&self.workspace.join(&publication.destination), 4 * 1024 * 1024),
+                        "candidate":diagnostic_file(&data.join("document-edits").join(format!("{}.blob", publication.candidate_sha256)), 4 * 1024 * 1024),
+                        "control_plane_error":control.get("diagnostic_error"),
+                        "registry_record_present":!record.is_null(),
+                        "registry":diagnostic_fields(record, &["status","publication_phase","review_sha256","owner_approval"]),
+                        "publication_receipt":receipt,
+                        "run":run.map(|run| diagnostic_fields(run, &["status","error","actionReceipts","turn","checkpoint"])),
+                        "readback_proof":diagnostic_json(&data.join("document-edits").join(format!("proof_{}.json", publication.proposal)), 64 * 1024),
+                        "checkpoints":checkpoint_diagnostics(&data.join("checkpoints")),
+                    })
+                );
+            }
             eprintln!(
                 "packaged daemon log:\n{}",
                 std::fs::read_to_string(&self.log).unwrap_or_default()
@@ -369,6 +549,9 @@ async fn packaged_selected_office_edits_require_owner_and_round_trip() {
             .no_proxy()
             .build()
             .unwrap(),
+        home: home.path().to_path_buf(),
+        workspace: workspace.clone(),
+        publication: None,
     };
     let deadline = Instant::now() + Duration::from_secs(40);
     loop {
@@ -516,6 +699,12 @@ async fn packaged_selected_office_edits_require_owner_and_round_trip() {
             );
             assert_eq!(approval_args["source_sha256"], source_hash);
             let proposal = approval_args["proposal_id"].as_str().unwrap();
+            daemon.publication = Some(PublicationDiagnostic {
+                run: run.clone(),
+                proposal: proposal.to_owned(),
+                destination: destination.clone(),
+                candidate_sha256: approval_args["candidate_sha256"].as_str().unwrap().into(),
+            });
             if let Some(denied) = &denied_proposal {
                 assert_ne!(proposal, denied, "retry must prepare a fresh proposal");
             }

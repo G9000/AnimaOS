@@ -14,6 +14,7 @@ const MAX_HEADER: usize = 64 * 1024;
 const MAX_INPUT: usize = 4 * 1024 * 1024;
 const MAX_RESPONSE_HEADER: usize = 512 * 1024;
 const MAX_CANDIDATE: usize = 4 * 1024 * 1024;
+const MAX_HTML_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -25,6 +26,20 @@ enum Command {
         format: OfficeFormat,
         edits: OfficeEditSpec,
     },
+}
+impl Command {
+    fn byte_limit(&self) -> usize {
+        match self {
+            Self::Inspect {
+                format: OfficeFormat::Html,
+            }
+            | Self::Prepare {
+                format: OfficeFormat::Html,
+                ..
+            } => MAX_HTML_BYTES,
+            _ => MAX_INPUT,
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,7 +60,7 @@ impl Request {
         Self::new(Command::Prepare { format, edits }, source)
     }
     fn new(command: Command, source: &[u8]) -> Result<Self, WorkerFailure> {
-        if source.is_empty() || source.len() > MAX_INPUT {
+        if source.is_empty() || source.len() > command.byte_limit() {
             return Err(WorkerFailure::InvalidOutput);
         }
         let request = Self {
@@ -114,7 +129,7 @@ fn read_frame(reader: &mut impl Read, limit: usize) -> io::Result<Vec<u8>> {
 fn read_request(reader: &mut impl Read) -> io::Result<(Request, Vec<u8>, Vec<u8>)> {
     let header = read_frame(reader, MAX_HEADER)?;
     let request: Request = serde_json::from_slice(&header).map_err(|_| invalid())?;
-    let source = read_frame(reader, MAX_INPUT)?;
+    let source = read_frame(reader, request.command.byte_limit())?;
     let mut trailing = [0; 1];
     if reader.read(&mut trailing)? != 0
         || request.version != 1
@@ -211,6 +226,7 @@ fn validate_response(
         || response.request_sha256 != digest(header)
         || response.source_sha256 != request.source_sha256
         || candidate.len() > MAX_CANDIDATE
+        || candidate.len() > request.command.byte_limit()
     {
         return Err(WorkerFailure::InvalidOutput);
     }
@@ -303,7 +319,7 @@ async fn exchange(
     }
     let header = serde_json::to_vec(&request).map_err(|_| WorkerFailure::InvalidOutput)?;
     if header.len() > MAX_HEADER
-        || source.len() > MAX_INPUT
+        || source.len() > request.command.byte_limit()
         || digest(&source) != request.source_sha256
     {
         return Err(WorkerFailure::InvalidOutput);
@@ -350,7 +366,7 @@ async fn exchange(
         .await
         .map_err(|_| WorkerFailure::InvalidOutput)?;
     let size = u32::from_le_bytes(length) as usize;
-    if size > MAX_CANDIDATE {
+    if size > MAX_CANDIDATE || size > request.command.byte_limit() {
         return Err(WorkerFailure::InvalidOutput);
     }
     let mut candidate = vec![0; size];

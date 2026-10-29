@@ -109,6 +109,7 @@ import {
 import { useAttachmentSession } from './hooks/useAttachmentSession';
 import { useAttachments } from './hooks/useAttachments';
 import { recoveredDraft } from './lib/attachments';
+import { validPreviewEditContext, type PreviewEditContext } from '@animaos/sdk';
 import type { SendAttachments } from './hooks/useSessionSends';
 
 interface AgentOperation {
@@ -125,6 +126,9 @@ interface FailedDraft {
   attachmentIds?: string[];
   attachments?: UploadedAttachment[];
   skill?: string;
+  documentEditContext?: PreviewEditContext;
+  agentId?: string;
+  sessionId?: string;
 }
 
 type ChatState = {
@@ -141,6 +145,7 @@ type ChatState = {
     idempotencyKey: string;
     attachmentIds?: string[];
     skill?: string;
+    documentEditContext?: PreviewEditContext;
   } | null;
   /** The last Telegram reply's run; `queued` once it completed while the
    *  connector had an approved chat, which queues its reply for delivery. */
@@ -574,12 +579,16 @@ export function ViewHarness() {
             typeof value === 'function' ? value(current.draft) : value;
           return {
             draft,
+            ...(!draft && current.resend?.documentEditContext ? { resend: null } : {}),
             ...(!draft && current.literalDraft ? { literalDraft: false } : {}),
           };
         });
     },
     [activeChatKey, updateChat],
   );
+  const clearDocumentEditContext = useCallback(() => {
+    if (activeChatKey) updateChat(activeChatKey, { resend: null });
+  }, [activeChatKey, updateChat]);
   const setFailedDrafts = (
     value: (current: ChatState['failedDrafts']) => ChatState['failedDrafts'],
   ) => {
@@ -1207,6 +1216,7 @@ export function ViewHarness() {
     mode: RunMode = 'queue',
     skill?: string,
     attachmentInput?: SendAttachments,
+    documentEditContext?: PreviewEditContext,
     capturedBrowserSelection?: BrowserSelection | null,
   ) => {
     if (
@@ -1214,8 +1224,11 @@ export function ViewHarness() {
       resetInFlightRef.current !== null
     )
       return;
+    if (documentEditContext !== undefined && (target.kind !== 'chat' || mode !== 'queue' || !validPreviewEditContext(documentEditContext) || conversation !== `${target.agentId}\u0000session:${target.id}`)) {
+      updateChat(conversation, { error: 'Select the original content again in its web chat before sending this edit.' }); return;
+    }
     const browserSelection =
-      capturedBrowserSelection !== undefined
+      documentEditContext ? null : capturedBrowserSelection !== undefined
         ? capturedBrowserSelection
         : target.agentId === agentId &&
             target.kind === 'chat' &&
@@ -1229,9 +1242,11 @@ export function ViewHarness() {
       sessionId: target.id,
       conversation,
       text,
+      ...(documentEditContext ? { documentEditContext } : {}),
       mode,
       ...(skill ? { skill } : {}),
       ...(target.kind === 'chat' &&
+      !documentEditContext &&
       planModeRef.current &&
       agent?.toolNames.includes('propose_plan')
         ? { plan: true }
@@ -1348,6 +1363,7 @@ export function ViewHarness() {
       'queue',
       skill,
       attachmentInput,
+      undefined,
       capturedBrowserSelection,
     );
   };
@@ -1834,6 +1850,8 @@ export function ViewHarness() {
         disabled: resetting || sessionLoading || waitingForMain || daemonTooOld,
         offline: connection === 'offline',
         onSend: commands.send,
+        documentEditContext: chat.resend?.documentEditContext,
+        onClearDocumentEditContext: clearDocumentEditContext,
         error: workspaceError,
         onDismissError: () => setWorkspaceError(null),
         commands: chat.literalDraft ? undefined : slashCommands,
@@ -1853,6 +1871,11 @@ export function ViewHarness() {
                 text: failedDraft ?? '',
                 restore: () => {
                   if (!activeChatKey) return;
+                  const recovered = failedDrafts[0];
+                  if (recovered?.documentEditContext && (!activeSession || sessionLoading || waitingForMain)) return;
+                  if (recovered && ((recovered.documentEditContext !== undefined && (!validPreviewEditContext(recovered.documentEditContext) || activeSession?.kind !== 'chat' || recovered.agentId !== activeSession.agentId || recovered.sessionId !== activeSession.id)) || (!recovered.documentEditContext && recovered.text.includes('BEGIN_PREVIEW_EDIT_CONTEXT')))) {
+                    updateChat(activeChatKey, (current) => ({ failedDrafts: current.failedDrafts.slice(1), error: 'This recovered edit needs a current selection. Open the original file and select its content again.' })); return;
+                  }
                   if (
                     !attachments.restore(
                       failedDrafts[0]?.attachments ?? [],
@@ -1871,12 +1894,14 @@ export function ViewHarness() {
                       resend:
                         first.idempotencyKey ||
                         first.attachmentIds?.length ||
-                        first.skill
+                        first.skill ||
+                        first.documentEditContext
                           ? {
                               text: first.text,
                               idempotencyKey:
                                 first.idempotencyKey ?? crypto.randomUUID(),
                               ...(first.skill ? { skill: first.skill } : {}),
+                              ...(first.documentEditContext ? { documentEditContext: first.documentEditContext } : {}),
                               ...(first.attachmentIds
                                 ? { attachmentIds: first.attachmentIds }
                                 : {}),

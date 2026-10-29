@@ -11,6 +11,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
+import type { PreviewEditContext } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
@@ -21,6 +22,8 @@ import {
 } from './artifact-document';
 import { useArtifactResize } from './useArtifactResize';
 import { useArtifactFullscreenMotion } from './useArtifactFullscreenMotion';
+import { ArtifactContentPreview } from './ArtifactContentPreview';
+import { WorkspaceFileDownload, workspaceFileTarget } from '../WorkspaceFileDownload';
 import {
   CodeIcon,
   DownloadIcon,
@@ -63,6 +66,8 @@ export function WorkspaceArtifactLink({
         {children}
       </button>
     </ArtifactLinkBoundary>
+  ) : !open && !insideLink && !literal && workspaceFileTarget(path) ? (
+    <ArtifactLinkBoundary><WorkspaceFileDownload url={path}>{children}</WorkspaceFileDownload></ArtifactLinkBoundary>
   ) : (
     <>{children}</>
   );
@@ -72,6 +77,7 @@ export function WorkspaceArtifactLayout(props: {
   agentId: string;
   sessionId: string;
   clearGeneration: number;
+  onEditSelection?: (context: PreviewEditContext | null) => void;
   children: ReactNode;
 }) {
   return (
@@ -90,10 +96,13 @@ function ArtifactSession({
   agentId,
   sessionId,
   clearGeneration,
+  onEditSelection,
   children,
 }: Parameters<typeof WorkspaceArtifactLayout>[0]) {
   const [path, setPath] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  const draftHandoff = useRef<PreviewEditContext | null>(null);
+  const focusDraft = useRef(false);
   const {
     layoutRef,
     chatShare,
@@ -117,17 +126,19 @@ function ArtifactSession({
   const opener = useRef<HTMLElement | null>(null);
   const open = useMemo(
     () => (target: string, element: HTMLElement) => {
+      focusDraft.current = false;
+      onEditSelection?.(null);
       opener.current = element;
       cancelFullscreen();
       setClosing(false);
       setPath(target);
       panel.current?.focus();
     },
-    [cancelFullscreen],
+    [cancelFullscreen, onEditSelection],
   );
   useEffect(() => {
     if (path && !closing) panel.current?.focus();
-    else if (opener.current?.isConnected && !opener.current.closest('[inert]'))
+    else if (!focusDraft.current && opener.current?.isConnected && !opener.current.closest('[inert]'))
       opener.current.focus();
   }, [path, closing]);
   const finishClose = useCallback(() => {
@@ -135,6 +146,28 @@ function ArtifactSession({
     setPath(null);
     setClosing(false);
   }, [cancelFullscreen]);
+  useEffect(() => {
+    if (path !== null || !draftHandoff.current) return;
+    const selection = draftHandoff.current;
+    draftHandoff.current = null;
+    onEditSelection?.(selection);
+  }, [path, onEditSelection]);
+  const selectForDraft = useCallback((context: PreviewEditContext | null) => {
+    if (!context) {
+      if (!draftHandoff.current) onEditSelection?.(null);
+      return;
+    }
+    focusDraft.current = true;
+    // An explicit draft handoff returns phone users to their still-mounted composer.
+    // Ordinary close, reload and scope changes continue to invalidate the selection.
+    if (window.matchMedia?.('(max-width: 767px)').matches) {
+      draftHandoff.current = context;
+      finishClose();
+    } else {
+      cancelFullscreen();
+      onEditSelection?.(context);
+    }
+  }, [finishClose, cancelFullscreen, onEditSelection]);
   useEffect(() => {
     if (!closing || fullscreen) return;
     // Retain the document for its exit; reopening cancels this cleanup.
@@ -165,6 +198,7 @@ function ArtifactSession({
       for (const element of background) element.removeAttribute('inert');
       if (
         preview.isConnected &&
+        !focusDraft.current &&
         !preview.hasAttribute('inert') &&
         fullscreenTrigger.current?.isConnected
       )
@@ -173,6 +207,7 @@ function ArtifactSession({
   }, [fullscreen]);
   const close = useCallback(() => {
     if (closing) return;
+    onEditSelection?.(null);
     stopResizing();
     if (fullscreen) {
       setClosing(true);
@@ -190,6 +225,7 @@ function ArtifactSession({
     closeFullscreen,
     finishClose,
     cancelFullscreen,
+    onEditSelection,
   ]);
   const escape = useCallback(() => {
     if (closing) return;
@@ -265,7 +301,7 @@ function ArtifactSession({
                 }
               }}
             >
-              <ArtifactFile
+              {/\.html?$/i.test(path) ? <ArtifactFile
                 key={path}
                 path={path}
                 storageKey={`anima-artifact:${JSON.stringify([agentId, sessionId, clearGeneration, path])}`}
@@ -273,7 +309,10 @@ function ArtifactSession({
                 onEscape={escape}
                 fullscreen={targetFullscreen}
                 onToggleFullscreen={toggleFullscreen}
-              />
+                agentId={agentId}
+                sessionId={sessionId}
+                onEditSelection={onEditSelection ? selectForDraft : undefined}
+              /> : <OfficeArtifactFile path={path} agentId={agentId} sessionId={sessionId} onEditSelection={onEditSelection ? selectForDraft : undefined} onClose={close} fullscreen={targetFullscreen} onToggleFullscreen={toggleFullscreen} />}
             </aside>
           )}
         </div>
@@ -289,6 +328,9 @@ function ArtifactFile({
   onEscape,
   fullscreen,
   onToggleFullscreen,
+  agentId,
+  sessionId,
+  onEditSelection,
 }: {
   path: string;
   storageKey: string;
@@ -296,14 +338,19 @@ function ArtifactFile({
   onEscape(): void;
   fullscreen: boolean;
   onToggleFullscreen(trigger: HTMLElement): void;
+  agentId: string;
+  sessionId: string;
+  onEditSelection?: (context: PreviewEditContext | null) => void;
 }) {
   const [attempt, setAttempt] = useState(0);
+  const [selecting, setSelecting] = useState(false);
   const [loaded, setLoaded] = useState<{
     source: string;
     document: string;
     sourceUrl: string;
     windowUrl: string;
     nonce: string;
+    sha256: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -315,6 +362,7 @@ function ArtifactFile({
   useResetOnChange([request], () => {
     setLoaded(null);
     setError(null);
+    setSelecting(false);
   });
   useEffect(() => {
     const { path: requestPath, storageKey: requestStorageKey } = request;
@@ -326,7 +374,9 @@ function ArtifactFile({
           requestPath,
           abort.signal,
         );
-        const source = await blob.text();
+        const bytes = await blob.arrayBuffer();
+        const source = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+        const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
         if (abort.signal.aborted) return;
         let snapshot = '[]';
         try {
@@ -354,6 +404,7 @@ function ArtifactFile({
           sourceUrl,
           windowUrl,
           nonce,
+          sha256,
         });
       } catch (caught) {
         if (!abort.signal.aborted)
@@ -434,7 +485,7 @@ function ArtifactFile({
             className="workspace-artifact-action"
             aria-label="Reload"
             title="Reload preview"
-            onClick={() => setAttempt((n) => n + 1)}
+            onClick={() => { onEditSelection?.(null); setAttempt((n) => n + 1); }}
           >
             <RefreshIcon size={16} strokeWidth={1.7} />
           </button>
@@ -493,19 +544,21 @@ function ArtifactFile({
           </button>
         </div>
       </header>
+      {loaded && onEditSelection && <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 text-sm"><span>{selecting ? 'Text selection' : 'Live HTML preview'}</span><button type="button" className="studio-tool-button" aria-pressed={selecting} onClick={() => { onEditSelection(null); setSelecting((value) => !value); }}>{selecting ? 'Return to live preview' : 'Select content to edit'}</button></div>}
       {error ? (
         <p role="alert" className="p-4 text-sm text-danger">
           {error}
         </p>
       ) : loaded ? (
-        <iframe
+        <>{selecting && <div className="min-h-0 flex-1 overflow-auto"><ArtifactContentPreview key={`${path}:${loaded.sha256}:${attempt}`} path={path} agentId={agentId} sessionId={sessionId} source={loaded.source} sha256={loaded.sha256} onSelect={onEditSelection} /></div>}<iframe
           ref={frame}
           title={path}
           className="min-h-0 w-full flex-1 border-0 bg-white"
           sandbox="allow-scripts allow-downloads allow-modals"
           referrerPolicy="no-referrer"
           srcDoc={loaded.document}
-        />
+          hidden={selecting}
+        /></>
       ) : (
         <p role="status" className="p-4 text-sm text-ink-3">
           Opening HTML file…
@@ -513,4 +566,20 @@ function ArtifactFile({
       )}
     </>
   );
+}
+
+function OfficeArtifactFile({ path, agentId, sessionId, onEditSelection, onClose, fullscreen, onToggleFullscreen }: {
+  path: string; agentId: string; sessionId: string; onEditSelection?: (context: PreviewEditContext | null) => void;
+  onClose(): void; fullscreen: boolean; onToggleFullscreen(trigger: HTMLElement): void;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  return <>
+    <header className="workspace-artifact-toolbar"><div className="workspace-artifact-file-info"><h2 title={path}>{path.split('/').at(-1)}</h2><p>Document content preview</p></div><div className="workspace-artifact-actions" role="group" aria-label="Preview actions">
+      <button type="button" className="workspace-artifact-action" aria-label="Reload" onClick={() => { onEditSelection?.(null); setAttempt((value) => value + 1); }}><RefreshIcon size={16} /></button>
+      <WorkspaceFileDownload url={`/api/workspace/file/download?path=${encodeURIComponent(path)}`}>Download</WorkspaceFileDownload>
+      <button type="button" className="workspace-artifact-action" aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} onClick={(event) => onToggleFullscreen(event.currentTarget)}>{fullscreen ? <MinimizeIcon size={16} /> : <MaximizeIcon size={16} />}</button>
+      <button type="button" className="workspace-artifact-action" aria-label="Close artifact preview" onClick={onClose}><XIcon size={16} /></button>
+    </div></header>
+    <div className="min-h-0 flex-1 overflow-auto"><ArtifactContentPreview key={`${path}:${attempt}`} path={path} agentId={agentId} sessionId={sessionId} onSelect={onEditSelection} /></div>
+  </>;
 }

@@ -1,4 +1,5 @@
 import type { DaemonClient } from './client.js';
+import type { ProjectAddConnectedSourceInput, ProjectConnectedSourceChoices, ProjectConnectedSourceGrant } from './project-connected-sources.js';
 
 export interface ProjectMember { agentId: string; generation: number; joinedAtMs: number }
 export type ProjectStatus = 'active' | 'archived';
@@ -15,7 +16,8 @@ export type ProjectLinkTarget =
   | { kind: 'workflow'; ownerAgentId: string; workflowId: string }
   | { kind: 'workflow_template'; ownerAgentId: string; slug: string };
 export type ProjectTarget = ProjectLinkTarget
-  | { kind: 'knowledge_folder'; rootPath: string; rootIdentity: string };
+  | { kind: 'knowledge_folder'; rootPath: string; rootIdentity: string }
+  | { kind: 'connected_source'; grant: ProjectConnectedSourceGrant };
 export type ProjectResourceState = 'ready' | 'missing' | 'not_in_project' | 'access_removed'
   | 'source_changed' | 'workspace_changed' | 'excluded' | 'unsafe_content' | 'unsupported'
   | 'unavailable' | 'no_matches' | 'budget_omitted' | 'already_in_current_chat';
@@ -72,6 +74,8 @@ export interface ProjectKnowledgeSource {
 export interface ProjectKnowledgeStatus extends ProjectKnowledgeBinding { sources: ProjectKnowledgeSource[] }
 export interface ProjectKnowledgeHit {
   citationId: string; resourceId: string; documentId: string; title: string; locator: string; excerpt: string;
+  origin?: { ownerAgentId: string; connectorId: string; provider: string; remoteId: string;
+    ownerName?: string; accountLabel?: string | null; revisionSha256: string; verifiedAtMs: number; coverage: string };
 }
 export interface ProjectKnowledgeSearch extends ProjectKnowledgeStatus { hits: ProjectKnowledgeHit[] }
 export interface ProjectKnowledgeCitation extends ProjectKnowledgeBinding, ProjectKnowledgeHit { text: string }
@@ -145,6 +149,15 @@ export class ProjectsClient {
   /** Explicit owner grant. Root identities are issued and verified by the host. */
   async addKnowledgeFolder(id: string, input: ProjectAddKnowledgeFolderInput): Promise<Project> {
     const result = await this.client.requestJson<{ project: Project }>(`${path(id)}/knowledge/sources`, { method: 'POST', body: input });
+    return result.project;
+  }
+
+  connectedSourceChoices(id: string, asAgentId: string, options: { query?: string; signal?: AbortSignal } = {}): Promise<ProjectConnectedSourceChoices> {
+    return this.client.requestJson(`${path(id)}/knowledge/connected-sources?${new URLSearchParams({ asAgentId, query: options.query ?? '' })}`, { signal: options.signal });
+  }
+
+  async addConnectedSource(id: string, input: ProjectAddConnectedSourceInput): Promise<Project> {
+    const result = await this.client.requestJson<{ project: Project }>(`${path(id)}/knowledge/connected-sources`, { method: 'POST', body: input });
     return result.project;
   }
 

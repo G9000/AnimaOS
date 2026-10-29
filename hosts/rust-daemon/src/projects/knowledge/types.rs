@@ -42,10 +42,26 @@ pub(crate) struct KnowledgeHit {
     pub(crate) title: String,
     pub(crate) locator: String,
     pub(crate) excerpt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) origin: Option<ConnectedCitationOrigin>,
     #[serde(skip)]
     pub(crate) source_sha256: String,
     #[serde(skip)]
     pub(crate) chunk_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConnectedCitationOrigin {
+    pub(crate) owner_agent_id: String,
+    pub(crate) owner_name: Option<String>,
+    pub(crate) account_label: Option<String>,
+    pub(crate) connector_id: String,
+    pub(crate) provider: String,
+    pub(crate) remote_id: String,
+    pub(crate) revision_sha256: String,
+    pub(crate) verified_at_ms: u64,
+    pub(crate) coverage: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]

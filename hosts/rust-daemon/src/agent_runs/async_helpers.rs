@@ -336,6 +336,7 @@ impl AgentRunCoordinator {
                 .filter(|control| !control.cancel.is_cancelled() && !control.steering.is_closed())
                 .ok_or_else(|| "Helper steering inbox is closed".to_string())?;
             let steer = RunSteer {
+                document_edit_context: None,
                 idempotency_key: key,
                 text: message,
                 attachment_ids: Vec::new(),

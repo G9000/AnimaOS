@@ -19,7 +19,7 @@ export function workspaceArtifactPath(
   if (path.startsWith('./')) path = path.slice(2);
   if (
     new TextEncoder().encode(path).length > 1024 ||
-    !/\.html?$/i.test(path) ||
+    !/\.(?:html?|docx|xlsx|pptx)$/i.test(path) ||
     /[\\:?#]/.test(path) ||
     [...path].some(
       (character) =>

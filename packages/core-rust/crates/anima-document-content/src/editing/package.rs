@@ -486,6 +486,7 @@ impl Package {
             OfficeFormat::Docx => "wordprocessingml.document.main",
             OfficeFormat::Xlsx => "spreadsheetml.sheet.main",
             OfficeFormat::Pptx => "presentationml.presentation.main",
+            OfficeFormat::Html => return Err(Error::InvalidPackage),
         };
         if overrides.get(&self.main).map(String::as_str)
             != Some(

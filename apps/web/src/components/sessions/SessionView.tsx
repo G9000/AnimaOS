@@ -1,7 +1,9 @@
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
   useEffect,
+  useCallback,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -12,6 +14,8 @@ import {
   type Session,
   type BrowserSelection,
   type UploadedAttachment,
+  validPreviewEditContext,
+  type PreviewEditContext,
 } from '@animaos/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
@@ -66,7 +70,10 @@ export interface SessionComposerState {
   sending: boolean;
   disabled: boolean;
   offline: boolean;
-  onSend: (text?: string) => void;
+  onSend: (text?: string, documentEditContext?: PreviewEditContext) => void;
+  /** A recovered or revised edit remains visible until it is sent or discarded. */
+  documentEditContext?: PreviewEditContext;
+  onClearDocumentEditContext?: () => void;
   error: string | null;
   onDismissError: () => void;
   recovery?: {
@@ -374,6 +381,36 @@ export function SessionView({
   const saveAgentName =
     saveAgentId === agent.id ? agent.name : GENERIC_SAVE_AGENT_NAME;
   const sessionId = session?.id ?? null;
+  const viewRef = useRef<HTMLElement | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<PreviewEditContext | null>(null);
+  const selectedEditContext = previewSelection ?? composer.documentEditContext ?? null;
+  const selectionSubmitted = useRef(false);
+  const selectionGeneration = useRef(0);
+  const clearRecoveredEdit = composer.onClearDocumentEditContext;
+  useResetOnChange([session?.agentId, sessionId, session?.clearGeneration, composer.disabled, composer.offline], () => {
+    setPreviewSelection(null);
+    selectionSubmitted.current = false;
+    selectionGeneration.current++;
+  });
+  const choosePreviewSelection = useCallback((context: PreviewEditContext | null) => {
+    selectionGeneration.current++;
+    setPreviewSelection(context && validPreviewEditContext(context) ? context : null);
+    if (!context) clearRecoveredEdit?.();
+  }, [clearRecoveredEdit]);
+  useEffect(() => {
+    if (!selectedEditContext) return;
+    const generation = selectionGeneration.current;
+    // Wait for the draft chip and the phone's return to the conversation to commit.
+    const frame = requestAnimationFrame(() => {
+      if (selectionGeneration.current === generation) viewRef.current?.querySelector<HTMLTextAreaElement>('[data-workspace-composer]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedEditContext]);
+  useEffect(() => {
+    if (!selectionSubmitted.current || composer.draft) return;
+    selectionSubmitted.current = false;
+    setPreviewSelection(null);
+  }, [composer.draft]);
   const exportScope = useMemo(
     () =>
       saveAgentId && sessionId ? { agentId: saveAgentId, sessionId } : null,
@@ -393,6 +430,12 @@ export function SessionView({
   });
   const sendWithSideQuestion = (override?: string) => {
     const text = override ?? composer.draft;
+    if (selectedEditContext && override === undefined) {
+      if (!text.trim() || composer.disabled || composer.offline || composer.sending) return;
+      selectionSubmitted.current = true;
+      composer.onSend(text, selectedEditContext);
+      return;
+    }
     if (
       !composer.literalDraft &&
       session?.kind === 'chat' &&
@@ -581,6 +624,7 @@ export function SessionView({
   );
   const view = (
     <section
+      ref={viewRef}
       className="flex h-full min-h-0 flex-col"
       aria-label={session?.title ?? 'New chat'}
       data-main-chat={session?.mainChat ? 'true' : undefined}
@@ -754,7 +798,7 @@ export function SessionView({
           }
           runActive={composer.runActive}
           onStop={composer.onStop}
-          onSteer={composer.onSteer}
+          onSteer={selectedEditContext ? undefined : composer.onSteer}
           conversationKey={voiceKey}
           voiceDisabled={composer.voiceDisabled}
           nativeVoice={
@@ -786,6 +830,7 @@ export function SessionView({
                 )}
             </>
           }
+          context={selectedEditContext ? <section role="region" aria-label="Selected content for edit" className="mb-2 rounded-xl border border-line bg-panel p-3 text-sm"><div className="flex items-center justify-between gap-3"><strong className="min-w-0 break-words">{revealInvisible(selectedEditContext.source.path).text}</strong><button type="button" className={ghostBtnCls} aria-label="Remove selected content" onClick={() => choosePreviewSelection(null)}>Remove</button></div><p className="max-h-24 overflow-auto whitespace-pre-wrap break-words">{revealInvisible(selectedEditContext.selection.kind === 'html_text' ? selectedEditContext.selection.expected_text : selectedEditContext.selection.label).text}</p><p className="text-xs text-ink-3">Describe the change below. You will review the proposal before it is applied.</p></section> : undefined}
         />
       ) : (
         <div className="session-footer-note" role="note">
@@ -822,6 +867,7 @@ export function SessionView({
           agentId={session.agentId}
           sessionId={session.id}
           clearGeneration={session.clearGeneration ?? 0}
+          onEditSelection={session.capabilities.send && !composer.disabled && !composer.offline ? choosePreviewSelection : undefined}
         >
           {view}
         </WorkspaceArtifactLayout>

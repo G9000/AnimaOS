@@ -124,6 +124,7 @@ impl DiscordManager {
             .runs
             .accept_run(
                 AcceptRun {
+                    document_edit_context: None,
                     agent_id: agent,
                     session_id: session,
                     text: inbound.text.clone(),

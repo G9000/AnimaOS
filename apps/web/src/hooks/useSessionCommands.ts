@@ -14,7 +14,9 @@ import type {
   SessionReviseInput,
   SessionQueuedRunPatch,
   UploadedAttachment,
+  PreviewEditContext,
 } from '@animaos/sdk';
+import { validPreviewEditContext } from '@animaos/sdk';
 import type { SendAttachments } from './useSessionSends';
 import { useLatest } from './useLatest';
 import { ATTACHMENT_ERRORS } from '../lib/attachments';
@@ -36,7 +38,7 @@ import { isOwnerWritten, type HelperTarget } from '../lib/transcript';
 export interface CommandChatPatch {
   draft?: string;
   error?: string | null;
-  resend?: null;
+  resend?: SessionCommandOptions['resend'];
   delivery?: null;
   notice?: string | null;
   literalDraft?: boolean;
@@ -65,6 +67,7 @@ export interface SessionCommandOptions {
     idempotencyKey: string;
     attachmentIds?: string[];
     skill?: string;
+    documentEditContext?: PreviewEditContext;
   } | null;
   attachments?: readonly UploadedAttachment[];
   /** Saved IDs whose display metadata is unavailable (manual run recovery). */
@@ -92,6 +95,7 @@ export interface SessionCommandOptions {
     mode?: RunMode,
     skill?: string,
     attachments?: SendAttachments,
+    documentEditContext?: PreviewEditContext,
   ) => void;
   /** The commands the composer offers: the built-ins and the skills. */
   slashCommands: readonly SlashCommand[];
@@ -123,7 +127,7 @@ export interface SessionCommandOptions {
 export interface SessionCommands {
   /** Sends the draft, or `text` (a command picked from the menu), as a
    *  queued message; a slash command runs instead. */
-  send: (text?: string) => void;
+  send: (text?: string, documentEditContext?: PreviewEditContext) => void;
   /** Steers the draft into the reply in progress (⌘/Ctrl+Enter). */
   steer: () => void;
   /** Stops a run (spec §4.6): the reply in progress, or a queued message. */
@@ -243,12 +247,16 @@ export function useSessionCommands(
           ...(throughMessageId ? { throughMessageId } : {}),
         });
         if (!stillOpen()) return;
+        const retryContext = revision.retryDocumentEditContext;
+        if ((retryContext != null && !validPreviewEditContext(retryContext)) || (!retryContext && revision.retryPrompt?.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
+          current.setError('This retry needs a current selection. Open the original file and select its content again.'); return;
+        }
         current.upsertSession(revision.session);
         current.updateChat(
           `${revision.session.agentId}\u0000session:${revision.session.id}`,
           {
             draft: revision.retryPrompt ?? '',
-            resend: null,
+            resend: retryContext && revision.retryPrompt ? { text: revision.retryPrompt, idempotencyKey: crypto.randomUUID(), documentEditContext: retryContext } : null,
             literalDraft: revision.retryPrompt !== null,
             delivery: null,
             error: null,
@@ -374,14 +382,22 @@ export function useSessionCommands(
       return result;
     };
 
-    const submit = (mode: RunMode, override?: string) => {
+    const submit = (mode: RunMode, override?: string, selectedContext?: PreviewEditContext) => {
       const current = latest.current;
       if (!current.canSend() || current.attachmentsBlocked) return;
       const rawText = override ?? current.draft;
+      const documentEditContext = selectedContext ?? current.resend?.documentEditContext;
+      if ((documentEditContext !== undefined && (!validPreviewEditContext(documentEditContext) || !current.session || current.session.kind !== 'chat' || !['web', 'api'].includes(current.session.origin) || current.session.parentRunId || !current.session.capabilities.send || current.chatKey !== `${current.session.agentId}\u0000session:${current.session.id}`)) || (!documentEditContext && rawText.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
+        current.setError('This edit needs a current content selection in its original web chat. Select the content again.');
+        return;
+      }
       const attachments = [...(current.attachments ?? [])];
       const attachmentIds = current.attachmentIds
         ? [...current.attachmentIds]
         : attachments.map((item) => item.id);
+      if (documentEditContext && attachmentIds.length > 0) {
+        current.setError('Remove attached files before sending a selected document edit.'); return;
+      }
       if (
         current.session?.kind === 'discord' &&
         attachmentIds.length > 0 &&
@@ -396,25 +412,26 @@ export function useSessionCommands(
       const sameAttachments =
         JSON.stringify(current.resend?.attachmentIds ?? []) ===
         JSON.stringify(attachmentIds);
+      const sameContext = JSON.stringify(current.resend?.documentEditContext) === JSON.stringify(documentEditContext);
       const exactReplay =
         current.resend !== null &&
         current.resend.text === rawText &&
-        sameAttachments;
+        sameAttachments && sameContext;
       const text =
         exactReplay || current.literalDraft ? rawText : rawText.trim();
       if (!text && attachmentIds.length === 0) return;
       const attached: SendAttachments | undefined = attachmentIds.length
         ? { attachmentIds, attachments }
         : undefined;
-      const parsed = current.literalDraft
+      const parsed = current.literalDraft || documentEditContext
         ? null
         : parseSlashCommand(text, current.slashCommands);
       // An unchanged recovered input already was a message, including API text
       // that looks like a local command. Preserve its identity before normalization.
       const command = exactReplay ? null : parsed;
       // A skill is a message: the whole text goes, with its skill (spec §15.3).
-      const restored = current.resend?.text === text && sameAttachments;
-      const skill =
+      const restored = current.resend?.text === text && sameAttachments && sameContext;
+      const skill = documentEditContext ? undefined :
         (exactReplay ? current.resend?.skill : parsed?.command.skill) ??
         (restored ? current.resend?.skill : undefined);
       if (command && !command.command.turn && !skill && current.chatKey) {
@@ -472,13 +489,15 @@ export function useSessionCommands(
       // A skill message never steers (the daemon refuses it).
       const sendMode =
         mode === 'steer' &&
+        !documentEditContext &&
         !parsed?.command.turn &&
         !skill &&
         activeRun &&
         session.capabilities.steer
           ? 'steer'
           : 'queue';
-      if (attached)
+      if (documentEditContext) current.queueSend(session, chatKey, text, idempotencyKey, 'queue', undefined, attached, documentEditContext);
+      else if (attached)
         current.queueSend(
           session,
           chatKey,
@@ -502,7 +521,7 @@ export function useSessionCommands(
     };
 
     return {
-      send: (text?: string) => submit('queue', text),
+      send: (text?: string, documentEditContext?: PreviewEditContext) => submit('queue', text, documentEditContext),
       steer: () => submit('steer'),
       stopRun,
       compactSession,
@@ -520,8 +539,13 @@ export function useSessionCommands(
           return false;
         if (session.kind === 'discord' && !latest.current.discordReady)
           return false;
+        const documentEditContext = run.input.documentEditContext;
+        if ((documentEditContext != null && (!validPreviewEditContext(documentEditContext) || session.kind !== 'chat' || !['web', 'api'].includes(session.origin) || session.parentRunId)) || (!documentEditContext && run.input.text.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
+          latest.current.setError('Select the original content again before retrying this edit.'); return false;
+        }
         const key = crypto.randomUUID();
-        if (run.input.attachmentIds.length)
+        if (documentEditContext) queueSend(session, chatKey, run.input.text, key, 'queue', undefined, run.input.attachmentIds.length ? { attachmentIds: [...run.input.attachmentIds] } : undefined, documentEditContext);
+        else if (run.input.attachmentIds.length)
           queueSend(
             session,
             chatKey,

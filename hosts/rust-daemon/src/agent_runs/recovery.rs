@@ -72,7 +72,10 @@ fn apply_project_review(state: &DaemonState, source: &RunRecord, view: &mut Reco
                     row.state == crate::projects::ProjectSourceState::Ready
                         && matches!(
                             row.witness,
-                            Some(crate::projects::ProjectSourceWitness::KnowledgeFolder { .. })
+                            Some(
+                                crate::projects::ProjectSourceWitness::KnowledgeFolder { .. }
+                                    | crate::projects::ProjectSourceWitness::ConnectedSource { .. }
+                            )
                         )
                 })
             }) {
@@ -122,6 +125,11 @@ impl RecoveryAdmission {
             .get(&self.source_run_id)
             .filter(|r| r.agent_id == request.agent_id && r.session_id == request.session_id)
             .ok_or_else(ApiError::not_found)?;
+        if request.document_edit_context != source.effective_input().document_edit_context {
+            return Err(ApiError::conflict(
+                "Selected document context cannot change during recovery",
+            ));
+        }
         let mut view = summary(source);
         apply_project_review(state, source, &mut view);
         if view.fingerprint != self.fingerprint {
@@ -139,6 +147,9 @@ impl RecoveryAdmission {
                 || child.recovery_attempt != source.recovery_attempt.saturating_add(1)
                 || child.recovery_attempt > crate::runs::recovery::MAX_RECOVERY_ATTEMPTS
                 || saved.fingerprint != self.fingerprint
+                || child.input.document_edit_context
+                    != source.effective_input().document_edit_context
+                || child.document_edit_scope != source.document_edit_scope
             {
                 return Err(ApiError::conflict(
                     "The saved continuation does not match this task",
@@ -293,6 +304,7 @@ impl AgentRunCoordinator {
                 source: source.source,
                 source_ref: None,
                 skill: source.effective_input().skill.clone(),
+                document_edit_context: source.effective_input().document_edit_context.clone(),
             };
             let start = self.web_start_with_attachments(
                 source.agent_id.clone(),
@@ -376,6 +388,7 @@ impl AgentRunCoordinator {
             source: RunSource::Web,
             source_ref: None,
             skill: source.effective_input().skill.clone(),
+            document_edit_context: source.effective_input().document_edit_context.clone(),
         };
         let start = self.web_start_with_attachments(
             agent,

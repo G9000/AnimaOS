@@ -1,7 +1,96 @@
 //! Independent read snapshots; never advance the automatic-reply mailbox cursor.
 use super::*;
 use crate::connected_search::{DocumentKind, IndexedDocument};
+
+pub(crate) struct ProjectMailThread {
+    pub(crate) title: String,
+    pub(crate) text: String,
+    pub(crate) revision: String,
+    pub(crate) partial: bool,
+}
+
 impl MailManager {
+    /// Read only the selected conversation; this never moves the automatic-reply cursor.
+    pub(crate) async fn read_project_thread(
+        &self,
+        agent: &str,
+        id: &str,
+        expected_generation: &str,
+        selected_message: &str,
+        stream_epoch: Option<&str>,
+    ) -> Result<ProjectMailThread, MailError> {
+        let provider = {
+            let shared = self.shared()?;
+            let state = shared.read().await;
+            let authority = crate::connected_search::source_authority(&state, agent, id)
+                .filter(|a| a.enabled && a.generation == expected_generation)
+                .ok_or(MailError::Conflict)?;
+            let provider = Self::record(&state, agent, id, Provider::parse(&authority.provider)?)?
+                .connector
+                .provider;
+            provider
+        };
+        if provider == Provider::Email {
+            let snapshot = self
+                .search_documents(agent, id, expected_generation)
+                .await?;
+            if snapshot.stream_epoch.as_deref() != stream_epoch {
+                return Err(MailError::Conflict);
+            }
+            let message = snapshot
+                .documents
+                .into_iter()
+                .find(|d| d.external_id == selected_message)
+                .ok_or(MailError::NotFound)?;
+            return super::client::project_thread(vec![message], true);
+        }
+        let lock = self.lock(agent, provider).await;
+        let _guard = lock.lock().await;
+        let auth_generation = {
+            let shared = self.shared()?;
+            let state = shared.read().await;
+            if !crate::connected_search::source_authority(&state, agent, id)
+                .is_some_and(|a| a.enabled && a.generation == expected_generation)
+            {
+                return Err(MailError::Conflict);
+            }
+            Self::record(&state, agent, id, provider)?
+                .auth_generation
+                .clone()
+        };
+        let lease = self
+            .oauth_apps
+            .locked_config(provider.oauth_provider().ok_or(MailError::Invalid)?)
+            .await
+            .map_err(|_| MailError::Credential)?;
+        let config = lease
+            .config()
+            .map(|c| OAuthConfig::from_resolved(provider, c))
+            .ok_or(MailError::Unconfigured)?;
+        let token = self.token(agent, id, provider, &config).await?;
+        let result = self
+            .transport
+            .project_thread(provider, token.access_token(), selected_message)
+            .await;
+        let value = match result {
+            Ok(value) => value,
+            Err(error) => {
+                if error == MailError::Unauthorized {
+                    self.record_error(agent, id, provider, error).await?;
+                }
+                return Err(error);
+            }
+        };
+        let shared = self.shared()?;
+        let state = shared.read().await;
+        if Self::record(&state, agent, id, provider)?.auth_generation != auth_generation
+            || !crate::connected_search::source_authority(&state, agent, id)
+                .is_some_and(|a| a.enabled && a.generation == expected_generation)
+        {
+            return Err(MailError::Conflict);
+        }
+        Ok(value)
+    }
     pub(crate) async fn search_history_page(
         &self,
         agent: &str,

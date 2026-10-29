@@ -1,5 +1,6 @@
 import type { DaemonClient } from './client.js';
 import type { BrowserSelection } from './browser.js';
+import type { PreviewEditContext } from './preview-context.js';
 
 export type RunStatus =
   | 'queued'
@@ -133,7 +134,7 @@ export interface Run {
   status: RunStatus;
   /** Effective waiting order; absent on older daemons and null outside the queue. */
   queueOrder?: number | null;
-  input: { text: string; attachmentIds: string[]; skill: string | null };
+  input: { text: string; attachmentIds: string[]; skill: string | null; documentEditContext?: PreviewEditContext | null };
   createdAtMs: number;
   startedAtMs: number | null;
   finishedAtMs: number | null;
@@ -189,6 +190,8 @@ export interface StartRunInput {
   plan?: boolean;
   /** Explicit owner opt-in for a new immediately eligible Chat run; replay never renews it. */
   browserSelection?: BrowserSelection;
+  /** Exact selected preview data. Restricts this owner run to reviewed document edits. */
+  documentEditContext?: PreviewEditContext;
   /** The sender's IANA time zone; the daemon keeps it as the owner's, so
    *  "7 p.m." means their evening in every channel. */
   timeZone?: string;

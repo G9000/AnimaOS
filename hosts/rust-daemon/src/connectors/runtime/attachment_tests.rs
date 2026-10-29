@@ -99,6 +99,7 @@ async fn accepted_owner_attachment_uses_ledger_refs_and_keeps_text_delivery() {
         .runs
         .accept_run(
             AcceptRun {
+                document_edit_context: None,
                 agent_id: agent.clone(),
                 session_id: session,
                 text: "raw owner text".into(),

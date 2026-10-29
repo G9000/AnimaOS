@@ -87,6 +87,15 @@ pub(crate) enum ProjectMutation {
         id: String,
         input: AddResourceRequest,
     },
+    AddConnectedSource {
+        id: String,
+        input: super::connected::AddConnectedSourceRequest,
+    },
+    /// Host-only result of explicit selected-account admission.
+    AddGrantedConnectedSource {
+        id: String,
+        input: AddResourceRequest,
+    },
     PatchResource {
         id: String,
         resource_id: String,
@@ -247,6 +256,51 @@ impl ProjectService {
 
     async fn mutate_owned(&self, mutation: ProjectMutation) -> Result<Value, ProjectError> {
         let mutation = match mutation {
+            ProjectMutation::AddConnectedSource { id, input } => {
+                if !input.share_with_project {
+                    return Err(ProjectError::InvalidRecord(
+                        "Confirm sharing this selected source with project members",
+                    ));
+                }
+                let (grant, label) = {
+                    let state = self.state.read().await;
+                    let project = member_project(&state, &id, &input.as_agent_id)?;
+                    if project.member(&input.owner_agent_id).is_none() {
+                        return Err(ProjectError::NotMember);
+                    }
+                    let grant = super::connected::capture(
+                        &state,
+                        &input.owner_agent_id,
+                        &input.connector_id,
+                        &input.citation_id,
+                    )?;
+                    let title = state
+                        .connected_search
+                        .sources
+                        .get(&input.connector_id)
+                        .and_then(|index| {
+                            index
+                                .documents
+                                .iter()
+                                .chain(index.historical.values())
+                                .find(|document| document.citation_id == input.citation_id)
+                        })
+                        .map(|document| document.title.chars().take(120).collect::<String>());
+                    (grant, input.label.or(title))
+                };
+                ProjectMutation::AddGrantedConnectedSource {
+                    id,
+                    input: AddResourceRequest {
+                        expected_revision: input.expected_revision,
+                        request_key: input.request_key,
+                        as_agent_id: input.as_agent_id,
+                        target: ProjectResourceTarget::ConnectedSource { grant },
+                        role: ProjectResourceRole::Reference,
+                        label,
+                        use_in_context: true,
+                    },
+                }
+            }
             ProjectMutation::AddKnowledgeFolder { id, input } => {
                 let protected = {
                     let state = self.state.read().await;
@@ -288,7 +342,8 @@ impl ProjectService {
             mutation => mutation,
         };
         let preflight = if let ProjectMutation::AddResource { id, input }
-        | ProjectMutation::AddGrantedKnowledgeFolder { id, input } = &mutation
+        | ProjectMutation::AddGrantedKnowledgeFolder { id, input }
+        | ProjectMutation::AddGrantedConnectedSource { id, input } = &mutation
         {
             let (resource, binding) = {
                 let state = self.state.read().await;
@@ -628,6 +683,7 @@ fn prepare(
     mutation: ProjectMutation,
 ) -> Result<PreparedMutation, ProjectError> {
     let granted_knowledge = matches!(&mutation, ProjectMutation::AddGrantedKnowledgeFolder { .. });
+    let granted_connected = matches!(&mutation, ProjectMutation::AddGrantedConnectedSource { .. });
     let mut registry = state.projects.clone();
     let mut bindings = Vec::new();
     let mut changes = Vec::new();
@@ -686,7 +742,15 @@ fn prepare(
             json!({"deleted":true,"detachedChatCount":bindings.len()})
         }
         ProjectMutation::AddResource { id, input }
-        | ProjectMutation::AddGrantedKnowledgeFolder { id, input } => {
+        | ProjectMutation::AddGrantedKnowledgeFolder { id, input }
+        | ProjectMutation::AddGrantedConnectedSource { id, input } => {
+            if matches!(&input.target, ProjectResourceTarget::ConnectedSource { .. })
+                != granted_connected
+            {
+                return Err(ProjectError::InvalidRecord(
+                    "connected sources require explicit selected-account admission",
+                ));
+            }
             if matches!(&input.target, ProjectResourceTarget::KnowledgeFolder { .. })
                 != granted_knowledge
             {
@@ -788,7 +852,9 @@ fn prepare(
             changes.push(invalidation(Some(&old), Some(&changed))?);
             json!({"project":project_view(state,&changed)})
         }
-        ProjectMutation::AddKnowledgeFolder { .. } => return Err(ProjectError::AccessUnavailable),
+        ProjectMutation::AddKnowledgeFolder { .. } | ProjectMutation::AddConnectedSource { .. } => {
+            return Err(ProjectError::AccessUnavailable)
+        }
         ProjectMutation::PatchResource {
             id,
             resource_id,

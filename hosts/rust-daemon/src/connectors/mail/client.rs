@@ -4,8 +4,11 @@ mod attachments;
 mod backfill;
 #[path = "mime.rs"]
 mod mime;
+#[path = "client_project_thread.rs"]
+mod project_thread;
 #[path = "client_search.rs"]
 mod search;
+pub(super) use project_thread::project_thread;
 
 use super::*;
 use async_trait::async_trait;
@@ -13,6 +16,14 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::{json, Value};
 #[async_trait]
 pub(crate) trait MailTransport: Send + Sync {
+    async fn project_thread(
+        &self,
+        _p: Provider,
+        _access: &str,
+        _message: &str,
+    ) -> Result<super::search::ProjectMailThread, MailError> {
+        Err(MailError::Upstream)
+    }
     async fn exchange(
         &self,
         config: &OAuthConfig,
@@ -147,6 +158,14 @@ fn text(v: &Value, key: &str, max: usize) -> String {
 }
 #[async_trait]
 impl MailTransport for MailClient {
+    async fn project_thread(
+        &self,
+        p: Provider,
+        access: &str,
+        message: &str,
+    ) -> Result<super::search::ProjectMailThread, MailError> {
+        self.fetch_project_thread(p, access, message).await
+    }
     async fn attachment_batch(
         &self,
         p: Provider,

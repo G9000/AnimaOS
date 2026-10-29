@@ -1,5 +1,8 @@
 //! Private imported-document proposals and exact, capacity-reserved publication authority.
 pub(crate) mod approval;
+mod owner_inspection;
+pub(crate) use owner_inspection::{readonly_scope_in, OwnerInspectionScope};
+pub(crate) mod preview_context;
 pub(crate) mod projection;
 pub(crate) mod recovery;
 mod registry;

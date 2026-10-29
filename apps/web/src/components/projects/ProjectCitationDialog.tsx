@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { ProjectKnowledgeCitation } from '@animaos/sdk';
 import { useLatest } from '../../hooks/useLatest';
+import { connectedProviderName } from './connected-source-presentation';
 import './projects.css';
 
 /** Plain text only: a cited passage remains untrusted source material. */
@@ -31,6 +32,10 @@ export function ProjectCitationDialog({ citation, opening, error, onClose }: {
       {error && <p role="alert">{error}</p>}
       {opening ? <p role="status">Checking current source and project access…</p> : citation && <>
         <p className="project-citation-locator">{citation.locator}</p>
+        {citation.origin && <div className="project-note" aria-label="Verified connected source">
+          <p>{connectedProviderName(citation.origin.provider)} · {citation.origin.accountLabel ?? citation.origin.ownerName ?? 'Connected account'} · verified {new Date(citation.origin.verifiedAtMs).toLocaleString()}</p>
+          <p>{citation.origin.coverage}</p>
+        </div>}
         <pre tabIndex={0}>{citation.text}</pre>
         <p className="project-note">Bounded passage verified against the current source when opened.</p>
       </>}

@@ -12,6 +12,9 @@ pub(crate) struct RunInputResponse {
     pub(crate) text: String,
     pub(crate) attachment_ids: Vec<String>,
     pub(crate) skill: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) document_edit_context:
+        Option<crate::document_edits::preview_context::PreviewEditContext>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -197,6 +200,7 @@ impl From<&RunRecord> for RunResponse {
                 text: record.effective_input().text.clone(),
                 attachment_ids: record.effective_input().attachment_ids.clone(),
                 skill: record.effective_input().skill.clone(),
+                document_edit_context: record.effective_input().document_edit_context.clone(),
             },
             created_at_ms: record.created_at_ms,
             queue_order: record.queue_order(),

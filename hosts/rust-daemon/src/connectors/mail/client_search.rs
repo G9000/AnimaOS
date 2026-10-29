@@ -14,6 +14,12 @@ fn payload_text(payload: &Value, depth: usize) -> Result<String, MailError> {
     if depth > 12 {
         return Err(MailError::Upstream);
     }
+    if payload["filename"]
+        .as_str()
+        .is_some_and(|name| !name.is_empty())
+    {
+        return Ok(String::new());
+    }
     let mime = payload["mimeType"].as_str().unwrap_or("");
     if matches!(mime, "text/plain" | "text/html") {
         let Some(data) = payload["body"]["data"].as_str() else {
@@ -316,6 +322,16 @@ mod tests {
     fn gmail_indexes_full_body_beyond_the_preview() {
         let v = json!({"id":"abc123","snippet":"Preview only","payload":{"mimeType":"multipart/alternative","headers":[{"name":"Subject","value":"Invoice"}],"parts":[{"mimeType":"text/plain","body":{"data":URL_SAFE_NO_PAD.encode("Full invoice amount 983 not in preview")}}]}});
         assert!(gmail_document(&v).unwrap().text.contains("983"));
+    }
+    #[test]
+    fn gmail_body_never_includes_a_named_text_attachment() {
+        let value = json!({"id":"selected1","payload":{"mimeType":"multipart/mixed","parts":[
+            {"mimeType":"text/plain","filename":"attached.txt","body":{"data":URL_SAFE_NO_PAD.encode("unselected attachment content")}},
+            {"mimeType":"text/plain","body":{"data":URL_SAFE_NO_PAD.encode("selected message body")}}
+        ]}});
+        let document = gmail_document(&value).unwrap();
+        assert!(document.text.contains("selected message body"));
+        assert!(!document.text.contains("unselected attachment content"));
     }
     #[test]
     fn graph_indexes_full_body_and_rejects_cross_origin_pagination() {

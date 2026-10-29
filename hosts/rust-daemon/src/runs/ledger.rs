@@ -136,6 +136,9 @@ pub(crate) struct RunInput {
     pub(crate) attachment_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) skill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) document_edit_context:
+        Option<crate::document_edits::preview_context::PreviewEditContext>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +201,9 @@ pub(crate) struct RunSteer {
     pub(crate) attachment_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) skill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) document_edit_context:
+        Option<crate::document_edits::preview_context::PreviewEditContext>,
     pub(crate) accepted_at_ms: u64,
 }
 
@@ -207,6 +213,7 @@ impl RunSteer {
             text: self.text.clone(),
             attachment_ids: self.attachment_ids.clone(),
             skill: self.skill.clone(),
+            document_edit_context: self.document_edit_context.clone(),
         }
     }
 }
@@ -240,6 +247,9 @@ pub(crate) struct RunRecord {
     pub(crate) idempotency_key: Option<String>,
     #[serde(default)]
     pub(crate) input: RunInput,
+    /// Host-captured custody for selected document turns; never accepted from request JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) document_edit_scope: Option<crate::document_edits::OwnerInspectionScope>,
     /// Accepted input stays immutable for delivery retries. Owner queue edits
     /// supply the input used by execution and recovery separately.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -348,8 +358,10 @@ impl RunRecord {
                 text: truncate_to_bytes(&start.text, MAX_RUN_INPUT_TEXT_BYTES),
                 attachment_ids: Vec::new(),
                 skill: None,
+                document_edit_context: None,
             },
             edited_input: None,
+            document_edit_scope: None,
             queue_position: None,
             created_at_ms: now_ms,
             started_at_ms: Some(now_ms),
@@ -574,6 +586,7 @@ impl RunRecord {
                     steer.accepted_at_ms,
                 );
                 record.input = input;
+                record.document_edit_scope = self.document_edit_scope.clone();
                 record
             })
             .collect()
@@ -1048,11 +1061,32 @@ impl RunLedger {
         let mut ids = HashSet::new();
         for record in records {
             super::turn::validate(record)?;
+            if let Some(context) = &record.input.document_edit_context {
+                context.validate()?;
+                if record.source != RunSource::Web
+                    || record.source_ref.is_some()
+                    || record.parent_run_id.is_some()
+                    || record.async_helper.is_some()
+                    || record.helper_completion.is_some()
+                {
+                    return Err("Selected document edits require an ordinary owner web run".into());
+                }
+            }
+            if record.input.document_edit_context.is_some() != record.document_edit_scope.is_some()
+            {
+                return Err("Selected document custody is missing or inconsistent".into());
+            }
+            if record.pending_steers.iter().any(|steer| {
+                steer.document_edit_context != record.effective_input().document_edit_context
+            }) {
+                return Err("Selected document context changed in a saved steer".into());
+            }
             if let Some(edited) = &record.edited_input {
                 if edited.text.len() > MAX_RUN_INPUT_TEXT_BYTES
                     || (edited.text.trim().is_empty() && edited.attachment_ids.is_empty())
                     || edited.attachment_ids != record.input.attachment_ids
                     || edited.skill != record.input.skill
+                    || edited.document_edit_context != record.input.document_edit_context
                     || !matches!(record.source, RunSource::Web | RunSource::Api)
                     || record.source_ref.is_some()
                     || record.parent_run_id.is_some()
@@ -1069,6 +1103,9 @@ impl RunLedger {
                     if parent.agent_id != record.agent_id
                         || parent.session_id != record.session_id
                         || record.recovery_attempt != parent.recovery_attempt.saturating_add(1)
+                        || record.input.document_edit_context
+                            != parent.effective_input().document_edit_context
+                        || record.document_edit_scope != parent.document_edit_scope
                         || parent
                             .recovery
                             .as_ref()
@@ -1301,6 +1338,7 @@ mod tests {
         assert!(value.get("steeredKeys").is_none());
         let mut steered = record.clone();
         steered.pending_steers = vec![RunSteer {
+            document_edit_context: None,
             attachment_ids: Vec::new(),
             skill: None,
             idempotency_key: "key-2".into(),
@@ -1462,6 +1500,7 @@ mod tests {
     fn restart_recovery_offers_the_steers_a_run_still_held_once() {
         let now = 5 * TERMINAL_RUN_RETENTION_MS;
         let steer = |key: &str, at: u64| RunSteer {
+            document_edit_context: None,
             attachment_ids: Vec::new(),
             skill: None,
             idempotency_key: key.into(),
@@ -1517,6 +1556,7 @@ mod tests {
         let mut run = record("agent-a", since - 100);
         run.pending_steers = vec![
             RunSteer {
+                document_edit_context: None,
                 attachment_ids: Vec::new(),
                 skill: None,
                 idempotency_key: "old-pending".into(),
@@ -1524,6 +1564,7 @@ mod tests {
                 accepted_at_ms: since - 1,
             },
             RunSteer {
+                document_edit_context: None,
                 attachment_ids: Vec::new(),
                 skill: None,
                 idempotency_key: "pending".into(),
@@ -1570,6 +1611,7 @@ mod tests {
         let mut ledger = RunLedger::default();
         let mut holding = mirrored("agent-a", now - 2 * TERMINAL_RUN_RETENTION_MS);
         holding.pending_steers = vec![RunSteer {
+            document_edit_context: None,
             attachment_ids: Vec::new(),
             skill: None,
             idempotency_key: "key-2".into(),
@@ -1983,6 +2025,7 @@ mod tests {
 
     fn steer(key: &str) -> RunSteer {
         RunSteer {
+            document_edit_context: None,
             attachment_ids: Vec::new(),
             skill: None,
             idempotency_key: key.into(),
@@ -2170,6 +2213,7 @@ mod tests {
                 .unwrap();
         assert!(key.input.is_none());
         let input = super::RunInput {
+            document_edit_context: None,
             text: "raw".into(),
             attachment_ids: vec!["att-one".into(), "att-two".into()],
             skill: Some("raw-skill".into()),
@@ -2210,6 +2254,7 @@ mod tests {
         let mut run = record("agent-a", 10);
         run.start("model".into(), None, 11);
         run.pending_steers.push(RunSteer {
+            document_edit_context: None,
             idempotency_key: "restart-steer".into(),
             text: "raw text".into(),
             attachment_ids: vec!["att-b".into(), "att-a".into()],

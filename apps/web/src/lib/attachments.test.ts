@@ -6,7 +6,15 @@ import {
   messageAttachment,
   uploadAttachmentWithProgress,
   ATTACHMENT_ERRORS,
+  recoveredDraft,
 } from './attachments';
+import type { PreviewEditContext } from '@animaos/sdk';
+
+it('preserves an exact document edit restriction and owner scope in a recoverable draft', () => {
+  const documentEditContext: PreviewEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
+  const recovered = recoveredDraft({ key: 'original', text: 'Rewrite', agentId: 'agent', sessionId: 'chat', documentEditContext });
+  expect(recovered).toMatchObject({ requestId: 'original', idempotencyKey: 'original', agentId: 'agent', sessionId: 'chat', documentEditContext });
+});
 
 const metadata = {
   id: 'att_1',

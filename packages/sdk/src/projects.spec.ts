@@ -9,6 +9,15 @@ function fixture() {
 }
 
 describe('ProjectsClient', () => {
+  it('shares only a selected connected citation with explicit project consent and a revision witness', async () => {
+    const { client, requestJson } = fixture();
+    const signal = new AbortController().signal;
+    await client.connectedSourceChoices('p/a', 'b', { query: 'annual & report', signal });
+    expect(requestJson).toHaveBeenLastCalledWith('/api/projects/p%2Fa/knowledge/connected-sources?asAgentId=b&query=annual+%26+report', { signal });
+    const input = { expectedRevision: 5, requestKey: 'connected-grant', asAgentId: 'b', ownerAgentId: 'a', connectorId: 'drive-one', citationId: 'selected-citation', shareWithProject: true as const };
+    expect(await client.addConnectedSource('p/a', input)).toEqual({ id: 'shared' });
+    expect(requestJson).toHaveBeenLastCalledWith('/api/projects/p%2Fa/knowledge/connected-sources', { method: 'POST', body: input });
+  });
   it('keeps profile project identity separate from the explicit requesting member', async () => {
     const { client, requestJson } = fixture();
     const controller = new AbortController();

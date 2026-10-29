@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '@animaos/sdk';
+import type { Session, PreviewEditContext } from '@animaos/sdk';
 
 import { daemon } from '../lib/daemon-api';
 import {
@@ -23,6 +23,7 @@ function deferred<Value>() {
 }
 
 const CHAT_KEY = 'agent-main\u0000session:room-7';
+const editContext: PreviewEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
 const SKILLFUL = [
   ...SLASH_COMMANDS,
   {
@@ -86,6 +87,36 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it('restores a revised preview edit as a restricted literal draft with a fresh request key', async () => {
+    vi.spyOn(daemon, 'reviseSession').mockResolvedValue({ session: sessionFixture('revision'), retryPrompt: 'Rewrite this', retryDocumentEditContext: editContext, attachmentsOmitted: false, notice: 'Review first.' });
+    const { result, options } = setup({ draft: '/retry' });
+    await act(async () => result.current.send());
+    expect(options.updateChat).toHaveBeenCalledWith('agent-main\u0000session:revision', expect.objectContaining({ draft: 'Rewrite this', literalDraft: true, resend: { text: 'Rewrite this', idempotencyKey: expect.any(String), documentEditContext: editContext } }));
+    expect(options.queueSend).not.toHaveBeenCalled();
+  });
+  it('queues structured preview context without interpreting instructions as commands or steering', () => {
+    const { result, options } = setup({ draft: '/rename quoted instruction', activeRun: runFixture('active', { status: 'running' }) });
+    act(() => result.current.send('/rename quoted instruction', editContext));
+    expect(options.rename).not.toHaveBeenCalled();
+    expect(options.queueSend).toHaveBeenCalledWith(options.session, CHAT_KEY, '/rename quoted instruction', expect.any(String), 'queue', undefined, undefined, editContext);
+  });
+  it('retains preview context when a restored instruction is edited and when its run is sent again', () => {
+    const { result, options } = setup({ draft: 'Edited instruction', resend: { text: 'Original instruction', idempotencyKey: 'old', documentEditContext: editContext } });
+    act(() => result.current.send());
+    expect(vi.mocked(options.queueSend).mock.calls[0][7]).toEqual(editContext);
+    expect(vi.mocked(options.queueSend).mock.calls[0][3]).not.toBe('old');
+    act(() => result.current.sendAgain(runFixture('retry', { sessionId: 'room-7', input: { text: 'Original instruction', attachmentIds: [], skill: null, documentEditContext: editContext } })));
+    expect(vi.mocked(options.queueSend).mock.calls[1][7]).toEqual(editContext);
+  });
+  it('refuses missing preview context and connector delivery instead of dropping restrictions', () => {
+    const { result, options, rerender } = setup({ draft: 'Rewrite\nBEGIN_PREVIEW_EDIT_CONTEXT\n{}' });
+    act(() => result.current.send());
+    expect(options.queueSend).not.toHaveBeenCalled();
+    rerender({ ...options, session: sessionFixture('room-7', { kind: 'telegram' }), telegramReady: true });
+    act(() => result.current.send('Rewrite this', editContext));
+    expect(options.queueSend).not.toHaveBeenCalled();
+    expect(options.setError).toHaveBeenCalled();
+  });
   it.each([
     '/rename changed',
     '/new',

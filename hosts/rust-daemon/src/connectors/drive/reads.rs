@@ -241,6 +241,16 @@ impl DriveManager {
         .await
         .map_err(|_| DriveError::Deadline)?
     }
+    /// The project custodian owns its bounded wait and retains this complete native operation.
+    pub(crate) async fn read_retained_for_project(
+        &self,
+        agent: &str,
+        file: &str,
+        generation: &str,
+    ) -> Result<DriveReadResult, DriveError> {
+        self.read_inner(agent, DriveFileId::parse(file)?, Some(generation))
+            .await
+    }
     async fn read_inner(
         &self,
         agent: &str,

@@ -2,13 +2,14 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Supported imported Office containers.
+/// Supported imported Office containers and inert UTF-8 HTML sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OfficeFormat {
     Docx,
     Xlsx,
     Pptx,
+    Html,
 }
 
 /// An all-or-nothing batch against one exact host-verified source snapshot.
@@ -22,6 +23,13 @@ pub struct OfficeEditSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OfficeEditOperation {
+    /// Replace exact raw HTML source text with escaped literal text.
+    HtmlReplaceText {
+        start_utf8: u32,
+        end_utf8: u32,
+        expected_text: String,
+        new_text: String,
+    },
     WordReplaceText {
         target_id: String,
         start: u32,
@@ -101,6 +109,12 @@ pub enum OfficeCalculationState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OfficeTargetValue {
+    /// Raw source text, including entities, at absolute UTF-8 byte offsets.
+    HtmlText {
+        start_utf8: u32,
+        end_utf8: u32,
+        text: String,
+    },
     Text {
         text: String,
     },

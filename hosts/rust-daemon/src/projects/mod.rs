@@ -2,6 +2,7 @@
 
 mod access;
 mod agent_removal;
+pub(crate) mod connected;
 mod context;
 pub(crate) mod knowledge;
 mod records;

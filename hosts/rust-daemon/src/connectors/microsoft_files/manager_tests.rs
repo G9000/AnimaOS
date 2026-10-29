@@ -8,7 +8,7 @@ use super::*;
 use crate::connected_search::SourceReader;
 use crate::connectors::oauth_apps::OAuthAppCredentials;
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Default)]
 struct FakeProvider {
@@ -19,6 +19,12 @@ struct FakeProvider {
     fail_metadata: AtomicBool,
     revoke_refresh: AtomicBool,
     reduced_grant: AtomicBool,
+    stall_content: AtomicBool,
+    content_calls: AtomicUsize,
+    metadata_calls: AtomicUsize,
+    active_content: AtomicUsize,
+    content_entered: tokio::sync::Notify,
+    content_release: tokio::sync::Notify,
 }
 fn grant(mode: MicrosoftFileMode) -> MicrosoftFileGrant {
     MicrosoftFileGrant {
@@ -107,6 +113,7 @@ impl MicrosoftFileTransport for FakeProvider {
         _: &str,
         _: &str,
     ) -> Result<MicrosoftFileMetadata, MicrosoftFileError> {
+        self.metadata_calls.fetch_add(1, Ordering::SeqCst);
         if self.deny_metadata.load(Ordering::SeqCst) {
             Err(MicrosoftFileError::PermissionDenied)
         } else if self.fail_metadata.load(Ordering::SeqCst) {
@@ -122,6 +129,19 @@ impl MicrosoftFileTransport for FakeProvider {
         _: &str,
         _: Option<&str>,
     ) -> Result<Vec<u8>, MicrosoftFileError> {
+        struct ContentCustody<'a>(&'a AtomicUsize);
+        impl Drop for ContentCustody<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        self.content_calls.fetch_add(1, Ordering::SeqCst);
+        self.active_content.fetch_add(1, Ordering::SeqCst);
+        let _custody = ContentCustody(&self.active_content);
+        if self.stall_content.load(Ordering::SeqCst) {
+            self.content_entered.notify_one();
+            self.content_release.notified().await;
+        }
         Ok(b"text".to_vec())
     }
 }
@@ -173,6 +193,344 @@ fn consent_parts(url: &str) -> (String, String) {
         pairs["state"].to_string(),
         pairs["code_challenge"].to_string(),
     )
+}
+
+struct ProjectKnowledgeFixture {
+    state: SharedDaemonState,
+    agent: String,
+    manager: MicrosoftFileManager,
+    provider: Arc<FakeProvider>,
+    knowledge: crate::projects::knowledge::KnowledgeService,
+    project: String,
+    resource: String,
+    _private: crate::document_edits::store::test_support::PrivateTestDirectory,
+}
+
+async fn project_knowledge_fixture() -> ProjectKnowledgeFixture {
+    use crate::connected_search::{
+        providers::document, source_authority, DocumentKind, SourceIndex,
+    };
+    use crate::projects::{
+        connected::AddConnectedSourceRequest, knowledge::KnowledgeService, ProjectCreateRequest,
+        ProjectMutation, ProjectService,
+    };
+    let (state, agent, manager, provider, _) = fixture().await;
+    let started = manager
+        .begin_connect(agent.clone(), MicrosoftFileMode::OneDrive, None)
+        .await
+        .unwrap();
+    let (nonce, _) = consent_parts(&started.consent_url);
+    manager
+        .complete_connect(nonce, Some("code".into()))
+        .await
+        .unwrap();
+    let files = manager
+        .browse(agent.clone(), started.connector_id.clone(), None, None)
+        .await
+        .unwrap();
+    let record = state.read().await.microsoft_file_records[&started.connector_id].clone();
+    let key = files.files[0].key.clone();
+    manager
+        .select(
+            agent.clone(),
+            record.id.clone(),
+            record.generation.clone(),
+            record.selection_revision,
+            vec![key.clone()],
+        )
+        .await
+        .unwrap();
+    let private = crate::document_edits::store::test_support::private_directory();
+    let knowledge = KnowledgeService::open(private.path().to_owned(), None).unwrap();
+    {
+        let mut guard = state.write().await;
+        guard.microsoft_files_manager = Some(manager.weak());
+        guard.project_knowledge = knowledge.clone();
+        let authority = source_authority(&guard, &agent, &record.id).unwrap();
+        let mut index = SourceIndex::new(&authority);
+        let mut selected = document(
+            DocumentKind::File,
+            key,
+            "selected".into(),
+            "Selected report".into(),
+            String::new(),
+        );
+        selected.citation_id = "a".repeat(64);
+        selected.revision = "b".repeat(64);
+        index.documents.push(selected);
+        guard
+            .connected_search
+            .sources
+            .insert(record.id.clone(), index);
+    }
+    let projects = ProjectService::new(state.clone(), manager.0.transactions.clone());
+    let created = projects
+        .mutate(ProjectMutation::Create(ProjectCreateRequest {
+            request_key: "microsoft-custody-project".into(),
+            title: "Retained native source".into(),
+            member_agent_ids: vec![agent.clone()],
+            instructions: String::new(),
+        }))
+        .await
+        .unwrap();
+    let project = created["project"]["id"].as_str().unwrap().to_owned();
+    let revision = state.read().await.projects.get(&project).unwrap().revision;
+    projects
+        .mutate(ProjectMutation::AddConnectedSource {
+            id: project.clone(),
+            input: AddConnectedSourceRequest {
+                expected_revision: revision,
+                request_key: "selected-microsoft-source".into(),
+                as_agent_id: agent.clone(),
+                owner_agent_id: agent.clone(),
+                connector_id: record.id,
+                citation_id: "a".repeat(64),
+                share_with_project: true,
+                label: None,
+            },
+        })
+        .await
+        .unwrap();
+    let resource = state.read().await.projects.get(&project).unwrap().resources[0]
+        .id
+        .clone();
+    provider.content_calls.store(0, Ordering::SeqCst);
+    provider.metadata_calls.store(0, Ordering::SeqCst);
+    ProjectKnowledgeFixture {
+        state,
+        agent,
+        manager,
+        provider,
+        knowledge,
+        project,
+        resource,
+        _private: private,
+    }
+}
+
+#[tokio::test]
+async fn microsoft_project_timeouts_retain_physical_permits_and_bound_nested_queued_reads() {
+    use crate::projects::ProjectError;
+    let fixture = project_knowledge_fixture().await;
+    let baseline = Arc::strong_count(&fixture.manager.0);
+    fixture.provider.stall_content.store(true, Ordering::SeqCst);
+    let first = tokio::spawn({
+        let state = fixture.state.clone();
+        let knowledge = fixture.knowledge.clone();
+        let project = fixture.project.clone();
+        let agent = fixture.agent.clone();
+        async move {
+            knowledge
+                .search(
+                    &state,
+                    &project,
+                    &agent,
+                    "text",
+                    8,
+                    anima_core::CancelSignal::new(),
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_millis(3300)),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        fixture.provider.content_entered.notified(),
+    )
+    .await
+    .expect("initial selected native content read should start");
+    tokio::time::timeout(std::time::Duration::from_secs(2), first)
+        .await
+        .expect("snapshot timeout must bound the first caller wait")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fixture.provider.active_content.load(Ordering::SeqCst),
+        1,
+        "the first owned Microsoft read remains physically live after timeout"
+    );
+    let _second = fixture
+        .knowledge
+        .search(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            "text",
+            8,
+            anima_core::CancelSignal::new(),
+            Some(tokio::time::Instant::now() + std::time::Duration::from_millis(3300)),
+        )
+        .await;
+    for _ in 0..24 {
+        fixture
+            .knowledge
+            .refresh(&fixture.state, &fixture.project, &fixture.agent, None)
+            .await
+            .unwrap();
+        let _ = fixture
+            .knowledge
+            .search(
+                &fixture.state,
+                &fixture.project,
+                &fixture.agent,
+                "text",
+                8,
+                anima_core::CancelSignal::new(),
+                Some(tokio::time::Instant::now() + std::time::Duration::from_millis(3300)),
+            )
+            .await;
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        fixture.provider.content_calls.load(Ordering::SeqCst),
+        1,
+        "only the first native operation may hold the per-agent gate"
+    );
+    assert_eq!(fixture.provider.metadata_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        Arc::strong_count(&fixture.manager.0) <= baseline + 4,
+        "two retained read slots bound both physical and gate-queued manager jobs"
+    );
+    let cancel = anima_core::CancelSignal::new();
+    cancel.cancel();
+    assert!(matches!(
+        fixture
+            .knowledge
+            .search(
+                &fixture.state,
+                &fixture.project,
+                &fixture.agent,
+                "text",
+                8,
+                cancel,
+                None
+            )
+            .await,
+        Err(ProjectError::Cancelled)
+    ));
+    assert!(matches!(
+        fixture
+            .knowledge
+            .search(
+                &fixture.state,
+                &fixture.project,
+                &fixture.agent,
+                "text",
+                8,
+                anima_core::CancelSignal::new(),
+                Some(tokio::time::Instant::now() - std::time::Duration::from_millis(1))
+            )
+            .await,
+        Err(ProjectError::Deadline)
+    ));
+    assert_eq!(
+        fixture.provider.content_calls.load(Ordering::SeqCst),
+        1,
+        "pre-cancelled and expired requests start no additional I/O"
+    );
+    fixture
+        .provider
+        .stall_content
+        .store(false, Ordering::SeqCst);
+    fixture.provider.content_release.notify_waiters();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while Arc::strong_count(&fixture.manager.0) != baseline {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("both nested native jobs must settle before retained capacity returns");
+    assert_eq!(fixture.provider.active_content.load(Ordering::SeqCst), 0);
+    let recovered = fixture
+        .knowledge
+        .search(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            "text",
+            8,
+            anima_core::CancelSignal::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered.hits.len(),
+        1,
+        "all physical read permits return after settlement"
+    );
+}
+
+#[tokio::test]
+async fn microsoft_project_scope_is_rechecked_after_scheduling_before_native_dispatch() {
+    use crate::projects::knowledge::test_support;
+    for revoke in 0..4 {
+        let fixture = project_knowledge_fixture().await;
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let cancel = anima_core::CancelSignal::new();
+        let mut reading = Box::pin(test_support::connected_read(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            &fixture.resource,
+            &cancel,
+            tokio::time::Instant::now()
+                + if revoke == 3 {
+                    std::time::Duration::from_millis(100)
+                } else {
+                    std::time::Duration::from_secs(2)
+                },
+            slots.clone(),
+        ));
+        // On this current-thread runtime, spawn never polls its child synchronously.
+        assert!(futures::poll!(reading.as_mut()).is_pending());
+        assert_eq!(
+            slots.available_permits(),
+            0,
+            "the child has been scheduled but cannot run before this barrier"
+        );
+        if revoke == 2 {
+            cancel.cancel();
+        } else if revoke == 3 {
+            // Keep the current-thread executor behind the pre-start barrier until expiry.
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        } else {
+            let mut state = fixture
+                .state
+                .try_write()
+                .expect("the scheduling boundary retains no state lock");
+            let revision = state.projects.get(&fixture.project).unwrap().revision;
+            if revoke == 1 {
+                state
+                    .projects
+                    .replace_members(&fixture.project, revision, Vec::new(), 3)
+                    .unwrap();
+            } else {
+                state
+                    .projects
+                    .remove_resource(&fixture.project, revision, &fixture.resource, 3)
+                    .unwrap();
+            }
+            state
+                .project_access
+                .publish_records(&state.projects)
+                .unwrap();
+        }
+        assert!(reading.await.is_err());
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while slots.available_permits() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("revoked pre-start jobs must retire their permit");
+        assert_eq!(fixture.provider.metadata_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            fixture.provider.content_calls.load(Ordering::SeqCst),
+            0,
+            "source/member revocation, cancellation or expiry before the owned job starts must prevent native I/O"
+        );
+    }
 }
 
 #[tokio::test]

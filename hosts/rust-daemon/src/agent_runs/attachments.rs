@@ -182,6 +182,8 @@ pub(super) fn input_from_content(content: &Content) -> RunInput {
         },
         attachment_ids,
         skill: string(crate::skills::SKILL_METADATA_KEY),
+        document_edit_context: string("documentEditContext")
+            .and_then(|text| serde_json::from_str(&text).ok()),
     }
 }
 pub(crate) async fn accepted_content(
@@ -228,6 +230,17 @@ pub(crate) async fn accepted_content(
         metadata.insert(
             crate::skills::SKILL_METADATA_KEY.into(),
             DataValue::String(skill),
+        );
+    }
+    // Only durable host input stamps this restrictive reference; arbitrary caller metadata cannot.
+    metadata.remove("documentEditContext");
+    if let Some(context) = input.document_edit_context {
+        metadata.insert(
+            "documentEditContext".into(),
+            DataValue::String(
+                serde_json::to_string(&context)
+                    .map_err(|_| ApiError::conflict("Selected document context is invalid"))?,
+            ),
         );
     }
     Ok(attachment_content(&input.text, &rows, Some(metadata)))

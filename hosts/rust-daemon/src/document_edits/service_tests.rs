@@ -1432,3 +1432,224 @@ fn document_edits_destination_expectations_never_overwrite_a_changed_preimage() 
         assert!(safe_path(path).is_err(), "{path}");
     }
 }
+
+#[tokio::test]
+async fn document_owner_inspection_scope_requires_current_ordinary_chat_without_tool_grants() {
+    let fixture = fixture().await;
+    let mut state = fixture.state.write().await;
+    state
+        .agents
+        .get_mut(&fixture.run.agent_id)
+        .unwrap()
+        .update_config(AgentConfigUpdate {
+            tools: Some(vec![]),
+            ..Default::default()
+        });
+    let before = super::owner_inspection::readonly_scope_in(
+        &state,
+        &fixture.run.agent_id,
+        &fixture.run.session_id,
+    )
+    .unwrap();
+    state
+        .sessions
+        .get_mut(&fixture.run.agent_id, &fixture.run.session_id)
+        .unwrap()
+        .clear_generation += 1;
+    let after = super::owner_inspection::readonly_scope_in(
+        &state,
+        &fixture.run.agent_id,
+        &fixture.run.session_id,
+    )
+    .unwrap();
+    assert_ne!(before, after);
+    assert!(super::owner_inspection::readonly_scope_in(
+        &state,
+        &fixture.run.agent_id,
+        "chat:elsewhere"
+    )
+    .is_err());
+    state
+        .sessions
+        .get_mut(&fixture.run.agent_id, &fixture.run.session_id)
+        .unwrap()
+        .pending_clear_run_id = Some("clearing".into());
+    assert!(super::owner_inspection::readonly_scope_in(
+        &state,
+        &fixture.run.agent_id,
+        &fixture.run.session_id
+    )
+    .is_err());
+    let session = state
+        .sessions
+        .get_mut(&fixture.run.agent_id, &fixture.run.session_id)
+        .unwrap();
+    session.pending_clear_run_id = None;
+    session.origin = crate::sessions::SessionOrigin::Api;
+    assert!(super::owner_inspection::readonly_scope_in(
+        &state,
+        &fixture.run.agent_id,
+        &fixture.run.session_id
+    )
+    .is_err());
+}
+
+async fn html_fixture() -> Fixture {
+    let mut fixture = fixture().await;
+    let source = b"<p>old</p><script>retained()</script>";
+    std::fs::write(fixture._root.path().join("source.html"), source).unwrap();
+    let edits: anima_document_content::OfficeEditSpec = serde_json::from_value(serde_json::json!({"operations":[{"type":"html_replace_text","start_utf8":3,"end_utf8":6,"expected_text":"old","new_text":"<new>"}]})).unwrap();
+    let prepared =
+        anima_document_content::prepare_office_edit(OfficeFormat::Html, source, &edits).unwrap();
+    let mut state = fixture.state.write().await;
+    let owner_scope =
+        super::readonly_scope_in(&state, &fixture.run.agent_id, &fixture.run.session_id).unwrap();
+    let preview: super::preview_context::PreviewEditContext = serde_json::from_value(serde_json::json!({"version":1,"source":{"kind":"workspace","path":"source.html","sha256":digest(source),"scope":owner_scope.source_scope("source.html", &digest(source)).unwrap()},"selection":{"kind":"html_text","start_utf8":3,"end_utf8":6,"expected_text":"old"}})).unwrap();
+    let run_record = state.runs.get_mut(&fixture.run.run_id).unwrap();
+    run_record.input.document_edit_context = Some(preview);
+    run_record.document_edit_scope = Some(owner_scope);
+    let mut draft = state.document_edits.get("proposal").unwrap().draft.clone();
+    let staged = state
+        .document_edit_store
+        .as_ref()
+        .unwrap()
+        .stage(prepared.bytes())
+        .unwrap();
+    draft.source = DocumentEditSource::Workspace {
+        file_path: "source.html".into(),
+        sha256: digest(source),
+    };
+    draft.file_path = "copy.htm".into();
+    draft.candidate_sha256 = staged.hash().into();
+    draft.candidate_bytes = staged.size();
+    draft.content_review = prepared.review().clone();
+    state.document_edits = DocumentEditRegistry::default();
+    let hash = state
+        .document_edits
+        .insert(draft, anima_core::primitives::now_millis())
+        .unwrap();
+    drop(staged);
+    drop(state);
+    let DataValue::Object(args) = crate::tools::generated_documents::schema_data(
+        serde_json::json!({"proposal_id":"proposal","review_sha256":hash,"file_path":"copy.htm","expected_destination":{"state":"absent"}}),
+    ) else {
+        unreachable!()
+    };
+    fixture.call.args = args;
+    fixture
+}
+
+#[tokio::test]
+async fn html_document_edit_uses_exact_native_allow_once_publication_and_replay() {
+    use crate::agent_runs::test_support::{decision, gated_context, pending_approvals, tool_input};
+    let fixture = html_fixture().await;
+    persistent(&fixture).await;
+    let cancel = CancelSignal::new();
+    let journal = crate::agent_runs::action_receipts::RunActionJournal::new(
+        &fixture.state,
+        fixture.coordinator.control_plane_transactions(),
+        fixture.run.clone(),
+        cancel.clone(),
+        None,
+    );
+    let mut context = gated_context(&fixture.coordinator, &fixture.run, cancel)
+        .await
+        .with_action_journal(journal);
+    context.document_edits = Some(fixture.service.clone());
+    let agent = fixture
+        .state
+        .read()
+        .await
+        .get_agent(&fixture.run.agent_id)
+        .unwrap()
+        .state;
+    let task_context = context.clone();
+    let task_agent = agent.clone();
+    let input = tool_input(&fixture.run.agent_id, &fixture.run.session_id);
+    let call = fixture.call.clone();
+    let applying =
+        tokio::spawn(async move { task_context.execute_tool(task_agent, input, call).await });
+    let pending = pending_approvals(&fixture.coordinator, 1).await.remove(0);
+    assert!(!fixture._root.path().join("copy.htm").exists());
+    assert!(fixture
+        .coordinator
+        .decide_approval(
+            &pending.id,
+            decision(ApprovalDecisionKind::AllowAlways, pending.revision)
+        )
+        .await
+        .is_err());
+    fixture
+        .coordinator
+        .decide_approval(
+            &pending.id,
+            decision(ApprovalDecisionKind::AllowOnce, pending.revision),
+        )
+        .await
+        .unwrap();
+    let result = applying.await.unwrap();
+    assert_eq!(
+        result.status,
+        anima_core::TaskStatus::Success,
+        "{:?}",
+        result.error
+    );
+    assert_eq!(
+        std::fs::read(fixture._root.path().join("copy.htm")).unwrap(),
+        b"<p>&lt;new&gt;</p><script>retained()</script>"
+    );
+    let receipt = fixture
+        .state
+        .read()
+        .await
+        .document_edits
+        .receipt_for_proposal("proposal")
+        .unwrap()
+        .clone();
+    assert_eq!(receipt.format, OfficeFormat::Html);
+    let mut replay = fixture.call.clone();
+    replay.id = "html-replay".into();
+    let result = context
+        .execute_tool(
+            agent,
+            tool_input(&fixture.run.agent_id, &fixture.run.session_id),
+            replay,
+        )
+        .await;
+    assert_eq!(
+        result.status,
+        anima_core::TaskStatus::Success,
+        "{:?}",
+        result.error
+    );
+    assert_eq!(
+        fixture
+            .state
+            .read()
+            .await
+            .document_edits
+            .receipt_for_proposal("proposal"),
+        Some(&receipt)
+    );
+}
+
+#[tokio::test]
+async fn html_document_edit_refuses_changed_source_under_the_review_witness() {
+    let fixture = html_fixture().await;
+    let witness = fixture
+        .service
+        .capture_apply(&fixture.run, &fixture.call)
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(fixture._root.path().join("source.html"), b"<p>changed</p>").unwrap();
+    assert!(fixture
+        .service
+        .revalidate_apply(&fixture.run, &fixture.call, &witness)
+        .await
+        .is_err());
+    assert!(!fixture._root.path().join("copy.htm").exists());
+}
+
+#[path = "preview_context_tests.rs"]
+mod preview_context_tests;

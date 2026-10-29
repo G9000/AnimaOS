@@ -91,6 +91,8 @@ export interface SessionRevision {
   session: Session;
   /** Restore as a draft only; sending again may repeat completed actions. */
   retryPrompt: string | null;
+  /** Retains the native restriction when retrying a selected document edit. */
+  retryDocumentEditContext?: import('./preview-context.js').PreviewEditContext | null;
   attachmentsOmitted: boolean;
   notice: string;
 }

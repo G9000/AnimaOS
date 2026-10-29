@@ -21,6 +21,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 const MAX_BYTES: usize = 4 * 1024 * 1024;
+const MAX_HTML_BYTES: usize = 1024 * 1024;
 const LIFETIME_MS: u64 = 30 * 60 * 1000;
 pub(crate) const UNCERTAIN: &str =
     "Document publication needs recovery; effects may have occurred. Do not repeat this write.";
@@ -84,7 +85,8 @@ pub(crate) fn format(path: &str) -> Result<OfficeFormat, String> {
         Some("docx") => Ok(OfficeFormat::Docx),
         Some("xlsx") => Ok(OfficeFormat::Xlsx),
         Some("pptx") => Ok(OfficeFormat::Pptx),
-        _ => Err("Office editing supports DOCX, XLSX and PPTX".into()),
+        Some("html" | "htm") => Ok(OfficeFormat::Html),
+        _ => Err("Document editing supports DOCX, XLSX, PPTX and UTF-8 HTML".into()),
     }
 }
 pub(crate) fn safe_path(path: &str) -> Result<(), String> {
@@ -121,7 +123,7 @@ fn label(source: &DocumentEditSource, attachment: Option<&AttachmentRecord>) -> 
         },
     }
 }
-fn screened(value: &impl Serialize) -> Result<(), String> {
+pub(super) fn screened(value: &impl Serialize) -> Result<(), String> {
     fn sensitive(value: &serde_json::Value) -> bool {
         match value {
             serde_json::Value::String(text) => {
@@ -243,7 +245,12 @@ pub(crate) fn workspace_snapshot(
 ) -> Result<Option<Vec<u8>>, String> {
     safe_path(path)?;
     let workspace = WorkspaceBytes::open(root).map_err(|_| "Document workspace is unavailable")?;
-    match workspace.read_file_snapshot_with_policy(path, MAX_BYTES, |name, metadata| {
+    let limit = if format(path)? == OfficeFormat::Html {
+        MAX_HTML_BYTES
+    } else {
+        MAX_BYTES
+    };
+    match workspace.read_file_snapshot_with_policy(path, limit, |name, metadata| {
         !crate::tools::generated_documents::excluded_component(name)
             && !crate::tools::generated_documents::hidden(metadata)
     }) {
@@ -643,9 +650,19 @@ impl DocumentEditService {
         cursor: Option<&str>,
         cancel: CancelSignal,
     ) -> Result<OfficeInventoryPage, String> {
+        let preview_context = self.preview_context(run).await?;
+        if let Some(context) = &preview_context {
+            context.bind_source(&source, context.sha256())?;
+        }
         let (scope, _, source, row, bytes, format) = self
             .resolve(run, "inspect_office_document", source, &cancel)
             .await?;
+        if preview_context
+            .as_ref()
+            .is_some_and(|context| context.sha256() != source.sha256())
+        {
+            return Err("Selected document source changed; select it again".into());
+        }
         let worker = self.state.read().await.document_edit_worker.clone();
         let inventory = worker
             .inspect(
@@ -679,6 +696,10 @@ impl DocumentEditService {
         input: ProposeRequest,
         cancel: CancelSignal,
     ) -> Result<serde_json::Value, String> {
+        if let Some(context) = self.preview_context(&run).await? {
+            context.bind_source(&input.source, &input.expected_sha256)?;
+            context.bind_operations(&input.operations)?;
+        }
         safe_path(&input.file_path)?;
         screened(&input.operations)?;
         if !super::registry::valid_hash(&input.expected_sha256) {

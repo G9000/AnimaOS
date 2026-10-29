@@ -22,7 +22,15 @@ pub(super) enum Purpose {
 #[derive(Clone)]
 pub(super) struct Source {
     pub(super) id: String,
-    pub(super) grant: KnowledgeFolderGrant,
+    pub(super) grant: SourceGrant,
+    pub(super) owner_name: Option<String>,
+    pub(super) account_label: Option<String>,
+}
+
+#[derive(Clone)]
+pub(super) enum SourceGrant {
+    Folder(KnowledgeFolderGrant),
+    Connected(anima_document_store_sqlite::connected::ConnectedSourceGrant),
 }
 
 #[derive(Clone)]
@@ -76,10 +84,36 @@ impl Scope {
                         root_identity,
                     } => Some(Source {
                         id: resource.id.clone(),
-                        grant: KnowledgeFolderGrant {
+                        owner_name: None,
+                        account_label: None,
+                        grant: SourceGrant::Folder(KnowledgeFolderGrant {
                             root_path: root_path.clone(),
                             root_identity: root_identity.clone(),
-                        },
+                        }),
+                    }),
+                    ProjectResourceTarget::ConnectedSource { grant } => Some(Source {
+                        id: resource.id.clone(),
+                        grant: SourceGrant::Connected(grant.clone()),
+                        owner_name: state
+                            .agents
+                            .get(&grant.owner_agent_id)
+                            .map(|agent| agent.config().name.clone()),
+                        account_label: state
+                            .drive_records
+                            .get(&grant.connector_id)
+                            .and_then(|r| r.account_label.clone())
+                            .or_else(|| {
+                                state
+                                    .microsoft_file_records
+                                    .get(&grant.connector_id)
+                                    .and_then(|r| r.account_label.clone())
+                            })
+                            .or_else(|| {
+                                state
+                                    .mail_records
+                                    .get(&grant.connector_id)
+                                    .and_then(|r| r.connector.account_label.clone())
+                            }),
                     }),
                     _ => None,
                 }
@@ -110,19 +144,78 @@ impl Scope {
 
     pub(super) fn check_source(&self, source: &Source) -> Result<(), ProjectError> {
         self.check_physical()?;
-        folder::ensure_root_allowed(
-            std::path::Path::new(&source.grant.root_path),
-            &self.protected,
-        )
-        .map_err(|_| ProjectError::AccessUnavailable)?;
-        folder::open_grant(&source.grant).map_err(|_| ProjectError::AccessUnavailable)?;
+        let SourceGrant::Folder(grant) = &source.grant else {
+            return Ok(());
+        };
+        folder::ensure_root_allowed(std::path::Path::new(&grant.root_path), &self.protected)
+            .map_err(|_| ProjectError::AccessUnavailable)?;
+        folder::open_grant(grant).map_err(|_| ProjectError::AccessUnavailable)?;
         Ok(())
+    }
+
+    pub(super) fn check_source_state(
+        &self,
+        state: &crate::state::DaemonState,
+        source: &Source,
+    ) -> Result<(), ProjectError> {
+        self.check_state(state)?;
+        let resource = self
+            .project
+            .resources
+            .iter()
+            .find(|resource| resource.id == source.id)
+            .ok_or(ProjectError::AccessRevoked)?;
+        crate::projects::context::validate_resource_access(state, &self.project, resource)
+            .map_err(|_| ProjectError::AccessUnavailable)
     }
 
     pub(super) async fn check(&self, state: &SharedDaemonState) -> Result<(), ProjectError> {
         self.check_physical()?;
         let state = state.read().await;
         self.check_state(&state)
+    }
+
+    pub(super) async fn read_connected_retained(
+        &self,
+        state: &SharedDaemonState,
+        source: &Source,
+        cancel: &CancelSignal,
+        deadline: Instant,
+        slots: Arc<Semaphore>,
+    ) -> Result<crate::projects::connected::ConnectedSnapshot, ProjectError> {
+        check_read_budget(cancel, deadline)?;
+        self.check_source_state(&*state.read().await, source)?;
+        let SourceGrant::Connected(grant) = &source.grant else {
+            return Err(ProjectError::AccessUnavailable);
+        };
+        let permit = slots.try_acquire_owned().map_err(|_| ProjectError::Busy)?;
+        check_read_budget(cancel, deadline)?;
+        let shared = state.clone();
+        let scope = self.clone();
+        let owned_source = source.clone();
+        let grant = grant.clone();
+        let signal = cancel.clone();
+        let reading = tokio::spawn(async move {
+            // The native manager may own nested jobs. Keep capacity until its complete await settles.
+            let _permit = permit;
+            check_read_budget(&signal, deadline)?;
+            scope.check_source_state(&*shared.read().await, &owned_source)?;
+            check_read_budget(&signal, deadline)?;
+            scope.check_physical()?;
+            let snapshot = crate::projects::connected::read(&shared, &grant).await?;
+            scope.check_source_state(&*shared.read().await, &owned_source)?;
+            check_read_budget(&signal, deadline)?;
+            Ok(snapshot)
+        });
+        let result = tokio::select! { biased;
+            () = cancel.cancelled() => return Err(ProjectError::Cancelled),
+            () = self.lease.cancelled() => return Err(ProjectError::AccessRevoked),
+            () = tokio::time::sleep_until(deadline) => return Err(ProjectError::Deadline),
+            result = reading => result.map_err(|_| ProjectError::AccessUnavailable)?,
+        };
+        self.check_source_state(&*state.read().await, source)?;
+        check_read_budget(cancel, deadline)?;
+        result
     }
 
     pub(super) fn check_state(
@@ -176,6 +269,28 @@ impl KnowledgeWitness {
         if self.documents.is_empty() {
             return self.check_budget();
         }
+        for document in &self.documents {
+            if matches!(&document.source.grant, SourceGrant::Connected(_)) {
+                let snapshot = self
+                    .scope
+                    .read_connected_retained(
+                        state,
+                        &document.source,
+                        &self.cancel,
+                        self.deadline,
+                        self.read_slots.clone(),
+                    )
+                    .await?;
+                if snapshot.name != document.relative_path
+                    || snapshot.source_sha256 != document.sha256
+                {
+                    return Err(ProjectError::ScopeChanged);
+                }
+                self.check_budget()?;
+                self.scope
+                    .check_source_state(&*state.read().await, &document.source)?;
+            }
+        }
         let documents = self.documents.clone();
         let scope = self.scope.clone();
         let signal = self.cancel.clone();
@@ -184,6 +299,9 @@ impl KnowledgeWitness {
             move || {
                 let mut bytes = 0usize;
                 for document in documents {
+                    let SourceGrant::Folder(grant) = &document.source.grant else {
+                        continue;
+                    };
                     if signal.is_cancelled() {
                         return Err(ProjectError::Cancelled);
                     }
@@ -195,7 +313,7 @@ impl KnowledgeWitness {
                     bytes = bytes
                         .checked_add(
                             folder::verify_document(
-                                &document.source.grant,
+                                grant,
                                 &document.relative_path,
                                 &document.sha256,
                             )
@@ -227,5 +345,40 @@ impl KnowledgeWitness {
             return Err(ProjectError::Deadline);
         }
         Ok(())
+    }
+}
+
+fn check_read_budget(cancel: &CancelSignal, deadline: Instant) -> Result<(), ProjectError> {
+    if cancel.is_cancelled() {
+        return Err(ProjectError::Cancelled);
+    }
+    if Instant::now() >= deadline {
+        return Err(ProjectError::Deadline);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) async fn connected_read(
+        state: &SharedDaemonState,
+        project_id: &str,
+        agent: &str,
+        resource_id: &str,
+        cancel: &CancelSignal,
+        deadline: Instant,
+        slots: Arc<Semaphore>,
+    ) -> Result<crate::projects::connected::ConnectedSnapshot, ProjectError> {
+        let scope = Scope::capture(state, project_id, agent, Purpose::Manual).await?;
+        let source = scope
+            .sources
+            .iter()
+            .find(|source| source.id == resource_id)
+            .ok_or(ProjectError::NotFound)?;
+        scope
+            .read_connected_retained(state, source, cancel, deadline, slots)
+            .await
     }
 }

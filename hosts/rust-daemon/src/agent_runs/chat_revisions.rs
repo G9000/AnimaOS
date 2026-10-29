@@ -7,6 +7,8 @@ use anima_core::{DataValue, Message, MessageRole};
 pub(crate) struct ChatRevision {
     pub(crate) session_id: String,
     pub(crate) retry_prompt: Option<String>,
+    pub(crate) retry_document_edit_context:
+        Option<crate::document_edits::preview_context::PreviewEditContext>,
     pub(crate) attachments_omitted: bool,
 }
 
@@ -182,6 +184,35 @@ impl AgentRunCoordinator {
                 "This conversation is too large to branch; export it instead",
             ));
         }
+        let retry_document_edit_context = if mode == "retry" {
+            let value = messages
+                .iter()
+                .rfind(|message| {
+                    message.role == MessageRole::User
+                        && !message
+                            .content
+                            .metadata
+                            .as_ref()
+                            .is_some_and(|metadata| metadata.contains_key("steer"))
+                })
+                .and_then(|message| message.content.metadata.as_ref())
+                .and_then(|metadata| metadata.get("documentEditContext"));
+            match value {
+                None => None,
+                Some(DataValue::String(text)) => {
+                    let context: crate::document_edits::preview_context::PreviewEditContext = serde_json::from_str(text).map_err(|_| ApiError::conflict("Selected document context is unavailable; select the content again"))?;
+                    context.validate().map_err(ApiError::conflict)?;
+                    Some(context)
+                }
+                Some(_) => {
+                    return Err(ApiError::conflict(
+                        "Selected document context is invalid; select the content again",
+                    ))
+                }
+            }
+        } else {
+            None
+        };
         let (mut messages, retry_prompt, mut attachments_omitted) =
             revision_prefix(messages, mode, through)?;
         let now = anima_core::primitives::now_millis();
@@ -271,6 +302,7 @@ impl AgentRunCoordinator {
         Ok(ChatRevision {
             session_id: id,
             retry_prompt,
+            retry_document_edit_context,
             attachments_omitted,
         })
     }

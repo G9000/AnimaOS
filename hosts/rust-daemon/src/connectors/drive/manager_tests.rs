@@ -17,6 +17,7 @@ struct FakeTransport {
     changed: AtomicBool,
     metadata_count: AtomicUsize,
     metadata_name: StdMutex<Option<String>>,
+    active_reads: AtomicUsize,
     entered: Semaphore,
     release: Semaphore,
     refresh_scopes: StdMutex<Option<Vec<String>>>,
@@ -31,6 +32,7 @@ impl Default for FakeTransport {
             changed: AtomicBool::new(false),
             metadata_count: AtomicUsize::new(0),
             metadata_name: StdMutex::new(None),
+            active_reads: AtomicUsize::new(0),
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
             refresh_scopes: StdMutex::new(None),
@@ -112,6 +114,14 @@ impl DriveTransport for FakeTransport {
         _: &str,
         _: &DriveFileMetadata,
     ) -> Result<DriveTextBytes, DriveError> {
+        struct ReadCustody<'a>(&'a AtomicUsize);
+        impl Drop for ReadCustody<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        self.active_reads.fetch_add(1, Ordering::SeqCst);
+        let _custody = ReadCustody(&self.active_reads);
         self.calls.lock().unwrap().push("read".into());
         if self.read_gate.load(Ordering::SeqCst) {
             self.entered.add_permits(1);
@@ -232,6 +242,310 @@ async fn selected_reads_and_searches_are_current_agent_grant_bound_and_never_enu
             .unwrap_err(),
         DriveError::NotConnected
     );
+}
+
+#[tokio::test]
+async fn selected_drive_project_knowledge_indexes_native_bytes_and_rejects_changed_citations() {
+    use crate::connected_search::{
+        providers::document, source_authority, DocumentKind, SourceIndex,
+    };
+    use crate::projects::{
+        connected::AddConnectedSourceRequest, knowledge::KnowledgeService, ProjectCreateRequest,
+        ProjectMutation, ProjectService,
+    };
+    let (manager, shared, transport, agent) = setup().await;
+    let account = active(&manager, &agent).await;
+    *transport.bytes.lock().unwrap() = b"cobalt original remote project evidence".to_vec();
+    let private = crate::document_edits::store::test_support::private_directory();
+    let knowledge = KnowledgeService::open(private.path().to_owned(), None).unwrap();
+    {
+        let mut state = shared.write().await;
+        state.drive_manager = Some(manager.weak());
+        state.project_knowledge = knowledge.clone();
+        let authority = source_authority(&state, &agent, &account.id).unwrap();
+        let mut index = SourceIndex::new(&authority);
+        let mut selected = document(
+            DocumentKind::File,
+            "selected-a".into(),
+            "selected".into(),
+            "Selected native report".into(),
+            String::new(),
+        );
+        selected.citation_id = "a".repeat(64);
+        selected.revision = "b".repeat(64);
+        index.documents.push(selected);
+        state
+            .connected_search
+            .sources
+            .insert(account.id.clone(), index);
+    }
+    let projects = ProjectService::new(shared.clone(), manager.inner.transactions.clone());
+    let created = projects
+        .mutate(ProjectMutation::Create(ProjectCreateRequest {
+            request_key: "native-source-project".into(),
+            title: "Remote evidence".into(),
+            member_agent_ids: vec![agent.clone()],
+            instructions: String::new(),
+        }))
+        .await
+        .unwrap();
+    let id = created["project"]["id"].as_str().unwrap().to_owned();
+    let revision = shared.read().await.projects.get(&id).unwrap().revision;
+    projects
+        .mutate(ProjectMutation::AddConnectedSource {
+            id: id.clone(),
+            input: AddConnectedSourceRequest {
+                expected_revision: revision,
+                request_key: "share-selected-native-source".into(),
+                as_agent_id: agent.clone(),
+                owner_agent_id: agent.clone(),
+                connector_id: account.id.clone(),
+                citation_id: "a".repeat(64),
+                share_with_project: true,
+                label: None,
+            },
+        })
+        .await
+        .unwrap();
+    knowledge.refresh(&shared, &id, &agent, None).await.unwrap();
+    within(async {
+        loop {
+            let status = knowledge.status(&shared, &id, &agent).await.unwrap();
+            if status.sources.iter().all(|source| {
+                source.status == crate::projects::knowledge::KnowledgeSourceState::Ready
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let found = knowledge
+        .search(
+            &shared,
+            &id,
+            &agent,
+            "cobalt",
+            8,
+            anima_core::CancelSignal::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(found.hits.len(), 1);
+    let old_citation = found.hits[0].citation_id.clone();
+    let citation = knowledge
+        .citation(&shared, &id, &agent, &old_citation)
+        .await
+        .unwrap();
+    assert!(citation.text.contains("original remote project evidence"));
+    assert_eq!(citation.hit.origin.as_ref().unwrap().provider, "gdrive");
+    *transport.bytes.lock().unwrap() = b"silver changed remote project evidence".to_vec();
+    transport.changed.store(true, Ordering::SeqCst);
+    assert!(
+        knowledge
+            .citation(&shared, &id, &agent, &old_citation)
+            .await
+            .is_err(),
+        "a cached citation must fail after native source bytes or version change"
+    );
+    let updated = knowledge
+        .search(
+            &shared,
+            &id,
+            &agent,
+            "silver",
+            8,
+            anima_core::CancelSignal::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.hits.len(), 1);
+    assert_ne!(updated.hits[0].citation_id, old_citation);
+    let folder = tempfile::Builder::new()
+        .prefix("anima-connected-healthy-folder-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(
+        folder.path().join("healthy.txt"),
+        "healthyfoldermarker remains searchable",
+    )
+    .unwrap();
+    let revision = shared.read().await.projects.get(&id).unwrap().revision;
+    projects
+        .mutate(ProjectMutation::AddKnowledgeFolder {
+            id: id.clone(),
+            input: crate::projects::AddKnowledgeFolderRequest {
+                expected_revision: revision,
+                request_key: "healthy-folder".into(),
+                as_agent_id: agent.clone(),
+                root_path: folder.path().to_string_lossy().into_owned(),
+                label: None,
+            },
+        })
+        .await
+        .unwrap();
+    transport.read_gate.store(true, Ordering::SeqCst);
+    let healthy = knowledge
+        .search(
+            &shared,
+            &id,
+            &agent,
+            "healthyfoldermarker",
+            8,
+            anima_core::CancelSignal::new(),
+            Some(tokio::time::Instant::now() + std::time::Duration::from_secs(2)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        healthy.hits.len(),
+        1,
+        "a short remote read budget preserves healthy local folder results"
+    );
+    assert!(healthy.hits[0].origin.is_none());
+    transport.read_gate.store(false, Ordering::SeqCst);
+    assert!(transport
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|call| !call.contains("list") && !call.contains("unselected")));
+    let snapshot = serde_json::to_string(&shared.read().await.control_plane_snapshot()).unwrap();
+    assert!(
+        !snapshot.contains("access-fixture") && !snapshot.contains("refresh-fixture"),
+        "credentials remain in the original account vault"
+    );
+    manager.disconnect(agent.clone(), account.id).await.unwrap();
+    assert!(knowledge
+        .citation(&shared, &id, &agent, &updated.hits[0].citation_id)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn final_project_knowledge_witness_bounds_cancel_and_deadline_but_retains_native_read_custody(
+) {
+    use crate::connected_search::{
+        providers::document, source_authority, DocumentKind, SourceIndex,
+    };
+    use crate::projects::{
+        connected::AddConnectedSourceRequest, knowledge::KnowledgeService, ProjectCreateRequest,
+        ProjectError, ProjectMutation, ProjectService,
+    };
+    let (manager, shared, transport, agent) = setup().await;
+    let account = active(&manager, &agent).await;
+    *transport.bytes.lock().unwrap() = b"cobalt bounded witness evidence".to_vec();
+    let private = crate::document_edits::store::test_support::private_directory();
+    let knowledge = KnowledgeService::open(private.path().to_owned(), None).unwrap();
+    {
+        let mut state = shared.write().await;
+        state.drive_manager = Some(manager.weak());
+        state.project_knowledge = knowledge.clone();
+        let authority = source_authority(&state, &agent, &account.id).unwrap();
+        let mut index = SourceIndex::new(&authority);
+        let mut selected = document(
+            DocumentKind::File,
+            "selected-a".into(),
+            "selected".into(),
+            "Selected native report".into(),
+            String::new(),
+        );
+        selected.citation_id = "a".repeat(64);
+        selected.revision = "b".repeat(64);
+        index.documents.push(selected);
+        state
+            .connected_search
+            .sources
+            .insert(account.id.clone(), index);
+    }
+    let projects = ProjectService::new(shared.clone(), manager.inner.transactions.clone());
+    let created = projects
+        .mutate(ProjectMutation::Create(ProjectCreateRequest {
+            request_key: "witness-budget-project".into(),
+            title: "Bounded witness".into(),
+            member_agent_ids: vec![agent.clone()],
+            instructions: String::new(),
+        }))
+        .await
+        .unwrap();
+    let id = created["project"]["id"].as_str().unwrap().to_owned();
+    let revision = shared.read().await.projects.get(&id).unwrap().revision;
+    projects
+        .mutate(ProjectMutation::AddConnectedSource {
+            id: id.clone(),
+            input: AddConnectedSourceRequest {
+                expected_revision: revision,
+                request_key: "share-bounded-witness".into(),
+                as_agent_id: agent.clone(),
+                owner_agent_id: agent.clone(),
+                connector_id: account.id,
+                citation_id: "a".repeat(64),
+                share_with_project: true,
+                label: None,
+            },
+        })
+        .await
+        .unwrap();
+    let project = shared.read().await.projects.get(&id).unwrap().clone();
+    for cancel_read in [true, false] {
+        let cancel = anima_core::CancelSignal::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(4);
+        let retrieval = knowledge
+            .retrieve(
+                &shared,
+                &project,
+                &agent,
+                "cobalt",
+                cancel.clone(),
+                Some(deadline),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            retrieval.passages.len(),
+            1,
+            "indexing must finish before the final native source read stalls"
+        );
+        transport.read_gate.store(true, Ordering::SeqCst);
+        let checking = tokio::spawn({
+            let shared = shared.clone();
+            async move { retrieval.witness.check(&shared).await }
+        });
+        within(transport.entered.acquire()).await.unwrap().forget();
+        if cancel_read {
+            cancel.cancel();
+        }
+        let timeout = if cancel_read {
+            std::time::Duration::from_millis(500)
+        } else {
+            std::time::Duration::from_secs(5)
+        };
+        let result = tokio::time::timeout(timeout, checking)
+            .await
+            .expect(
+                "final witness must obey its own cancellation/deadline before the provider timeout",
+            )
+            .unwrap();
+        assert!(matches!(
+            (cancel_read, result),
+            (true, Err(ProjectError::Cancelled)) | (false, Err(ProjectError::Deadline))
+        ));
+        assert_eq!(
+            transport.active_reads.load(Ordering::SeqCst),
+            1,
+            "returning a bounded wait must retain physical native read custody until settlement"
+        );
+        transport.read_gate.store(false, Ordering::SeqCst);
+        transport.release.add_permits(1);
+        within(async {
+            while transport.active_reads.load(Ordering::SeqCst) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    }
 }
 #[tokio::test]
 async fn callback_is_single_use_and_disconnected_pending_cannot_exchange_or_reactivate() {
