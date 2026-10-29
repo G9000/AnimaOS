@@ -92,8 +92,10 @@ export function ComposerMode({
         {model && (
           <span className="composer-chip-model">
             {model.current || model.provider}
-            {model.selectionLabel && <small className="ml-1 opacity-60">{model.selectionLabel}</small>}
           </span>
+        )}
+        {model?.selectionLabel && (
+          <small className="composer-chip-tag">{model.selectionLabel}</small>
         )}
         <ChevronIcon size={12} />
       </button>

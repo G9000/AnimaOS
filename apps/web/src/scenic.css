@@ -90,7 +90,7 @@
   transition: opacity 500ms ease;
 }
 
-.scenic-shell:has(.studio-messages) .halo-backdrop::after {
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading)) .halo-backdrop::after {
   opacity: 1;
 }
 
@@ -447,19 +447,28 @@ button.scenic-thread[aria-expanded='true'] {
   color: #fff;
 }
 
-.scenic-topbar
-  .studio-topbar-actions
-  > :is(.studio-tool-button, .studio-command-trigger) {
-  height: 32px;
-  min-height: 32px;
+/* Top-bar buttons take the search box's outline (below), so Projects and
+ * search read as a pair, quiet until hovered. */
+.scenic-shell .scenic-topbar .studio-topbar-actions > .studio-tool-button {
+  height: 28px;
+  min-height: 28px;
   gap: 6px;
-  padding: 0 9px;
-  border-color: rgb(255 255 255 / 0.12);
-  border-radius: 4px;
-  background: rgb(12 16 21 / 0.7);
-  color: rgb(255 255 255 / 0.8);
+  padding: 6px 11px;
+  border: 1px solid rgb(236 230 218 / 0.15);
+  border-radius: 6px;
+  background: none;
+  backdrop-filter: none;
+  color: rgb(236 230 218 / 0.72);
   font-size: 12px;
   line-height: 16px;
+}
+
+.scenic-shell
+  .scenic-topbar
+  .studio-topbar-actions
+  > .studio-tool-button[aria-pressed='true'] {
+  border-color: rgb(var(--color-accent-rgb) / 0.55);
+  color: var(--color-ink);
 }
 
 .scenic-topbar .studio-command-trigger kbd {
@@ -471,12 +480,13 @@ button.scenic-thread[aria-expanded='true'] {
   font: 11px/14px var(--font-mono);
 }
 
-.scenic-topbar
+.scenic-shell
+  .scenic-topbar
   .studio-topbar-actions
-  > :is(.studio-tool-button, .studio-command-trigger):hover {
-  border-color: rgb(255 255 255 / 0.28);
-  background: rgb(30 38 44 / 0.8);
-  color: #fff;
+  > .studio-tool-button:hover {
+  border-color: rgb(236 230 218 / 0.3);
+  background: none;
+  color: var(--color-ink);
 }
 
 .scenic-shell .studio-view {
@@ -769,7 +779,7 @@ button.scenic-thread[aria-expanded='true'] {
   min-height: 34px;
   padding: 6px 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--control-radius);
   background: transparent;
   font-size: 12px;
   cursor: pointer;
@@ -2183,8 +2193,8 @@ button.scenic-thread[aria-expanded='true'] {
   gap: 6px;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 2px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
   background: rgb(236 230 218 / 0.04);
   color: var(--color-ink);
   font-size: 12px;
@@ -2211,11 +2221,23 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .scenic-shell .composer-chip-model {
-  max-width: 150px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(236 230 218 / 0.6);
+  color: var(--control-ink);
+}
+
+/* Where the model comes from (Inherited, Pinned…): a small tag, readable. */
+.scenic-shell .composer-chip-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--control-line);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--control-muted);
 }
 
 .scenic-shell .composer-chip > svg:last-child {
@@ -3919,7 +3941,7 @@ button.scenic-thread[aria-expanded='true'] {
   height: 32px;
   padding: 0 10px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: #0b0b0a;
   color: rgb(236 230 218 / 0.35);
 }
@@ -4581,7 +4603,7 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .settings-profile .field {
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 /* Profile · personality is a segmented control on its row */
@@ -4599,14 +4621,14 @@ fieldset.profile-personality .profile-personality-options {
   width: auto;
   padding: 2px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: none;
 }
 
 fieldset.profile-personality .profile-personality-options span {
   min-height: 24px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -4670,7 +4692,7 @@ details.settings-item > :not(summary) {
   min-height: 0;
   padding: 0 12px;
   border: 1px solid rgb(255 107 91 / 0.45);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
   color: #ff6b5b;
 }
@@ -4683,7 +4705,7 @@ details.settings-item > :not(summary) {
 .settings-model-summary {
   padding: 12px 14px;
   border: 1px solid rgb(233 77 171 / 0.35);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(233 77 171 / 0.07);
 }
 
@@ -4710,7 +4732,7 @@ details.settings-item > :not(summary) {
   align-self: auto;
   height: 30px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   border-color: rgb(236 230 218 / 0.2);
   line-height: 28px;
   color: rgb(236 230 218 / 0.8);
@@ -4751,13 +4773,13 @@ details.settings-item > :not(summary) {
   grid-row: 1 / span 2;
   align-self: start;
   height: 30px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .fallback-footer > button:last-child {
   grid-column: 1 / -1;
   justify-self: end;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .fallback-footer > button:last-child:disabled {
@@ -4765,7 +4787,7 @@ details.settings-item > :not(summary) {
 }
 
 .fallback-list {
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .fallback-number {
@@ -4818,7 +4840,7 @@ details.settings-item > :not(summary) {
 .settings-window .skills-decided {
   gap: 0;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .skills-list > li,
@@ -4887,7 +4909,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -4961,7 +4983,7 @@ details.settings-item > :not(summary) {
   gap: 10px;
   padding: 16px 18px;
   border: 1px solid rgb(233 77 171 / 0.3);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(233 77 171 / 0.05);
 }
 
@@ -4986,7 +5008,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 14px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -5029,7 +5051,7 @@ details.settings-item > :not(summary) {
   gap: 2px;
   padding: 2px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .memory-tab {
@@ -5037,7 +5059,7 @@ details.settings-item > :not(summary) {
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
   color: rgb(236 230 218 / 0.5);
 }
@@ -5071,7 +5093,7 @@ details.settings-item > :not(summary) {
 .settings-window .memory-list {
   gap: 0;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .memory-item {
@@ -5122,13 +5144,13 @@ details.settings-item > :not(summary) {
   height: 28px;
   min-height: 0;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
 .settings-window .memory-search input,
 .settings-window .memory-toolbar select {
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 /* The daemon-wide search check is housekeeping: it goes under the list. */
@@ -5136,7 +5158,7 @@ details.settings-item > :not(summary) {
   order: 9;
   padding: 14px 16px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 /* ── Tools and Connections as hairline lists ── */
@@ -5206,7 +5228,7 @@ details.settings-item > :not(summary) {
   height: 32px;
   padding: 0 10px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: rgb(236 230 218 / 0.03);
   font-size: 12px;
   color: var(--color-ink);
@@ -5215,7 +5237,7 @@ details.settings-item > :not(summary) {
 .tools-authority {
   padding: 12px 14px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(236 230 218 / 0.025);
 }
 
@@ -5350,7 +5372,7 @@ details.settings-item > :not(summary) {
 .connections-card {
   padding: 16px 18px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: none;
 }
 
@@ -5362,7 +5384,7 @@ details.settings-item > :not(summary) {
 }
 
 .connections-card .field {
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 /* ── Work and Files ── */
@@ -5388,7 +5410,7 @@ details.settings-item > :not(summary) {
   gap: 2px;
   padding: 2px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .work-navigation {
@@ -5425,14 +5447,14 @@ details.settings-item > :not(summary) {
   gap: 2px;
   padding: 5px;
   border: 1px solid rgb(236 230 218 / 0.16);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: #181817;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
 }
 
 .work-more-views button {
   padding: 7px 9px;
-  border-radius: 5px;
+  border-radius: var(--control-radius);
   color: rgb(236 230 218 / 0.7);
   font-size: 11px;
   text-align: left;
@@ -5451,12 +5473,12 @@ details.settings-item > :not(summary) {
   gap: 2px;
   padding: 2px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .work-status-filters button {
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   color: rgb(236 230 218 / 0.5);
   font-size: 11px;
   cursor: pointer;
@@ -5473,7 +5495,7 @@ details.settings-item > :not(summary) {
 
 .work-tab {
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
   color: rgb(236 230 218 / 0.5);
   cursor: pointer;
@@ -5503,7 +5525,7 @@ details.settings-item > :not(summary) {
 .work-toolbar .field {
   height: 34px;
   min-height: 0;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 13px;
 }
 
@@ -5511,7 +5533,7 @@ details.settings-item > :not(summary) {
   height: 34px;
   padding: 0 12px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
   color: rgb(236 230 218 / 0.7);
 }
@@ -5604,7 +5626,7 @@ details.settings-item > :not(summary) {
   height: 40px;
   padding: 0 14px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(236 230 218 / 0.025);
   font-size: 13px;
   color: var(--color-ink);
@@ -5667,7 +5689,7 @@ details.settings-item > :not(summary) {
 .files-preview {
   min-width: 0;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(11 11 10 / 0.6);
 }
 
@@ -5744,7 +5766,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -5770,7 +5792,7 @@ details.settings-item > :not(summary) {
 .settings-window .automations-list {
   gap: 0;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   list-style: none;
 }
 
@@ -5835,7 +5857,7 @@ details.settings-item > :not(summary) {
   height: 28px;
   min-height: 0;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -5847,7 +5869,7 @@ details.settings-item > :not(summary) {
 .settings-window .automation-prompt {
   max-height: 2.8em;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 11px;
   line-height: 1.4;
   overflow: hidden;
@@ -5882,7 +5904,7 @@ details.settings-item > :not(summary) {
 .settings-window .automation-history {
   padding: 16px 18px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: none;
 }
 
@@ -5896,7 +5918,7 @@ details.settings-item > :not(summary) {
 .settings-window .automation-field textarea,
 .settings-window .automation-field select {
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: rgb(236 230 218 / 0.025);
   font-size: 13px;
   color: var(--color-ink);
@@ -5918,7 +5940,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -5940,7 +5962,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -5971,7 +5993,7 @@ details.settings-item > :not(summary) {
   gap: 6px;
   padding: 16px 18px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: none;
 }
 
@@ -6002,7 +6024,7 @@ details.settings-item > :not(summary) {
   min-height: 25px;
   padding: 0 9px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: rgb(236 230 218 / 0.04);
   color: var(--color-ink);
   font-size: 11px;
@@ -6033,7 +6055,7 @@ details.settings-item > :not(summary) {
   min-height: 30px;
   padding: 0 8px;
   border: 1px solid rgb(236 230 218 / 0.16);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: rgb(8 8 8 / 0.2);
   color: var(--color-ink);
   font: inherit;
@@ -6048,7 +6070,7 @@ details.settings-item > :not(summary) {
   box-sizing: border-box;
   padding: 16px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .usage-bar {
@@ -6072,7 +6094,7 @@ details.settings-item > :not(summary) {
   border-spacing: 0;
   overflow: hidden;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .usage-table th,
@@ -6156,7 +6178,7 @@ details.settings-item > :not(summary) {
   height: 28px;
   min-height: 0;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -6182,7 +6204,7 @@ details.settings-item > :not(summary) {
   gap: 4px;
   padding: 14px 16px 16px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: transparent;
   box-shadow: none;
 }
@@ -6258,7 +6280,7 @@ details.settings-item > :not(summary) {
   margin: 0;
   padding: 16px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(0 0 0 / 0.35);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -6283,7 +6305,7 @@ details.settings-item > :not(summary) {
 
 .settings-window .runtime-facts {
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .runtime-fact + .runtime-fact {
@@ -6307,7 +6329,7 @@ details.settings-item > :not(summary) {
   flex: none;
   padding: 3px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .logs-levels button {
@@ -6317,7 +6339,7 @@ details.settings-item > :not(summary) {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: transparent;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -6344,7 +6366,7 @@ details.settings-item > :not(summary) {
   min-width: 0;
   padding: 0 12px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: transparent;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -6384,7 +6406,7 @@ details.settings-item > :not(summary) {
   height: 28px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: transparent;
   font-family: var(--font-sans);
   font-size: 12px;
@@ -6404,7 +6426,7 @@ details.settings-item > :not(summary) {
 .settings-window .system-log {
   padding: 12px 6px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(0 0 0 / 0.35);
   font-size: 11px;
 }
@@ -6708,7 +6730,7 @@ details.settings-item > :not(summary) {
   border-radius: 6px;
   background: none;
   backdrop-filter: none;
-  color: rgb(236 230 218 / 0.35);
+  color: rgb(236 230 218 / 0.5);
   font-size: 12px;
   line-height: 16px;
 }
@@ -6788,7 +6810,7 @@ details.settings-item > :not(summary) {
     background 600ms ease;
 }
 
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
   :is(.halo-backdrop-orb, .halo-glow) {
   /* 100px short of the column, but never so far out that none of it shows. */
@@ -6798,30 +6820,30 @@ details.settings-item > :not(summary) {
   );
 }
 
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
   .halo-glow {
   width: 800px;
 }
 
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
   .halo-backdrop-orb {
   opacity: 0.42;
 }
 
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet'][data-mode='thinking'] .halo-backdrop-orb,
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet'][data-mode='speaking'] .halo-backdrop-orb,
-.scenic-shell:has(.studio-messages)
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
   .halo-backdrop[data-variant='quiet'][data-mode='attention']
   .halo-backdrop-orb {
   opacity: 0.6;
 }
 
 @media (max-width: 899px) {
-  .scenic-shell:has(.studio-messages)
+  .scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
     .halo-backdrop[data-variant='quiet']:not([data-mode='listening'])
     .halo-backdrop-orb {
     opacity: 0.28;
@@ -6829,7 +6851,7 @@ details.settings-item > :not(summary) {
 }
 
 /* The reading lane is for an orb behind the text; at the edge it has no job. */
-.scenic-shell:has(.studio-messages) .halo-backdrop[data-variant='quiet']::after {
+.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading)) .halo-backdrop[data-variant='quiet']::after {
   opacity: 0;
 }
 
@@ -7078,7 +7100,7 @@ details.settings-item > :not(summary) {
     .tool-block-card
   ) {
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: #191918f2;
   box-shadow: none;
   color: #ece6da;
@@ -7124,7 +7146,7 @@ details.settings-item > :not(summary) {
 .scenic-shell [data-main-chat='true'] .automation-card {
   gap: 0;
   border-color: rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: #191918f2;
 }
 
@@ -7217,7 +7239,7 @@ details.settings-item > :not(summary) {
     .automation-card-primary,
     .approval-card-actions .studio-tool-button
   ) {
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .scenic-shell [data-main-chat='true'] .run-outcome {
@@ -7406,7 +7428,7 @@ details.settings-item > :not(summary) {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(236 230 218 / 0.025);
   color: var(--color-ink);
   cursor: pointer;
@@ -7634,7 +7656,7 @@ details.settings-item > :not(summary) {
   gap: 4px;
   padding: 3px;
   border: 1px solid rgb(236 230 218 / 0.1);
-  border-radius: 7px;
+  border-radius: var(--panel-radius);
   background: rgb(0 0 0 / 0.12);
 }
 
@@ -7642,7 +7664,7 @@ details.settings-item > :not(summary) {
   position: relative;
   min-width: 78px;
   padding: 6px 10px;
-  border-radius: 5px;
+  border-radius: var(--control-radius);
   color: var(--color-ink-3);
   font-size: 11px;
   text-align: center;
@@ -8059,7 +8081,7 @@ details.settings-item > :not(summary) {
   gap: 8px;
   min-height: 34px;
   padding: 6px 8px;
-  border-radius: 5px;
+  border-radius: var(--control-radius);
   color: var(--color-ink-2);
   font-size: 12px;
   text-align: left;
@@ -9497,7 +9519,7 @@ details.settings-item > :not(summary) {
 }
 .health-log-filters button {
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--control-radius);
   padding: 4px 7px;
   color: var(--color-ink-3);
   font-size: 10px;
@@ -9709,7 +9731,7 @@ details.settings-item > :not(summary) {
 
 .settings-profile .settings-list {
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-profile .settings-list > .settings-item,
@@ -9898,7 +9920,7 @@ details.settings-item > :not(summary) {
   min-height: 30px;
   padding: 0 12px;
   border: 1px solid rgb(236 230 218 / 0.25);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: transparent;
   color: #ff6b5b;
   font-size: 12px;
@@ -10031,12 +10053,12 @@ details.settings-item > :not(summary) {
   margin: 0;
   padding: 2px;
   border-color: rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-profile .personality-preset-group-inline label span {
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   color: rgb(236 230 218 / 0.35);
   font-size: 11px;
   line-height: 1.3;
@@ -10346,7 +10368,7 @@ details.settings-item > :not(summary) {
   min-height: 48px;
   padding: 8px 14px;
   border: 1px solid rgb(233 77 171 / 0.35);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(233 77 171 / 0.06);
   color: var(--color-ink);
   font-size: 12px;
@@ -10357,7 +10379,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .settings-window .approvals-pending-details > summary,
@@ -10379,7 +10401,7 @@ details.settings-item > :not(summary) {
   min-width: 0;
   overflow-x: auto;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .approvals-rules-table {
@@ -10422,7 +10444,7 @@ details.settings-item > :not(summary) {
   gap: 2px;
   padding: 2px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .settings-window .approvals-decision-options button {
@@ -10490,7 +10512,7 @@ details.settings-item > :not(summary) {
   min-width: 140px;
   padding: 0 9px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: #0b0b0a;
   color: var(--color-ink);
   font-size: 11px;
@@ -10500,7 +10522,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 11px;
 }
 
@@ -10546,7 +10568,7 @@ details.settings-item > :not(summary) {
 .settings-window .skills-decided {
   margin-top: 8px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   overflow: hidden;
 }
 
@@ -10557,7 +10579,7 @@ details.settings-item > :not(summary) {
 .settings-window .skill-draft {
   gap: 8px;
   border-color: rgb(233 77 171 / 0.42);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(233 77 171 / 0.045);
   padding: 12px 14px;
 }
@@ -10623,7 +10645,7 @@ details.settings-item > :not(summary) {
   min-width: 0;
   overflow-x: auto;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
 }
 
 .settings-window .skills-table {
@@ -10771,7 +10793,7 @@ details.settings-item > :not(summary) {
   gap: 12px;
   padding: 12px;
   border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(236 230 218 / 0.02);
   cursor: pointer;
 }
@@ -10928,7 +10950,7 @@ details.settings-item > :not(summary) {
   height: 30px;
   min-height: 0;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   font-size: 12px;
 }
 
@@ -10938,7 +10960,7 @@ details.settings-item > :not(summary) {
   gap: 14px;
   padding: 16px;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: rgb(236 230 218 / 0.02);
 }
 
@@ -10949,21 +10971,21 @@ details.settings-item > :not(summary) {
 }
 
 .settings-workflow-form .field {
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .settings-workflow-form > button {
   align-self: flex-start;
   min-height: 30px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--control-radius);
 }
 
 .settings-window .settings-workflow-card {
   gap: 12px;
   padding: 14px 16px;
   border-color: rgb(236 230 218 / 0.12);
-  border-radius: 8px;
+  border-radius: var(--panel-radius);
   background: transparent;
   box-shadow: none;
 }
@@ -10976,7 +10998,7 @@ details.settings-item > :not(summary) {
 
 .settings-window .settings-workflow-card ol > li {
   border-color: rgb(236 230 218 / 0.1);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   padding: 10px 12px;
 }
 

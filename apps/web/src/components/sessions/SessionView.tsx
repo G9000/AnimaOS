@@ -81,6 +81,7 @@ export interface SessionComposerState {
     text: string;
     restore: () => void;
     dismiss: () => void;
+    ready?: boolean;
   };
   commands?: readonly SlashCommand[];
   /** This session's reply is in progress (spec §15.3). */
@@ -121,6 +122,8 @@ export interface SessionViewProps {
   hasOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
+  /** The first page of messages has not arrived yet. */
+  loadingHistory?: boolean;
   /** The session was deleted elsewhere. */
   missing: boolean;
   telegramAvailable: boolean;
@@ -349,6 +352,7 @@ export function SessionView({
   hasOlder,
   loadingOlder,
   onLoadOlder,
+  loadingHistory = false,
   missing,
   telegramAvailable,
   discordAvailable = false,
@@ -592,6 +596,7 @@ export function SessionView({
       hasOlder={hasOlder}
       loadingOlder={loadingOlder}
       onLoadOlder={onLoadOlder}
+      loading={loadingHistory}
       emptyState={session && session.kind !== 'chat' ? NO_MESSAGES : undefined}
       readAloud={readAloud}
       conversationKey={voiceKey}

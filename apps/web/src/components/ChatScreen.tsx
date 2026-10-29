@@ -613,6 +613,7 @@ export const MessageList = memo(function MessageList({
   hasOlder = false,
   loadingOlder = false,
   onLoadOlder,
+  loading = false,
   emptyState,
   tail,
   items,
@@ -636,6 +637,9 @@ export const MessageList = memo(function MessageList({
   hasOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
+  /** The first page of history is still on its way: show nothing rather
+   *  than the welcome, which would flash before the messages arrive. */
+  loading?: boolean;
   /** Replaces the welcome screen for sessions that are not new chats. */
   emptyState?: ReactNode;
   /** Agent-scoped controls rendered after the transcript inside its scroller. */
@@ -968,7 +972,11 @@ export const MessageList = memo(function MessageList({
             }
           }}
         >
-          {transcript.length === 0 && !sending ? (
+          {transcript.length === 0 && !sending && loading ? (
+            <div className="studio-transcript-loading" aria-busy="true">
+              <span className="sr-only">Loading conversation…</span>
+            </div>
+          ) : transcript.length === 0 && !sending ? (
             (emptyState ?? (
               <EmptyState agentName={agent.name} onPick={onSuggestion} />
             ))
@@ -1076,6 +1084,11 @@ export const MessageList = memo(function MessageList({
 });
 
 /* ── Composer ── */
+/** Set when a focused composer is replaced (the chat settling on its main
+ *  session, a loading state): the next composer takes focus back so the
+ *  owner's typing continues instead of landing on the page. */
+let composerFocusHandoff = false;
+
 export function Composer({
   agentName,
   label,
@@ -1120,6 +1133,9 @@ export function Composer({
     text: string;
     restore: () => void;
     dismiss: () => void;
+    /** False while the chat cannot take the message back yet (loading,
+     *  offline): Restore waits instead of silently doing nothing. */
+    ready?: boolean;
   };
   /** The slash commands the menu offers (spec §15.3); none without them. */
   commands?: readonly SlashCommand[];
@@ -1151,6 +1167,24 @@ export function Composer({
   };
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const textarea = taRef.current;
+    if (
+      composerFocusHandoff &&
+      textarea &&
+      (document.activeElement === null ||
+        document.activeElement === document.body)
+    ) {
+      textarea.focus();
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+    }
+    composerFocusHandoff = false;
+    return () => {
+      composerFocusHandoff =
+        textarea !== null && document.activeElement === textarea;
+    };
+  }, []);
   const latestDraftRef = useLatest(draft);
   const spokenDraftRef = useRef(false);
   const historyKey = conversationKey ?? agentName;
@@ -1273,6 +1307,12 @@ export function Composer({
               <button
                 type="button"
                 className="studio-tool-button"
+                disabled={recovery.ready === false}
+                title={
+                  recovery.ready === false
+                    ? 'Available once this chat has loaded'
+                    : undefined
+                }
                 onClick={() => {
                   recovery.restore();
                   taRef.current?.focus();

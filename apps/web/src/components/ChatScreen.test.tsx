@@ -1558,6 +1558,31 @@ describe('Composer keyboard safety', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onSend).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps typing focus when a focused composer is replaced, without stealing it otherwise', () => {
+    const props = {
+      agentName: 'Nova',
+      draft: 'Half-typed',
+      setDraft: vi.fn(),
+      sending: false,
+      disabled: false,
+      onSend: vi.fn(),
+      error: null,
+      onDismissError: vi.fn(),
+    };
+    const view = render(<Composer key="home" {...props} />);
+    screen.getByRole('textbox', { name: 'Message Nova' }).focus();
+    view.rerender(<Composer key="main" {...props} />);
+    const replaced = screen.getByRole('textbox', { name: 'Message Nova' });
+    expect(replaced).toHaveFocus();
+    expect(replaced.selectionStart).toBe('Half-typed'.length);
+
+    replaced.blur();
+    view.rerender(<Composer key="other" {...props} />);
+    expect(
+      screen.getByRole('textbox', { name: 'Message Nova' }),
+    ).not.toHaveFocus();
+  });
 });
 
 describe('Composer message recall', () => {
@@ -2183,5 +2208,27 @@ describe('automation cards in the main chat', () => {
     Object.defineProperty(scroller, 'clientHeight', { value: 500 });
     fireEvent.scroll(scroller);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe('MessageList while history loads', () => {
+  it('shows no welcome until the first page arrives, then the welcome for an empty chat', () => {
+    const props = {
+      agent: { ...agent, messages: [] },
+      sending: false,
+      scrollerRef: { current: null },
+      onSuggestion: vi.fn(),
+      items: [],
+    };
+    const view = render(<MessageList {...props} loading />);
+    expect(screen.getByText('Loading conversation…')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: `Say something to ${agent.name}` }),
+    ).not.toBeInTheDocument();
+
+    view.rerender(<MessageList {...props} />);
+    expect(
+      screen.getByRole('heading', { name: `Say something to ${agent.name}` }),
+    ).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import type { AvailablePage } from './WorkspaceShell';
 import { isMacPlatform } from '../lib/platform';
 import { SettingsAgentPicker } from './SettingsAgentPicker';
 import { PenIcon } from './PenIcon';
+import { BellIcon } from './icons';
 
 interface Destination {
   page: AvailablePage;
@@ -96,6 +97,11 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
         page: 'appearance',
         label: 'Appearance',
         icon: <PenIcon name="palette-fill" size={14} />,
+      },
+      {
+        page: 'notifications',
+        label: 'Notifications',
+        icon: <BellIcon size={14} />,
       },
       {
         page: 'runtime',
@@ -193,6 +199,11 @@ export const SETTINGS_PAGE_META: Partial<
     scope: 'all',
     description: () =>
       'How anima looks on this computer. Your chats and settings stay the same.',
+  },
+  notifications: {
+    scope: 'all',
+    description: () =>
+      'What anima tells you about while you are in another tab or app.',
   },
   runtime: {
     scope: 'all',

@@ -7,6 +7,7 @@ export const HASH_PAGES = [
   'profile',
   'model',
   'appearance',
+  'notifications',
   'runtime',
   'approvals',
   'automations',

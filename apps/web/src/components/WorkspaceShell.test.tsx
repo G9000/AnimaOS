@@ -520,6 +520,7 @@ describe('WorkspaceShell', () => {
       'Work',
       'Files',
       'Appearance',
+      'Notifications',
       'Runtime',
       'Usage',
       'Diagnostics',
@@ -1067,7 +1068,7 @@ it('filters settings destinations and restores the complete sidebar after naviga
   await user.click(within(nav).getByRole('button', { name: 'Model' }));
   expect(screen.getByText('Model page')).toBeVisible();
   expect(search).toHaveValue('');
-  expect(within(nav).getAllByRole('button')).toHaveLength(15);
+  expect(within(nav).getAllByRole('button')).toHaveLength(16);
   expect(within(nav).getByRole('button', { name: 'Model' })).toHaveAttribute(
     'aria-current',
     'page',

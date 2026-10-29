@@ -3095,13 +3095,11 @@ it('offers a message still retrying when the page reloads before it is answered 
   first.unmount();
 
   render(<ViewHarness />);
-  // Restoring needs the chat's attachments ready; until then it is ignored.
-  await waitFor(() =>
-    expect(screen.getByLabelText('Choose attachments')).toBeEnabled(),
-  );
-  await user.click(
-    await screen.findByRole('button', { name: 'Restore message' }),
-  );
+  // Restore waits until the chat has loaded, instead of dropping the click.
+  const restore = () =>
+    screen.getByRole('button', { name: 'Restore message' });
+  await waitFor(() => expect(restore()).toBeEnabled());
+  await user.click(restore());
   expect(screen.getByPlaceholderText('Message Alpha…')).toHaveValue(
     'Still on its way',
   );

@@ -89,6 +89,7 @@ import { checkinScheduleId } from './lib/automations';
 import { findAutomationMessage } from './lib/automation-cards';
 import { shouldShowSession } from './lib/session-groups';
 import type { ChatAttention, AutomationToast } from './lib/automation-toasts';
+import { useApprovalNotifications } from './hooks/useApprovalNotifications';
 import { useAutomationToasts } from './hooks/useAutomationToasts';
 import { AutomationToasts } from './components/sessions/AutomationToasts';
 import { useHashRoute, type HashRoute } from './lib/hash-route';
@@ -865,6 +866,11 @@ export function ViewHarness() {
     () => pendingApprovals(live.state.approvals),
     [live.state.approvals],
   );
+  const approvalAgentName = useCallback(
+    (id: string) => agents.find((item) => item.id === id)?.name ?? 'An agent',
+    [agents],
+  );
+  useApprovalNotifications(approvalsWaiting, approvalAgentName);
   const needsYou = useNeedsYou({
     agentId,
     online: connection === 'online',
@@ -1774,6 +1780,12 @@ export function ViewHarness() {
       announcement={live.announcement}
       hasOlder={history.hasOlder}
       loadingOlder={history.loadingOlder}
+      loadingHistory={
+        routeSessionId !== null &&
+        history.appliedRead === 0 &&
+        !history.missing &&
+        !history.error
+      }
       onLoadOlder={loadOlder}
       missing={routeSessionId !== null && history.missing && !daemonTooOld}
       telegramAvailable={activeConnector !== null}
@@ -1869,6 +1881,13 @@ export function ViewHarness() {
             ? {
                 count: failedDrafts.length,
                 text: failedDraft ?? '',
+                // While the chat is still loading, a restore would be
+                // dropped; Restore waits for it instead.
+                ready:
+                  agent !== null &&
+                  !resetting &&
+                  !sessionLoading &&
+                  !waitingForMain,
                 restore: () => {
                   if (!activeChatKey) return;
                   const recovered = failedDrafts[0];

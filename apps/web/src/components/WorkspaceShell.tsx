@@ -47,6 +47,7 @@ import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
 import { HeaderContextLine } from './HeaderContextLine';
 import { AppearancePage } from './AppearancePage';
+import { NotificationsPage } from './NotificationsPage';
 import { useChatBackground } from '../lib/chat-background';
 import {
   useAppearancePreferences,
@@ -61,6 +62,7 @@ export const AVAILABLE_PAGES = [
   'profile',
   'model',
   'appearance',
+  'notifications',
   'runtime',
   'approvals',
   'automations',
@@ -809,6 +811,8 @@ export function WorkspaceShell({
                         model
                       ) : page === 'appearance' ? (
                         <AppearancePage />
+                      ) : page === 'notifications' ? (
+                        <NotificationsPage />
                       ) : page === 'runtime' ? (
                         runtime
                       ) : page === 'approvals' ? (

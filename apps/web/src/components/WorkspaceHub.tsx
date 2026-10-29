@@ -446,7 +446,7 @@ export function WorkspaceHub({
                     )}
                     <button
                       type="button"
-                      className="rounded-xl border border-line px-4 py-3 text-sm"
+                      className="ui-button"
                       disabled={section === 'Tasks' && !online}
                       onClick={() => {
                         if (
@@ -470,10 +470,10 @@ export function WorkspaceHub({
                           <button
                             key={agent.id}
                             type="button"
-                            className="flex items-center gap-2 rounded-xl border border-line px-4 py-3 text-sm"
+                            className="ui-button"
                             onClick={() => setManagedId(agent.id)}
                           >
-                            <AgentAvatar id={agent.id} name={agent.name} />
+                            <AgentAvatar id={agent.id} name={agent.name} size={18} />
                             Manage {agent.name}’s {section.toLowerCase()}
                           </button>
                         ))}
