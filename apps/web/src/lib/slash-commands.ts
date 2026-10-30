@@ -39,6 +39,9 @@ export interface SlashCommand {
   turn?: boolean;
   /** Optional arguments validated by the command itself. */
   acceptsArgument?: boolean;
+  /** Another name for this command; the menu lists it only when its
+   *  main name does not match. */
+  aliasOf?: string;
 }
 
 /** A skill's description in the menu, at most this many characters. */
@@ -58,33 +61,27 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
     needs: 'a title',
     placeholder: '<title>',
   },
-  { name: 'archive', description: 'Archive or unarchive this chat' },
-  { name: 'export', description: 'Download this chat as Markdown' },
-  { name: 'branch', description: 'Continue a copy of this chat' },
-  { name: 'fork', description: 'Continue a copy of this chat' },
-  { name: 'undo', description: 'Open a revision without the latest exchange' },
-  { name: 'retry', description: 'Open a revision and edit the latest prompt' },
   {
     name: 'search',
     description: 'Search your chats',
     needs: 'words to find',
     placeholder: '<words>',
   },
-  { name: 'model', description: 'Switch this chat’s model, or open model settings', acceptsArgument: true, placeholder: '[inherit | <provider> <model> [effort]]' },
-  { name: 'tools', description: 'Open this agent’s tools in Settings' },
-  { name: 'review', description: 'Get a second opinion on the latest reply', acceptsArgument: true, placeholder: '[focus]' },
+  { name: 'branch', description: 'Continue a copy of this chat' },
+  { name: 'fork', description: 'Continue a copy of this chat', aliasOf: 'branch' },
+  { name: 'undo', description: 'Open a revision without the latest exchange' },
+  { name: 'retry', description: 'Open a revision and edit the latest prompt' },
+  { name: 'archive', description: 'Archive or unarchive this chat' },
+  { name: 'export', description: 'Download this chat as Markdown' },
   { name: 'share', description: 'Choose who can read this chat' },
+  { name: 'model', description: 'Switch this chat’s model, or open model settings', acceptsArgument: true, placeholder: '[inherit | <provider> <model> [effort]]' },
+  { name: 'review', description: 'Get a second opinion on the latest reply', acceptsArgument: true, placeholder: '[focus]' },
+  { name: 'tools', description: 'Open this agent’s tools in Settings' },
   {
     name: 'compact',
     description: 'Summarize earlier messages to make room',
     placeholder: '[keep 1–100 | focus <topic>]',
     acceptsArgument: true,
-  },
-  {
-    name: 'learn',
-    description: 'Turn a workflow or source into a reusable skill',
-    placeholder: '<workflow or source>',
-    turn: true,
   },
   {
     name: 'clear',
@@ -93,10 +90,56 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
   {
     name: 'reset',
     description: 'Clear the main chat; keep your companion and memories',
+    aliasOf: 'clear',
+  },
+  {
+    name: 'learn',
+    description: 'Turn a workflow or source into a reusable skill',
+    placeholder: '<workflow or source>',
+    turn: true,
   },
   { name: 'usage', description: 'Show usage for this chat and today' },
   { name: 'help', description: 'Show every command' },
 ];
+
+/** The menu's sections, in order; skills come last. */
+export const SLASH_COMMAND_GROUPS = [
+  'Chat',
+  'Model',
+  'Context',
+  'Help',
+  'Skills',
+] as const;
+export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
+
+const GROUP_OF: Record<SlashCommandName, SlashCommandGroup> = {
+  new: 'Chat',
+  stop: 'Chat',
+  rename: 'Chat',
+  search: 'Chat',
+  branch: 'Chat',
+  fork: 'Chat',
+  undo: 'Chat',
+  retry: 'Chat',
+  archive: 'Chat',
+  export: 'Chat',
+  share: 'Chat',
+  model: 'Model',
+  review: 'Model',
+  tools: 'Model',
+  compact: 'Context',
+  clear: 'Context',
+  reset: 'Context',
+  learn: 'Context',
+  usage: 'Help',
+  help: 'Help',
+};
+
+/** Which menu section a command sits in. */
+export function slashCommandGroup(command: SlashCommand): SlashCommandGroup {
+  if (command.skill) return 'Skills';
+  return GROUP_OF[command.name as SlashCommandName] ?? 'Skills';
+}
 
 /** `/<slug>` for each enabled, active skill that does not shadow a
  *  built-in command (spec §15.3). */
@@ -143,7 +186,14 @@ export function slashSuggestions(
 ): SlashCommand[] {
   const match = /^\/([a-z0-9-]*)$/.exec(draft);
   if (!match) return [];
-  return commands.filter((item) => item.name.startsWith(match[1]));
+  const found = commands.filter((item) => item.name.startsWith(match[1]));
+  const names = new Set(found.map((item) => item.name));
+  const order = (item: SlashCommand) =>
+    SLASH_COMMAND_GROUPS.indexOf(slashCommandGroup(item));
+  // In menu order, so the arrow keys walk the sections top to bottom.
+  return found
+    .filter((item) => !item.aliasOf || !names.has(item.aliasOf))
+    .sort((a, b) => order(a) - order(b));
 }
 
 /** What each command does in the open session; a missing handler means the

@@ -1897,8 +1897,12 @@ describe('Composer commands and live replies', () => {
     });
     render(<Composer {...props} />);
 
-    expect(screen.getByRole('option', { selected: true })).toHaveTextContent(
-      '/notes <request>',
+    const active = screen.getByRole('option', { selected: true });
+    expect(active).toHaveTextContent('/notes');
+    // The active row shows what to type after the name.
+    expect(active).toHaveTextContent('<request>');
+    expect(screen.getByRole('group', { name: 'Skills' })).toContainElement(
+      active,
     );
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Nova' }), {
       key: 'Enter',

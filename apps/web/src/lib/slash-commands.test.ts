@@ -71,13 +71,36 @@ describe('SLASH_COMMANDS', () => {
 describe('slashSuggestions', () => {
   it('suggests commands while only the first word is typed', () => {
     expect(slashSuggestions('/').map((command) => command.name)).toEqual(
-      SLASH_COMMANDS.map((command) => command.name),
+      SLASH_COMMANDS.filter((command) => !command.aliasOf).map(
+        (command) => command.name,
+      ),
     );
     expect(slashSuggestions('/co').map((command) => command.name)).toEqual([
       'compact',
     ]);
     expect(slashSuggestions('/rename x')).toEqual([]);
     expect(slashSuggestions('hi')).toEqual([]);
+  });
+
+  it('lists an alias only when its main name does not match', () => {
+    expect(slashSuggestions('/fo').map((command) => command.name)).toEqual([
+      'fork',
+    ]);
+    expect(slashSuggestions('/re').map((command) => command.name)).toEqual([
+      'rename',
+      'retry',
+      'review',
+      'reset',
+    ]);
+  });
+
+  it('puts skills after the built-in sections', () => {
+    const skill = { name: 'notes', description: 'Take notes', skill: 'notes' };
+    expect(
+      slashSuggestions('/n', [skill, ...SLASH_COMMANDS]).map(
+        (command) => command.name,
+      ),
+    ).toEqual(['new', 'notes']);
   });
 });
 

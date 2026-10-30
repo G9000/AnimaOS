@@ -224,36 +224,133 @@
 }
 /* Composer command menu (spec §15.3). */
 .slash-menu {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 8px;
   overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: 2px;
-  background: var(--color-panel);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: var(--panel-radius);
+  /* Solid like the composer's mode menu: the conversation must not show
+   * through. */
+  background: #171615;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.03) inset,
+    0 18px 48px rgb(0 0 0 / 0.55);
+}
+.slash-menu > [role='listbox'] {
+  max-height: min(320px, 42vh);
+  padding: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.slash-menu > [role='listbox'] > li + li {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+}
+.slash-menu-group {
+  display: block;
+  padding: 6px 8px 3px;
+  color: rgb(236 230 218 / 0.42);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 .slash-menu-option {
   display: flex;
   cursor: pointer;
   align-items: baseline;
-  gap: 10px;
-  padding: 7px 12px;
-  color: var(--color-ink-2);
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--control-radius);
+  color: rgb(236 230 218 / 0.55);
   font-size: 12px;
+  line-height: 1.35;
+}
+.slash-menu-option:hover {
+  background: rgb(255 255 255 / 0.04);
 }
 .slash-menu-option[aria-selected='true'] {
-  background: rgb(255 255 255 / 0.05);
-  color: var(--color-ink);
+  background: rgb(255 255 255 / 0.07);
+  color: rgb(236 230 218 / 0.75);
 }
 .slash-menu-name {
-  flex-shrink: 0;
+  flex: none;
+  min-width: 96px;
   color: var(--color-ink);
   font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.slash-menu-option[aria-selected='true'] .slash-menu-name {
+  color: var(--color-accent);
 }
 .slash-menu-description {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.slash-menu-args {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  color: rgb(236 230 218 / 0.4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash-menu-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 6px 11px;
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+  color: rgb(236 230 218 / 0.42);
+  font-size: 10.5px;
+}
+.slash-menu-keys kbd {
+  display: inline-block;
+  min-width: 16px;
+  margin-right: 3px;
+  padding: 0 4px;
+  border: 1px solid rgb(236 230 218 / 0.14);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 15px;
+  text-align: center;
+}
+:root[data-appearance-theme='light'] .slash-menu {
+  border-color: var(--control-line);
+  background: var(--color-panel);
+  box-shadow: 0 18px 40px rgb(40 30 20 / 0.16);
+}
+:root[data-appearance-theme='light'] .slash-menu > [role='listbox'] > li + li,
+:root[data-appearance-theme='light'] .slash-menu-keys {
+  border-color: var(--control-line);
+}
+:root[data-appearance-theme='light'] .slash-menu-option,
+:root[data-appearance-theme='light'] .slash-menu-group,
+:root[data-appearance-theme='light'] .slash-menu-args,
+:root[data-appearance-theme='light'] .slash-menu-keys {
+  color: var(--control-muted);
+}
+:root[data-appearance-theme='light'] .slash-menu-option:hover,
+:root[data-appearance-theme='light'] .slash-menu-option[aria-selected='true'] {
+  background: var(--control-fill-hover);
+  color: var(--control-ink);
+}
+:root[data-appearance-theme='light'] .slash-menu-keys kbd {
+  border-color: var(--control-line);
+}
+@media (max-width: 560px) {
+  .slash-menu-keys,
+  .slash-menu-args {
+    display: none;
+  }
 }
 
 /* App and coding-agent sessions (Chat · Using an app): a glass panel with a
