@@ -848,7 +848,7 @@ export function SettingsPanel({
 
   return (
     <div
-      className={`settings-form${shows('profile') ? ' settings-profile' : ''}`}
+      className={`settings-form${shows('profile') ? ' settings-profile' : ''}${shows('model') ? ' settings-model-page' : ''}`}
       aria-busy={controlsDisabled}
     >
       {shows('profile') && (
@@ -1220,7 +1220,10 @@ export function SettingsPanel({
       )}
 
       {shows('model') && (
-        <section className="settings-group" aria-labelledby="settings-model">
+        <section
+          className="settings-group model-section"
+          aria-labelledby="settings-model"
+        >
           <h3 id="settings-model" className="settings-group-title">
             Main model
           </h3>
@@ -1252,10 +1255,7 @@ export function SettingsPanel({
               </div>
             </div>
             <details className="settings-model-more">
-              <summary>
-                <PenIcon name="caret-down-fill" size={12} />
-                Change
-              </summary>
+              <summary>Change</summary>
               <div className="settings-model-change">
                 <label className={labelCls} htmlFor="settings-provider">
                   Provider
@@ -1618,6 +1618,8 @@ export function SettingsPanel({
             saving || resetting || !dirty || !resolvedModel || !name.trim()
           }
           className={`${primaryBtnCls} settings-save-button`}
+          // Nothing to save: the model page leaves the button out.
+          data-idle={(!saving && !savedFlash && !dirty) || undefined}
         >
           {saving
             ? 'Saving…'

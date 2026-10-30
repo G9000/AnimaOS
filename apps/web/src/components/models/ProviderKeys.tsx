@@ -42,6 +42,13 @@ export function keyStatus(key: ProviderKey): string {
   return key.lastError ? `${until} · ${key.lastError}` : until;
 }
 
+/** "2 keys · 1 resting", or "1 key · Ready". */
+function poolSummary(pool: ProviderKeysView): string {
+  const count = `${pool.keys.length} ${pool.keys.length === 1 ? 'key' : 'keys'}`;
+  const resting = pool.keys.filter((key) => key.status === 'resting').length;
+  return resting > 0 ? `${count} · ${resting} resting` : `${count} · Ready`;
+}
+
 /**
  * The provider key pool (spec 2026-10-19): add and remove keys, see which
  * ones are resting and why, wake one early ("Try now", for example after
@@ -117,11 +124,20 @@ export function ProviderKeys({
   const shown = (pools ?? []).filter(
     (pool) => providers?.find((p) => p.id === pool.id)?.requiresKey !== false,
   );
+  const connected = shown.filter((pool) => pool.keys.length > 0);
+  // A new provider is the likelier choice, so those come first.
+  const addable = [
+    ...shown.filter((pool) => pool.keys.length === 0),
+    ...connected,
+  ].map((pool) => ({ id: pool.id, label: label(pool.id) }));
 
   return (
-    <section className="settings-group" aria-labelledby="settings-api-keys">
+    <section
+      className="settings-group model-section"
+      aria-labelledby="settings-api-keys"
+    >
       <h3 id="settings-api-keys" className="settings-group-title">
-        Brains
+        API keys
       </h3>
       <p className="settings-group-help">
         Keys stay in the operating-system keychain, never in anima's files.
@@ -139,75 +155,88 @@ export function ProviderKeys({
       {pools === null && !error ? (
         <p className="settings-group-help">Loading keys…</p>
       ) : null}
-      {shown.map((pool) => (
-        <div key={pool.id} className="key-provider">
-          <div className="key-provider-head">
-            <h4 className="key-provider-name">{label(pool.id)}</h4>
-            <select
-              aria-label={`How ${label(pool.id)} picks a key`}
-              className="field key-strategy"
-              value={pool.strategy}
-              disabled={disabled}
-              onChange={(event) =>
-                void pick(pool.id, event.target.value as KeyStrategy)
-              }
-            >
-              {STRATEGIES.map((strategy) => (
-                <option key={strategy.value} value={strategy.value}>
-                  {strategy.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {pool.keys.length > 0 && (
-            <ul className="key-list">
-              {pool.keys.map((key) => (
-                <li
-                  key={key.id}
-                  className={`key-row${key.status === 'resting' ? ' is-resting' : ''}`}
-                >
-                  <code className="key-masked">{key.masked}</code>
-                  {key.label ? (
-                    <span className="key-label">{key.label}</span>
-                  ) : null}
-                  {key.source === 'env' ? (
-                    <span className="key-label">From the environment</span>
-                  ) : null}
-                  <span className="key-status">{keyStatus(key)}</span>
-                  {key.status === 'resting' && (
-                    <button
-                      type="button"
-                      className={ghostBtnCls}
-                      aria-label={`Try key ${key.masked} now`}
-                      disabled={disabled}
-                      onClick={() => void wake(pool.id, key)}
-                    >
-                      Try now
-                    </button>
-                  )}
-                  {key.source === 'file' && (
-                    <button
-                      type="button"
-                      className={ghostBtnCls}
-                      aria-label={`Remove key ${key.masked}`}
-                      disabled={disabled}
-                      onClick={() => void remove(pool.id, key)}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+      {connected.length > 0 && (
+        <ul className="key-providers">
+          {connected.map((pool) => (
+            <li key={pool.id} className="key-provider">
+              <div className="key-provider-head">
+                <h4 className="key-provider-name">{label(pool.id)}</h4>
+                <span className="key-provider-meta">{poolSummary(pool)}</span>
+                {/* Taking turns only means something with two keys. */}
+                {pool.keys.length > 1 && (
+                  <select
+                    aria-label={`How ${label(pool.id)} picks a key`}
+                    className="field key-strategy"
+                    value={pool.strategy}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      void pick(pool.id, event.target.value as KeyStrategy)
+                    }
+                  >
+                    {STRATEGIES.map((strategy) => (
+                      <option key={strategy.value} value={strategy.value}>
+                        {strategy.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <ul className="key-list">
+                {pool.keys.map((key) => (
+                  <li
+                    key={key.id}
+                    className={`key-row${key.status === 'resting' ? ' is-resting' : ''}`}
+                  >
+                    <code className="key-masked">{key.masked}</code>
+                    {key.label ? (
+                      <span className="key-label">{key.label}</span>
+                    ) : null}
+                    {key.source === 'env' ? (
+                      <span className="key-label">From the environment</span>
+                    ) : null}
+                    <span className="key-status">{keyStatus(key)}</span>
+                    {key.status === 'resting' && (
+                      <button
+                        type="button"
+                        className={ghostBtnCls}
+                        aria-label={`Try key ${key.masked} now`}
+                        disabled={disabled}
+                        onClick={() => void wake(pool.id, key)}
+                      >
+                        Try now
+                      </button>
+                    )}
+                    {key.source === 'file' && (
+                      <button
+                        type="button"
+                        className={ghostBtnCls}
+                        aria-label={`Remove key ${key.masked}`}
+                        disabled={disabled}
+                        onClick={() => void remove(pool.id, key)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+      {addable.length > 0 && (
+        <div className="key-add-panel">
+          <span className="key-add-title">
+            {connected.length > 0 ? 'Add a key' : 'Add your first key'}
+          </span>
           <AddKeyForm
-            providers={[{ id: pool.id, label: label(pool.id) }]}
+            providers={addable}
             buttonLabel="Add key"
             disabled={disabled}
             onAdded={changed}
           />
         </div>
-      ))}
+      )}
     </section>
   );
 }

@@ -460,7 +460,7 @@ describe('model resilience settings', () => {
       }),
       { saveSettings, sections: ['model'] },
     );
-    expect(screen.getByRole('heading', { name: 'Brains' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'API keys' })).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Side-task model' }),
     ).toBeVisible();

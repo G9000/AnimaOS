@@ -83,13 +83,13 @@ export function SideModel({
   };
 
   return (
-    <section className="settings-group" aria-labelledby="settings-side-model">
+    <section
+      className="settings-group model-section"
+      aria-labelledby="settings-side-model"
+    >
       <h3 id="settings-side-model" className="settings-group-title">
         Side-task model
       </h3>
-      <p className="settings-group-help" id="settings-side-model-label">
-        Model for small background tasks
-      </p>
       <p className="settings-group-help">
         Titles, summaries, the smart check and task reviews. Leave empty to use
         each agent's own model.

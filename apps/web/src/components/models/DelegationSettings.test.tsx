@@ -100,7 +100,7 @@ describe('Helper routing and limits', () => {
       />,
     );
     expect(
-      screen.getByRole('heading', { name: 'Helper routing and limits' }),
+      screen.getByRole('heading', { name: 'Helpers' }),
     ).toBeVisible();
   });
   it('grants background helper tools only after the owner changes the separate ability', async () => {

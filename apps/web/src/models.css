@@ -1,30 +1,328 @@
-/* API keys, fallback models and the side-task model (spec 2026-10-19). */
-.key-provider {
+/* Settings · Model: the main model, fallbacks, helpers, API keys and the
+ * side-task model (spec 2026-10-19). Every section has the same rhythm: a
+ * title, one line of help, then its content. A hairline divides sections. */
+
+.settings-model-page {
+  --model-hairline: color-mix(in srgb, var(--control-line) 65%, transparent);
+}
+
+.model-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Each section after the first opens with a hairline, whether it sits in
+ * the page or inside the main model's section. */
+.settings-model-page .model-section .model-section,
+.settings-model-page > .model-section + .model-section {
+  margin-top: 12px;
+  padding-top: 24px;
+  border-top: 1px solid var(--model-hairline);
+}
+
+.settings-model-page .settings-group-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+}
+
+.settings-model-page .settings-group-help {
+  max-width: 64ch;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+/* Help sits right under its title, as in a section head. */
+.settings-model-page .model-section > .settings-group-title + .settings-group-help {
+  margin-top: -8px;
+}
+
+.model-subtitle {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+/* Title and help on the left, the section's one action on the right. */
+.model-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-section-head > button {
+  flex: none;
+}
+
+.model-empty {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--model-hairline);
+  border-radius: var(--panel-radius);
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+/* Save and Discard show only when there is something to save. */
+.model-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.model-actions > button:disabled {
+  display: none;
+}
+
+.settings-model-page .settings-save-button[data-idle] {
+  display: none;
+}
+
+/* ── Main model: one row, with Change on the right ── */
+.settings-model-block {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid rgb(255 255 255 / 0.07);
-  border-radius: 12px;
 }
+
+.settings-model-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 12px 108px 12px 14px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--panel-radius);
+  background: var(--control-fill);
+}
+
+.settings-model-mark {
+  display: grid;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(var(--color-accent-rgb) / 0.12);
+  color: var(--color-accent);
+}
+
+.settings-model-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-model-text strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.settings-model-text span {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.settings-model-more > summary {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
+  font-size: 12.5px;
+  color: var(--control-ink, var(--color-ink));
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-model-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-model-more > summary:hover {
+  border-color: var(--control-line-hover, var(--control-line));
+  background: var(--control-fill-hover, var(--control-fill));
+}
+
+.settings-model-more[open] > summary {
+  border-color: var(--color-accent);
+}
+
+.settings-model-more[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--model-hairline);
+  border-radius: var(--panel-radius);
+}
+
+/* ── Fallbacks: a numbered, hairline list ── */
+.fallback-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--model-hairline);
+  border-radius: var(--panel-radius);
+}
+
+.fallback-row {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 1fr) minmax(140px, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.fallback-row + .fallback-row {
+  border-top: 1px solid var(--model-hairline);
+}
+
+.fallback-number {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid var(--control-line);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.fallback-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.fallback-problem {
+  grid-column: 2 / -1;
+}
+
+/* ── Helpers: compact limits, then routes ── */
+.helper-settings .settings-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.helper-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.helper-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.helper-limit > span {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.helper-routes-head {
+  margin-top: 4px;
+}
+
+.helper-settings .settings-fieldset.helper-route {
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--model-hairline);
+  border-radius: var(--panel-radius);
+}
+
+/* Inside the box, not cut into its border. */
+.helper-route > legend {
+  float: left;
+  width: 100%;
+}
+
+.helper-route-fallback {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--model-hairline);
+}
+
+.helper-route-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── API keys: providers with keys, then one form to add another ── */
+.key-providers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--model-hairline);
+  border-radius: var(--panel-radius);
+}
+
+.key-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.key-provider + .key-provider {
+  border-top: 1px solid var(--model-hairline);
+}
+
 .key-provider-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px 10px;
 }
+
 .key-provider-name {
   margin: 0;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-ink);
 }
+
+.key-provider-meta {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
 .key-strategy {
   width: auto;
   max-width: 100%;
   font-size: 12px;
 }
+
 .key-list {
   display: flex;
   flex-direction: column;
@@ -33,114 +331,144 @@
   padding: 0;
   list-style: none;
 }
+
 .key-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 6px 12px;
+  min-height: 28px;
   font-size: 12px;
 }
+
 .key-masked {
   font-family: var(--font-mono);
   color: var(--color-ink);
 }
+
 .key-label,
 .key-status {
   color: var(--color-ink-3);
 }
-.key-row.is-resting .key-status {
-  color: var(--color-amber);
-}
+
 .key-row .key-status {
   flex: 1 1 auto;
   min-width: 0;
 }
-.key-add,
-.key-add-row {
+
+.key-row.is-resting .key-status {
+  color: var(--color-amber);
+}
+
+.key-add-panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--model-hairline);
+  border-radius: var(--panel-radius);
 }
+
+.key-add-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.key-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.key-add-provider {
+  flex: 0 0 180px;
+  width: auto;
+}
+
 .key-add-row {
-  flex-direction: row;
+  display: flex;
+  flex: 1 1 260px;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
+
 .key-add-row > input {
   flex: 1 1 auto;
   min-width: 0;
 }
-.key-add-provider {
-  width: auto;
-}
+
 .key-warning {
   margin: 0;
   padding: 10px 12px;
   border: 1px solid rgb(227 187 112 / 0.3);
-  border-radius: 10px;
+  border-radius: var(--panel-radius);
   font-size: 12px;
   color: var(--color-ink-2);
 }
+
 .key-error {
   margin: 0;
   font-size: 12px;
   color: var(--color-danger, #e5484d);
 }
-.fallback-models {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid rgb(255 255 255 / 0.07);
-}
-.fallback-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.fallback-row {
-  display: grid;
-  grid-template-columns: 20px minmax(110px, 1fr) minmax(130px, 1.4fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-.fallback-number {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-.fallback-actions {
-  display: flex;
-  gap: 4px;
-}
-.fallback-problem {
-  grid-column: 2 / -1;
-}
-.fallback-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
+
+/* ── Side-task model: one row ── */
 .side-model-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(130px, 1.4fr) auto;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1.4fr) auto;
   align-items: center;
   gap: 8px;
 }
+
 @media (max-width: 560px) {
   .fallback-row,
   .side-model-row {
     grid-template-columns: 1fr;
   }
+
   .fallback-problem {
     grid-column: auto;
   }
-  .key-add-row {
+
+  .model-section-head {
     flex-direction: column;
-    align-items: stretch;
   }
+
+  .key-add-provider,
+  .key-add-row {
+    flex-basis: 100%;
+  }
+}
+
+/* Field labels on this page read like the helper limits: small, plain. */
+.settings-model-page .settings-field-note,
+.settings-model-page .settings-model-more label {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-3);
+}
+
+/* Change: provider and model, each label above its field. */
+.settings-model-change,
+.settings-model-more[open] > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-model-more .settings-field-note {
+  margin: 0;
+}
+
+.settings-model-more .chatgpt-connection {
+  border-color: var(--model-hairline);
+  border-radius: var(--panel-radius);
+}
+
+.settings-model-more .ui-button {
+  align-self: flex-start;
 }

@@ -33,7 +33,7 @@ describe('SideModel', () => {
       .mockImplementation(async (choice) => choice);
     render(<SideModel providers={PROVIDERS} />);
     expect(
-      await screen.findByText('Model for small background tasks'),
+      await screen.findByRole('heading', { name: 'Side-task model' }),
     ).toBeVisible();
     expect(
       screen.getByText(

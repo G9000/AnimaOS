@@ -393,20 +393,23 @@ export function DelegationSettings({
   };
 
   return (
-    <section className="settings-group" aria-labelledby={headingId}>
+    <section
+      className="settings-group model-section helper-settings"
+      aria-labelledby={headingId}
+    >
       <h3 id={headingId} className="settings-group-title">
-        Helper routing and limits
+        Helpers
       </h3>
       <p className="settings-group-help">
-        Choose routes such as fast or research for different tasks. Helpers keep
-        their focused task and playbook, without the main personality.
+        Helpers take on focused tasks with their own playbook, without the main
+        personality. These limits keep them in check.
       </p>
       <fieldset disabled={disabled || busy} className="settings-fieldset">
         <legend className="sr-only">Helper limits and routes</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="helper-limits">
           {LIMITS.map((limit) => (
-            <label key={limit.name}>
-              <span className="settings-field-note">{limit.label}</span>
+            <label key={limit.name} className="helper-limit">
+              <span>{limit.label}</span>
               <input
                 aria-label={limit.label}
                 className="field"
@@ -428,15 +431,47 @@ export function DelegationSettings({
             </label>
           ))}
         </div>
-        <p className="settings-group-help">
-          Without a named route, helpers use the current model. Fallback models
-          are tried in order before a reply starts.
-        </p>
+        <div className="model-section-head helper-routes-head">
+          <div>
+            <h4 className="model-subtitle">Routes</h4>
+            <p className="settings-group-help">
+              Name a route, such as fast or research, to give those tasks their
+              own model. Without one, helpers use the current model.
+            </p>
+          </div>
+          {draft.routes.length < 8 && (
+            <button
+              type="button"
+              className={ghostBtnCls}
+              onClick={() => {
+                let id = 'fast';
+                for (
+                  let n = 2;
+                  draft.routes.some((route) => route.id === id);
+                  n += 1
+                )
+                  id = 'route-' + n;
+                const route: RouteDraft = {
+                  ...newChoice(primary, false),
+                  id,
+                  key: 'new-route-' + nextKey.current++,
+                  fallbacks: [],
+                };
+                update((current) => ({
+                  ...current,
+                  routes: [...current.routes, route],
+                }));
+              }}
+            >
+              Add route
+            </button>
+          )}
+        </div>
         {draft.routes.map((route, i) => {
           const label = 'Route ' + (i + 1);
           return (
-            <fieldset key={route.key} className="settings-fieldset">
-              <legend className="settings-group-title">{label}</legend>
+            <fieldset key={route.key} className="settings-fieldset helper-route">
+              <legend className="model-subtitle">{label}</legend>
               <label>
                 <span className="settings-field-note">{label} name</span>
                 <input
@@ -466,10 +501,7 @@ export function DelegationSettings({
                 }
               />
               {route.fallbacks.map((fallback, n) => (
-                <div
-                  key={fallback.key}
-                  className="grid gap-2 border-t border-white/10 pt-3"
-                >
+                <div key={fallback.key} className="helper-route-fallback">
                   <ModelPicker
                     key={fallback.key + fallback.provider}
                     label={label + ' fallback ' + (n + 1)}
@@ -534,7 +566,7 @@ export function DelegationSettings({
                   </div>
                 </div>
               ))}
-              <div className="fallback-footer">
+              <div className="helper-route-actions">
                 {route.fallbacks.length < 3 && (
                   <button
                     type="button"
@@ -573,33 +605,6 @@ export function DelegationSettings({
             </fieldset>
           );
         })}
-        {draft.routes.length < 8 && (
-          <button
-            type="button"
-            className={ghostBtnCls}
-            onClick={() => {
-              let id = 'fast';
-              for (
-                let n = 2;
-                draft.routes.some((route) => route.id === id);
-                n += 1
-              )
-                id = 'route-' + n;
-              const route: RouteDraft = {
-                ...newChoice(primary, false),
-                id,
-                key: 'new-route-' + nextKey.current++,
-                fallbacks: [],
-              };
-              update((current) => ({
-                ...current,
-                routes: [...current.routes, route],
-              }));
-            }}
-          >
-            Add route
-          </button>
-        )}
       </fieldset>
       {problems.length > 0 && (
         <div role="alert" className="key-error">
@@ -616,7 +621,7 @@ export function DelegationSettings({
         </p>
       )}
       {saved && <p role="status">Helper settings saved.</p>}
-      <div className="fallback-footer">
+      <div className="model-actions">
         <button
           type="button"
           className={ghostBtnCls}

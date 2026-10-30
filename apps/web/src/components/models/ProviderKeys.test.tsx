@@ -68,7 +68,7 @@ describe('ProviderKeys', () => {
 
     render(<ProviderKeys providers={PROVIDERS} />);
     expect(await screen.findByText('sk-env…0000')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Brains' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'API keys' })).toBeVisible();
     expect(
       screen.getByText(
         "Keys stay in the operating-system keychain, never in anima's files.",
@@ -193,9 +193,12 @@ describe('ProviderKeys', () => {
     ).toBeVisible();
   });
 
-  it('changes how a provider picks between its keys', async () => {
+  it('changes how a provider picks between its keys, once it has two', async () => {
     const user = userEvent.setup();
-    vi.spyOn(daemon, 'providerKeys').mockResolvedValue({ providers: [pool()] });
+    const second = { ...ENV_KEY, id: 'key_b', masked: 'sk-two…beef', source: 'file' as const };
+    vi.spyOn(daemon, 'providerKeys').mockResolvedValue({
+      providers: [pool({ keys: [ENV_KEY, second] })],
+    });
     const strategy = vi
       .spyOn(daemon, 'setKeyStrategy')
       .mockResolvedValue(pool({ strategy: 'round_robin' }));
@@ -205,5 +208,36 @@ describe('ProviderKeys', () => {
       'round_robin',
     );
     expect(strategy).toHaveBeenCalledWith('openai', 'round_robin');
+  });
+
+  it('lists only providers with keys, and adds a new provider from one form', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(daemon, 'providerKeys').mockResolvedValue({
+      providers: [pool(), pool({ id: 'anthropic', keys: [] })],
+    });
+    const add = vi.spyOn(daemon, 'addProviderKey').mockResolvedValue({
+      ...ENV_KEY,
+      id: 'key_new',
+      source: 'file',
+    });
+    render(
+      <ProviderKeys
+        providers={[
+          ...PROVIDERS,
+          { id: 'anthropic', label: 'Anthropic', requiresKey: true, configured: false, apiKeyEnvs: [] },
+        ]}
+      />,
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'OpenAI' }),
+    ).toBeVisible();
+    expect(screen.getByText('1 key · Ready')).toBeVisible();
+    // One key: nothing to take turns between.
+    expect(screen.queryByLabelText('How OpenAI picks a key')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Anthropic' })).toBeNull();
+    // The form starts on a provider without a key.
+    await user.type(screen.getByLabelText('API key for Anthropic'), 'sk-ant-x');
+    await user.click(screen.getByRole('button', { name: 'Add key' }));
+    expect(add).toHaveBeenCalledWith('anthropic', { key: 'sk-ant-x' });
   });
 });

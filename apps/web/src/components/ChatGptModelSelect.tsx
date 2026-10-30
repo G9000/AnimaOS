@@ -112,7 +112,7 @@ export function ChatGptModelSelect({
       )}
       <button
         type="button"
-        className="rounded-xl border border-line px-3 py-2 text-sm disabled:opacity-50"
+        className="ui-button"
         disabled={disabled || connectionPending || metadata.busy}
         // While the picker believes ChatGPT is disconnected, the button
         // re-reads instead: the account may have been connected elsewhere.

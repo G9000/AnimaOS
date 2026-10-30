@@ -131,14 +131,36 @@ export function FallbackModels({
   };
 
   return (
-    <section className="fallback-models" aria-labelledby="settings-fallbacks">
-      <h4 id="settings-fallbacks" className="settings-group-title">
-        When it can't answer
-      </h4>
-      <p className="settings-group-help">
-        If the main model fails or hits a limit, {agentName} tries these in
-        order and tells you in the chat.
-      </p>
+    <section
+      className="settings-group model-section fallback-models"
+      aria-labelledby="settings-fallbacks"
+    >
+      <div className="model-section-head">
+        <div>
+          <h3 id="settings-fallbacks" className="settings-group-title">
+            When it can't answer
+          </h3>
+          <p className="settings-group-help">
+            If the main model fails or hits a limit, {agentName} tries these
+            in order and tells you in the chat.
+          </p>
+        </div>
+        {rows.length < MAX_FALLBACKS && (
+          <button
+            type="button"
+            className={ghostBtnCls}
+            disabled={disabled || busy}
+            onClick={add}
+          >
+            Add fallback
+          </button>
+        )}
+      </div>
+      {rows.length === 0 && (
+        <p className="model-empty">
+          No fallbacks: if the main model can't answer, the reply stops there.
+        </p>
+      )}
       {rows.length > 0 && (
         <ol className="fallback-list">
           {rows.map((row, index) => {
@@ -225,17 +247,7 @@ export function FallbackModels({
           })}
         </ol>
       )}
-      <div className="fallback-footer">
-        {rows.length < MAX_FALLBACKS && (
-          <button
-            type="button"
-            className={ghostBtnCls}
-            disabled={disabled || busy}
-            onClick={add}
-          >
-            Add fallback
-          </button>
-        )}
+      <div className="model-actions">
         <button
           type="button"
           className={primaryBtnCls}

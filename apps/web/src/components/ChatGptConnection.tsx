@@ -5,8 +5,8 @@ import { useLatest } from '../hooks/useLatest';
 
 const client = createDaemonClient({ baseUrl: '', fetch: ownerFetch }).chatgpt;
 const verificationUrl = 'https://auth.openai.com/codex/device';
-const buttonClass =
-  'rounded-xl border border-line px-3 py-2 text-sm text-ink disabled:opacity-50';
+// The shared settings button (.ui-button in styles.css).
+const buttonClass = 'ui-button';
 const compactButtonClass =
   'onboarding__button onboarding__button--secondary onboarding__button--small';
 
@@ -123,7 +123,7 @@ export function ChatGptConnection({
       className={
         compact
           ? 'onboarding__connection'
-          : 'space-y-3 rounded-xl border border-line bg-white/[0.02] p-4'
+          : 'chatgpt-connection space-y-3 border border-line p-4'
       }
     >
       {compact ? null : (
