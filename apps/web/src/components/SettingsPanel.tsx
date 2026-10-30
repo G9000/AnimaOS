@@ -28,12 +28,16 @@ import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
-import { SettingsSection } from './settings/SettingsKit';
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+} from './settings/SettingsKit';
 import { DelegationSettings } from './models/DelegationSettings';
 import { ProviderKeys } from './models/ProviderKeys';
 import { SideModel } from './models/SideModel';
 import { OrbStyleDialog } from './OrbStyleDialog';
-import { ErrorBanner, SectionTitle, labelCls, primaryBtnCls } from './ui-bits';
+import { ErrorBanner, labelCls, primaryBtnCls } from './ui-bits';
 
 /** The parts of the companion's own configuration. Each Settings page shows
  *  the ones it is about; one save covers whatever the page shows. */
@@ -110,18 +114,26 @@ function AbilityToggle({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="settings-ability">
-      <input
-        id={`settings-${id}`}
-        type="checkbox"
-        aria-describedby={`settings-${id}-help`}
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <div>
-        <label htmlFor={`settings-${id}`}>{label}</label>
-        <p id={`settings-${id}-help`}>{help}</p>
+    <div className="sk-row settings-ability">
+      <div className="sk-row-main">
+        <div className="sk-row-text">
+          <label className="sk-row-title" htmlFor={`settings-${id}`}>
+            {label}
+          </label>
+          <span className="sk-row-desc" id={`settings-${id}-help`}>
+            {help}
+          </span>
+        </div>
+        <div className="sk-row-control">
+          <input
+            id={`settings-${id}`}
+            type="checkbox"
+            aria-describedby={`settings-${id}-help`}
+            checked={checked}
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+        </div>
       </div>
     </div>
   );
@@ -1391,146 +1403,150 @@ export function SettingsPanel({
       )}
 
       {(shows('access') || shows('builtins')) && (
-        <section className="settings-group" aria-labelledby="settings-access">
-          <h3 id="settings-access" className="settings-group-title">
-            {shows('builtins') ? 'Built-in' : 'Default access'}
-          </h3>
-          {shows('access') && (
-            <p className="settings-group-help">
-              Applies to {agent.name} and every helper it brings in.
-            </p>
-          )}
-          {shows('builtins') && (
-            <p className="settings-group-help">
-              Turn built-in tools on or off for this agent. Permission rules
-              still decide when an action asks first.
-            </p>
-          )}
-          {shows('builtins') && agent.toolNames.some((name) =>
-            /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
-          ) && (
-            <p className="settings-group-help">
-              External tool permissions are managed in Connectors. Choosing a
-              standard access profile replaces these permissions when you save;
-              saved connections and reviews are kept.
-            </p>
-          )}
-          {shows('access') && derivedAccess === 'custom' ? (
-            <div className="settings-custom-access">
-              <p className="font-semibold text-ink">Custom access</p>
-              <p>
-                This agent has a custom tool set. Choose a standard profile to
-                replace it when you save.
+        <SettingsSection
+          id="settings-access"
+          className="settings-access-section"
+          title={shows('builtins') ? 'Built-in tools' : 'Default access'}
+          description={
+            shows('builtins')
+              ? 'Turn built-in tools on or off for this agent. Permission rules still decide when an action asks first.'
+              : `Applies to ${agent.name} and every helper it brings in.`
+          }
+        >
+          {shows('builtins') &&
+            agent.toolNames.some((name) =>
+              /^mcp_[0-9a-f]{32}_[0-9a-f]{16}$/.test(name),
+            ) && (
+              <p className="sk-note">
+                External tool permissions are managed in Connectors. Choosing a
+                standard access profile replaces these permissions when you
+                save; saved connections and reviews are kept.
               </p>
-              <p className="settings-field-note">
-                {agent.toolNames.length} tools configured
-              </p>
-              <p className="settings-field-note break-words">
-                {agent.toolNames.join(', ') || 'No tools configured'}
-              </p>
-            </div>
-          ) : null}
-          <fieldset disabled={controlsDisabled} className="settings-fieldset">
+            )}
+          <fieldset disabled={controlsDisabled} className="sk-fieldset">
             {shows('access') && (
               <>
-                <legend className={labelCls}>Access profile</legend>
-                <div className="settings-access-options">
-              {ACCESS_ORDER.map((profileName) => {
-                const profile = ACCESS_PROFILE_COPY[profileName];
-                const inputId = `settings-access-${profileName}`;
-                return (
-                  <div
-                    key={profileName}
-                    className={`settings-access-option${accessSelection === profileName ? ' is-selected' : ''}`}
-                  >
-                    <input
-                      id={inputId}
-                      type="radio"
-                      name="settings-access"
-                      value={profileName}
-                      checked={accessSelection === profileName}
-                      onChange={() => {
-                        setAccessSelection(profileName);
-                        setAccessChanged(true);
-                        setAllowMemoryRemove(false);
-                        setAllowMemoryConsolidate(false);
-                        setAllowDocumentRead(false);
-                        setAllowWebSearch(profileName === 'operate');
-                        setAllowWebFetch(false);
-                        setAllowToolChains(false);
-                        setBrowserGrants([]);
-                      }}
-                    />
-                    <label htmlFor={inputId}>
-                      <span className="settings-access-name">
-                        {profile.label}
-                      </span>
-                      <span className="settings-access-summary">
-                        {profile.summary}
-                      </span>
-                    </label>
-                    {profile.kicker && (
-                      <span
-                        className={`settings-access-kicker${profileName === 'collaborate' ? ' is-recommended' : ''}`}
+                <legend className="sr-only">Access profile</legend>
+                <SettingsCard className="settings-access-options">
+                  {derivedAccess === 'custom' && (
+                    <SettingsRow
+                      className="settings-custom-access"
+                      title="Custom access"
+                      description={
+                        <>
+                          <span>{agent.toolNames.length} tools configured</span>{' '}
+                          · picked one by one. Choose a profile below to
+                          replace them when you save.
+                        </>
+                      }
+                    >
+                      <details className="sk-disclosure">
+                        <summary>Show the tools</summary>
+                        <p className="sk-mono-list">
+                          {agent.toolNames.join(', ') || 'No tools configured'}
+                        </p>
+                      </details>
+                    </SettingsRow>
+                  )}
+                  {ACCESS_ORDER.map((profileName) => {
+                    const profile = ACCESS_PROFILE_COPY[profileName];
+                    const inputId = `settings-access-${profileName}`;
+                    return (
+                      <label
+                        key={profileName}
+                        htmlFor={inputId}
+                        className={`sk-row sk-choice settings-access-option${accessSelection === profileName ? ' is-selected' : ''}`}
                       >
-                        {profile.kicker}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-                </div>
+                        <div className="sk-row-main">
+                          <input
+                            id={inputId}
+                            type="radio"
+                            name="settings-access"
+                            value={profileName}
+                            checked={accessSelection === profileName}
+                            onChange={() => {
+                              setAccessSelection(profileName);
+                              setAccessChanged(true);
+                              setAllowMemoryRemove(false);
+                              setAllowMemoryConsolidate(false);
+                              setAllowDocumentRead(false);
+                              setAllowWebSearch(profileName === 'operate');
+                              setAllowWebFetch(false);
+                              setAllowToolChains(false);
+                              setBrowserGrants([]);
+                            }}
+                          />
+                          <span className="sk-row-text">
+                            <span className="sk-row-title settings-access-name">
+                              {profile.label}
+                            </span>
+                            <span className="sk-row-desc settings-access-summary">
+                              {profile.summary}
+                            </span>
+                          </span>
+                          {profile.kicker && (
+                            <span
+                              className={`sk-badge${profileName === 'collaborate' ? ' is-accent' : ''}`}
+                            >
+                              {profile.kicker}
+                            </span>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </SettingsCard>
               </>
             )}
             {shows('access') && accessSelection === 'operate' && (
-              <p className="settings-access-note">
-                <span>
-                  Helpers get the same access as {agent.name}. Commands run in
-                  a Docker sandbox.
-                </span>
-                <a
-                  className="settings-access-note-link"
-                  href="#/runtime"
-                >
+              <p className="sk-note">
+                Helpers get the same access as {agent.name}. Commands run in a
+                Docker sandbox.{' '}
+                <a className="sk-link" href="#/runtime">
                   Change in Runtime
                 </a>
               </p>
             )}
             {shows('builtins') && (
-              <div className="settings-tool-groups">
+              <SettingsCard className="settings-tool-groups">
                 {builtInToolGroups.map((group) => (
-                  <label
+                  <SettingsRow
+                    as="label"
                     key={group.id}
                     className="settings-tool-group"
-                    data-mixed={group.mixed || undefined}
-                  >
-                    <span className="settings-tool-group-copy">
-                      <strong>{group.label}</strong>
-                      <small>
-                        {group.enabledCount} of {group.tools.length} tools on
-                      </small>
-                      <span>{group.help}</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={group.label}
-                      aria-checked={group.mixed ? 'mixed' : group.enabled}
-                      checked={group.enabled}
-                      disabled={controlsDisabled || (group.id === 'document-editing' && agent.workspaceRole === 'helper')}
-                      onChange={(event) =>
-                        setBuiltInToolGroup(group.id, event.target.checked)
-                      }
-                    />
-                  </label>
+                    title={group.label}
+                    description={group.help}
+                    control={
+                      <>
+                        <span className="sk-meta">
+                          {group.enabledCount} of {group.tools.length}
+                        </span>
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={group.label}
+                          aria-checked={group.mixed ? 'mixed' : group.enabled}
+                          data-mixed={group.mixed || undefined}
+                          checked={group.enabled}
+                          disabled={
+                            controlsDisabled ||
+                            (group.id === 'document-editing' &&
+                              agent.workspaceRole === 'helper')
+                          }
+                          onChange={(event) =>
+                            setBuiltInToolGroup(group.id, event.target.checked)
+                          }
+                        />
+                      </>
+                    }
+                  />
                 ))}
-              </div>
+              </SettingsCard>
             )}
             {shows('builtins') && (
-              <details className="settings-tools-advanced">
+              <details className="sk-disclosure settings-tools-advanced">
                 <summary>Specific permissions</summary>
-                <SectionTitle>Individual capabilities</SectionTitle>
-                <div className="settings-abilities">
+                <SettingsCard>
                   {abilities.map(
                     ({ id, label, checked, setChecked, help, disabled }) => (
                       <AbilityToggle
@@ -1544,34 +1560,41 @@ export function SettingsPanel({
                       />
                     ),
                   )}
-                </div>
-                <SectionTitle>Browser tools</SectionTitle>
-                <div className="settings-ability is-list">
-                  <p>
-                    Each chat task also needs an installed browser policy. Existing
-                    action approval rules still apply.
-                  </p>
-                  {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
-                    <label key={name}>
-                      <input
-                        type="checkbox"
-                        checked={browserGrants.includes(name)}
-                        onChange={(event) =>
-                          setBrowserGrants((current) =>
-                            event.target.checked
-                              ? [...current.filter((tool) => tool !== name), name]
-                              : current.filter((tool) => tool !== name),
-                          )
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
+                </SettingsCard>
+                <SettingsCard>
+                  <SettingsRow
+                    title="Browser tools"
+                    description="Each chat task also needs an installed browser policy. Existing action approval rules still apply."
+                  >
+                    <div className="sk-checks">
+                      {BROWSER_TOOL_ACCESS.map(({ name, label }) => (
+                        <label key={name}>
+                          <input
+                            type="checkbox"
+                            checked={browserGrants.includes(name)}
+                            onChange={(event) =>
+                              setBrowserGrants((current) =>
+                                event.target.checked
+                                  ? [
+                                      ...current.filter(
+                                        (tool) => tool !== name,
+                                      ),
+                                      name,
+                                    ]
+                                  : current.filter((tool) => tool !== name),
+                              )
+                            }
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </SettingsRow>
+                </SettingsCard>
               </details>
             )}
           </fieldset>
-        </section>
+        </SettingsSection>
       )}
 
       <div className={`settings-save${dirty && !saving ? ' is-dirty' : ''}`}>

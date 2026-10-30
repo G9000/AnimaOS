@@ -282,9 +282,8 @@ describe('ApprovalsPage', () => {
       policy: { write: 'allow', exec: 'allow', network: 'allow', delegate: 'allow' },
     });
     renderPage();
-    // Autonomy sits behind More permission settings, apart from the rules.
+    // Autonomy has its own page, reached from More under the rules.
     const openAutonomy = async () => {
-      await user.click(screen.getByText('More permission settings'));
       await user.click(
         screen.getByRole('button', { name: /When it checks with you/ }),
       );

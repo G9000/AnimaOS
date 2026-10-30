@@ -432,6 +432,95 @@ export function CommunityBundlesPanel({
           Bundle changes are unavailable while this agent is busy or restricted.
         </p>
       )}
+      <div className="sk-card mcp-bundle-list">
+      {!loading && summaries.length === 0 && (
+        <p className="sk-empty">No community bundles installed.</p>
+      )}
+      {summaries.map((row) => {
+        const cached = details[row.id];
+        const value =
+          cached?.version === row.version &&
+          cached.reviewedComponentStateDigest ===
+            row.reviewedComponentStateDigest
+            ? cached
+            : undefined;
+        return (
+          <BundleCard
+            key={`${agentId}:${row.id}`}
+            row={row}
+            value={value}
+            blocked={blocked}
+            reading={inspecting !== null}
+            inspect={() => void inspect(row.id)}
+            update={() => {
+              if (!value || blocked) return;
+              setTarget({
+                id: value.id,
+                version: value.version,
+                name: value.name,
+                componentStateDigest: value.reviewedComponentStateDigest,
+              });
+              if (!manifestText.trim())
+                setManifestText(JSON.stringify(value.manifest, null, 2));
+              invalidateReview();
+            }}
+            changeEnabled={() => {
+              if (!value) return;
+              void perform(
+                () =>
+                  api.setEnabled(agentId, row.id, {
+                    expectedVersion: value.version,
+                    reviewedComponentStateDigest:
+                      value.reviewedComponentStateDigest,
+                    enabled: !value.enabled,
+                  }),
+                acceptMutation,
+                true,
+              );
+            }}
+            remove={() => {
+              if (!value) return;
+              void perform(
+                () =>
+                  api.remove(agentId, row.id, {
+                    expectedVersion: value.version,
+                    reviewedComponentStateDigest:
+                      value.reviewedComponentStateDigest,
+                  }),
+                async (outcome) => {
+                  const epoch = generation.current;
+                  const owner = agentId;
+                  if (outcome.bundleId !== row.id || !outcome.removed)
+                    throw new Error('Removal target mismatch');
+                  setSummaries((rows) =>
+                    rows.filter((saved) => saved.id !== row.id),
+                  );
+                  setDetails((values) => {
+                    const next = { ...values };
+                    delete next[row.id];
+                    return next;
+                  });
+                  setReview(null);
+                  await onGrantsChanged?.(outcome.toolNames);
+                  if (current(epoch, owner))
+                    setNotice(
+                      'Owned components removed. Refresh External tools before changing other connections.',
+                    );
+                },
+                true,
+              );
+            }}
+          />
+        );
+      })}
+      </div>
+      <details
+        className="sk-disclosure mcp-bundle-install"
+        open={
+          target !== null || review !== null || manifestText !== '' || undefined
+        }
+      >
+        <summary>Install from a manifest</summary>
       <form
         className="space-y-3"
         onSubmit={(event) => {
@@ -596,92 +685,13 @@ export function CommunityBundlesPanel({
             : 'Save reviewed update'}
         </button>
       )}
+      </details>
       {summaries.length >= 16 && (
         <p className="text-xs text-ink-3">
           The workspace limit of 16 bundles is reached. A new installation
           cannot evict another bundle.
         </p>
       )}
-      {!loading && summaries.length === 0 && (
-        <p className="text-sm text-ink-3">No community bundles installed.</p>
-      )}
-      {summaries.map((row) => {
-        const cached = details[row.id];
-        const value =
-          cached?.version === row.version &&
-          cached.reviewedComponentStateDigest ===
-            row.reviewedComponentStateDigest
-            ? cached
-            : undefined;
-        return (
-          <BundleCard
-            key={`${agentId}:${row.id}`}
-            row={row}
-            value={value}
-            blocked={blocked}
-            reading={inspecting !== null}
-            inspect={() => void inspect(row.id)}
-            update={() => {
-              if (!value || blocked) return;
-              setTarget({
-                id: value.id,
-                version: value.version,
-                name: value.name,
-                componentStateDigest: value.reviewedComponentStateDigest,
-              });
-              if (!manifestText.trim())
-                setManifestText(JSON.stringify(value.manifest, null, 2));
-              invalidateReview();
-            }}
-            changeEnabled={() => {
-              if (!value) return;
-              void perform(
-                () =>
-                  api.setEnabled(agentId, row.id, {
-                    expectedVersion: value.version,
-                    reviewedComponentStateDigest:
-                      value.reviewedComponentStateDigest,
-                    enabled: !value.enabled,
-                  }),
-                acceptMutation,
-                true,
-              );
-            }}
-            remove={() => {
-              if (!value) return;
-              void perform(
-                () =>
-                  api.remove(agentId, row.id, {
-                    expectedVersion: value.version,
-                    reviewedComponentStateDigest:
-                      value.reviewedComponentStateDigest,
-                  }),
-                async (outcome) => {
-                  const epoch = generation.current;
-                  const owner = agentId;
-                  if (outcome.bundleId !== row.id || !outcome.removed)
-                    throw new Error('Removal target mismatch');
-                  setSummaries((rows) =>
-                    rows.filter((saved) => saved.id !== row.id),
-                  );
-                  setDetails((values) => {
-                    const next = { ...values };
-                    delete next[row.id];
-                    return next;
-                  });
-                  setReview(null);
-                  await onGrantsChanged?.(outcome.toolNames);
-                  if (current(epoch, owner))
-                    setNotice(
-                      'Owned components removed. Refresh External tools before changing other connections.',
-                    );
-                },
-                true,
-              );
-            }}
-          />
-        );
-      })}
     </section>
   );
 }
@@ -853,7 +863,7 @@ function BundleCard({
   return (
     <article
       aria-label={`Community bundle ${row.name}`}
-      className="space-y-3 rounded-xl border border-line p-4"
+      className="sk-row bundle-row space-y-3"
     >
       <h3 className="break-words font-medium">{row.name}</h3>
       <p className="text-xs text-ink-3">

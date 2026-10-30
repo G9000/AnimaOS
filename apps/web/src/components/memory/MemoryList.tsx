@@ -80,6 +80,7 @@ function MemoryRow({
   onDone,
 }: { memory: MemoryEntry } & Omit<MemoryListProps, 'memories'>) {
   const [mode, setMode] = useState<Mode>('view');
+  const [expanded, setExpanded] = useState(false);
   const [deleteSnapshot, setDeleteSnapshot] = useState<MemoryEntry | null>(
     null,
   );
@@ -104,6 +105,11 @@ function MemoryRow({
     if (request !== trailRequest.current) return;
     setTrail(trace ? { state: 'ready', trace } : { state: 'failed' });
   };
+
+  // A long memory shows its first lines until asked for the rest.
+  const long =
+    displayedMemory.content.length > 280 ||
+    (displayedMemory.content.match(/\n/g)?.length ?? 0) > 3;
 
   return (
     <li className="memory-item">
@@ -133,9 +139,21 @@ function MemoryRow({
               {formatWhen(displayedMemory.createdAt)}
             </time>
           </div>
-          <p className="memory-content">
+          <p
+            className={`memory-content${long && !expanded ? ' is-clamped' : ''}`}
+          >
             <RevealedText text={displayedMemory.content} />
           </p>
+          {long && (
+            <button
+              type="button"
+              className="memory-more"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? 'Show less' : 'Show all'}
+            </button>
+          )}
           {displayedMemory.tags && displayedMemory.tags.length > 0 && (
             <ul className="memory-tags" aria-label="Tags">
               {displayedMemory.tags.map((tag) => (
@@ -178,7 +196,7 @@ function MemoryRow({
           ) : (
             <button
               type="button"
-              className="studio-tool-button"
+              className="ui-button is-quiet"
               onClick={() => setMode('edit')}
             >
               Edit
@@ -186,7 +204,7 @@ function MemoryRow({
           )}
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button is-quiet"
             onClick={() => {
               setDeleteSnapshot(memory);
               setMode('delete');
@@ -196,7 +214,7 @@ function MemoryRow({
           </button>
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button is-quiet"
             aria-expanded={trail !== null}
             onClick={() => void toggleTrail()}
           >
@@ -364,12 +382,12 @@ function MemoryEditor({
       <div className="memory-actions">
         <button
           type="submit"
-          className="studio-tool-button"
+          className="ui-button is-quiet"
           disabled={!canSave}
         >
           Save
         </button>
-        <button type="button" className="studio-tool-button" onClick={onCancel}>
+        <button type="button" className="ui-button is-quiet" onClick={onCancel}>
           Cancel
         </button>
       </div>

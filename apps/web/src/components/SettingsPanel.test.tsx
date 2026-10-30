@@ -1361,11 +1361,11 @@ describe('SettingsPanel access', () => {
 
     expect(screen.getByText('Custom access')).toBeVisible();
     expect(
-      screen.getByText(
-        'This agent has a custom tool set. Choose a standard profile to replace it when you save.',
-      ),
+      screen.getByText(/Choose a profile below to replace them when you save/),
     ).toBeVisible();
     expect(screen.getByText('5 tools configured')).toBeVisible();
+    // The tools themselves stay folded until asked for.
+    fireEvent.click(screen.getByText('Show the tools'));
     expect(screen.getByText(customTools.join(', '))).toBeVisible();
     expect(
       screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),

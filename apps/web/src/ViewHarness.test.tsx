@@ -3765,6 +3765,7 @@ it('M45 reconciles acknowledged bundle removal permissions without overwriting n
     'gpt-4.1-mini',
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await user.click(screen.getByText('Show the tools'));
   expect(screen.getByText('read_file, unknown_custom')).toBeVisible();
   expect(communityBundlesOwnerApi.remove).toHaveBeenCalledTimes(1);
 });
@@ -3921,6 +3922,7 @@ it('M43 reconciles canonical grant descriptors without overwriting newer setting
     'gpt-4.1-mini',
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await user.click(screen.getByText('Show the tools'));
   expect(
     screen.getByText(
       ['read_file', 'unknown_custom', external.reviewedTools[0].alias].join(
@@ -3974,6 +3976,7 @@ it('M43 reconciles deleted aliases while preserving actual native and unrelated 
   );
   await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await user.click(screen.getByText('Show the tools'));
   expect(
     screen.getByText(['read_file', dormant, 'unknown_custom'].join(', ')),
   ).toBeVisible();
@@ -4042,6 +4045,7 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
   expect(mcpOwnerApi.setGrant).toHaveBeenCalledTimes(1);
   await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
+  await user.click(screen.getByText('Show the tools'));
   expect(
     screen.getByText(
       canonical.state.config.tools!.map((tool) => tool.name).join(', '),

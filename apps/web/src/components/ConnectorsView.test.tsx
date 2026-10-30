@@ -528,6 +528,8 @@ it('M45_owner_connectors_expose_the_community_bundles_review_region', () => {
   const region = screen.getByRole('region', { name: 'Community bundles' });
   expect(region).toBeVisible();
   const bundles = within(region);
+  // The manifest form folds under Install from a manifest until asked for.
+  fireEvent.click(bundles.getByText('Install from a manifest'));
   expect(
     bundles.getByRole('textbox', { name: 'Bundle manifest' }),
   ).toBeVisible();

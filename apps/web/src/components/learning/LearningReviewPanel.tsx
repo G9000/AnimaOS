@@ -10,7 +10,6 @@ import type {
   SkillDetail,
   SkillDraft,
 } from '@animaos/sdk';
-import { SectionTitle } from '../ui-bits';
 import { LearningSkillDraftForm } from './LearningSkillDraftForm';
 import { useLatest } from '../../hooks/useLatest';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
@@ -271,87 +270,88 @@ export function LearningReviewPanel({
   const panelGeneration = generation.current;
 
   return (
-    <section aria-labelledby="learning-review-heading" className="space-y-3">
-      <SectionTitle>Learning review</SectionTitle>
-      <h4 id="learning-review-heading" className="sr-only">
+    <section
+      aria-labelledby="learning-review-heading"
+      className="learning-review"
+    >
+      <h3 id="learning-review-heading" className="sr-only">
         Learning review
-      </h4>
-      <div className="rounded-xl border border-line bg-white/[0.015] p-3.5">
-        <div className="flex items-start gap-3">
-          <input
-            id="learning-auto-review"
-            type="checkbox"
-            aria-describedby="learning-auto-review-help"
-            checked={policy?.autoEnabled ?? false}
-            disabled={disabled || busy || loading || !api || policy === null}
-            onChange={(event) => void changePolicy(event.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0"
-          />
-          <label
-            htmlFor="learning-auto-review"
-            className="cursor-pointer font-medium text-ink"
-          >
-            Automatically review completed tasks
-          </label>
+      </h3>
+      <div className="sk-card">
+        <div className="sk-row">
+          <div className="sk-row-main">
+            <div className="sk-row-text">
+              <label
+                htmlFor="learning-auto-review"
+                className="sk-row-title"
+              >
+                Automatically review completed tasks
+              </label>
+              <span id="learning-auto-review-help" className="sk-row-desc">
+                Reviews produce suggestions for you to inspect. They do not
+                change saved facts or skills.
+              </span>
+            </div>
+            <div className="sk-row-control">
+              <input
+                id="learning-auto-review"
+                type="checkbox"
+                role="switch"
+                aria-describedby="learning-auto-review-help"
+                checked={policy?.autoEnabled ?? false}
+                disabled={disabled || busy || loading || !api || policy === null}
+                onChange={(event) => void changePolicy(event.target.checked)}
+              />
+            </div>
+          </div>
+          {loading ? (
+            <p role="status" className="sk-row-desc">
+              Loading learning reviews…
+            </p>
+          ) : null}
         </div>
-        <p
-          id="learning-auto-review-help"
-          className="mt-1 pl-7 text-sm text-ink-2"
-        >
-          Reviews produce suggestions for you to inspect. They do not change
-          saved facts or skills.
-        </p>
-        {loading ? (
-          <p role="status" className="mt-2 pl-7 text-xs text-ink-3">
-            Loading learning reviews…
-          </p>
-        ) : null}
       </div>
 
       {error ? (
-        <div
-          role="alert"
-          className="rounded-lg border border-danger/30 bg-danger/[0.05] p-3 text-sm text-danger"
-        >
+        <div role="alert" className="learning-review-error">
           {error}
         </div>
       ) : null}
 
-      <div className="space-y-2" aria-label="Learning review history">
-        <div className="flex justify-end">
+      <div className="learning-review-history" aria-label="Learning review history">
+        <div className="learning-review-history-head">
+          <span className="learning-review-history-title">Recent reviews</span>
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button is-quiet"
             disabled={!api || loading || busy}
             onClick={() => void refreshReviews(generation.current, true)}
           >
             {refreshing ? 'Refreshing reviews…' : 'Refresh reviews'}
           </button>
         </div>
+        <div className="sk-card learning-review-list">
         {reviews.length === 0 && !loading ? (
-          <p className="text-sm text-ink-3">No task reviews yet.</p>
+          <p className="sk-empty">No task reviews yet.</p>
         ) : null}
         {reviews.map((review) => (
-          <article
-            key={review.id}
-            className="rounded-xl border border-line bg-white/[0.015] p-3.5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-medium text-ink">
+          <article key={review.id} className="sk-row learning-review-row">
+            <div className="sk-row-main">
+              <div className="sk-row-text">
+                <span className="sk-row-title">
                   {review.trigger === 'conversation'
                     ? 'Conversation review'
                     : 'Task review'}
-                </p>
-                <p className="mt-1 text-xs text-ink-3">
+                </span>
+                <span className="sk-row-desc">
                   {review.state} · {review.proposals.length} suggestion
                   {review.proposals.length === 1 ? '' : 's'}
-                </p>
+                </span>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="sk-row-control">
                 <button
                   type="button"
-                  className="studio-tool-button"
+                  className="ui-button"
                   aria-expanded={expanded.has(review.id)}
                   onClick={() => void readReview(review.id)}
                   disabled={busy}
@@ -361,7 +361,7 @@ export function LearningReviewPanel({
                 {review.state === 'queued' || review.state === 'running' ? (
                   <button
                     type="button"
-                    className="studio-tool-button"
+                    className="ui-button is-quiet"
                     onClick={() => void cancel(review)}
                     disabled={disabled || busy}
                   >
@@ -371,7 +371,7 @@ export function LearningReviewPanel({
               </div>
             </div>
             {expanded.has(review.id) ? (
-              <div className="mt-3 space-y-3 border-t border-line pt-3">
+              <div className="learning-review-body space-y-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-ink-3">
                     Evidence
@@ -480,6 +480,7 @@ export function LearningReviewPanel({
             ) : null}
           </article>
         ))}
+        </div>
       </div>
     </section>
   );

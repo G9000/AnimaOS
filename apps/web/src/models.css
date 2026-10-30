@@ -21,7 +21,8 @@
   display: none;
 }
 
-.settings-model-page .settings-save-button[data-idle] {
+/* Nothing to save on a settings page: no "No changes" button. */
+.settings-form .settings-save-button[data-idle] {
   display: none;
 }
 

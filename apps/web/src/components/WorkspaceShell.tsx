@@ -848,7 +848,7 @@ export function WorkspaceShell({
                       ) : page === 'capabilities' ? (
                         <>
                           {builtinTools}
-                          <details className="tools-inventory-details">
+                          <details className="sk-disclosure tools-inventory-details">
                             <summary>Registered tools and runtime details</summary>
                             <WorkspaceCapabilities
                               online={connection === 'online'}

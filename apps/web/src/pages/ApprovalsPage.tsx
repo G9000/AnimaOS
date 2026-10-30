@@ -12,6 +12,12 @@ import {
 import { AutonomyCard } from '../components/autonomy/AutonomyCard';
 import { CodingKeys } from '../components/coding/CodingKeys';
 import { ApprovalCard } from '../components/sessions/ApprovalCard';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from '../components/settings/SettingsKit';
 import { useApprovals, type ApprovalsView } from '../hooks/useApprovals';
 import {
   CLASS_LABELS,
@@ -88,18 +94,30 @@ function ClassRules({
     if (kept) setValue('');
   };
 
+  const decision = view.policy?.[klass] ?? DEFAULT_APPROVAL_POLICY[klass];
   return (
-    <>
-      <tr className="approvals-policy-row" data-policy-class={klass}>
-        <th scope="row">{POLICY_ROW_ACTIONS[klass]}</th>
-        <td>{POLICY_ROW_WHERE[klass]}</td>
-        <td>
-          <div className="approvals-decision-options" role="group" aria-label={`Default decision for ${label}`}>
+    <div className="sk-row approvals-class" data-policy-class={klass}>
+      <div className="sk-row-main">
+        <div className="sk-row-text">
+          <span className="sk-row-title">{POLICY_ROW_ACTIONS[klass]}</span>
+          <span className="sk-row-desc">
+            {POLICY_ROW_WHERE[klass]}
+            {rules.length > 0 &&
+              ` · ${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`}
+          </span>
+        </div>
+        <div className="sk-row-control">
+          <div
+            className="sk-segmented"
+            role="group"
+            aria-label={`Default decision for ${label}`}
+          >
             {ACTIONS.map((action) => (
               <button
                 key={action}
                 type="button"
-                aria-pressed={(view.policy?.[klass] ?? DEFAULT_APPROVAL_POLICY[klass]) === action}
+                data-tone={action}
+                aria-pressed={decision === action}
                 disabled={view.policy === null}
                 onClick={() => void view.setPolicyAction(klass, action)}
               >
@@ -107,91 +125,93 @@ function ClassRules({
               </button>
             ))}
           </div>
-        </td>
-      </tr>
-      {rules.map((rule) => {
-        const covers = describeMatcher(rule.tool, rule.matcher);
-        return (
-          <tr key={rule.id} className="approvals-rule-row">
-            <th scope="row">{rule.tool}</th>
-            <td>{covers}</td>
-            <td>
-              <span className="approvals-rule-allow">Allow</span>
-              <button
-                type="button"
-                className="approvals-remove-rule"
-                aria-label={`Remove rule: ${covers}`}
-                onClick={() => void view.removeRule(rule)}
-              >
-                Remove
-              </button>
-            </td>
-          </tr>
-        );
-      })}
-      {tool && matcherKind && (
-        <tr className="approvals-add-rule-row">
-          <td colSpan={3}>
-            <details className="approvals-add-rule-details">
-              <summary>Add rule · {label}</summary>
-              <form
-                className="approvals-add-rule"
-                aria-label={`Add a rule for ${label}`}
-                onSubmit={(event) => void add(event)}
-              >
-                <select
-                  aria-label="Tool"
-                  value={tool.name}
-                  onChange={(event) => setToolName(event.target.value)}
-                >
-                  {tools.map((item) => (
-                    <option key={item.name} value={item.name}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Match by"
-                  value={matcherKind}
-                  onChange={(event) =>
-                    setKind(event.target.value as ApprovalMatcherKind)
-                  }
-                >
-                  {tool.matcherKinds.map((item) => (
-                    <option key={item} value={item}>
-                      {MATCHER_KIND_LABELS[item]}
-                    </option>
-                  ))}
-                </select>
-                {matcherKind !== 'any' && (
-                  <input
-                    aria-label="Match value"
-                    value={value}
-                    maxLength={MAX_MATCHER_VALUE_CHARS}
-                    onChange={(event) => setValue(event.target.value)}
-                  />
-                )}
+        </div>
+      </div>
+      {rules.length > 0 && (
+        <ul className="approvals-rule-list">
+          {rules.map((rule) => {
+            const covers = describeMatcher(rule.tool, rule.matcher);
+            return (
+              <li key={rule.id}>
+                <code>{rule.tool}</code>
+                <span className="approvals-rule-covers">{covers}</span>
+                <span className="sk-badge">Allow</span>
                 <button
-                  type="submit"
-                  className="studio-tool-button"
-                  disabled={matcherKind !== 'any' && !value.trim()}
+                  type="button"
+                  className="ui-button is-quiet"
+                  aria-label={`Remove rule: ${covers}`}
+                  onClick={() => void view.removeRule(rule)}
                 >
-                  Add rule
+                  Remove
                 </button>
-                {broad && (
-                  <p className="approval-card-warning">
-                    A rule this broad lets your companion run almost anything,
-                    including changing its own approval settings.
-                  </p>
-                )}
-              </form>
-            </details>
-          </td>
-        </tr>
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </>
+      {tool && matcherKind && (
+        <details className="sk-disclosure approvals-add-rule-details">
+          <summary>Add rule · {label}</summary>
+          <form
+            className="approvals-add-rule"
+            aria-label={`Add a rule for ${label}`}
+            onSubmit={(event) => void add(event)}
+          >
+            <select
+              aria-label="Tool"
+              className="field"
+              value={tool.name}
+              onChange={(event) => setToolName(event.target.value)}
+            >
+              {tools.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Match by"
+              className="field"
+              value={matcherKind}
+              onChange={(event) =>
+                setKind(event.target.value as ApprovalMatcherKind)
+              }
+            >
+              {tool.matcherKinds.map((item) => (
+                <option key={item} value={item}>
+                  {MATCHER_KIND_LABELS[item]}
+                </option>
+              ))}
+            </select>
+            {matcherKind !== 'any' && (
+              <input
+                aria-label="Match value"
+                className="field"
+                value={value}
+                maxLength={MAX_MATCHER_VALUE_CHARS}
+                onChange={(event) => setValue(event.target.value)}
+              />
+            )}
+            <button
+              type="submit"
+              className="ui-button"
+              disabled={matcherKind !== 'any' && !value.trim()}
+            >
+              Add rule
+            </button>
+            {broad && (
+              <p className="approval-card-warning">
+                A rule this broad lets your companion run almost anything,
+                including changing its own approval settings.
+              </p>
+            )}
+          </form>
+        </details>
+      )}
+    </div>
   );
 }
+
 
 export interface ApprovalsPageProps {
   agentId: string;
@@ -307,71 +327,96 @@ export function ApprovalsPage({
             </details>
           )}
           {access}
-          <section className="approvals-section" aria-labelledby="approvals-rules">
-            <h2 id="approvals-rules">Rules</h2>
-            <p className="approvals-help">
-              When one of these runs, {agentName} follows the rule instead of asking
-              every time.
-            </p>
-            <div className="approvals-rules-table-wrap">
-              <table className="approvals-rules-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Action</th>
-                    <th scope="col">Where</th>
-                    <th scope="col">Decision</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {POLICY_CLASSES.map((klass) => (
-                    <ClassRules key={klass} klass={klass} view={view} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <details className="approvals-history-details">
+          <SettingsSection
+            id="approvals-rules"
+            title="Rules"
+            description={`When one of these runs, ${agentName} follows the rule instead of asking every time.`}
+          >
+            <SettingsCard className="approvals-rules">
+              {POLICY_CLASSES.map((klass) => (
+                <ClassRules key={klass} klass={klass} view={view} />
+              ))}
+            </SettingsCard>
+          </SettingsSection>
+          <SettingsSection
+            id="approvals-more"
+            title="More"
+            description="How often it checks with you, and keys for coding apps."
+          >
+            <SettingsCard className="approvals-shortcuts">
+              <button
+                type="button"
+                className="sk-row sk-nav"
+                onClick={() => setSection('autonomy')}
+              >
+                <span className="sk-row-text">
+                  <span className="sk-row-title">When it checks with you</span>
+                  <span className="sk-row-desc">
+                    Before every change, only for risky things, or rarely.
+                  </span>
+                </span>
+                <span aria-hidden="true">→</span>
+              </button>
+              <button
+                type="button"
+                className="sk-row sk-nav"
+                onClick={() => setSection('coding')}
+              >
+                <span className="sk-row-text">
+                  <span className="sk-row-title">Coding app keys</span>
+                  <span className="sk-row-desc">
+                    Keys the coding apps it runs can use.
+                  </span>
+                </span>
+                <span aria-hidden="true">→</span>
+              </button>
+            </SettingsCard>
+          </SettingsSection>
+          <details className="sk-disclosure approvals-history-details">
             <summary>Decision history</summary>
-            {view.decided.length === 0 ? (
-              <p className="approvals-empty">No decisions in the last 30 days.</p>
-            ) : (
-              <ul className="approvals-decided">
-                {view.decided.map((approval) => (
-                  <li key={approval.id}>
-                    <strong>{approval.tool}</strong>
-                    <span>{approvalOutcome(approval)}</span>
-                    {approval.resolution?.note && (
-                      <span className="approvals-note">
-                        “{approval.resolution.note}”
-                      </span>
-                    )}
-                    <time dateTime={new Date(resolvedAt(approval)).toISOString()}>
-                      {formatWhen(resolvedAt(approval))}
-                    </time>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <SettingsCard as="ul" className="approvals-decided">
+              {view.decided.length === 0 ? (
+                <li>
+                  <SettingsEmpty>No decisions in the last 30 days.</SettingsEmpty>
+                </li>
+              ) : (
+                view.decided.map((approval) => (
+                  <SettingsRow
+                    as="li"
+                    key={approval.id}
+                    title={<code>{approval.tool}</code>}
+                    description={
+                      <>
+                        {approvalOutcome(approval)}
+                        {approval.resolution?.note && (
+                          <span className="approvals-note">
+                            {' '}
+                            “{approval.resolution.note}”
+                          </span>
+                        )}
+                      </>
+                    }
+                    control={
+                      <time
+                        className="sk-meta"
+                        dateTime={new Date(resolvedAt(approval)).toISOString()}
+                      >
+                        {formatWhen(resolvedAt(approval))}
+                      </time>
+                    }
+                  />
+                ))
+              )}
+            </SettingsCard>
             {view.hasMoreDecided && (
               <button
                 type="button"
-                className="studio-tool-button"
+                className="ui-button"
                 onClick={view.loadMoreDecided}
               >
                 Show older
               </button>
             )}
-          </details>
-          <details className="approvals-more-settings">
-            <summary>More permission settings</summary>
-            <div className="approvals-shortcuts" aria-label="More permission settings">
-              <button type="button" onClick={() => setSection('autonomy')}>
-                When it checks with you <span aria-hidden="true">→</span>
-              </button>
-              <button type="button" onClick={() => setSection('coding')}>
-                Coding app keys <span aria-hidden="true">→</span>
-              </button>
-            </div>
           </details>
         </>
       ) : (

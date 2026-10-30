@@ -169,3 +169,436 @@
     flex-wrap: wrap;
   }
 }
+
+/* A switch, wherever a kit row has one. */
+.sk-row input[role='switch'] {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  background: rgb(236 230 218 / 0.16);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.sk-row input[role='switch']::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgb(236 230 218 / 0.65);
+  content: '';
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
+}
+
+.sk-row input[role='switch']:checked {
+  background: rgb(var(--color-accent-rgb) / 0.6);
+}
+
+.sk-row input[role='switch']:checked::after {
+  background: #fff;
+  transform: translateX(14px);
+}
+
+/* Some of a group on: the knob rests in the middle. */
+.sk-row input[role='switch'][data-mixed]::after {
+  transform: translateX(7px);
+}
+
+.sk-row input[role='switch']:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.sk-row input[role='switch']:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+:root[data-appearance-theme='light'] .sk-row input[role='switch'] {
+  background: rgb(26 26 24 / 0.14);
+}
+
+:root[data-appearance-theme='light'] .sk-row input[role='switch']::after {
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+
+/* A row you pick (a radio): the whole row is the target. */
+.sk-choice {
+  cursor: pointer;
+}
+
+.sk-choice .sk-row-main {
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.sk-choice .sk-row-text {
+  flex: 1;
+}
+
+.sk-choice:hover {
+  background: var(--control-fill-hover, rgb(236 230 218 / 0.04));
+}
+
+.sk-choice.is-selected,
+.sk-choice:has(input:checked) {
+  background: rgb(var(--color-accent-rgb) / 0.07);
+}
+
+.sk-choice input[type='radio'] {
+  flex: none;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.sk-badge {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  white-space: nowrap;
+}
+
+.sk-badge.is-accent {
+  border-color: rgb(var(--color-accent-rgb) / 0.45);
+  color: var(--color-accent);
+}
+
+.sk-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.sk-link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.sk-link:hover {
+  text-decoration: underline;
+}
+
+/* A disclosure under a section: a quiet line, its content below. */
+.sk-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sk-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-size: 12.5px;
+  color: var(--color-ink-2, var(--color-ink));
+  cursor: pointer;
+  list-style: none;
+}
+
+.sk-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sk-disclosure > summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.sk-disclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.sk-disclosure > summary:hover {
+  color: var(--color-ink);
+}
+
+.sk-mono-list {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+  overflow-wrap: anywhere;
+}
+
+.sk-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12.5px;
+  color: var(--color-ink-2, var(--color-ink));
+}
+
+.sk-checks > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A segmented choice in a row (Allow · Ask · Block). */
+.sk-segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: rgb(0 0 0 / 0.12);
+}
+
+.sk-segmented > button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.sk-segmented > button:hover:not(:disabled) {
+  color: var(--color-ink);
+}
+
+.sk-segmented > button[aria-pressed='true'] {
+  background: var(--control-fill-hover, rgb(236 230 218 / 0.1));
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--control-line);
+}
+
+.sk-segmented > button[aria-pressed='true'][data-tone='allow'] {
+  color: var(--color-mint, #7fcb8a);
+}
+
+.sk-segmented > button[aria-pressed='true'][data-tone='deny'] {
+  color: var(--color-danger, #ff6b5b);
+}
+
+:root[data-appearance-theme='light'] .sk-segmented {
+  background: rgb(26 26 24 / 0.04);
+}
+
+/* A row that opens another page: the whole row is a button with → on the
+ * right. */
+.sk-nav {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.sk-nav:hover {
+  background: var(--control-fill-hover, rgb(236 230 218 / 0.04));
+  color: var(--color-ink);
+}
+
+.sk-card > .sk-nav + .sk-nav {
+  border-top: 1px solid var(--sk-hairline);
+}
+
+/* The Tools page: built-in tools, the registered-tools disclosure, then
+ * external tools and bundles, spaced like sections. */
+.settings-window .tools-inventory-details {
+  margin: 4px 32px 8px;
+}
+
+.settings-window .mcp-panel.mcp-bundles {
+  margin-top: 20px;
+}
+
+/* Learning review (Skills · How it learns): the switch card, then recent
+ * reviews as rows of one card. */
+.learning-review {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.learning-review-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.learning-review-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.learning-review-history-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-ink-2, var(--color-ink));
+}
+
+.learning-review-list {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.learning-review-body {
+  padding-top: 12px;
+  border-top: 1px solid var(--sk-hairline);
+}
+
+.learning-review-error {
+  padding: 10px 12px;
+  border: 1px solid rgb(255 107 91 / 0.3);
+  border-radius: var(--panel-radius);
+  font-size: 12.5px;
+  color: var(--color-danger);
+}
+
+/* ── Memory ── */
+.settings-window .memory-item {
+  align-items: start;
+  padding: 14px 16px;
+}
+
+.settings-window .memory-item > .memory-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-window .memory-content {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.memory-content.is-clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.memory-more {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.memory-more:hover {
+  text-decoration: underline;
+}
+
+.settings-window .memory-item .memory-label {
+  padding: 1px 7px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--color-ink-2, var(--color-ink));
+}
+
+.settings-window .memory-item .memory-meta {
+  align-items: center;
+}
+
+.settings-window .memory-item > .memory-actions {
+  gap: 4px;
+}
+
+.settings-window .memory-item .memory-actions .ui-button {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+/* Type filters read as one segmented control. */
+.settings-window .memory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-window .memory-toolbar[role='group'] {
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: rgb(0 0 0 / 0.12);
+}
+
+.settings-window .memory-toolbar[role='group'] > button {
+  height: 26px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.settings-window .memory-toolbar[role='group'] > button[aria-pressed='true'] {
+  background: var(--control-fill-hover, rgb(236 230 218 / 0.1));
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--control-line);
+}
+
+.settings-window .memory-toolbar > select {
+  height: 32px;
+  margin-left: auto;
+}
+
+.settings-window .memory-search {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-window .memory-search input {
+  flex: 1;
+  height: 34px;
+}
+
+:root[data-appearance-theme='light'] .sk-row input[role='switch']:checked {
+  background: var(--color-accent);
+}
+
+:root[data-appearance-theme='light']
+  .sk-segmented
+  > button[aria-pressed='true'][data-tone='allow'] {
+  color: #2f7d3c;
+}
+
+:root[data-appearance-theme='light']
+  .sk-segmented
+  > button[aria-pressed='true'][data-tone='deny'] {
+  color: #b8382b;
+}

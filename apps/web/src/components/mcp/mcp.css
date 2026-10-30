@@ -24,7 +24,7 @@
 .mcp-add-actions .mcp-note { margin-right: auto; }
 
 /* A server */
-.mcp-server { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--control-line); border-radius: var(--panel-radius); background: rgb(20 19 18 / 0.45); }
+.mcp-server { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--control-line); border-radius: var(--panel-radius); background: var(--control-fill); }
 .mcp-server-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .mcp-server-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--control-muted); }
 .mcp-server[data-tone='ok'] .mcp-server-dot { background: var(--color-mint); }
@@ -75,3 +75,7 @@
   .mcp-tool > .ui-button { grid-column: 1; grid-row: auto; justify-self: start; }
 }
 .mcp-server-args { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+
+/* Community bundles: installed bundles as rows of one card. */
+.mcp-bundle-list .bundle-row h3 { margin: 0; font-size: 13px; font-weight: 500; color: var(--color-ink); }
+.mcp-bundle-install > form { padding: 14px 16px; border: 1px solid var(--control-line); border-radius: var(--panel-radius); background: var(--control-fill); }

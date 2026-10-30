@@ -11,71 +11,8 @@
   flex-direction: column;
   gap: 12px;
 }
-.skills-section h2 {
-  color: var(--color-ink);
-  font-size: 15px;
-  font-weight: 600;
-}
-.skills-section-header,
-.skill-actions,
-.skill-draft-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.skills-list,
-.skills-decided {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.skills-row,
-.skill-draft,
-.skill-review,
-.skill-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--color-line);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
 .skill-draft {
   border-color: var(--color-amber);
-}
-.skills-row-text {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  color: var(--color-ink);
-}
-.skills-row-text code,
-.skill-draft-header code,
-.skills-decided code {
-  color: var(--color-ink-2);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.skills-description,
-.skill-draft-description,
-.skill-draft-source,
-.skills-confirm,
-.skills-empty {
-  color: var(--color-ink-3);
-  font-size: 12px;
-}
-.skills-status-active {
-  color: var(--color-mint);
-  font-size: 12px;
-}
-.skills-status-changed,
-.skills-status-missing,
-.skills-status-invalid,
-.skill-draft-warning {
-  color: var(--color-amber);
-  font-size: 12px;
 }
 .skills-error {
   color: var(--color-danger);
@@ -119,13 +56,6 @@
 .skill-field textarea {
   font-family: var(--font-mono);
 }
-.skills-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-ink-2);
-  font-size: 12px;
-}
 .skills-import {
   position: relative;
 }
@@ -136,4 +66,100 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Skills on the settings kit: one card; each skill is a row with its name,
+ * status and description, when it last improved, and its switch. */
+.skills-page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.skills-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.skills-table tbody tr + tr > * {
+  border-top: 1px solid var(--sk-hairline);
+}
+
+.skills-table th[scope='row'] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.skills-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.skills-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.skills-status-changed,
+.skills-status-problem {
+  border-color: rgb(227 187 112 / 0.45);
+  color: var(--color-amber);
+}
+
+.skills-description {
+  max-width: 70ch;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink-3);
+}
+
+.skills-slug {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.skills-row-manage {
+  margin-top: 4px;
+}
+
+.skills-row-manage .skill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.skills-confirm {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.skills-table td {
+  padding: 14px 16px 14px 0;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.skills-table td.skills-on {
+  display: table-cell;
+  width: 1%;
+}
+
+.skills-decided code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.skills-import {
+  position: relative;
+  cursor: pointer;
 }

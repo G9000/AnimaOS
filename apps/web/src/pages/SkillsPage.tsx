@@ -68,10 +68,20 @@ export function SkillsPage({
   // skills folder cannot be read.
   const learningSection = learning && (
     <section
-      className="skills-section skills-learning"
+      className="sk-section skills-section skills-learning"
       aria-labelledby="skills-learning"
     >
-      <h2 id="skills-learning">How it learns</h2>
+      <div className="sk-section-head">
+        <div className="sk-section-text">
+          <h2 id="skills-learning" className="sk-section-title">
+            How it learns
+          </h2>
+          <p className="sk-section-desc">
+            After a task it can look back and suggest skills or facts. Nothing
+            changes until you approve it.
+          </p>
+        </div>
+      </div>
       {learning}
     </section>
   );
@@ -193,12 +203,21 @@ export function SkillsPage({
           {moreFiles && <p className="skills-empty">{moreFiles}</p>}
         </section>
       )}
-      <section className="skills-section" aria-labelledby="skills-list">
-        <div className="skills-section-header">
-          <h2 id="skills-list">Your skills</h2>
+      <section className="sk-section skills-section" aria-labelledby="skills-list">
+        <div className="sk-section-head">
+          <div className="sk-section-text">
+            <h2 id="skills-list" className="sk-section-title">
+              Your skills
+            </h2>
+            <p className="sk-section-desc">
+              Instructions it follows for one kind of task. Type /name in a
+              chat to use one.
+            </p>
+          </div>
+          <div className="sk-section-action">
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button is-primary"
             onClick={() => {
               begin();
               setEditing({ skill: null });
@@ -206,7 +225,7 @@ export function SkillsPage({
           >
             New skill
           </button>
-          <label className="studio-tool-button skills-import">
+          <label className="ui-button skills-import">
             Import SKILL.md
             <input
               type="file"
@@ -222,7 +241,7 @@ export function SkillsPage({
               }}
             />
           </label>
-          <label className="studio-tool-button skills-import">
+          <label className="ui-button skills-import">
             Import skill folder
             <input
               type="file"
@@ -239,6 +258,7 @@ export function SkillsPage({
               }}
             />
           </label>
+          </div>
         </div>
         {editing && (
           <>
@@ -342,19 +362,19 @@ export function SkillsPage({
           </section>
         )}
         {view.loaded && view.skills.length === 0 ? (
-          <p className="skills-empty">
-            No skills yet. Write one, import a SKILL.md, or approve a draft.
-          </p>
+          <div className="sk-card">
+            <p className="sk-empty">
+              No skills yet. Write one, import a SKILL.md, or approve a draft.
+            </p>
+          </div>
         ) : (
-          <div className="skills-table-wrap">
+          <div className="sk-card skills-table-wrap">
             <table className="skills-table">
-              <thead>
+              <thead className="sr-only">
                 <tr>
                   <th scope="col">Skill</th>
-                  <th scope="col">Source</th>
-                  <th scope="col">Version</th>
-                  <th scope="col">Uses</th>
                   <th scope="col">Last improved</th>
+                  <th scope="col">On</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,37 +384,27 @@ export function SkillsPage({
                       scope="row"
                       aria-label={revealInvisible(skill.name).text}
                     >
-                      <span className="skills-row-name">
-                        {revealInvisible(skill.name).text}
-                      </span>
-                      <code>/{skill.slug}</code>
-                      <span
-                        className={`skills-status skills-status-${skill.status}`}
-                      >
-                        {STATUS_LABELS[skill.status]}
+                      <span className="skills-row-head">
+                        <span className="skills-row-name">
+                          {revealInvisible(skill.name).text}
+                        </span>
+                        <span
+                          className={`sk-badge skills-status skills-status-${skill.status}`}
+                        >
+                          {STATUS_LABELS[skill.status]}
+                        </span>
                       </span>
                       <span className="skills-description">
                         {revealInvisible(skill.description).text}
                       </span>
-                      <details className="skills-row-manage">
+                      <code className="skills-slug">/{skill.slug}</code>
+                      <details className="sk-disclosure skills-row-manage">
                         <summary>Manage</summary>
                         <div className="skill-actions">
-                          <label className="skills-switch">
-                            <input
-                              type="checkbox"
-                              checked={skill.enabled}
-                              aria-label={`${revealInvisible(skill.name).text} is ${skill.enabled ? 'on' : 'off'}`}
-                              onChange={(event) => {
-                                begin();
-                                void view.setEnabled(skill, event.target.checked);
-                              }}
-                            />
-                            {skill.enabled ? 'On' : 'Off'}
-                          </label>
                           {skill.status === 'changed' && (
                             <button
                               type="button"
-                              className="studio-tool-button"
+                              className="ui-button"
                               onClick={() => void openReview(skill)}
                             >
                               Review
@@ -402,7 +412,7 @@ export function SkillsPage({
                           )}
                           <button
                             type="button"
-                            className="studio-tool-button"
+                            className="ui-button"
                             onClick={() => void edit(skill)}
                           >
                             Edit
@@ -414,7 +424,7 @@ export function SkillsPage({
                               </span>
                               <button
                                 type="button"
-                                className="studio-tool-button"
+                                className="ui-button is-danger"
                                 onClick={async () => {
                                   begin();
                                   if (await view.remove(skill))
@@ -425,7 +435,7 @@ export function SkillsPage({
                               </button>
                               <button
                                 type="button"
-                                className="studio-tool-button"
+                                className="ui-button"
                                 onClick={() => setConfirming(null)}
                               >
                                 Keep
@@ -434,7 +444,7 @@ export function SkillsPage({
                           ) : (
                             <button
                               type="button"
-                              className="studio-tool-button"
+                              className="ui-button is-quiet"
                               onClick={() => setConfirming(skill.slug)}
                             >
                               Delete
@@ -443,13 +453,25 @@ export function SkillsPage({
                         </div>
                       </details>
                     </th>
-                    <td title="Skill origin is not recorded">—</td>
-                    <td title="Version history is not recorded">—</td>
-                    <td title="Skill usage is not recorded">—</td>
-                    <td>
-                      <time dateTime={new Date(skill.updatedAtMs).toISOString()}>
+                    <td className="skills-when">
+                      <time
+                        className="sk-meta"
+                        dateTime={new Date(skill.updatedAtMs).toISOString()}
+                      >
                         {formatWhen(skill.updatedAtMs)}
                       </time>
+                    </td>
+                    <td className="skills-on sk-row">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={skill.enabled}
+                        aria-label={`${revealInvisible(skill.name).text} is ${skill.enabled ? 'on' : 'off'}`}
+                        onChange={(event) => {
+                          begin();
+                          void view.setEnabled(skill, event.target.checked);
+                        }}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -460,21 +482,32 @@ export function SkillsPage({
       </section>
       {learningSection}
       {view.decided.length > 0 && (
-        <details className="skills-decided-details">
+        <details className="sk-disclosure skills-decided-details">
           <summary>Recently decided</summary>
-          <ul className="skills-decided">
+          <ul className="sk-card skills-decided">
             {view.decided.map((draft) => (
-              <li key={draft.id}>
-                <strong>{revealInvisible(draft.name).text}</strong>
-                <code>/{draft.slug}</code>
-                <span>
-                  {draft.status === 'approved' ? 'Approved' : 'Rejected'}
-                </span>
-                {draft.decidedAtMs !== null && (
-                  <time dateTime={new Date(draft.decidedAtMs).toISOString()}>
-                    {formatWhen(draft.decidedAtMs)}
-                  </time>
-                )}
+              <li key={draft.id} className="sk-row">
+                <div className="sk-row-main">
+                  <div className="sk-row-text">
+                    <span className="sk-row-title">
+                      {revealInvisible(draft.name).text}
+                    </span>
+                    <span className="sk-row-desc">
+                      <code>/{draft.slug}</code> ·{' '}
+                      <span>
+                        {draft.status === 'approved' ? 'Approved' : 'Rejected'}
+                      </span>
+                    </span>
+                  </div>
+                  {draft.decidedAtMs !== null && (
+                    <time
+                      className="sk-meta"
+                      dateTime={new Date(draft.decidedAtMs).toISOString()}
+                    >
+                      {formatWhen(draft.decidedAtMs)}
+                    </time>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

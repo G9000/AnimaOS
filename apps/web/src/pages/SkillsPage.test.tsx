@@ -139,8 +139,9 @@ describe('SkillsPage', () => {
         'Changed on disk — review it',
       ),
     ).toBeVisible();
+    // The switch sits on the skill's row, beside its name.
     await user.click(
-      within(notes).getByRole('checkbox', { name: 'Notes is on' }),
+      within(list).getByRole('switch', { name: 'Notes is on' }),
     );
     await waitFor(() => expect(daemon.listSkills).toHaveBeenCalledTimes(2));
     expect(toggle).toHaveBeenCalledWith('notes', false);
