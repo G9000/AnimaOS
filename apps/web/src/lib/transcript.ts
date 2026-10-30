@@ -1,3 +1,4 @@
+import type { SecondOpinions } from '../hooks/useSecondOpinions';
 import {
   type ActionReceipt,
   automationMessageMeta,
@@ -146,6 +147,8 @@ export interface TranscriptActions {
   /** Whether a message was saved from this page, for a bubble that mounts
    *  again; `shortened` when only its first characters were kept. */
   savedToMemory?: (messageId: string) => SavedState | null;
+  /** Another model's review of a reply, asked for from the reply itself. */
+  secondOpinions?: SecondOpinions;
 }
 
 export interface TranscriptInput {

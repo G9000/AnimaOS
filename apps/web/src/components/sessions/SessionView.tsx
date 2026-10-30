@@ -55,14 +55,12 @@ import {
 } from './ConversationControls';
 import { ChatExportScope } from './ChatExportDownload';
 import { ProjectKnowledgeChatScope } from '../projects/ProjectKnowledgeChatScope';
-import {
-  ChatExtensions,
-  type ChatPanelRequest,
-  type ChatPanelName,
-} from './ChatExtensions';
 import { WorkspaceArtifactLayout } from '../artifacts/WorkspaceArtifactPreview';
 import { ImageGallery } from '../images/ImageGallery';
-import type { ChatModelPreferencesView } from '@animaos/sdk';
+import {
+  useSecondOpinions,
+  type SecondOpinionApi,
+} from '../../hooks/useSecondOpinions';
 
 export interface SessionComposerState {
   draft: string;
@@ -169,11 +167,9 @@ export interface SessionViewProps {
   onAtBottomChange?: (atBottom: boolean) => void;
   /** Activity outside a historical window that refreshes its context estimate. */
   contextRefreshKey?: number | string;
-  extensions?: {
-    request?: ChatPanelRequest | null;
-    onOpen(panel: ChatPanelName): void;
-    onModelSaved?(view: ChatModelPreferencesView): void;
-  };
+  /** Offers a second opinion on this chat's replies; `refreshKey` reads
+   *  its reviews again (one started with /review). */
+  secondOpinions?: { api: SecondOpinionApi; refreshKey?: unknown };
   controls?: Pick<
     ConversationControlProps,
     'onRevise' | 'onQueuePatch' | 'onCancel' | 'onOpenSource' | 'revising'
@@ -378,7 +374,7 @@ export function SessionView({
   onAtBottomChange,
   contextRefreshKey,
   controls,
-  extensions,
+  secondOpinions: secondOpinionOptions,
 }: SessionViewProps) {
   // The session record names its agent, so a helper's session saves to that
   // helper even when the agents list does not hold it (then `agent` is the
@@ -516,9 +512,21 @@ export function SessionView({
     `${agent.provider}:${agent.model}:${finishedRuns}:${messages.length}:${session?.summary?.createdAtMs ?? ''}:${session?.contextTrimmed?.atMs ?? ''}:${contextRefreshKey ?? ''}`,
     !composer.offline && !missing,
   );
+  const secondOpinions = useSecondOpinions(
+    session ? secondOpinionOptions?.api : undefined,
+    session?.agentId ?? '',
+    session?.id ?? '',
+    session?.clearGeneration ?? 0,
+    secondOpinionOptions?.refreshKey,
+  );
   const transcriptActions = useMemo<TranscriptActions>(
-    () => ({ ...actions, onSaveToMemory: save, savedToMemory: savedState }),
-    [actions, save, savedState],
+    () => ({
+      ...actions,
+      onSaveToMemory: save,
+      savedToMemory: savedState,
+      secondOpinions,
+    }),
+    [actions, save, savedState, secondOpinions],
   );
   const conversation = useMemo(
     () => ({ ...agent, id: session?.agentId ?? agent.id, messages }),
@@ -691,16 +699,6 @@ export function SessionView({
         />
       )}
       {notice}
-      {session && extensions && (
-        <ChatExtensions
-          key={`${session.agentId}:${session.id}:${session.clearGeneration ?? 0}`}
-          session={session}
-          request={extensions.request}
-          onOpen={extensions.onOpen}
-          onModelSaved={extensions.onModelSaved}
-          refreshKey={contextRefreshKey}
-        />
-      )}
       {session && controls && (
         <ConversationControls
           key={`${session.agentId}:${session.id}`}

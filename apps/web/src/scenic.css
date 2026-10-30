@@ -2328,6 +2328,43 @@ button.scenic-thread[aria-expanded='true'] {
   white-space: nowrap;
 }
 
+/* Thinking: a small segmented row under the models. */
+.scenic-shell .composer-thinking {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 0;
+  padding: 4px 8px;
+}
+
+.scenic-shell .composer-thinking > span {
+  flex: 1;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.62);
+}
+
+.scenic-shell .composer-thinking > button {
+  min-width: 34px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.6);
+  cursor: pointer;
+}
+
+.scenic-shell .composer-thinking > button:hover:not(:disabled) {
+  color: var(--color-ink);
+}
+
+.scenic-shell .composer-thinking > button[aria-checked='true'] {
+  border-color: rgb(var(--color-accent-rgb) / 0.5);
+  background: rgb(var(--color-accent-rgb) / 0.1);
+  color: var(--color-ink);
+}
+
 .scenic-shell .composer-menu-more {
   align-items: center;
   justify-content: space-between;
@@ -7051,13 +7088,6 @@ details.settings-item > :not(summary) {
   color: rgb(236 230 218 / 0.35);
 }
 
-/* The main chat keeps secondary actions in the command palette and slash
- * commands. Keep an opened panel visible, along with live queued messages. */
-.scenic-shell
-  .main-chat-extensions[data-main-chat='true'][data-panel=''] {
-  display: none;
-}
-
 .scenic-shell
   .main-chat-conversation-controls[data-main-chat='true']:has(
     > details:only-child:not([open])
@@ -11188,4 +11218,57 @@ details.settings-item > :not(summary) {
 :root[data-appearance-theme='light'] .connections-app-row.is-unavailable > div > p,
 :root[data-appearance-theme='light'] .connections-app-row button:disabled {
   color: rgb(26 26 24 / 0.4);
+}
+
+/* A second opinion sits under the reply it reviews: a quiet hairline note,
+ * advice only. */
+.scenic-shell .second-opinion {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgb(236 230 218 / 0.12);
+  border-left: 2px solid rgb(var(--color-accent-rgb) / 0.6);
+  border-radius: var(--control-radius);
+  background: rgb(20 19 18 / 0.6);
+  font-size: 13px;
+}
+
+.scenic-shell .second-opinion header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: rgb(236 230 218 / 0.55);
+}
+
+.scenic-shell .second-opinion header strong {
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.scenic-shell .second-opinion-model {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.scenic-shell .second-opinion-status {
+  margin-left: auto;
+}
+
+.scenic-shell .second-opinion[data-status='running'] .second-opinion-status {
+  color: var(--color-amber);
+}
+
+.scenic-shell .second-opinion-findings {
+  margin: 8px 0 0;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--color-ink);
+}
+
+.scenic-shell .second-opinion p[role='status'],
+.scenic-shell .second-opinion-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: rgb(236 230 218 / 0.55);
 }

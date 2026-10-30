@@ -306,6 +306,7 @@ export function WorkspaceShell({
   inbox = null,
   onOpenReport,
   onExportConversation,
+  onShareConversation,
 }: {
   mainAgent: AgentDetail;
   /** The agent currently selected for agent-scoped Settings pages. */
@@ -382,6 +383,8 @@ export function WorkspaceShell({
   /** Downloads the conversation on screen as Markdown; absent when it
    *  cannot be exported. */
   onExportConversation?: () => void;
+  /** Opens who may read this chat. */
+  onShareConversation?: () => void;
 }) {
   const page = availablePage(route);
   const projectShown = route.kind === 'project';
@@ -535,6 +538,17 @@ export function WorkspaceShell({
             description: 'Download it as Markdown',
             group: 'Conversation',
             run: onExportConversation,
+          },
+        ]
+      : []),
+    ...(onShareConversation
+      ? [
+          {
+            id: 'share-conversation',
+            title: 'Share this conversation',
+            description: 'Read-only access for someone you choose',
+            group: 'Conversation',
+            run: onShareConversation,
           },
         ]
       : []),

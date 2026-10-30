@@ -115,10 +115,12 @@ export interface SessionCommandOptions {
   search: (words: string) => void;
   /** Opens or updates the current chat's model preference (`/model`). */
   chooseModel: (argument?: string) => void;
-  openChatPanel?: (
-    panel: 'tools' | 'review' | 'reports' | 'share',
-    argument?: string,
-  ) => void;
+  /** `/tools`: this agent's tools, in Settings. */
+  openTools?: () => void;
+  /** `/review [focus]`: a second opinion on the latest reply. */
+  review?: (focus?: string) => void;
+  /** `/share`: who may read this chat. */
+  share?: () => void;
   rename: (session: Session, title: string) => Promise<boolean>;
   archive: (session: Session, archived: boolean) => Promise<boolean>;
   exportSession: (session: Session) => Promise<void>;
@@ -332,12 +334,11 @@ export function useSessionCommands(
         session.kind === 'chat' &&
         ['web', 'api'].includes(session.origin) &&
         !session.parentRunId &&
-        current.openChatPanel
+        current.review
       ) {
-        for (const panel of ['tools', 'review', 'reports', 'share'] as const) {
-          result[panel] = (argument) =>
-            current.openChatPanel?.(panel, argument);
-        }
+        if (current.openTools) result.tools = () => current.openTools?.();
+        result.review = (argument) => current.review?.(argument || undefined);
+        if (current.share) result.share = () => current.share?.();
       }
       const { capabilities } = session;
       if (session.mainChat && !activeRun) {

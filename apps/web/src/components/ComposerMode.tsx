@@ -21,7 +21,22 @@ export interface ComposerModelState {
   onPick(model: string): void;
   /** Every other model lives in Settings. */
   onMore?(): void;
+  /** How hard the chosen model thinks, when it offers a choice. */
+  efforts?: readonly string[];
+  /** null: the model's own default. */
+  effort?: string | null;
+  onEffort?(effort: string | null): void;
 }
+
+const EFFORT_LABELS: Record<string, string> = {
+  none: 'Off',
+  minimal: 'Min',
+  low: 'Low',
+  medium: 'Med',
+  high: 'High',
+  xhigh: 'XHigh',
+  max: 'Max',
+};
 
 /**
  * The chip in the composer's controls row: "Do · model" or "Plan · model".
@@ -164,6 +179,30 @@ export function ComposerMode({
                   {name === model.current && <CheckIcon size={13} />}
                 </button>
               ))}
+              {model.onEffort && model.efforts && model.efforts.length > 0 && (
+                <div
+                  className="composer-thinking"
+                  role="radiogroup"
+                  aria-label="Thinking"
+                >
+                  <span>Thinking</span>
+                  {[null, ...model.efforts].map((effort) => (
+                    <button
+                      key={effort ?? 'default'}
+                      type="button"
+                      role="radio"
+                      aria-checked={(model.effort ?? null) === effort}
+                      disabled={model.busy}
+                      onClick={() => {
+                        if ((model.effort ?? null) !== effort)
+                          model.onEffort?.(effort);
+                      }}
+                    >
+                      {effort === null ? 'Auto' : (EFFORT_LABELS[effort] ?? effort)}
+                    </button>
+                  ))}
+                </div>
+              )}
               {model.onMore && (
                 <button
                   type="button"

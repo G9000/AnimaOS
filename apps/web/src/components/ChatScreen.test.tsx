@@ -2130,3 +2130,81 @@ describe('MessageList while history loads', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Second opinion on a reply', () => {
+  const reply: ChatMessage = {
+    id: 'reply-1',
+    role: 'Assistant',
+    content: { text: 'Use the blue plan.' },
+    created_at_ms: 2,
+  };
+  const review = {
+    id: 'review-1',
+    requestId: 'request-1',
+    sourceMessageId: 'reply-1',
+    sourceRunId: null,
+    evidenceDigest: 'digest',
+    focus: null,
+    reviewer: { provider: 'anthropic', model: 'claude-test' },
+    createdAtMs: 3,
+    finishedAtMs: 4,
+    evidenceLimited: false,
+  } as const;
+  const list = (secondOpinions: object) => (
+    <MessageList
+      agent={{ ...agent, messages: [reply] }}
+      sending={false}
+      scrollerRef={{ current: null }}
+      onSuggestion={vi.fn()}
+      actions={{ secondOpinions } as never}
+    />
+  );
+
+  it('asks about that reply and shows the opinion under it', async () => {
+    const user = userEvent.setup();
+    const request = vi.fn();
+    const view = render(
+      list({ reviewFor: () => null, request, cancel: vi.fn(), busy: false, error: null }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Second opinion' }));
+    expect(request).toHaveBeenCalledWith('reply-1');
+
+    view.rerender(
+      list({
+        reviewFor: () => ({
+          ...review,
+          status: 'completed',
+          findings: 'Blue misses the deadline.',
+          error: null,
+        }),
+        request,
+        cancel: vi.fn(),
+        busy: false,
+        error: null,
+      }),
+    );
+    const note = screen.getByRole('region', { name: 'Second opinion' });
+    expect(note).toHaveTextContent('anthropic / claude-test');
+    expect(note).toHaveTextContent('Blue misses the deadline.');
+    expect(screen.getByRole('button', { name: 'Ask again' })).toBeEnabled();
+  });
+
+  it('offers Cancel while the review runs', async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn();
+    render(
+      list({
+        reviewFor: () => ({ ...review, status: 'running', findings: null, error: null }),
+        request: vi.fn(),
+        cancel,
+        busy: true,
+        error: null,
+      }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Second opinion' }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(cancel).toHaveBeenCalledWith('review-1');
+  });
+});

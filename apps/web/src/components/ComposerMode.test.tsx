@@ -125,4 +125,35 @@ describe('ComposerMode', () => {
     const { container } = render(<ComposerMode />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('sets how hard the model thinks, with Auto for its default', async () => {
+    const user = userEvent.setup();
+    const onEffort = vi.fn();
+    render(
+      <ComposerMode
+        model={model({
+          efforts: ['low', 'medium', 'high'],
+          effort: 'medium',
+          onEffort,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /^Model, gpt-4\.1/ }));
+    const thinking = screen.getByRole('radiogroup', { name: 'Thinking' });
+    expect(screen.getByRole('radio', { name: 'Med' })).toBeChecked();
+    expect(thinking).toHaveTextContent('Auto');
+    await user.click(screen.getByRole('radio', { name: 'High' }));
+    expect(onEffort).toHaveBeenLastCalledWith('high');
+    await user.click(screen.getByRole('radio', { name: 'Auto' }));
+    expect(onEffort).toHaveBeenLastCalledWith(null);
+  });
+
+  it('offers no thinking choice when the model has none', async () => {
+    const user = userEvent.setup();
+    render(<ComposerMode model={model({ efforts: [], onEffort: vi.fn() })} />);
+    await user.click(screen.getByRole('button', { name: /^Model, gpt-4\.1/ }));
+    expect(
+      screen.queryByRole('radiogroup', { name: 'Thinking' }),
+    ).not.toBeInTheDocument();
+  });
 });

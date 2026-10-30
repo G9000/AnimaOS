@@ -15,6 +15,11 @@ import { HaloOrb } from './halo/HaloOrb';
 import { usePresenceSignals } from '../lib/presence';
 import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
+import {
+  SecondOpinionAction,
+  SecondOpinionNote,
+} from './sessions/SecondOpinion';
+import type { SecondOpinions } from '../hooks/useSecondOpinions';
 import type { SaveOutcome, SavedState } from '../hooks/useSaveToMemory';
 import type { ActionReceipt, SessionSummary } from '@animaos/sdk';
 import type { AgentDetail, ChatMessage } from '../lib/types';
@@ -136,6 +141,7 @@ const Bubble = memo(function Bubble({
   agentId,
   agentName = '',
   readAloud,
+  secondOpinions,
 }: {
   message: ChatMessage;
   /** Shown beside assistant replies so every reply is attributed. */
@@ -146,6 +152,8 @@ const Bubble = memo(function Bubble({
   savedLookup?: (messageId: string) => SavedState | null;
   agentId: string;
   readAloud?: ReadAloudController;
+  /** Offered on the companion's saved replies. */
+  secondOpinions?: SecondOpinions;
 }) {
   if (message.role !== 'User' && message.role !== 'Assistant') {
     return <EventPill message={message} />;
@@ -155,6 +163,8 @@ const Bubble = memo(function Bubble({
   const time = formatTime(message.created_at_ms);
   const source = messageSource(message);
   const automationPost = automationPostName(message);
+  const review =
+    !isUser && secondOpinions ? secondOpinions.reviewFor(message.id) : null;
   // A reply is a turn under the companion's name; the owner's words sit in
   // a slim bubble on the right. Actions stay out of the way until wanted.
   return (
@@ -211,7 +221,18 @@ const Bubble = memo(function Bubble({
               saved={savedLookup?.(message.id) ?? null}
             />
           )}
+        {!isUser && secondOpinions && message.content.text.trim() !== '' && (
+          <SecondOpinionAction
+            messageId={message.id}
+            review={review}
+            busy={secondOpinions.busy}
+            onRequest={secondOpinions.request}
+          />
+        )}
       </div>
+      {review && (
+        <SecondOpinionNote review={review} onCancel={secondOpinions!.cancel} />
+      )}
     </div>
   );
 });
@@ -507,6 +528,7 @@ const TranscriptEntry = memo(function TranscriptEntry({
             agentId={agentId}
             agentName={agentName}
             readAloud={readAloud}
+            secondOpinions={actions?.secondOpinions}
           />
           {isAcceptedBudgetWrapupMessage(item.message) && (
             <div className="mt-2 max-w-[85%] rounded-xl border border-line bg-panel-2/90 px-4 py-3 text-sm text-ink-2">

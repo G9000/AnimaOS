@@ -44,11 +44,7 @@ import { useMainChat } from './hooks/useMainChat';
 import { useSessionCommands } from './hooks/useSessionCommands';
 import { useChatModelPreferences } from './hooks/useChatModelPreferences';
 import { parseChatModelCommand } from './lib/chat-model-command';
-import {
-  chatPanelScope,
-  type ChatPanelName,
-  type ChatPanelRequest,
-} from './components/sessions/ChatExtensions';
+import { ShareConversationDialog } from './components/sessions/ShareConversationDialog';
 import { useSessionPending } from './hooks/useSessionPending';
 import { useSessionSends } from './hooks/useSessionSends';
 import { useSkillCommands } from './hooks/useSkillCommands';
@@ -110,7 +106,11 @@ import {
 import { useAttachmentSession } from './hooks/useAttachmentSession';
 import { useAttachments } from './hooks/useAttachments';
 import { recoveredDraft } from './lib/attachments';
-import { validPreviewEditContext, type PreviewEditContext } from '@animaos/sdk';
+import {
+  validPreviewEditContext,
+  type ChatReasoningEffort,
+  type PreviewEditContext,
+} from '@animaos/sdk';
 import type { SendAttachments } from './hooks/useSessionSends';
 
 interface AgentOperation {
@@ -1440,48 +1440,34 @@ export function ViewHarness() {
     daemon.chatModels,
     sessionRereads,
   );
-  const [chatPanel, setChatPanel] = useState<ChatPanelRequest | null>(null);
-  const currentOwnerScope = activeSession ? chatPanelScope(activeSession) : '';
-  const ownerScopeRef = useRef(currentOwnerScope);
-  ownerScopeRef.current = currentOwnerScope;
-  const openChatPanel = (
-    panel: ChatPanelName,
-    focus?: string,
-    startReview = false,
-  ) => {
+  // Second opinions live on each reply; /review asks about the latest one
+  // and bumps this so the reply reads its review.
+  const [reviewRefresh, setReviewRefresh] = useState(0);
+  const [sharing, setSharing] = useState<Session | null>(null);
+  const reviewsChat = (session: Session | null): session is Session =>
+    session?.kind === 'chat' &&
+    ['web', 'api'].includes(session.origin) &&
+    !session.parentRunId &&
+    daemon.chatModels !== undefined;
+  const startReview = (focus?: string) => {
     const session = activeSession;
-    if (!session || session.kind !== 'chat') return;
-    const scope = chatPanelScope(session);
-    const id = crypto.randomUUID();
-    setChatPanel({ scope, panel, id, ...(focus ? { focus } : {}) });
-    if (panel === 'review' && startReview && daemon.chatModels) {
-      void daemon.chatModels
-        .review(session.agentId, session.id, {
-          requestId: id,
-          clearGeneration: session.clearGeneration ?? 0,
-          ...(focus ? { focus } : {}),
-        })
-        .then(() => {
-          if (ownerScopeRef.current === scope)
-            setChatPanel({
-              scope,
-              panel,
-              id: `${id}:started`,
-              ...(focus ? { focus } : {}),
-            });
-        })
-        .catch((caught) => {
-          if (ownerScopeRef.current === scope)
-            setWorkspaceError(errorMessage(caught));
-        });
-    }
+    if (!reviewsChat(session)) return;
+    void daemon.chatModels
+      .review(session.agentId, session.id, {
+        requestId: crypto.randomUUID(),
+        clearGeneration: session.clearGeneration ?? 0,
+        ...(focus ? { focus } : {}),
+      })
+      .then(() => setReviewRefresh((value) => value + 1))
+      .catch((caught) => setWorkspaceError(errorMessage(caught)));
   };
+  /** `/model <provider> <model> [effort]` switches this chat; without an
+   *  argument, every model and the agent's default are in Settings. */
   const chooseChatModel = (argument = '') => {
-    if (!activeSession) {
+    if (!activeSession || !argument.trim()) {
       navigate({ kind: 'page', page: 'model' });
       return;
     }
-    openChatPanel('model');
     try {
       const preference = parseChatModelCommand(argument);
       if (preference) void chatModel.update(preference);
@@ -1530,8 +1516,11 @@ export function ViewHarness() {
     showCommands: () => setDraft('/'),
     search: setSessionQuery,
     chooseModel: chooseChatModel,
-    openChatPanel: (panel, focus) =>
-      openChatPanel(panel, focus, panel === 'review'),
+    openTools: () => navigate({ kind: 'page', page: 'capabilities' }),
+    review: startReview,
+    share: () => {
+      if (reviewsChat(activeSession)) setSharing(activeSession);
+    },
     rename: renameSession,
     archive: archiveSession,
     exportSession,
@@ -1736,16 +1725,9 @@ export function ViewHarness() {
       session={viewedSession}
       onMoveToProject={viewedSession && canMoveProjectChat(viewedSession) ? () => setMovingProjectChat(viewedSession) : undefined}
       onOpenProject={(projectId) => navigate({ kind: 'project', projectId })}
-      extensions={
-        viewedSession?.kind === 'chat' &&
-        ['web', 'api'].includes(viewedSession.origin) &&
-        !viewedSession.parentRunId &&
-        daemon.chatModels
-          ? {
-              request: chatPanel,
-              onOpen: (panel) => openChatPanel(panel),
-              onModelSaved: chatModel.adopt,
-            }
+      secondOpinions={
+        reviewsChat(viewedSession)
+          ? { api: daemon.chatModels, refreshKey: reviewRefresh }
           : undefined
       }
       historyAnchor={
@@ -1848,8 +1830,33 @@ export function ViewHarness() {
                   });
                 else chooseChatModel();
               },
-              onMore: () => chooseChatModel(),
-              moreLabel: activeSession ? 'Chat model & thinking…' : undefined,
+              ...(activeSession && chatModel.view
+                ? (() => {
+                    const view = chatModel.view;
+                    const primary = view.primary;
+                    const efforts =
+                      view.availableModels.find(
+                        (choice) =>
+                          choice.provider === primary.provider &&
+                          choice.model === primary.model,
+                      )?.reasoningEfforts ?? [];
+                    return {
+                      efforts,
+                      effort: primary.reasoningEffort ?? null,
+                      onEffort: (effort: string | null) =>
+                        void chatModel.update({
+                          mode: 'override',
+                          provider: primary.provider,
+                          model: primary.model,
+                          ...(effort
+                            ? { reasoningEffort: effort as ChatReasoningEffort }
+                            : {}),
+                        }),
+                    };
+                  })()
+                : {}),
+              onMore: () => navigate({ kind: 'page', page: 'model' }),
+              moreLabel: 'All models in Settings'
             }
           : undefined,
         setDraft,
@@ -2069,6 +2076,11 @@ export function ViewHarness() {
           onExportConversation={
             activeSession?.capabilities.export
               ? () => void exportSession(activeSession)
+              : undefined
+          }
+          onShareConversation={
+            reviewsChat(activeSession)
+              ? () => setSharing(activeSession)
               : undefined
           }
           inbox={
@@ -2367,6 +2379,15 @@ export function ViewHarness() {
         session={movingProjectChat} onClose={closeProjectMove} onMoved={() => {
           sessions.refresh(); setSessionRereads((value) => value + 1);
         }} />}
+      {sharing && (
+        <ShareConversationDialog
+          agentId={sharing.agentId}
+          sessionId={sharing.id}
+          title={sharing.title}
+          clearGeneration={sharing.clearGeneration ?? 0}
+          onClose={() => setSharing(null)}
+        />
+      )}
       {reportOpen && agent && (
         <WeeklyReport
           agentId={agent.id}

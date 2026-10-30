@@ -15,7 +15,6 @@ export type SlashCommandName =
   | 'model'
   | 'tools'
   | 'review'
-  | 'reports'
   | 'share'
   | 'compact'
   | 'branch'
@@ -71,11 +70,10 @@ export const SLASH_COMMANDS: readonly (SlashCommand & {
     needs: 'words to find',
     placeholder: '<words>',
   },
-  { name: 'model', description: 'Choose this chat’s model and thinking', acceptsArgument: true, placeholder: '[inherit | <provider> <model> [effort]]' },
-  { name: 'tools', description: 'Show this chat’s current tools and permissions' },
-  { name: 'review', description: 'Ask a different model for a second opinion', acceptsArgument: true, placeholder: '[focus]' },
-  { name: 'reports', description: 'Show saved results and pinned reports' },
-  { name: 'share', description: 'Manage authenticated read-only access to this chat' },
+  { name: 'model', description: 'Switch this chat’s model, or open model settings', acceptsArgument: true, placeholder: '[inherit | <provider> <model> [effort]]' },
+  { name: 'tools', description: 'Open this agent’s tools in Settings' },
+  { name: 'review', description: 'Get a second opinion on the latest reply', acceptsArgument: true, placeholder: '[focus]' },
+  { name: 'share', description: 'Choose who can read this chat' },
   {
     name: 'compact',
     description: 'Summarize earlier messages to make room',
