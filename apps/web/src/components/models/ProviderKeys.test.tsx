@@ -195,7 +195,12 @@ describe('ProviderKeys', () => {
 
   it('changes how a provider picks between its keys, once it has two', async () => {
     const user = userEvent.setup();
-    const second = { ...ENV_KEY, id: 'key_b', masked: 'sk-two…beef', source: 'file' as const };
+    const second = {
+      ...ENV_KEY,
+      id: 'key_b',
+      masked: 'sk-two…beef',
+      source: 'file' as const,
+    };
     vi.spyOn(daemon, 'providerKeys').mockResolvedValue({
       providers: [pool({ keys: [ENV_KEY, second] })],
     });
@@ -224,17 +229,24 @@ describe('ProviderKeys', () => {
       <ProviderKeys
         providers={[
           ...PROVIDERS,
-          { id: 'anthropic', label: 'Anthropic', requiresKey: true, configured: false, apiKeyEnvs: [] },
+          {
+            id: 'anthropic',
+            label: 'Anthropic',
+            requiresKey: true,
+            configured: false,
+            apiKeyEnvs: [],
+          },
         ]}
       />,
     );
-    expect(
-      await screen.findByRole('heading', { name: 'OpenAI' }),
-    ).toBeVisible();
+    const listed = await screen.findByRole('list', {
+      name: 'Providers with keys',
+    });
+    expect(within(listed).getByText('OpenAI')).toBeVisible();
     expect(screen.getByText('1 key · Ready')).toBeVisible();
     // One key: nothing to take turns between.
     expect(screen.queryByLabelText('How OpenAI picks a key')).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Anthropic' })).toBeNull();
+    expect(within(listed).queryByText('Anthropic')).toBeNull();
     // The form starts on a provider without a key.
     await user.type(screen.getByLabelText('API key for Anthropic'), 'sk-ant-x');
     await user.click(screen.getByRole('button', { name: 'Add key' }));

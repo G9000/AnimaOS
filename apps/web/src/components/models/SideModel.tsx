@@ -8,6 +8,11 @@ import {
   type ModelChoice,
 } from '../../lib/daemon-api';
 import { primaryBtnCls } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+} from '../settings/SettingsKit';
 
 function errorText(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
@@ -83,64 +88,62 @@ export function SideModel({
   };
 
   return (
-    <section
-      className="settings-group model-section"
-      aria-labelledby="settings-side-model"
+    <SettingsSection
+      id="settings-side-model"
+      title="Side-task model"
+      description="Titles, summaries, the smart check and task reviews. Leave empty to use each agent's own model."
     >
-      <h3 id="settings-side-model" className="settings-group-title">
-        Side-task model
-      </h3>
-      <p className="settings-group-help">
-        Titles, summaries, the smart check and task reviews. Leave empty to use
-        each agent's own model.
-      </p>
-      <div className="side-model-row">
-        <select
-          aria-label="Side-task provider"
-          className="field"
-          value={provider}
-          disabled={busy || disabled}
-          onChange={(event) => {
-            const next = event.target.value;
-            setProvider(next);
-            setModel(next ? (MODEL_SUGGESTIONS[next]?.[0] ?? '') : '');
-          }}
-        >
-          <option value="">Each agent's own model</option>
-          {ids.map((id) => (
-            <option key={id} value={id}>
-              {providers?.find((p) => p.id === id)?.label ?? id}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="Side-task model id"
-          className="field"
-          list="side-model-suggestions"
-          value={model}
-          disabled={busy || disabled || !provider}
-          placeholder="model id"
-          onChange={(event) => setModel(event.target.value)}
-        />
-        <datalist id="side-model-suggestions">
-          {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-        <button
-          type="button"
-          className={primaryBtnCls}
-          disabled={unchanged || !valid || busy || disabled}
-          onClick={() => void submit()}
-        >
-          {busy ? 'Saving…' : flash ? 'Saved ✓' : 'Save'}
-        </button>
-      </div>
+      <SettingsCard>
+        <SettingsRow title="Model for small background tasks">
+          <div className="side-model-row">
+            <select
+              aria-label="Side-task provider"
+              className="field"
+              value={provider}
+              disabled={busy || disabled}
+              onChange={(event) => {
+                const next = event.target.value;
+                setProvider(next);
+                setModel(next ? (MODEL_SUGGESTIONS[next]?.[0] ?? '') : '');
+              }}
+            >
+              <option value="">Each agent's own model</option>
+              {ids.map((id) => (
+                <option key={id} value={id}>
+                  {providers?.find((p) => p.id === id)?.label ?? id}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Side-task model id"
+              className="field"
+              list="side-model-suggestions"
+              value={model}
+              disabled={busy || disabled || !provider}
+              placeholder="model id"
+              onChange={(event) => setModel(event.target.value)}
+            />
+            <datalist id="side-model-suggestions">
+              {(MODEL_SUGGESTIONS[provider] ?? []).map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <button
+              type="button"
+              className={primaryBtnCls}
+              disabled={unchanged || !valid || busy || disabled}
+              onClick={() => void submit()}
+            >
+              {busy ? 'Saving…' : flash ? 'Saved ✓' : 'Save'}
+            </button>
+          </div>
+        </SettingsRow>
+      </SettingsCard>
       {error ? (
         <p role="alert" className="key-error">
           {error}
         </p>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }

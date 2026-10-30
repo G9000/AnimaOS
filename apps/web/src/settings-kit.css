@@ -1,0 +1,171 @@
+/* The settings kit (components/settings/SettingsKit.tsx): sections, cards and
+ * rows that every settings page shares. Imported after scenic.css so it is
+ * the last word on these classes. */
+
+.sk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+.sk-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sk-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sk-section-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sk-section-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+}
+
+.sk-section-desc {
+  max-width: 66ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.sk-section-action {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+/* A card: one surface, rows divided by hairlines. */
+.sk-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid var(--control-line);
+  border-radius: var(--panel-radius);
+  background: var(--control-fill);
+}
+
+.sk-card > * + * {
+  border-top: 1px solid var(--sk-hairline);
+}
+
+:root {
+  --sk-hairline: rgb(236 230 218 / 0.08);
+}
+
+:root[data-appearance-theme='light'] {
+  --sk-hairline: rgb(26 26 24 / 0.08);
+}
+
+.sk-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.sk-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+
+.sk-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sk-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.sk-row-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-ink-3);
+}
+
+.sk-row-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Controls sized for a row, not a form. */
+.sk-row-control .field {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+.sk-row-control input[type='number'].field {
+  width: 88px;
+  text-align: right;
+}
+
+.sk-empty {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+/* A footer inside a card: Save, Discard, Add… on the right. */
+.sk-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+}
+
+/* Small mono status text on the right of a row (counts, times). */
+.sk-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .sk-section-head,
+  .sk-row-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sk-row-control {
+    flex-wrap: wrap;
+  }
+}

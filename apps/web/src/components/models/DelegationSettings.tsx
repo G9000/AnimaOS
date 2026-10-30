@@ -8,6 +8,12 @@ import {
   type DaemonProvider,
 } from '../../lib/daemon-api';
 import { ghostBtnCls, primaryBtnCls } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from '../settings/SettingsKit';
 
 type LimitName =
   | 'maxConcurrent'
@@ -18,6 +24,7 @@ type LimitName =
 const LIMITS: {
   name: LimitName;
   label: string;
+  hint: string;
   initial: number;
   min: number;
   max: number;
@@ -26,6 +33,7 @@ const LIMITS: {
   {
     name: 'maxConcurrent',
     label: 'Concurrent helpers',
+    hint: 'How many helpers can work at the same time.',
     initial: 4,
     min: 1,
     max: 8,
@@ -34,6 +42,7 @@ const LIMITS: {
   {
     name: 'maxStartsPerRun',
     label: 'Helpers per run',
+    hint: 'The most one reply can bring in.',
     initial: 4,
     min: 1,
     max: 16,
@@ -42,6 +51,7 @@ const LIMITS: {
   {
     name: 'maxToolIterations',
     label: 'Tool turns per helper',
+    hint: 'Steps a helper can take before it stops.',
     initial: 8,
     min: 1,
     max: 32,
@@ -50,6 +60,7 @@ const LIMITS: {
   {
     name: 'timeoutMs',
     label: 'Time limit (seconds)',
+    hint: 'How long one helper can keep working.',
     initial: 120000,
     min: 1000,
     max: 600000,
@@ -58,6 +69,7 @@ const LIMITS: {
   {
     name: 'maxOutputTokens',
     label: 'Output tokens per reply',
+    hint: 'The longest answer a helper can write.',
     initial: 4096,
     min: 1,
     max: 16384,
@@ -218,9 +230,9 @@ function ModelPicker({
     choice.provider,
   ].filter((id, i, all) => id && all.indexOf(id) === i);
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <label>
-        <span className="settings-field-note">{label} provider</span>
+    <>
+      <label className="helper-field">
+        <span>{label} provider</span>
         <select
           aria-label={label + ' provider'}
           className="field"
@@ -239,8 +251,8 @@ function ModelPicker({
           ))}
         </select>
       </label>
-      <label>
-        <span className="settings-field-note">{label} model</span>
+      <label className="helper-field">
+        <span>{label} model</span>
         <select
           aria-label={label + ' model'}
           className="field"
@@ -264,8 +276,8 @@ function ModelPicker({
         </select>
       </label>
       {custom && (
-        <label className="sm:col-span-2">
-          <span className="settings-field-note">{label} custom model</span>
+        <label className="helper-field helper-field-wide">
+          <span>{label} custom model</span>
           <input
             aria-label={label + ' custom model'}
             className="field"
@@ -277,7 +289,7 @@ function ModelPicker({
           />
         </label>
       )}
-    </div>
+    </>
   );
 }
 
@@ -392,220 +404,223 @@ export function DelegationSettings({
     }
   };
 
+  const addRoute = () => {
+    let id = 'fast';
+    for (let n = 2; draft.routes.some((route) => route.id === id); n += 1)
+      id = 'route-' + n;
+    const route: RouteDraft = {
+      ...newChoice(primary, false),
+      id,
+      key: 'new-route-' + nextKey.current++,
+      fallbacks: [],
+    };
+    update((current) => ({ ...current, routes: [...current.routes, route] }));
+  };
+
   return (
-    <section
-      className="settings-group model-section helper-settings"
-      aria-labelledby={headingId}
+    <fieldset
+      disabled={disabled || busy}
+      className="helper-settings sk-fieldset"
     >
-      <h3 id={headingId} className="settings-group-title">
-        Helpers
-      </h3>
-      <p className="settings-group-help">
-        Helpers take on focused tasks with their own playbook, without the main
-        personality. These limits keep them in check.
-      </p>
-      <fieldset disabled={disabled || busy} className="settings-fieldset">
-        <legend className="sr-only">Helper limits and routes</legend>
-        <div className="helper-limits">
+      <legend className="sr-only">Helper limits and routes</legend>
+      <SettingsSection
+        id={headingId}
+        title="Helpers"
+        description="Helpers take on focused tasks with their own playbook, without the main personality. These limits keep them in check."
+      >
+        <SettingsCard>
           {LIMITS.map((limit) => (
-            <label key={limit.name} className="helper-limit">
-              <span>{limit.label}</span>
-              <input
-                aria-label={limit.label}
-                className="field"
-                type="number"
-                min={limit.min / limit.scale}
-                max={limit.max / limit.scale}
-                step={limit.scale === 1 ? 1 : 0.001}
-                value={draft.limits[limit.name]}
-                onChange={(event) =>
-                  update((current) => ({
-                    ...current,
-                    limits: {
-                      ...current.limits,
-                      [limit.name]: event.target.value,
-                    },
-                  }))
-                }
-              />
-            </label>
-          ))}
-        </div>
-        <div className="model-section-head helper-routes-head">
-          <div>
-            <h4 className="model-subtitle">Routes</h4>
-            <p className="settings-group-help">
-              Name a route, such as fast or research, to give those tasks their
-              own model. Without one, helpers use the current model.
-            </p>
-          </div>
-          {draft.routes.length < 8 && (
-            <button
-              type="button"
-              className={ghostBtnCls}
-              onClick={() => {
-                let id = 'fast';
-                for (
-                  let n = 2;
-                  draft.routes.some((route) => route.id === id);
-                  n += 1
-                )
-                  id = 'route-' + n;
-                const route: RouteDraft = {
-                  ...newChoice(primary, false),
-                  id,
-                  key: 'new-route-' + nextKey.current++,
-                  fallbacks: [],
-                };
-                update((current) => ({
-                  ...current,
-                  routes: [...current.routes, route],
-                }));
-              }}
-            >
-              Add route
-            </button>
-          )}
-        </div>
-        {draft.routes.map((route, i) => {
-          const label = 'Route ' + (i + 1);
-          return (
-            <fieldset key={route.key} className="settings-fieldset helper-route">
-              <legend className="model-subtitle">{label}</legend>
-              <label>
-                <span className="settings-field-note">{label} name</span>
+            <SettingsRow
+              key={limit.name}
+              title={limit.label}
+              description={limit.hint}
+              control={
                 <input
-                  aria-label={label + ' name'}
+                  aria-label={limit.label}
                   className="field"
-                  value={route.id}
-                  maxLength={32}
-                  placeholder="fast or research"
+                  type="number"
+                  min={limit.min / limit.scale}
+                  max={limit.max / limit.scale}
+                  step={limit.scale === 1 ? 1 : 0.001}
+                  value={draft.limits[limit.name]}
                   onChange={(event) =>
-                    updateRoute(route.key, (current) => ({
+                    update((current) => ({
                       ...current,
-                      id: event.target.value,
+                      limits: {
+                        ...current.limits,
+                        [limit.name]: event.target.value,
+                      },
                     }))
                   }
                 />
-              </label>
-              <ModelPicker
-                key={route.key + route.provider}
-                label={label}
-                choice={route}
-                providers={providers}
-                onChange={(choice) =>
-                  updateRoute(route.key, (current) => ({
-                    ...current,
-                    ...choice,
-                  }))
-                }
-              />
-              {route.fallbacks.map((fallback, n) => (
-                <div key={fallback.key} className="helper-route-fallback">
+              }
+            />
+          ))}
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection
+        title="Routes"
+        description="Name a route, such as fast or research, to give those tasks their own model. Without one, helpers use the current model."
+        action={
+          draft.routes.length < 8 && (
+            <button type="button" className={ghostBtnCls} onClick={addRoute}>
+              Add route
+            </button>
+          )
+        }
+      >
+        <SettingsCard>
+          {draft.routes.length === 0 && (
+            <SettingsEmpty>No routes yet.</SettingsEmpty>
+          )}
+          {draft.routes.map((route, i) => {
+            const label = 'Route ' + (i + 1);
+            return (
+              <div key={route.key} className="sk-row helper-route">
+                <div className="helper-route-grid">
+                  <label className="helper-field">
+                    <span>{label} name</span>
+                    <input
+                      aria-label={label + ' name'}
+                      className="field"
+                      value={route.id}
+                      maxLength={32}
+                      placeholder="fast or research"
+                      onChange={(event) =>
+                        updateRoute(route.key, (current) => ({
+                          ...current,
+                          id: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
                   <ModelPicker
-                    key={fallback.key + fallback.provider}
-                    label={label + ' fallback ' + (n + 1)}
-                    choice={fallback}
+                    key={route.key + route.provider}
+                    label={label}
+                    choice={route}
                     providers={providers}
                     onChange={(choice) =>
                       updateRoute(route.key, (current) => ({
                         ...current,
-                        fallbacks: current.fallbacks.map((item) =>
-                          item.key === fallback.key
-                            ? { ...item, ...choice }
-                            : item,
-                        ),
+                        ...choice,
                       }))
                     }
                   />
-                  <div className="fallback-actions">
-                    {([-1, 1] as const).map((by) => (
+                </div>
+                {route.fallbacks.map((fallback, n) => (
+                  <div key={fallback.key} className="helper-route-fallback">
+                    <div className="helper-route-grid">
+                      <ModelPicker
+                        key={fallback.key + fallback.provider}
+                        label={label + ' fallback ' + (n + 1)}
+                        choice={fallback}
+                        providers={providers}
+                        onChange={(choice) =>
+                          updateRoute(route.key, (current) => ({
+                            ...current,
+                            fallbacks: current.fallbacks.map((item) =>
+                              item.key === fallback.key
+                                ? { ...item, ...choice }
+                                : item,
+                            ),
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="fallback-actions">
+                      {([-1, 1] as const).map((by) => (
+                        <button
+                          key={by}
+                          type="button"
+                          className={ghostBtnCls}
+                          aria-label={
+                            'Move ' +
+                            label.toLowerCase() +
+                            ' fallback ' +
+                            (n + 1) +
+                            (by === -1 ? ' up' : ' down')
+                          }
+                          disabled={
+                            by === -1
+                              ? n === 0
+                              : n === route.fallbacks.length - 1
+                          }
+                          onClick={() =>
+                            updateRoute(route.key, (current) => {
+                              const fallbacks = [...current.fallbacks];
+                              const [moved] = fallbacks.splice(n, 1);
+                              fallbacks.splice(n + by, 0, moved);
+                              return { ...current, fallbacks };
+                            })
+                          }
+                        >
+                          {by === -1 ? '↑' : '↓'}
+                        </button>
+                      ))}
                       <button
-                        key={by}
                         type="button"
                         className={ghostBtnCls}
                         aria-label={
-                          'Move ' +
+                          'Remove ' +
                           label.toLowerCase() +
                           ' fallback ' +
-                          (n + 1) +
-                          (by === -1 ? ' up' : ' down')
-                        }
-                        disabled={
-                          by === -1 ? n === 0 : n === route.fallbacks.length - 1
+                          (n + 1)
                         }
                         onClick={() =>
-                          updateRoute(route.key, (current) => {
-                            const fallbacks = [...current.fallbacks];
-                            const [moved] = fallbacks.splice(n, 1);
-                            fallbacks.splice(n + by, 0, moved);
-                            return { ...current, fallbacks };
-                          })
+                          updateRoute(route.key, (current) => ({
+                            ...current,
+                            fallbacks: current.fallbacks.filter(
+                              (item) => item.key !== fallback.key,
+                            ),
+                          }))
                         }
                       >
-                        {by === -1 ? '↑' : '↓'}
+                        Remove fallback
                       </button>
-                    ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="helper-route-actions">
+                  {route.fallbacks.length < 3 && (
                     <button
                       type="button"
                       className={ghostBtnCls}
-                      aria-label={
-                        'Remove ' + label.toLowerCase() + ' fallback ' + (n + 1)
-                      }
-                      onClick={() =>
+                      aria-label={'Add ' + label.toLowerCase() + ' fallback'}
+                      onClick={() => {
+                        const fallback = {
+                          ...newChoice(route, true),
+                          key: 'new-fallback-' + nextKey.current++,
+                        };
                         updateRoute(route.key, (current) => ({
                           ...current,
-                          fallbacks: current.fallbacks.filter(
-                            (item) => item.key !== fallback.key,
-                          ),
-                        }))
-                      }
+                          fallbacks: [...current.fallbacks, fallback],
+                        }));
+                      }}
                     >
-                      Remove fallback
+                      Add fallback
                     </button>
-                  </div>
-                </div>
-              ))}
-              <div className="helper-route-actions">
-                {route.fallbacks.length < 3 && (
+                  )}
                   <button
                     type="button"
                     className={ghostBtnCls}
-                    aria-label={'Add ' + label.toLowerCase() + ' fallback'}
-                    onClick={() => {
-                      const fallback = {
-                        ...newChoice(route, true),
-                        key: 'new-fallback-' + nextKey.current++,
-                      };
-                      updateRoute(route.key, (current) => ({
+                    aria-label={'Remove ' + label.toLowerCase()}
+                    onClick={() =>
+                      update((current) => ({
                         ...current,
-                        fallbacks: [...current.fallbacks, fallback],
-                      }));
-                    }}
+                        routes: current.routes.filter(
+                          (item) => item.key !== route.key,
+                        ),
+                      }))
+                    }
                   >
-                    Add fallback
+                    Remove route
                   </button>
-                )}
-                <button
-                  type="button"
-                  className={ghostBtnCls}
-                  aria-label={'Remove ' + label.toLowerCase()}
-                  onClick={() =>
-                    update((current) => ({
-                      ...current,
-                      routes: current.routes.filter(
-                        (item) => item.key !== route.key,
-                      ),
-                    }))
-                  }
-                >
-                  Remove route
-                </button>
+                </div>
               </div>
-            </fieldset>
-          );
-        })}
-      </fieldset>
+            );
+          })}
+        </SettingsCard>
+      </SettingsSection>
       {problems.length > 0 && (
         <div role="alert" className="key-error">
           <ul>
@@ -643,6 +658,6 @@ export function DelegationSettings({
           {busy ? 'Saving helper settings…' : 'Save helper settings'}
         </button>
       </div>
-    </section>
+    </fieldset>
   );
 }

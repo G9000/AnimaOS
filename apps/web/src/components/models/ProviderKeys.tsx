@@ -8,6 +8,12 @@ import {
   type ProviderKeys as ProviderKeysView,
 } from '../../lib/daemon-api';
 import { ghostBtnCls } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from '../settings/SettingsKit';
 import { AddKeyForm, KEYS_NOT_PERSISTED_NOTE } from './AddKeyForm';
 
 const STRATEGIES: readonly { value: KeyStrategy; label: string }[] = [
@@ -132,16 +138,11 @@ export function ProviderKeys({
   ].map((pool) => ({ id: pool.id, label: label(pool.id) }));
 
   return (
-    <section
-      className="settings-group model-section"
-      aria-labelledby="settings-api-keys"
+    <SettingsSection
+      id="settings-api-keys"
+      title="API keys"
+      description="Keys stay in the operating-system keychain, never in anima's files."
     >
-      <h3 id="settings-api-keys" className="settings-group-title">
-        API keys
-      </h3>
-      <p className="settings-group-help">
-        Keys stay in the operating-system keychain, never in anima's files.
-      </p>
       {shown.some((pool) => !pool.persisted) && (
         <p role="note" className="key-warning">
           {KEYS_NOT_PERSISTED_NOTE}
@@ -152,91 +153,98 @@ export function ProviderKeys({
           {error}
         </p>
       ) : null}
-      {pools === null && !error ? (
-        <p className="settings-group-help">Loading keys…</p>
-      ) : null}
-      {connected.length > 0 && (
-        <ul className="key-providers">
-          {connected.map((pool) => (
-            <li key={pool.id} className="key-provider">
-              <div className="key-provider-head">
-                <h4 className="key-provider-name">{label(pool.id)}</h4>
-                <span className="key-provider-meta">{poolSummary(pool)}</span>
-                {/* Taking turns only means something with two keys. */}
-                {pool.keys.length > 1 && (
-                  <select
-                    aria-label={`How ${label(pool.id)} picks a key`}
-                    className="field key-strategy"
-                    value={pool.strategy}
-                    disabled={disabled}
-                    onChange={(event) =>
-                      void pick(pool.id, event.target.value as KeyStrategy)
-                    }
-                  >
-                    {STRATEGIES.map((strategy) => (
-                      <option key={strategy.value} value={strategy.value}>
-                        {strategy.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <ul className="key-list">
-                {pool.keys.map((key) => (
-                  <li
-                    key={key.id}
-                    className={`key-row${key.status === 'resting' ? ' is-resting' : ''}`}
-                  >
-                    <code className="key-masked">{key.masked}</code>
-                    {key.label ? (
-                      <span className="key-label">{key.label}</span>
-                    ) : null}
-                    {key.source === 'env' ? (
-                      <span className="key-label">From the environment</span>
-                    ) : null}
-                    <span className="key-status">{keyStatus(key)}</span>
-                    {key.status === 'resting' && (
-                      <button
-                        type="button"
-                        className={ghostBtnCls}
-                        aria-label={`Try key ${key.masked} now`}
-                        disabled={disabled}
-                        onClick={() => void wake(pool.id, key)}
-                      >
-                        Try now
-                      </button>
-                    )}
-                    {key.source === 'file' && (
-                      <button
-                        type="button"
-                        className={ghostBtnCls}
-                        aria-label={`Remove key ${key.masked}`}
-                        disabled={disabled}
-                        onClick={() => void remove(pool.id, key)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      )}
-      {addable.length > 0 && (
-        <div className="key-add-panel">
-          <span className="key-add-title">
-            {connected.length > 0 ? 'Add a key' : 'Add your first key'}
-          </span>
-          <AddKeyForm
-            providers={addable}
-            buttonLabel="Add key"
-            disabled={disabled}
-            onAdded={changed}
-          />
-        </div>
-      )}
-    </section>
+      <SettingsCard>
+        {pools === null && !error ? (
+          <SettingsEmpty>Loading keys…</SettingsEmpty>
+        ) : null}
+        {connected.length > 0 && (
+          <ul className="key-providers" aria-label="Providers with keys">
+            {connected.map((pool) => (
+              <SettingsRow
+                as="li"
+                key={pool.id}
+                className="key-provider"
+                title={label(pool.id)}
+                description={poolSummary(pool)}
+                control={
+                  // Taking turns only means something with two keys.
+                  pool.keys.length > 1 && (
+                    <select
+                      aria-label={`How ${label(pool.id)} picks a key`}
+                      className="field key-strategy"
+                      value={pool.strategy}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        void pick(pool.id, event.target.value as KeyStrategy)
+                      }
+                    >
+                      {STRATEGIES.map((strategy) => (
+                        <option key={strategy.value} value={strategy.value}>
+                          {strategy.label}
+                        </option>
+                      ))}
+                    </select>
+                  )
+                }
+              >
+                <ul className="key-list">
+                  {pool.keys.map((key) => (
+                    <li
+                      key={key.id}
+                      className={`key-row${key.status === 'resting' ? ' is-resting' : ''}`}
+                    >
+                      <code className="key-masked">{key.masked}</code>
+                      {key.label ? (
+                        <span className="key-label">{key.label}</span>
+                      ) : null}
+                      {key.source === 'env' ? (
+                        <span className="key-label">From the environment</span>
+                      ) : null}
+                      <span className="key-status">{keyStatus(key)}</span>
+                      {key.status === 'resting' && (
+                        <button
+                          type="button"
+                          className={ghostBtnCls}
+                          aria-label={`Try key ${key.masked} now`}
+                          disabled={disabled}
+                          onClick={() => void wake(pool.id, key)}
+                        >
+                          Try now
+                        </button>
+                      )}
+                      {key.source === 'file' && (
+                        <button
+                          type="button"
+                          className={ghostBtnCls}
+                          aria-label={`Remove key ${key.masked}`}
+                          disabled={disabled}
+                          onClick={() => void remove(pool.id, key)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </SettingsRow>
+            ))}
+          </ul>
+        )}
+        {addable.length > 0 && (
+          <SettingsRow
+            className="key-add-panel"
+            title={connected.length > 0 ? 'Add a key' : 'Add your first key'}
+            description="Pick a provider and paste its key."
+          >
+            <AddKeyForm
+              providers={addable}
+              buttonLabel="Add key"
+              disabled={disabled}
+              onAdded={changed}
+            />
+          </SettingsRow>
+        )}
+      </SettingsCard>
+    </SettingsSection>
   );
 }

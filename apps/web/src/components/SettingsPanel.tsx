@@ -28,6 +28,7 @@ import { AgentProfileDetails } from './AgentProfileDetails';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
+import { SettingsSection } from './settings/SettingsKit';
 import { DelegationSettings } from './models/DelegationSettings';
 import { ProviderKeys } from './models/ProviderKeys';
 import { SideModel } from './models/SideModel';
@@ -1220,17 +1221,13 @@ export function SettingsPanel({
       )}
 
       {shows('model') && (
-        <section
-          className="settings-group model-section"
-          aria-labelledby="settings-model"
+        <>
+        <SettingsSection
+          id="settings-model"
+          title="Main model"
+          description="Used for every reply unless a task asks for something stronger."
         >
-          <h3 id="settings-model" className="settings-group-title">
-            Main model
-          </h3>
-          <p className="settings-group-help">
-            Used for every reply unless a task asks for something stronger.
-          </p>
-          <div className="settings-model-block">
+          <div className="sk-card settings-model-block">
             <div className="settings-model-summary" data-testid="main-model">
               <span className="settings-model-mark" aria-hidden="true">
                 <PenIcon name="cpu-fill" size={16} />
@@ -1361,6 +1358,7 @@ export function SettingsPanel({
               )}
             </details>
           </div>
+        </SettingsSection>
           <FallbackModels
             key={'fallbacks:' + agent.id}
             primary={{ provider: agent.provider, model: agent.model }}
@@ -1378,7 +1376,7 @@ export function SettingsPanel({
             disabled={controlsDisabled}
             save={(delegation) => saveSettings({ settings: { delegation } })}
           />
-        </section>
+        </>
       )}
 
       {shows('model') && (

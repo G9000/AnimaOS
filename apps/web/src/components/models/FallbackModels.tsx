@@ -8,6 +8,11 @@ import {
   type ModelChoice,
 } from '../../lib/daemon-api';
 import { ghostBtnCls, primaryBtnCls } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsSection,
+} from '../settings/SettingsKit';
 
 /** The daemon accepts at most this many. */
 export const MAX_FALLBACKS = 3;
@@ -131,21 +136,13 @@ export function FallbackModels({
   };
 
   return (
-    <section
-      className="settings-group model-section fallback-models"
-      aria-labelledby="settings-fallbacks"
-    >
-      <div className="model-section-head">
-        <div>
-          <h3 id="settings-fallbacks" className="settings-group-title">
-            When it can't answer
-          </h3>
-          <p className="settings-group-help">
-            If the main model fails or hits a limit, {agentName} tries these
-            in order and tells you in the chat.
-          </p>
-        </div>
-        {rows.length < MAX_FALLBACKS && (
+    <SettingsSection
+      id="settings-fallbacks"
+      className="fallback-models"
+      title="When it can't answer"
+      description={`If the main model fails or hits a limit, ${agentName} tries these in order and tells you in the chat.`}
+      action={
+        rows.length < MAX_FALLBACKS && (
           <button
             type="button"
             className={ghostBtnCls}
@@ -154,15 +151,17 @@ export function FallbackModels({
           >
             Add fallback
           </button>
-        )}
-      </div>
-      {rows.length === 0 && (
-        <p className="model-empty">
-          No fallbacks: if the main model can't answer, the reply stops there.
-        </p>
-      )}
-      {rows.length > 0 && (
-        <ol className="fallback-list">
+        )
+      }
+    >
+      {rows.length === 0 ? (
+        <SettingsCard>
+          <SettingsEmpty>
+            No fallbacks: if the main model can't answer, the reply stops there.
+          </SettingsEmpty>
+        </SettingsCard>
+      ) : (
+        <SettingsCard as="ol" className="fallback-list">
           {rows.map((row, index) => {
             const n = index + 1;
             return (
@@ -245,7 +244,7 @@ export function FallbackModels({
               </li>
             );
           })}
-        </ol>
+        </SettingsCard>
       )}
       <div className="model-actions">
         <button
@@ -257,6 +256,6 @@ export function FallbackModels({
           {busy ? 'Saving…' : 'Save fallbacks'}
         </button>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

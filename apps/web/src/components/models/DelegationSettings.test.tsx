@@ -99,9 +99,7 @@ describe('Helper routing and limits', () => {
         sections={['model']}
       />,
     );
-    expect(
-      screen.getByRole('heading', { name: 'Helpers' }),
-    ).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Helpers' })).toBeVisible();
   });
   it('grants background helper tools only after the owner changes the separate ability', async () => {
     const save = makeSave();
