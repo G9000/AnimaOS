@@ -177,6 +177,7 @@ export function ComposerMode({
                   }}
                 >
                   {model.moreLabel ?? 'All models and providers…'}
+                  <span aria-hidden="true">→</span>
                 </button>
               )}
               {model.error && (

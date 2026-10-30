@@ -2213,45 +2213,53 @@ button.scenic-thread[aria-expanded='true'] {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 300px;
-  max-height: 340px;
-  padding: 6px;
+  width: 288px;
+  max-height: 360px;
+  padding: 4px;
   overflow-y: auto;
   border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 2px;
-  background: rgb(20 20 19 / 0.97);
-  box-shadow: 0 16px 44px rgb(0 0 0 / 0.6);
-  backdrop-filter: blur(24px);
+  border-radius: var(--panel-radius);
+  /* Solid, not frosted: a translucent panel inside the blurred composer
+   * lets the conversation show through in some browsers. */
+  background: #171615;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.03) inset,
+    0 18px 48px rgb(0 0 0 / 0.65);
 }
 
 .scenic-shell .composer-menu > [role='group'] {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+}
+
+.scenic-shell .composer-menu > [role='group'] + [role='group'] {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgb(236 230 218 / 0.08);
 }
 
 .scenic-shell .composer-menu-label {
   display: block;
-  padding: 8px 8px 4px;
+  padding: 8px 10px 4px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 9.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgb(236 230 218 / 0.35);
+  color: rgb(236 230 218 / 0.42);
 }
 
 .scenic-shell .composer-menu-item {
   display: flex;
   flex: none;
   height: auto;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
-  padding: 8px;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--control-radius);
   background: none;
   color: var(--color-ink);
   text-align: left;
@@ -2260,7 +2268,14 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .composer-menu-item > svg:first-child {
   flex: none;
-  color: rgb(236 230 218 / 0.6);
+  margin-top: 2px;
+  color: rgb(236 230 218 / 0.5);
+}
+
+.scenic-shell .composer-menu-item > svg:last-child:not(:first-child) {
+  flex: none;
+  align-self: center;
+  color: var(--color-accent);
 }
 
 .scenic-shell .composer-menu-item > span {
@@ -2274,25 +2289,26 @@ button.scenic-thread[aria-expanded='true'] {
 .scenic-shell .composer-menu-item strong {
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.35;
 }
 
 .scenic-shell .composer-menu-item small {
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.4;
   color: rgb(236 230 218 / 0.55);
 }
 
 .scenic-shell .composer-menu-item[aria-checked='true'] {
-  background: rgb(233 77 171 / 0.1);
+  background: rgb(236 230 218 / 0.06);
 }
 
-.scenic-shell .composer-menu-item[aria-checked='true'] svg {
+.scenic-shell .composer-menu-item[aria-checked='true'] > svg:first-child {
   color: var(--color-accent);
 }
 
 .scenic-shell .composer-menu-item:hover:not(:disabled),
 .scenic-shell .composer-menu-item:focus-visible {
-  background: rgb(236 230 218 / 0.08);
+  background: rgb(236 230 218 / 0.09);
 }
 
 .scenic-shell .composer-menu-item:disabled {
@@ -2300,20 +2316,31 @@ button.scenic-thread[aria-expanded='true'] {
   cursor: not-allowed;
 }
 
+.scenic-shell .composer-menu-item--model {
+  align-items: center;
+}
+
 .scenic-shell .composer-menu-item--model strong {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scenic-shell .composer-menu-more {
-  color: rgb(236 230 218 / 0.6);
-  font-size: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: rgb(236 230 218 / 0.62);
+}
+
+.scenic-shell .composer-menu-more:hover:not(:disabled) {
+  color: var(--color-ink);
 }
 
 .scenic-shell .composer-menu-error {
   margin: 0;
-  padding: 6px 8px;
+  padding: 6px 10px;
   font-size: 12px;
   color: var(--color-danger);
 }
