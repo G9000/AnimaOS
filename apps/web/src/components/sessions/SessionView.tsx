@@ -38,6 +38,7 @@ import {
 } from '../../lib/transcript';
 import { ghostBtnCls } from '../ui-bits';
 import { useReadAloud } from '../../hooks/useReadAloud';
+import { useAppearancePreferences } from '../../lib/appearance-preferences';
 import type { AttachmentDraft } from '../../lib/attachments';
 import type { KnownRunAttachments } from '../../lib/run-attachments';
 import { BrowserTaskControls } from './BrowserTaskControls';
@@ -496,6 +497,7 @@ export function SessionView({
   const voiceKey =
     composer.conversationKey ??
     `${session?.agentId ?? agent.id}\u0000${sessionId ?? 'home'}`;
+  const [{ advancedInput }] = useAppearancePreferences();
   const readAloud = useReadAloud(
     voiceKey,
     missing ||
@@ -860,9 +862,13 @@ export function SessionView({
           }
           savedAttachmentCount={composer.savedAttachmentCount}
           mode={
-            session?.kind === 'chat' || !session ? composer.mode : undefined
+            (session?.kind === 'chat' || !session) &&
+            // A chat left in Plan keeps its chip, so it never plans unseen.
+            (advancedInput || composer.mode?.plan)
+              ? composer.mode
+              : undefined
           }
-          model={composer.model}
+          model={advancedInput ? composer.model : undefined}
           tools={
             <>
               {session?.kind === 'chat' &&

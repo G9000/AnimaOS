@@ -229,6 +229,19 @@ export function AppearancePage() {
             }
           />
         </label>
+        <label className="appearance-motion-row">
+          <span className="appearance-choice-copy">
+            <strong>Advanced input</strong>
+            <small>Do/Plan and the model picker beside attachments</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={preferences.advancedInput}
+            onChange={(event) =>
+              setPreferences({ advancedInput: event.target.checked })
+            }
+          />
+        </label>
       </section>
     </div>
   );

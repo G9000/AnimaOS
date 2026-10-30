@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { saveAppearancePreferences } from '../../lib/appearance-preferences';
 import { daemon } from '../../lib/daemon-api';
 import { memoryFixture } from '../../test/memory';
 
@@ -90,6 +91,37 @@ beforeEach(() => {
   vi.spyOn(daemon, 'listWorkflows').mockImplementation(
     () => new Promise(() => {}),
   );
+});
+
+describe('input controls', () => {
+  const composerWith = (plan: boolean) => ({
+    draft: '',
+    setDraft: vi.fn(),
+    sending: false,
+    disabled: false,
+    offline: false,
+    onSend: vi.fn(),
+    error: null,
+    onDismissError: vi.fn(),
+    mode: { plan, canPlan: true, onChange: vi.fn() },
+    model: { provider: 'openai', current: 'gpt-5.4', onPick: vi.fn() },
+  });
+  const chip = () => screen.queryByRole('button', { name: /Change how it works/ });
+
+  afterEach(() => saveAppearancePreferences({ advancedInput: false }));
+
+  it('keeps Do/Plan and the model off the input unless advanced input is on', () => {
+    const view = renderView({ composer: composerWith(false) });
+    expect(chip()).toBeNull();
+    act(() => saveAppearancePreferences({ advancedInput: true }));
+    view.rerender({});
+    expect(chip()).toHaveAccessibleName(/^Do, gpt-5\.4/);
+  });
+
+  it('still shows a chat left in Plan, without the model', () => {
+    renderView({ composer: composerWith(true) });
+    expect(chip()).toHaveAccessibleName(/^Plan, mode/);
+  });
 });
 
 describe('artifact conversation layout', () => {

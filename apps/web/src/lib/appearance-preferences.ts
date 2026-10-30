@@ -33,6 +33,9 @@ export interface AppearancePreferences {
   textSize: AppearanceTextSize;
   density: AppearanceDensity;
   reduceMotion: boolean;
+  /** Do/Plan and the model picker on the chat input. Off keeps the input
+   *  to attachments; the model lives in Settings. */
+  advancedInput: boolean;
 }
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
@@ -41,6 +44,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   textSize: 'default',
   density: 'comfortable',
   reduceMotion: false,
+  advancedInput: false,
 };
 
 const STORAGE_KEY = 'anima.appearance';
@@ -76,6 +80,10 @@ function sanitize(value: unknown): AppearancePreferences {
       typeof stored.reduceMotion === 'boolean'
         ? stored.reduceMotion
         : DEFAULT_APPEARANCE_PREFERENCES.reduceMotion,
+    advancedInput:
+      typeof stored.advancedInput === 'boolean'
+        ? stored.advancedInput
+        : DEFAULT_APPEARANCE_PREFERENCES.advancedInput,
   };
 }
 
