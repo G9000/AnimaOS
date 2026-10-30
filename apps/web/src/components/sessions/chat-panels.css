@@ -1,0 +1,33 @@
+/* Chat controls: a quiet tab row and, when one is open, a solid card the
+ * width of the chat column. Model & thinking, Tools and Second opinion share
+ * the card's type and controls (.field, .ui-button from styles.css). */
+.main-chat-extensions { display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 8px; }
+.chat-panel-tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; width: min(100%, 760px); margin: 0 auto; }
+.chat-panel-tab { min-height: 28px; padding: 0 10px; border: 0; border-radius: var(--control-radius); background: none; font-size: 12px; color: var(--control-muted); cursor: pointer; }
+.chat-panel-tab:hover { background: var(--control-fill); color: var(--color-ink); }
+.chat-panel-tab[aria-expanded='true'] { background: var(--control-fill-hover); color: var(--color-ink); box-shadow: inset 0 -2px 0 var(--color-accent); }
+
+.chat-panel { width: min(100%, 760px); max-height: min(56vh, 460px); margin: 0 auto; padding: 14px 16px; overflow-y: auto; border: 1px solid var(--control-line); border-radius: var(--panel-radius); background: #171615; box-shadow: 0 16px 40px rgb(0 0 0 / 0.5); font-size: 12.5px; color: var(--color-ink); }
+.chat-panel > section { display: flex; flex-direction: column; gap: 12px; padding: 0; font-size: 12.5px; }
+.chat-panel > section > button { align-self: flex-start; }
+.chat-panel li { padding: 10px 12px; border-color: rgb(236 230 218 / 0.1); border-radius: var(--control-radius); }
+.chat-panel p { margin: 0; line-height: 1.5; }
+.chat-panel [role='status'], .chat-panel-note { font-size: 12px; color: var(--control-muted); }
+.chat-panel [role='alert'] { color: var(--color-danger); }
+.chat-panel ul { margin: 0; padding: 0; list-style: none; }
+.chat-panel button:not(.ui-button):not(.chat-panel-tab) { min-height: 30px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: var(--control-radius); background: var(--control-fill); font-size: 12.5px; color: var(--control-ink); cursor: pointer; }
+.chat-panel button:not(.ui-button):not(.chat-panel-tab):hover:not(:disabled) { border-color: var(--control-line-hover); color: var(--color-ink); }
+.chat-panel button:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-panel select:not(.field) { min-height: 30px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: var(--control-radius); background: var(--control-fill); color: var(--color-ink); }
+
+/* Model & thinking */
+.chat-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; }
+.chat-model-current { font-family: var(--font-mono); font-size: 11px; color: var(--control-muted); }
+.chat-model-row { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 12px 0 0; border: 0; border-top: 1px solid rgb(236 230 218 / 0.08); }
+.chat-model-row label { display: grid; grid-template-columns: 140px minmax(0, 360px); align-items: center; gap: 12px; font-size: 12.5px; color: var(--control-ink); }
+.chat-panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding-top: 4px; }
+.chat-panel-actions [role='alert'] { margin-right: auto; }
+
+@media (max-width: 560px) {
+  .chat-model-row label { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}

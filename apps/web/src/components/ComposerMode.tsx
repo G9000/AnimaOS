@@ -113,9 +113,7 @@ export function ComposerMode({
                 <BoltIcon size={14} />
                 <span>
                   <strong>Do</strong>
-                  <small>
-                    Gets on with it. Asks as often as you set in Access.
-                  </small>
+                  <small>Gets on with it</small>
                 </span>
                 {!planning && <CheckIcon size={13} />}
               </button>
@@ -136,8 +134,8 @@ export function ComposerMode({
                   <strong>Plan</strong>
                   <small>
                     {mode.canPlan
-                      ? 'Shows the steps first. Nothing starts until you say go.'
-                      : 'Needs the Edit files level or more.'}
+                      ? 'Shows the steps, waits for your go'
+                      : 'Needs the Edit files level'}
                   </small>
                 </span>
                 {planning && <CheckIcon size={13} />}

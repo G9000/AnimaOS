@@ -99,10 +99,10 @@ export function ChatModelControls({
           ?.reasoningEfforts ?? [])
       : [];
     return (
-      <fieldset disabled={busy}>
-        <legend>{label}</legend>
+      <fieldset disabled={busy} className="chat-model-row">
+        <legend className="sr-only">{label}</legend>
         <label>
-          {label} model
+          <span>{label} model</span>
           <select
             className="field"
             aria-label={target === 'primary' ? 'Chat model' : 'Reviewer model'}
@@ -119,7 +119,7 @@ export function ChatModelControls({
         </label>
         {efforts.length > 0 && selected && (
           <label>
-            Reasoning effort
+            <span>Reasoning effort</span>
             <select
               className="field"
               aria-label={
@@ -186,17 +186,19 @@ export function ChatModelControls({
     }
   };
   return (
-    <section aria-label="Chat model settings">
-      <p>
-        Saved changes apply to the next turn. A reply already running keeps its
-        model.
-      </p>
-      <p>
-        Current chat choice: {view.primary.provider} / {view.primary.model}
-        {view.primary.reasoningEffort
-          ? ` · ${view.primary.reasoningEffort}`
-          : ''}
-      </p>
+    <section aria-label="Chat model settings" className="chat-model-settings">
+      <header className="chat-panel-head">
+        <p className="chat-panel-note">
+          Saved changes apply to the next turn. A reply already running keeps
+          its model.
+        </p>
+        <p className="chat-model-current">
+          Now: {view.primary.provider} / {view.primary.model}
+          {view.primary.reasoningEffort
+            ? ` · ${view.primary.reasoningEffort}`
+            : ''}
+        </p>
+      </header>
       {editor('primary', 'Chat', 'Use agent default', view.primary)}
       {editor(
         'reviewer',
@@ -205,16 +207,21 @@ export function ChatModelControls({
         view.reviewer,
       )}
       {view.reviewerUnavailableReason && (
-        <p role="status">{view.reviewerUnavailableReason}</p>
+        <p role="status" className="chat-panel-note">
+          {view.reviewerUnavailableReason}
+        </p>
       )}
-      <button
-        type="button"
-        disabled={busy || (!changed('primary') && !changed('reviewer'))}
-        onClick={() => void save()}
-      >
-        {busy ? 'Saving…' : 'Save model settings'}
-      </button>
-      {error && <p role="alert">{error}</p>}
+      <div className="chat-panel-actions">
+        {error && <p role="alert">{error}</p>}
+        <button
+          type="button"
+          className="ui-button is-primary"
+          disabled={busy || (!changed('primary') && !changed('reviewer'))}
+          onClick={() => void save()}
+        >
+          {busy ? 'Saving…' : 'Save model settings'}
+        </button>
+      </div>
     </section>
   );
 }

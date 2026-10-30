@@ -6,6 +6,7 @@ import { ChatToolsPanel } from './ChatToolsPanel';
 import { ChatModelControls } from './ChatModelControls';
 import { ChatReviewPanel } from './ChatReviewPanel';
 import { ShareConversationDialog } from './ShareConversationDialog';
+import './chat-panels.css';
 
 export type ChatPanelName = 'model' | 'tools' | 'review' | 'reports' | 'share';
 export interface ChatPanelRequest {
@@ -38,7 +39,7 @@ export function ChatExtensions({
   const button = (name: ChatPanelName, label: string) => (
     <button
       type="button"
-      className="rounded px-2 py-1 hover:bg-white/5"
+      className="chat-panel-tab"
       aria-expanded={panel === name}
       onClick={() => (panel === name ? setPanel(null) : onOpen(name))}
     >
@@ -47,12 +48,12 @@ export function ChatExtensions({
   );
   return (
     <div
-      className="main-chat-extensions shrink-0 border-b border-white/10 text-xs"
+      className="main-chat-extensions shrink-0"
       data-main-chat={session.mainChat ? 'true' : undefined}
       data-panel={panel ?? ''}
     >
       <nav
-        className="flex flex-wrap gap-1 px-3 py-1"
+        className="chat-panel-tabs"
         aria-label="Chat controls"
       >
         {button('model', 'Model & thinking')}
@@ -63,7 +64,7 @@ export function ChatExtensions({
       </nav>
       {panel && panel !== 'share' && (
         <div
-          className="max-h-80 overflow-y-auto p-3"
+          className="chat-panel"
           key={`${scope}:${request?.id ?? panel}`}
         >
           {panel === 'model' && (
