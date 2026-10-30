@@ -1129,7 +1129,6 @@ export function Composer({
   context,
   mode,
   model,
-  sendAlways = false,
 }: {
   agentName: string;
   /** The textarea's name and placeholder; defaults to "Message <agent>". */
@@ -1167,12 +1166,10 @@ export function Composer({
   tools?: ReactNode;
   /** Current quoted selection, kept visible beside the editable draft. */
   context?: ReactNode;
-  /** Plan or Do for what is sent next; with `model`, the chip under the
+  /** Plan or Do for what is sent next; with `model`, the chip beside the
    *  message. */
   mode?: ComposerModeState;
   model?: ComposerModelState;
-  /** The main chat keeps its send control visible when the draft is empty. */
-  sendAlways?: boolean;
   attachments?: {
     items: readonly AttachmentDraft[];
     onAdd(files: readonly File[]): void;
@@ -1279,11 +1276,10 @@ export function Composer({
   // dictation listens the mic stays, so its words never stop it.
   const listening = usePresenceSignals().listening !== null;
   const showSend =
-    sendAlways ||
-    (!listening &&
-      (draft.trim().length > 0 ||
-        (attachments?.items.length ?? 0) > 0 ||
-        savedAttachmentCount > 0));
+    !listening &&
+    (draft.trim().length > 0 ||
+      (attachments?.items.length ?? 0) > 0 ||
+      savedAttachmentCount > 0);
 
   useResetOnChange([draft], () => setActiveIndex(0));
   useResetOnChange([historyKey], () => {
@@ -1401,7 +1397,7 @@ export function Composer({
           </div>
         )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
-          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col gap-1 p-1.5 transition-[background-color,border-color,box-shadow] duration-200">
+          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col p-1.5 transition-[background-color,border-color,box-shadow] duration-200">
             <div className="composer-row">
               {/* The agent's orb lives in the composer: it brightens while you
                 write and while the agent works. */}
@@ -1505,69 +1501,68 @@ export function Composer({
                 placeholder={`${inputLabel}…`}
                 className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
               />
-            </div>
-            <div className="composer-controls">
-              {attachments && (
-                <button ref={moreButton} type="button" className="composer-icon composer-more"
-                  aria-label="More input options" aria-expanded={moreOpen} aria-controls={trayId}
-                  onClick={() => setMoreOpen((open) => !open)}>
-                  <PlusIcon size={16} />
-                </button>
-              )}
-              <ComposerMode mode={mode} model={model} />
-              <span className="composer-spacer" />
-              {runActive && (
-                <>
-                  <button
-                    type="button"
-                    className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
-                    disabled={!canSend}
-                    onClick={() => send()}
-                    title="Wait for the current reply, then send this message"
-                  >
-                    Wait
+              <div className="composer-controls">
+                {attachments && (
+                  <button ref={moreButton} type="button" className="composer-icon composer-more"
+                    aria-label="More input options" aria-expanded={moreOpen} aria-controls={trayId}
+                    onClick={() => setMoreOpen((open) => !open)}>
+                    <PlusIcon size={16} />
                   </button>
-                  {steerable && (
+                )}
+                <ComposerMode mode={mode} model={model} />
+                {runActive && (
+                  <>
                     <button
                       type="button"
                       className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
                       disabled={!canSend}
-                      onClick={() => onSteer?.()}
-                      title="Add this message to the reply in progress"
+                      onClick={() => send()}
+                      title="Wait for the current reply, then send this message"
                     >
-                      Steer
+                      Wait
                     </button>
-                  )}
-                </>
-              )}
-              {runActive && onStop ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  aria-label="Stop"
-                  className="composer-send composer-stop flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
-                >
-                  <StopIcon size={14} />
-                </button>
-              ) : !showSend ? (
-                <DictationControl
-                  compact
-                  disabled={!canPick || voiceDisabled}
-                  conversationKey={conversationKey}
-                  onTranscript={appendDictation}
-                  onPushToTalkStop={() => send(latestDraftRef.current)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => send()}
-                  disabled={!canSend}
-                  aria-label="Send"
-                  className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"
-                >
-                  <SendIcon size={14} />
-                </button>
-              )}
+                    {steerable && (
+                      <button
+                        type="button"
+                        className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
+                        disabled={!canSend}
+                        onClick={() => onSteer?.()}
+                        title="Add this message to the reply in progress"
+                      >
+                        Steer
+                      </button>
+                    )}
+                  </>
+                )}
+                {runActive && onStop ? (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    aria-label="Stop"
+                    className="composer-send composer-stop flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95"
+                  >
+                    <StopIcon size={14} />
+                  </button>
+                ) : !showSend ? (
+                  <DictationControl
+                    compact
+                    disabled={!canPick || voiceDisabled}
+                    conversationKey={conversationKey}
+                    onTranscript={appendDictation}
+                    onPushToTalkStop={() => send(latestDraftRef.current)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => send()}
+                    disabled={!canSend}
+                    aria-label="Send"
+                    className="composer-send flex shrink-0 cursor-pointer items-center justify-center transition active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100"
+                  >
+                    <SendIcon size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </AttachmentDropZone>

@@ -2109,10 +2109,11 @@ button.scenic-thread[aria-expanded='true'] {
   box-shadow: none;
 }
 
-/* Two rows: the message (with the orb), then what is sent with it. */
+/* One row: the orb, the message, then its controls. The message grows
+ * upward; the controls stay on its last line. */
 .scenic-shell .composer-row {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 4px;
 }
 
@@ -2122,9 +2123,11 @@ button.scenic-thread[aria-expanded='true'] {
 
 .scenic-shell .composer-controls {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
-  padding: 0 0 0 1px;
+  /* One text line tall, so the buttons sit centred on the last line. */
+  min-height: 38px;
 }
 
 .scenic-shell .composer-controls .composer-icon {
@@ -2151,10 +2154,6 @@ button.scenic-thread[aria-expanded='true'] {
 .scenic-shell .composer-bar .composer-controls .composer-send {
   width: 32px;
   height: 32px;
-}
-
-.scenic-shell .composer-spacer {
-  flex: 1;
 }
 
 .scenic-shell .composer-mode {
@@ -7169,8 +7168,7 @@ details.settings-item > :not(summary) {
 }
 
 .scenic-shell [data-main-chat='true'] .studio-composer-box.composer-bar {
-  gap: 12px;
-  padding: 14px 14px 10px;
+  padding: 8px 8px 8px 12px;
   border-color: rgb(255 255 255 / 0.14);
   border-radius: 12px;
   background: #141413f2;
@@ -7178,8 +7176,7 @@ details.settings-item > :not(summary) {
 }
 
 .scenic-shell [data-main-chat='true'] .composer-row {
-  align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .scenic-shell [data-main-chat='true'] .composer-orb {
@@ -7201,6 +7198,7 @@ details.settings-item > :not(summary) {
 
 .scenic-shell [data-main-chat='true'] .composer-controls {
   gap: 6px;
+  min-height: 34px;
 }
 
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-chip {
@@ -7511,7 +7509,7 @@ details.settings-item > :not(summary) {
 
 @media (max-width: 767px) {
   .scenic-shell [data-main-chat='true'] .studio-composer-box.composer-bar {
-    padding: 10px 10px 8px;
+    padding: 6px 6px 6px 10px;
   }
 }
 

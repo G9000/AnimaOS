@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveAppearancePreferences } from './lib/appearance-preferences';
 import {
   DaemonConnectionError,
   DaemonHttpError,
@@ -843,6 +844,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  // The store remembers its last save in memory, past localStorage.clear().
+  saveAppearancePreferences({ advancedInput: false });
   localStorage.clear();
   sessionStorage.clear();
   window.history.replaceState(null, '', '/');
@@ -1473,6 +1476,8 @@ describe('ViewHarness workspace controller', () => {
     });
     mockProviders();
     const startRun = vi.mocked(daemon.startRun);
+    // Do/Plan is on the input only with Advanced input.
+    saveAppearancePreferences({ advancedInput: true });
 
     render(<ViewHarness />);
     await openChat();
@@ -2487,7 +2492,7 @@ it('sends a /skill message from the composer with its skill', async () => {
   const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, '/no');
   expect(
-    await screen.findByRole('option', { name: /\/notes <request>/ }),
+    await screen.findByRole('option', { name: /\/notes/ }),
   ).toBeVisible();
   await user.type(input, 'tes plan the week{Enter}');
 

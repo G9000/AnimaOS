@@ -819,7 +819,6 @@ export function SessionView({
       {footer.kind === 'composer' ? (
         <Composer
           agentName={agent.name}
-          sendAlways={!session || session.mainChat === true}
           label={footer.label}
           draft={composer.draft}
           setDraft={composer.setDraft}

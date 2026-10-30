@@ -1654,7 +1654,6 @@ describe('Composer commands and live replies', () => {
     const onAdd = vi.fn();
     render(<Composer {...composerProps({
       attachments: { items: [], onAdd, onRemove: vi.fn() },
-      sendAlways: true,
     })} />);
     const more = screen.getByRole('button', { name: 'More input options' });
     await userEvent.click(more);
