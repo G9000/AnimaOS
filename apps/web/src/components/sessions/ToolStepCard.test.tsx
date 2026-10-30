@@ -51,7 +51,7 @@ it('offers owned saved result retrieval from the compact retained-output header'
     helper: null,
   };
   render(<ToolStepCard step={step} agentId="agent" />);
-  fireEvent.click(screen.getByRole('button', { name: /read_file/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Read file/ }));
   expect(
     screen.getByRole('button', { name: 'View saved result' }),
   ).toBeVisible();
@@ -83,7 +83,7 @@ describe('m83 Search sources card', () => {
 
   it('renders exact source links as text outside the clipped result', () => {
     const { container } = render(<ToolStepCard step={step} />);
-    fireEvent.click(screen.getByRole('button', { name: /web_search/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Web search/ }));
     expect(screen.getByText('Search sources')).toBeVisible();
     const link = screen.getByRole('link', { name: sources[0].title });
     expect(link).toHaveAttribute('href', sources[0].url);
@@ -98,7 +98,7 @@ describe('m83 Search sources card', () => {
     'never displays sources for a %s card',
     (status) => {
       render(<ToolStepCard step={{ ...step, status }} />);
-      fireEvent.click(screen.getByRole('button', { name: /web_search/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Web search/ }));
       expect(screen.queryByText('Search sources')).not.toBeInTheDocument();
       expect(screen.queryByRole('link')).not.toBeInTheDocument();
     },
@@ -106,7 +106,7 @@ describe('m83 Search sources card', () => {
 
   it('clears visible sources when the same mounted card changes status or loses its projection', () => {
     const view = render(<ToolStepCard step={step} />);
-    fireEvent.click(screen.getByRole('button', { name: /web_search/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Web search/ }));
     expect(screen.getByRole('link')).toHaveAttribute('href', sources[0].url);
     view.rerender(<ToolStepCard step={{ ...step, status: 'error' }} />);
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
@@ -125,7 +125,7 @@ describe('m83 Search sources card', () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /web_search/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Web search/ }));
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 });
@@ -219,7 +219,7 @@ describe('app and coding agent sessions in tool steps', () => {
         agentId="agent-1"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
+    fireEvent.click(screen.getByRole('button', { name: /App read/ }));
     const card = screen.getByRole('region', {
       name: 'Claude Code app session',
     });
@@ -249,7 +249,7 @@ describe('app and coding agent sessions in tool steps', () => {
         agentId="agent-1"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /acp_prompt/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Acp prompt/ }));
     const card = screen.getByRole('region', { name: 'Codex coding agent' });
     expect(within(card).getByText('WAITING FOR YOU')).toBeVisible();
     expect(within(card).getByRole('list', { name: 'Plan' })).toHaveTextContent(
@@ -284,7 +284,7 @@ describe('app and coding agent sessions in tool steps', () => {
         agentId="agent-1"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
+    fireEvent.click(screen.getByRole('button', { name: /App read/ }));
     fireEvent.click(screen.getByRole('button', { name: /Stop/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'daemon unreachable',
@@ -300,7 +300,7 @@ describe('app and coding agent sessions in tool steps', () => {
     const { container } = render(
       <ToolStepCard step={toolStep('app_read', result)} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
+    fireEvent.click(screen.getByRole('button', { name: /App read/ }));
     expect(container.querySelector('.tool-step-result pre')?.textContent).toBe(
       result,
     );
@@ -311,7 +311,7 @@ describe('app and coding agent sessions in tool steps', () => {
     render(
       <ToolStepCard step={toolStep('app_read', JSON.stringify(appSession))} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /app_read/ }));
+    fireEvent.click(screen.getByRole('button', { name: /App read/ }));
     expect(screen.queryByRole('button', { name: /Stop/ })).toBeNull();
   });
 

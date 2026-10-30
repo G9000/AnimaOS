@@ -62,7 +62,7 @@ async function openM83SearchCards() {
     name: /^Worked for .* · \d+ steps?$/,
   }))
     fireEvent.click(button);
-  for (const button of screen.getAllByRole('button', { name: /^web_search/ }))
+  for (const button of screen.getAllByRole('button', { name: /^Web search/ }))
     fireEvent.click(button);
 }
 
@@ -930,7 +930,7 @@ describe('MessageList', () => {
     await user.click(
       screen.getByRole('button', { name: 'Worked for <1s · 1 step' }),
     );
-    await user.click(screen.getByRole('button', { name: /^tool\b/ }));
+    await user.click(screen.getByRole('button', { name: /^Tool\b/ }));
     expect(screen.getByText('## tool marker').tagName).toBe('PRE');
     expect(
       screen.queryByRole('heading', { name: 'tool marker' }),
@@ -1650,22 +1650,35 @@ describe('Composer commands and live replies', () => {
     };
   }
 
-  it('offers attachment in the plus menu and closes it with Escape', async () => {
+  it('offers attachments and commands under + and closes it with Escape', async () => {
     const onAdd = vi.fn();
-    render(<Composer {...composerProps({
+    const props = composerProps({
       attachments: { items: [], onAdd, onRemove: vi.fn() },
-    })} />);
-    const more = screen.getByRole('button', { name: 'More input options' });
-    await userEvent.click(more);
-    expect(more).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+    });
+    render(<Composer {...props} />);
+    const add = screen.getByRole('button', { name: 'Add' });
+    await userEvent.click(add);
+    expect(add).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menuitem', { name: /Attach files/ })).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Record audio' })).not.toBeInTheDocument();
     const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
     await userEvent.upload(screen.getByLabelText('Choose attachments'), file);
     expect(onAdd).toHaveBeenCalledWith([file]);
     await userEvent.keyboard('{Escape}');
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(more).toHaveFocus();
+    expect(add).toHaveAttribute('aria-expanded', 'false');
+    expect(add).toHaveFocus();
+
+    // Commands starts a / in the empty message, which opens their menu.
+    await userEvent.click(add);
+    await userEvent.click(screen.getByRole('menuitem', { name: /Commands/ }));
+    expect(props.setDraft).toHaveBeenCalledWith('/');
+    expect(screen.getByRole('textbox', { name: 'Message Nova' })).toHaveFocus();
+  });
+
+  it('keeps Commands for an empty message, so a draft is never replaced', async () => {
+    render(<Composer {...composerProps({ draft: 'half a thought' })} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: /Commands/ })).toBeDisabled();
   });
   it('offers the matching commands and runs one with Enter', () => {
     const props = composerProps({ draft: '/co' });
@@ -1954,7 +1967,7 @@ it('tags an owner message that arrived from Telegram in the main chat', () => {
   expect(screen.getAllByText('via Telegram')).toHaveLength(1);
 });
 
-describe('Composer one button', () => {
+describe('Composer mic and send', () => {
   const base = {
     agentName: 'Nova',
     setDraft: vi.fn(),
@@ -1965,18 +1978,23 @@ describe('Composer one button', () => {
     onDismissError: vi.fn(),
   };
 
-  it('shows the live orb and the mic until there is something to send', () => {
-    const { container, rerender } = render(<Composer {...base} draft="" />);
-    expect(container.querySelector('.composer-orb')).not.toBeNull();
-    expect(
-      screen.queryByRole('button', { name: 'Send' }),
-    ).not.toBeInTheDocument();
+  it('keeps the mic beside Send, so you can type first and talk after', () => {
+    class Recognition {}
+    vi.stubGlobal('SpeechRecognition', Recognition);
+    try {
+      const { rerender } = render(<Composer {...base} draft="" />);
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Dictate message' })).toBeVisible();
 
-    rerender(<Composer {...base} draft="Plan the launch" />);
-    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+      rerender(<Composer {...base} draft="Plan the launch" />);
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Dictate message' })).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('keeps the mic while dictation listens, even once words arrive', async () => {
+  it('writes the words being heard into the input, after what was typed', async () => {
     class Recognition {
       static instance: Recognition;
       continuous = false;
@@ -1985,7 +2003,7 @@ describe('Composer one button', () => {
       onstart: (() => void) | null = null;
       onend: (() => void) | null = null;
       onerror: (() => void) | null = null;
-      onresult: (() => void) | null = null;
+      onresult: ((event: unknown) => void) | null = null;
       start = vi.fn();
       stop = vi.fn();
       abort = vi.fn();
@@ -1995,20 +2013,33 @@ describe('Composer one button', () => {
     }
     vi.stubGlobal('SpeechRecognition', Recognition);
     vi.stubGlobal('webkitSpeechRecognition', undefined);
+    const setDraft = vi.fn();
     try {
-      const { rerender } = render(<Composer {...base} draft="" />);
+      render(<Composer {...base} setDraft={setDraft} draft="typed first" />);
       await userEvent.click(
         screen.getByRole('button', { name: 'Dictate message' }),
       );
       act(() => Recognition.instance.onstart?.());
-      // Dictated words land in the draft; the mic stays so they can stop.
-      rerender(<Composer {...base} draft="plan the launch" />);
-      expect(
-        screen.getByRole('button', { name: 'Stop dictation' }),
-      ).toBeVisible();
-      expect(
-        screen.queryByRole('button', { name: 'Send' }),
-      ).not.toBeInTheDocument();
+      act(() =>
+        Recognition.instance.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: false, 0: { transcript: 'then the' } }],
+        }),
+      );
+      const input = screen.getByRole('textbox', { name: 'Message Nova' });
+      expect(input).toHaveValue('typed first then the');
+      expect(input).toHaveAttribute('readonly');
+      expect(screen.getByRole('button', { name: 'Stop dictation' })).toBeVisible();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+      act(() =>
+        Recognition.instance.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: 'then the launch' } }],
+        }),
+      );
+      expect(setDraft).toHaveBeenLastCalledWith('typed first then the launch');
+      expect(input).not.toHaveAttribute('readonly');
     } finally {
       vi.unstubAllGlobals();
     }

@@ -98,12 +98,14 @@ it('cancels a pending request and clears interim on disabled boundary', async ()
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
-it('shows what the composer microphone hears on the orb, and clears it after', async () => {
+it('hands the words being heard to the input, wakes the orb without them, and clears both after', async () => {
   const { getPresenceSnapshotForTest } = await import('../../lib/presence');
+  const onInterim = vi.fn();
   const view = render(
     <DictationControl
       compact
       onTranscript={vi.fn()}
+      onInterim={onInterim}
       conversationKey="session"
     />,
   );
@@ -118,9 +120,10 @@ it('shows what the composer microphone hears on the orb, and clears it after', a
       results: [{ isFinal: false, 0: { transcript: 'what should I' } }],
     }),
   );
-  expect(getPresenceSnapshotForTest().listening).toEqual({
-    words: 'what should I',
-  });
+  expect(onInterim).toHaveBeenLastCalledWith('what should I');
+  expect(getPresenceSnapshotForTest().listening).toEqual({ words: '' });
+  // No status panel: the words are in the input.
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
   view.unmount();
   expect(getPresenceSnapshotForTest().listening).toBeNull();
 });

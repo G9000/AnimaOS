@@ -106,7 +106,7 @@ describe('RunActivity', () => {
     expect(screen.getByText('Add these')).toBeVisible();
     expect(screen.getByText('Adding now')).toBeVisible();
     expect(screen.getByLabelText(/^Working · 1 step · /)).toBeVisible();
-    const card = screen.getByRole('button', { name: /calculate/ });
+    const card = screen.getByRole('button', { name: /Calculate/ });
     expect(card).toHaveAttribute('aria-expanded', 'false');
     await user.click(card);
     expect(card).toHaveAttribute('aria-expanded', 'true');
@@ -193,10 +193,10 @@ describe('RunActivity', () => {
     ).not.toBeInTheDocument();
     await user.click(summary);
     expect(
-      screen.getByRole('button', { name: /send_email.*failed/ }),
+      screen.getByRole('button', { name: /Send email.*failed/ }),
     ).toBeVisible();
     await user.click(
-      screen.getByRole('button', { name: /send_email.*failed/ }),
+      screen.getByRole('button', { name: /Send email.*failed/ }),
     );
     expect(screen.getByText(refusal)).toBeVisible();
     expect(screen.queryByText(/Reported success/)).not.toBeInTheDocument();
@@ -380,10 +380,10 @@ describe('ToolBlock', () => {
       name: 'Worked for <1s · 2 steps',
     });
     expect(
-      screen.queryByRole('button', { name: /calculate/ }),
+      screen.queryByRole('button', { name: /Calculate/ }),
     ).not.toBeInTheDocument();
     await user.click(toggle);
-    await user.click(screen.getAllByRole('button', { name: /calculate/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /Calculate/ })[0]);
     expect(screen.getByText('Result shortened to 2 KiB.')).toBeVisible();
   });
 
@@ -391,7 +391,7 @@ describe('ToolBlock', () => {
     const user = userEvent.setup();
     render(<ToolBlock steps={[step]} active />);
 
-    const card = screen.getByRole('button', { name: /calculate/ });
+    const card = screen.getByRole('button', { name: /Calculate/ });
     expect(card).toHaveAttribute('aria-expanded', 'false');
     expect(card).not.toHaveAttribute('aria-controls');
 

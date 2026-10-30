@@ -149,7 +149,7 @@
     opacity 300ms ease;
 }
 
-/* The words are on the orb; the composer keeps its status for screen
+/* The words are in the input; the composer keeps its status for screen
  * readers only. */
 .scenic-shell[data-presence='listening']
   .studio-dictation-control.is-compact
@@ -187,8 +187,6 @@
     --scenic-topbar-h: 58px;
   }
 }
-
-
 
 .scenic-shell .studio-view:has(.companion-chat-panel:not([hidden])) {
   overflow: visible;
@@ -1144,7 +1142,12 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .scenic-shell .tool-step-toggle {
-  padding: 9px 12px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+}
+
+.scenic-shell .tool-step-args {
+  color: rgb(236 230 218 / 0.42);
 }
 
 .scenic-shell .tool-step-result pre {
@@ -1919,10 +1922,10 @@ button.scenic-thread[aria-expanded='true'] {
 .scenic-shell .tool-block-label {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   margin: 0;
-  padding: 11px 14px;
+  padding: 9px 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1950,18 +1953,16 @@ button.scenic-thread[aria-expanded='true'] {
 }
 
 .scenic-shell .tool-block-meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgb(255 255 255 / 0.45);
+  color: rgb(236 230 218 / 0.45);
 }
 
 .scenic-shell .tool-block-live {
   flex: none;
   width: 6px;
   height: 6px;
+  border-radius: 50%;
   background: var(--color-accent);
   animation: tool-block-live 1.4s ease-in-out infinite;
 }
@@ -2039,15 +2040,6 @@ button.scenic-thread[aria-expanded='true'] {
   border-color: color-mix(in srgb, var(--color-ink) 34%, transparent);
 }
 
-/* The composer you are writing in is the live item: a plain accent edge. */
-:root:root .scenic-shell .studio-composer-box.composer-bar:focus-within,
-:root:root
-  .scenic-shell
-  [data-main-chat='true']
-  .studio-composer-box.composer-bar:focus-within {
-  border-color: var(--color-accent);
-}
-
 .scenic-shell .composer-bar textarea {
   min-height: 38px;
   padding: 7px 6px;
@@ -2058,8 +2050,7 @@ button.scenic-thread[aria-expanded='true'] {
   margin: 0;
 }
 
-/* The bar shows focus (focus-glow); a second ring on the text inside it
- * reads as a box within the box. */
+/* The caret is focus enough: no ring on the text, none on the bar. */
 .scenic-shell .composer-bar textarea:focus-visible {
   outline: none;
 }
@@ -2133,6 +2124,27 @@ button.scenic-thread[aria-expanded='true'] {
 .scenic-shell .composer-controls .composer-icon {
   width: 28px;
   height: 28px;
+}
+
+/* + (attach, commands) starts the bar, level with the last line like the
+ * controls at the other end. */
+.scenic-shell .composer-add {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 38px;
+}
+
+.scenic-shell .composer-bar .composer-attach {
+  width: 28px;
+  height: 28px;
+}
+
+/* Listening: the mic takes the accent until you stop it. */
+.scenic-shell .composer-bar .studio-dictation-button[aria-pressed='true'] {
+  background: rgb(var(--color-accent-rgb) / 0.16);
+  color: var(--color-accent);
 }
 
 /* The studio sheet sizes every box button 43px square; these are not. */
@@ -2389,23 +2401,6 @@ button.scenic-thread[aria-expanded='true'] {
   }
 }
 
-/* The agent's orb, live, at the start of the composer. */
-.composer-orb {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-}
-
-.composer-orb .composer-orb-canvas {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  overflow: hidden;
-}
-
 .scenic-shell .composer-bar .composer-send:disabled {
   background: rgb(255 255 255 / 0.1);
   color: rgb(255 255 255 / 0.4);
@@ -2430,55 +2425,6 @@ button.scenic-thread[aria-expanded='true'] {
   font-size: 12px;
 }
 
-/* The + tray: closed, it shows only what is live; open, every extra input. */
-.composer-tray {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.composer-tray:not([data-open]) > :not([data-live]) {
-  display: none;
-}
-
-.composer-tray:not([data-open]):not(:has(> [data-live])) {
-  display: none;
-}
-
-.composer-tray[data-open] {
-  padding: 10px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 4px;
-  background: rgb(15 19 22 / 0.94);
-  backdrop-filter: blur(24px);
-  animation: tray-in 140ms ease-out;
-}
-
-@keyframes tray-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-tray[data-open] {
-    animation: none;
-  }
-}
-
-.scenic-shell .composer-tray > * {
-  margin: 0;
-  color: rgb(255 255 255 / 0.78);
-  font-size: 12px;
-}
-
-.scenic-shell .composer-tray[data-open] > * + * {
-  padding-top: 8px;
-  border-top: 1px solid rgb(255 255 255 / 0.07);
-}
-
 .studio-audio-recording {
   display: flex;
   flex-wrap: wrap;
@@ -2491,45 +2437,6 @@ button.scenic-thread[aria-expanded='true'] {
   margin: 0;
   font-size: 11px;
   color: rgb(255 255 255 / 0.5);
-}
-
-.scenic-shell .composer-tray button,
-.scenic-shell .composer-tray select,
-.scenic-shell .composer-tray summary {
-  border-radius: 2px;
-}
-
-.scenic-shell .composer-tray .studio-attachment-picker button,
-.scenic-shell .composer-tray .studio-tool-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 4px 12px;
-  border: 1px solid rgb(255 255 255 / 0.16);
-  background: transparent;
-  color: rgb(255 255 255 / 0.88);
-  font-size: 12px;
-  backdrop-filter: none;
-}
-
-.scenic-shell
-  .composer-tray
-  .studio-attachment-picker
-  button:hover:not(:disabled),
-.scenic-shell .composer-tray .studio-tool-button:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 0.32);
-  color: #fff;
-}
-
-.scenic-shell .composer-tray .rounded-xl,
-.scenic-shell .composer-tray .border-t {
-  border: 0;
-  border-radius: 0;
-}
-
-.scenic-shell .composer-tray section {
-  padding-inline: 0;
 }
 
 /* A rail of days at the right edge: jump back to where one began. */
@@ -2584,18 +2491,6 @@ button.scenic-thread[aria-expanded='true'] {
   .scenic-shell .day-rail {
     display: none;
   }
-}
-
-.scenic-shell .studio-composer > div > p.composer-keys {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  margin: 10px 0 0;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgb(236 230 218 / 0.35);
 }
 
 .scenic-shell .composer-hints {
@@ -2655,143 +2550,8 @@ button.scenic-thread[aria-expanded='true'] {
   }
 }
 
-/* The + tray: quick inputs on one row, larger tools below. */
-.composer-tray[data-open] {
-  flex-flow: row wrap;
-  align-items: flex-start;
-}
-
-.composer-tray[data-open]
-  > :not(.studio-attachment-picker, .studio-audio-recording) {
-  flex-basis: 100%;
-}
-
-.scenic-shell .composer-tray[data-open] > * + * {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.scenic-shell
-  .composer-tray[data-open]
-  > :not(.studio-attachment-picker, .studio-audio-recording) {
-  padding-top: 8px;
-  border-top: 1px solid rgb(255 255 255 / 0.07);
-}
-
 .studio-audio-note {
   order: 2;
-}
-
-.scenic-shell .composer-tray details > summary {
-  padding: 2px 0;
-  cursor: pointer;
-}
-
-.scenic-shell .composer-tray select {
-  max-width: 100%;
-}
-
-/* Keep extra inputs close to the + button and out of the conversation. */
-.scenic-shell .composer-tray[data-open] {
-  position: absolute;
-  bottom: calc(100% - 8px);
-  left: 14px;
-  z-index: 5;
-  width: min(200px, calc(100% - 28px));
-  max-height: min(60vh, 480px);
-  overflow-y: auto;
-  flex-direction: column;
-  gap: 2px;
-  padding: 5px;
-  border-color: rgb(255 255 255 / 0.13);
-  border-radius: 10px;
-  background: #1b1a19;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
-}
-
-.scenic-shell .composer-tray[data-open] .studio-audio-recording:not([data-live]) .studio-audio-note {
-  display: none;
-}
-
-.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-tool-button) {
-  border-radius: 8px;
-  background: transparent;
-}
-
-.scenic-shell .composer-tray[data-open] > :is(.studio-attachment-picker, .studio-audio-recording) {
-  width: 100%;
-}
-
-.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-audio-recording > button, .studio-dictation-button) {
-  display: flex;
-  width: 100%;
-  min-height: 36px;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: rgb(255 255 255 / 0.88);
-  text-align: left;
-  font-size: 13px;
-}
-
-.scenic-shell .composer-tray[data-open] .studio-attachment-picker button svg {
-  color: rgb(236 230 218 / 0.6);
-}
-
-.scenic-shell .composer-tray[data-open] :is(.studio-attachment-picker button, .studio-audio-recording > button, .studio-dictation-button):hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.07);
-}
-
-.scenic-shell .composer-tray[data-open] .studio-dictation-button::after {
-  content: attr(aria-label);
-}
-
-.scenic-shell .composer-tray[data-open] > :not(.studio-attachment-picker, .studio-audio-recording) {
-  width: 100%;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.scenic-shell .composer-tray[data-open] details > summary {
-  padding: 8px;
-  border-radius: 8px;
-}
-
-.scenic-shell .composer-tray[data-open] > details {
-  padding-inline: 0;
-}
-
-.scenic-shell .composer-tray[data-open] details > summary:hover {
-  background: rgb(255 255 255 / 0.06);
-}
-
-@media (max-width: 767px) {
-  .scenic-shell .composer-tray[data-open] {
-    left: 10px;
-    width: min(200px, calc(100% - 20px));
-  }
-}
-
-:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] {
-  border-color: rgb(26 26 24 / 0.14);
-  background: #fffefa;
-  box-shadow: 0 12px 32px rgb(26 26 24 / 0.14);
-}
-
-:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button {
-  color: #39362f;
-}
-
-:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button svg {
-  color: #777166;
-}
-
-:root[data-appearance-theme='light'] .scenic-shell .composer-tray[data-open] .studio-attachment-picker button:hover:not(:disabled) {
-  background: rgb(26 26 24 / 0.06);
 }
 
 .scenic-shell .session-view-header button {
@@ -4176,8 +3936,7 @@ button.scenic-thread[aria-expanded='true'] {
     .plan-card-actions,
     .plan-card-status
   )::after,
-.approval-card:not(:has(.approval-card-sent))::after,
-.tool-block[data-active] .tool-block-card::after {
+.approval-card:not(:has(.approval-card-sent))::after {
   content: '';
   position: absolute;
   top: -4px;
@@ -4199,19 +3958,8 @@ button.scenic-thread[aria-expanded='true'] {
   background-repeat: no-repeat;
 }
 
-/* Work in progress is the live item too. */
-.tool-block[data-active] .tool-block-card {
-  position: relative;
-  overflow: visible;
-  border-color: var(--color-accent);
-}
-
-.tool-block-label,
-.tool-block-toggle {
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
+/* Work in progress stays a quiet card: only its live dot moves. The
+ * accent frame is kept for what needs the owner (plans, approvals). */
 
 /* ── Settings, V2 ──
  * Serif page titles, mono section headers, and a pink handle frame on the
@@ -7168,7 +6916,7 @@ details.settings-item > :not(summary) {
 }
 
 .scenic-shell [data-main-chat='true'] .studio-composer-box.composer-bar {
-  padding: 8px 8px 8px 12px;
+  padding: 8px;
   border-color: rgb(255 255 255 / 0.14);
   border-radius: 12px;
   background: #141413f2;
@@ -7176,17 +6924,7 @@ details.settings-item > :not(summary) {
 }
 
 .scenic-shell [data-main-chat='true'] .composer-row {
-  gap: 10px;
-}
-
-.scenic-shell [data-main-chat='true'] .composer-orb {
-  width: 34px;
-  height: 34px;
-}
-
-.scenic-shell [data-main-chat='true'] .composer-orb .composer-orb-canvas {
-  width: 26px;
-  height: 26px;
+  gap: 6px;
 }
 
 .scenic-shell [data-main-chat='true'] .composer-bar textarea {
@@ -7196,8 +6934,8 @@ details.settings-item > :not(summary) {
   line-height: 22px;
 }
 
-.scenic-shell [data-main-chat='true'] .composer-controls {
-  gap: 6px;
+.scenic-shell [data-main-chat='true'] .composer-controls,
+.scenic-shell [data-main-chat='true'] .composer-add {
   min-height: 34px;
 }
 
@@ -7207,6 +6945,7 @@ details.settings-item > :not(summary) {
 }
 
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-controls .composer-icon,
+.scenic-shell [data-main-chat='true'] .composer-bar .composer-attach,
 .scenic-shell [data-main-chat='true'] .composer-bar .composer-controls .composer-send {
   width: 28px;
   height: 28px;
@@ -7218,13 +6957,10 @@ details.settings-item > :not(summary) {
   color: #141413;
 }
 
-.scenic-shell [data-main-chat='true'] .studio-composer > div > p.composer-keys {
-  gap: 16px;
-  font-family: var(--font-sans);
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  text-transform: none;
-  color: rgb(236 230 218 / 0.35);
+/* Nothing to send yet: the button rests. */
+.scenic-shell [data-main-chat='true'] .composer-bar .composer-send:disabled {
+  background: rgb(236 230 218 / 0.1);
+  color: rgb(236 230 218 / 0.38);
 }
 
 /* In-chat cards use the same quiet paper-dark surface and 8px corners as
@@ -7388,8 +7124,7 @@ details.settings-item > :not(summary) {
   .plan-card:not(.plan-card-note):has(.plan-card-actions, .plan-card-status),
 .scenic-shell [data-main-chat='true']
   .approval-card:not(:has(.approval-card-sent)),
-.scenic-shell [data-main-chat='true'] .automation-card[data-state='due'],
-.scenic-shell [data-main-chat='true'] .tool-block[data-active] .tool-block-card {
+.scenic-shell [data-main-chat='true'] .automation-card[data-state='due'] {
   border-color: var(--color-accent);
 }
 
@@ -7509,7 +7244,7 @@ details.settings-item > :not(summary) {
 
 @media (max-width: 767px) {
   .scenic-shell [data-main-chat='true'] .studio-composer-box.composer-bar {
-    padding: 6px 6px 6px 10px;
+    padding: 6px;
   }
 }
 

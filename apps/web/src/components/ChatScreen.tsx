@@ -11,8 +11,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { HaloOrb } from './halo/HaloOrb';
-import { usePresenceSignals } from '../lib/presence';
 import { CopyMessage } from './CopyMessage';
 import { SaveToMemory } from './memory/SaveToMemory';
 import {
@@ -26,7 +24,6 @@ import type { AgentDetail, ChatMessage } from '../lib/types';
 import {
   AlertIcon,
   BoltIcon,
-  PlusIcon,
   PulseIcon,
   SendIcon,
   StopIcon,
@@ -39,6 +36,7 @@ import {
   type ComposerModeState,
   type ComposerModelState,
 } from './ComposerMode';
+import { ComposerAdd } from './ComposerAdd';
 import {
   buildTranscript,
   isAcceptedBudgetWrapupMessage,
@@ -64,8 +62,8 @@ import {
   type Recall,
 } from '../lib/sent-history';
 import { SlashCommandMenu } from './sessions/SlashCommandMenu';
+import { toolLabel } from '../lib/tool-labels';
 import {
-  AttachmentControls,
   AttachmentDropZone,
 } from './attachments/AttachmentControls';
 import { AttachmentChips } from './attachments/AttachmentChips';
@@ -373,15 +371,6 @@ function itemTime(item: TranscriptItem): number | null {
     : null;
 }
 
-function receiptLabel(name: string): string {
-  if (/^(remember|memory_(?:store|write|remember))/i.test(name))
-    return 'Remembered';
-  if (/^mcp_[a-f0-9]{16,}(?:_[a-f0-9]{12,})?$/i.test(name))
-    return 'Connected tool';
-  const words = name.replace(/[_-]+/g, ' ').trim();
-  return words ? words[0].toUpperCase() + words.slice(1) : 'Completed action';
-}
-
 function ActionReceiptCard({
   receipts,
   createdAtMs,
@@ -436,7 +425,7 @@ function ActionReceiptCard({
                 {status === 'success' ? '✓' : status === 'failed' ? '!' : '·'}
               </span>
               <span className="action-receipt-label">
-                {receiptLabel(receipt.name)}
+                {toolLabel(receipt.name)}
               </span>
               <time>{formatTime(receipt.finishedAtMs ?? createdAtMs)}</time>
               <span className="sr-only">{accessibleStatus}</span>
@@ -1226,30 +1215,12 @@ export function Composer({
     onSend(text);
   };
   const menuId = useId();
-  const trayId = useId();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreButton = useRef<HTMLButtonElement>(null);
-  const tray = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!moreOpen) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!tray.current?.contains(target) && !moreButton.current?.contains(target)) setMoreOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setMoreOpen(false);
-      moreButton.current?.focus();
-    };
-    document.addEventListener('pointerdown', closeOnOutside);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutside);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [moreOpen]);
+  // Words dictation is still hearing, shown after the draft until they
+  // settle into it.
+  const [heard, setHeard] = useState('');
+  const shownDraft = heard
+    ? `${draft.trimEnd()}${draft.trim() ? ' ' : ''}${heard}`
+    : draft;
   const [activeIndex, setActiveIndex] = useState(0);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const [blurred, setBlurred] = useState(false);
@@ -1272,14 +1243,6 @@ export function Composer({
     (draft.trim().length > 0 || hasAttachments);
   const canPick = !disabled && !sending && !offline;
   const steerable = runActive && onSteer !== undefined;
-  // One button: the mic until there is something to send, then Send. While
-  // dictation listens the mic stays, so its words never stop it.
-  const listening = usePresenceSignals().listening !== null;
-  const showSend =
-    !listening &&
-    (draft.trim().length > 0 ||
-      (attachments?.items.length ?? 0) > 0 ||
-      savedAttachmentCount > 0);
 
   useResetOnChange([draft], () => setActiveIndex(0));
   useResetOnChange([historyKey], () => {
@@ -1306,7 +1269,7 @@ export function Composer({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [draft]);
+  }, [shownDraft]);
 
   /** Runs a command that needs nothing more; completes one that does, and
    *  a skill, which takes the request after its name (spec §15.3). */
@@ -1391,28 +1354,30 @@ export function Composer({
           </p>
         )}
         {tools}
-        {attachments && (
-          <div ref={tray} id={trayId} className="composer-tray" data-open={moreOpen || undefined} hidden={!moreOpen}>
-            <AttachmentControls disabled={!canPick} onAdd={attachments.onAdd} />
-          </div>
-        )}
         <AttachmentDropZone disabled={!canPick} onAdd={attachments?.onAdd}>
-          <div className="studio-composer-box composer-bar glass-strong focus-glow flex flex-col p-1.5 transition-[background-color,border-color,box-shadow] duration-200">
+          <div className="studio-composer-box composer-bar glass-strong flex flex-col p-1.5 transition-[background-color,border-color,box-shadow] duration-200">
             <div className="composer-row">
-              {/* The agent's orb lives in the composer: it brightens while you
-                write and while the agent works. */}
-              <span className="composer-orb" aria-hidden>
-                <HaloOrb
-                  energy={
-                    runActive || sending ? 0.8 : draft.trim() ? 0.6 : 0.35
+              <ComposerAdd
+                attachments={
+                  attachments && { disabled: !canPick, onAdd: attachments.onAdd }
+                }
+                commands={
+                  commands && {
+                    disabled: disabled || draft.trim() !== '',
+                    onStart: () => {
+                      changeDraft('/');
+                      taRef.current?.focus();
+                    },
                   }
-                  className="composer-orb-canvas"
-                />
-              </span>
+                }
+              />
               <textarea
                 data-workspace-composer
                 ref={taRef}
-                value={draft}
+                value={shownDraft}
+                // Held still while words are being heard, so typing never
+                // races the transcript.
+                readOnly={heard !== ''}
                 disabled={disabled}
                 onChange={(e) => {
                   // Typing makes a recalled message the user's own draft.
@@ -1502,13 +1467,6 @@ export function Composer({
                 className="max-h-48 flex-1 resize-none bg-transparent px-2 py-[7px] text-[15px] leading-6 text-ink placeholder-ink-3 outline-none"
               />
               <div className="composer-controls">
-                {attachments && (
-                  <button ref={moreButton} type="button" className="composer-icon composer-more"
-                    aria-label="More input options" aria-expanded={moreOpen} aria-controls={trayId}
-                    onClick={() => setMoreOpen((open) => !open)}>
-                    <PlusIcon size={16} />
-                  </button>
-                )}
                 <ComposerMode mode={mode} model={model} />
                 {runActive && (
                   <>
@@ -1534,6 +1492,14 @@ export function Composer({
                     )}
                   </>
                 )}
+                <DictationControl
+                  compact
+                  disabled={!canPick || voiceDisabled}
+                  conversationKey={conversationKey}
+                  onTranscript={appendDictation}
+                  onInterim={setHeard}
+                  onPushToTalkStop={() => send(latestDraftRef.current)}
+                />
                 {runActive && onStop ? (
                   <button
                     type="button"
@@ -1543,14 +1509,6 @@ export function Composer({
                   >
                     <StopIcon size={14} />
                   </button>
-                ) : !showSend ? (
-                  <DictationControl
-                    compact
-                    disabled={!canPick || voiceDisabled}
-                    conversationKey={conversationKey}
-                    onTranscript={appendDictation}
-                    onPushToTalkStop={() => send(latestDraftRef.current)}
-                  />
                 ) : (
                   <button
                     type="button"
@@ -1566,12 +1524,6 @@ export function Composer({
             </div>
           </div>
         </AttachmentDropZone>
-        {commands && (
-          <p className="composer-keys" aria-hidden>
-            <span>/ commands</span>
-            <span>{isMacPlatform() ? '⌘K' : 'Ctrl K'} search</span>
-          </p>
-        )}
         {/* A hint only when there is something to know. */}
         {(steerable || offline || sending || runActive) && (
           <div className="composer-hints">

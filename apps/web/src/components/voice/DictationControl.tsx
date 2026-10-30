@@ -11,6 +11,8 @@ export interface DictationControlProps {
   disabled?: boolean;
   conversationKey?: string | null;
   onTranscript(text: string): void;
+  /** Words still being heard; the composer shows them in the input. */
+  onInterim?(text: string): void;
   onPushToTalkStop?: () => void;
 }
 export function DictationControl({
@@ -18,6 +20,7 @@ export function DictationControl({
   disabled = false,
   conversationKey,
   onTranscript,
+  onInterim,
   onPushToTalkStop,
 }: DictationControlProps) {
   const { pushToTalk } = useVoiceSettings();
@@ -81,11 +84,16 @@ export function DictationControl({
       document.removeEventListener('keyup', up);
     };
   }, [pushToTalk, compact, disabled, beginPushToTalk, finishPushToTalk]);
-  // The composer's microphone drives the orb: it shows the words as heard.
+  // The composer's microphone wakes the orb; the words themselves go
+  // straight into the input.
   useEffect(() => {
     if (!compact) return;
-    setPresenceListening(active ? dictation.interim : null);
-  }, [compact, active, dictation.interim]);
+    setPresenceListening(active ? '' : null);
+  }, [compact, active]);
+  const interim = active ? dictation.interim : '';
+  useEffect(() => {
+    onInterim?.(interim);
+  }, [onInterim, interim]);
   useEffect(
     () => () => {
       if (compact) setPresenceListening(null);
@@ -136,7 +144,7 @@ export function DictationControl({
       >
         {compact ? <MicIcon size={16} /> : label}
       </button>
-      {active && (
+      {active && (!compact || pushToTalk) && (
         <div role="status" className="mt-2 text-xs text-ink-3">
           {pushToTalk
             ? 'Hold Space or the microphone to talk. Releasing sends the transcript.'

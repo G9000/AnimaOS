@@ -9,8 +9,7 @@
 .tool-block-label,
 .tool-block-toggle {
   color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
 }
 .tool-block-toggle:hover {
@@ -74,7 +73,6 @@
 .tool-step-name {
   flex-shrink: 0;
   color: var(--color-ink);
-  font-family: var(--font-mono);
 }
 .tool-step-args {
   min-width: 0;

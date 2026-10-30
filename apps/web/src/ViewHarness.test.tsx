@@ -4520,7 +4520,7 @@ it('streams a reply into the open session with its tool steps, then shows the co
 
   expect(await screen.findByText('Saturday looks sunny')).toBeVisible();
   expect(screen.getByText('Plan Saturday')).toBeVisible();
-  expect(screen.getByRole('button', { name: /web_search/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: /Web search/ })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
 
   vi.mocked(daemon.sessionMessages).mockResolvedValue({

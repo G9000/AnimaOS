@@ -6,6 +6,7 @@ import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { toolWebSources } from '../../lib/web-sources';
 import { savedToolResultId, ToolResultArtifact } from './ToolResultArtifact';
 import { ChatExportDownload, chatExportResult } from './ChatExportDownload';
+import { toolLabel } from '../../lib/tool-labels';
 
 const STATUS_LABELS: Record<ToolStep['status'], string> = {
   running: 'running',
@@ -51,7 +52,9 @@ export function ToolStepCard({
             '✗'
           )}
         </span>
-        <span className="tool-step-name">{step.name}</span>
+        <span className="tool-step-name" title={step.name}>
+          {toolLabel(step.name)}
+        </span>
         {step.argumentsPreview && (
           <span className="tool-step-args">{step.argumentsPreview}</span>
         )}

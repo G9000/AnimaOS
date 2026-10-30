@@ -102,8 +102,8 @@ it('keeps the simplified composer attachment-only and makes zero transcription r
   );
   expect(api.transcribe).not.toHaveBeenCalled();
   expect(api.capabilities).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole('button', { name: 'More input options' }));
-  expect(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+  await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+  expect(screen.getByRole('menuitem', { name: /Attach files/ })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Record audio' })).not.toBeInTheDocument();
   expect(screen.queryByRole('combobox', { name: 'Audio to transcribe' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Transcribe with OpenAI API' })).not.toBeInTheDocument();
