@@ -254,7 +254,6 @@ export function agentStatusText({
   workingHelpers: number;
 }): string {
   if (!online) return 'Offline';
-  if (presence === 'listening') return 'Listening';
   if (presence === 'speaking') return 'Speaking';
   if (presence === 'attention') return 'Waiting for your OK';
   const helpers =
@@ -613,7 +612,6 @@ export function WorkspaceShell({
             <HaloBackdrop
               variant={chatBackground}
               mode={page === null ? presence : 'calm'}
-              words={presenceSignals.listening?.words}
               accent={appearance.accent}
               agentId={settingsAgent.id}
             />

@@ -1735,7 +1735,7 @@ describe('Composer commands and live replies', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
-  it('turns Send into Stop and steers with Ctrl+Enter while a reply runs', async () => {
+  it('turns Send into Stop, queues with Enter, and steers with Ctrl+Enter while a reply runs', async () => {
     const props = composerProps({
       draft: 'also check flights',
       runActive: true,
@@ -1755,39 +1755,15 @@ describe('Composer commands and live replies', () => {
     expect(props.onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(props.onSend).toHaveBeenCalledTimes(1);
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Wait', exact: true }),
-    );
-    expect(props.onSend).toHaveBeenCalledTimes(2);
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Steer', exact: true }),
-    );
-    expect(props.onSteer).toHaveBeenCalledTimes(2);
-    // jsdom reports no Mac platform, so the hint names Ctrl+Enter (S3b-E).
+    // The message just queues; Steer is offered on it once it is queued,
+    // not as buttons or a hint row on the input.
     expect(
-      screen.getByText('⏎ queue · Ctrl+Enter steer · ⇧⏎ new line'),
-    ).toBeVisible();
-  });
-
-  it('shows the ⌘ steer hint on a Mac', () => {
-    vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel' });
-    try {
-      render(
-        <Composer
-          {...composerProps({
-            draft: 'and Sunday?',
-            runActive: true,
-            onStop: vi.fn(),
-            onSteer: vi.fn(),
-          })}
-        />,
-      );
-      expect(
-        screen.getByText('⏎ queue · ⌘⏎ steer · ⇧⏎ new line'),
-      ).toBeVisible();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+      screen.queryByRole('button', { name: 'Wait', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Steer', exact: true }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/queue ·/)).not.toBeInTheDocument();
   });
 
   it('does not steer or send while composing IME text', () => {

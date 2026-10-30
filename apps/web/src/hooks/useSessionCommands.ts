@@ -134,6 +134,8 @@ export interface SessionCommands {
   steer: () => void;
   /** Stops a run (spec §4.6): the reply in progress, or a queued message. */
   stopRun: (run: Pick<Run, 'agentId' | 'id'>) => Promise<void>;
+  /** Moves a queued message into the reply in progress. */
+  steerQueued: (run: Run) => Promise<void>;
   /** Folds earlier turns into the session summary (spec §5.4). */
   compactSession: (
     session: Session,
@@ -195,6 +197,28 @@ export function useSessionCommands(
       } catch (caught) {
         latest.current.setError(errorMessage(caught));
       }
+    };
+
+    /** A queued message leaves the queue first, so it never runs twice,
+     *  then joins the reply in progress. The draft is left alone. */
+    const steerQueued = async (run: Run) => {
+      const { session, activeRun, chatKey } = latest.current;
+      if (!session || !chatKey || !activeRun || !session.capabilities.steer)
+        return;
+      try {
+        await daemon.stopRun(run.agentId, run.id);
+      } catch (caught) {
+        latest.current.setError(errorMessage(caught));
+        return;
+      }
+      latest.current.queueSend(
+        session,
+        chatKey,
+        run.input.text,
+        crypto.randomUUID(),
+        'steer',
+      );
+      latest.current.refreshRuns();
     };
 
     const compactSession = async (
@@ -525,6 +549,7 @@ export function useSessionCommands(
       send: (text?: string, documentEditContext?: PreviewEditContext) => submit('queue', text, documentEditContext),
       steer: () => submit('steer'),
       stopRun,
+      steerQueued,
       compactSession,
       reviseSession,
       updateQueuedRun,

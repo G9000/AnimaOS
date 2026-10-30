@@ -1,29 +1,18 @@
 import { useSyncExternalStore } from 'react';
 
-/** What the voice controls report to the orb: the words being dictated, and
- *  whether a reply is being read aloud. One store for the whole console. */
+/** What the voice controls report to the orb: whether a reply is being read
+ *  aloud. One store for the whole console. Dictation stays in the composer:
+ *  its words go into the input, not onto the orb. */
 export interface PresenceSignals {
-  /** Set while dictating; the words heard so far (may be empty). */
-  listening: { words: string } | null;
   speaking: boolean;
 }
 
-let signals: PresenceSignals = { listening: null, speaking: false };
+let signals: PresenceSignals = { speaking: false };
 const listeners = new Set<() => void>();
 
 function emit(next: PresenceSignals) {
   signals = next;
   for (const listener of listeners) listener();
-}
-
-export function setPresenceListening(words: string | null) {
-  const listening = words === null ? null : { words };
-  if (
-    signals.listening?.words === listening?.words &&
-    (signals.listening === null) === (listening === null)
-  )
-    return;
-  emit({ ...signals, listening });
 }
 
 export function setPresenceSpeaking(speaking: boolean) {
@@ -32,7 +21,7 @@ export function setPresenceSpeaking(speaking: boolean) {
 }
 
 export function resetPresence() {
-  emit({ listening: null, speaking: false });
+  emit({ speaking: false });
 }
 
 export function usePresenceSignals(): PresenceSignals {
@@ -49,11 +38,10 @@ export type PresenceMode =
   | 'calm'
   | 'thinking'
   | 'speaking'
-  | 'listening'
   | 'attention';
 
-/** Listening outranks everything: the owner is talking. A pending approval
- *  comes next, because anima is waiting on them. */
+/** A pending approval outranks everything, because anima is waiting on the
+ *  owner. */
 export function presenceMode({
   signals,
   running,
@@ -63,7 +51,6 @@ export function presenceMode({
   running: boolean;
   waiting: boolean;
 }): PresenceMode {
-  if (signals.listening) return 'listening';
   if (waiting) return 'attention';
   if (signals.speaking) return 'speaking';
   if (running) return 'thinking';

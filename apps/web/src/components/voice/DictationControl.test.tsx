@@ -98,7 +98,7 @@ it('cancels a pending request and clears interim on disabled boundary', async ()
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
-it('hands the words being heard to the input, wakes the orb without them, and clears both after', async () => {
+it('hands the words being heard to the input, with no status panel and nothing on the orb', async () => {
   const { getPresenceSnapshotForTest } = await import('../../lib/presence');
   const onInterim = vi.fn();
   const view = render(
@@ -121,9 +121,8 @@ it('hands the words being heard to the input, wakes the orb without them, and cl
     }),
   );
   expect(onInterim).toHaveBeenLastCalledWith('what should I');
-  expect(getPresenceSnapshotForTest().listening).toEqual({ words: '' });
-  // No status panel: the words are in the input.
+  // No status panel and no blur: the words are in the input.
+  expect(getPresenceSnapshotForTest()).toEqual({ speaking: false });
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
   view.unmount();
-  expect(getPresenceSnapshotForTest().listening).toBeNull();
 });

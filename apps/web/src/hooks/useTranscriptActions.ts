@@ -54,6 +54,9 @@ export interface TranscriptActionOptions {
   /** The listed sessions, where it finds a finished helper's session. */
   sessions: readonly Session[];
   stopRun: (run: Run) => void;
+  /** Moves a queued message into the reply in progress; absent while
+   *  nothing can be steered. */
+  steerQueued?: (run: Run) => void;
   /** Takes back a send the daemon has not accepted (S3b-I). */
   cancelPending: (key: string) => void;
   /** Sends a run's message again; false when it could not go. */
@@ -103,6 +106,7 @@ export function useTranscriptActions({
   liveRuns,
   sessions,
   stopRun,
+  steerQueued,
   cancelPending,
   sendAgain,
   compact,
@@ -120,6 +124,7 @@ export function useTranscriptActions({
 }: TranscriptActionOptions): TranscriptActions {
   const latest = {
     stopRun,
+    steerQueued,
     cancelPending,
     sendAgain,
     compact,
@@ -139,6 +144,7 @@ export function useTranscriptActions({
   const [resent, setResent] = useState<ReadonlySet<string>>(() => new Set());
   const resentRef = useRef(resent);
   const cancellable = session?.capabilities.stop === true;
+  const steerable = cancellable && steerQueued !== undefined;
   const canResend = resendable && session?.capabilities.send === true;
   const compactable = session?.capabilities.compact ? session : null;
   const canUndo = undoAutomation !== undefined;
@@ -165,6 +171,11 @@ export function useTranscriptActions({
         ? {
             onCancelQueued: (run: Run) => latestRef.current.stopRun(run),
             onStopRun: (run: Run) => latestRef.current.stopRun(run),
+          }
+        : {}),
+      ...(steerable
+        ? {
+            onSteerQueued: (run: Run) => latestRef.current.steerQueued?.(run),
           }
         : {}),
       onCancelPending: (key) => latestRef.current.cancelPending(key),
@@ -224,6 +235,7 @@ export function useTranscriptActions({
     }),
     [
       cancellable,
+      steerable,
       canResend,
       compactable,
       sessions,

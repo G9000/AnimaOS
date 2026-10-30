@@ -1,4 +1,3 @@
-import { revealInvisible } from '../../lib/skills';
 import type { PresenceMode } from '../../lib/presence';
 import type { ChatBackground } from '../../lib/chat-background';
 import {
@@ -15,7 +14,6 @@ const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
   calm: { accent: '#E94DAB', energy: 0.3 },
   thinking: { accent: '#E94DAB', energy: 0.75 },
   speaking: { accent: '#E94DAB', energy: 0.6 },
-  listening: { accent: '#E94DAB', energy: 0.95 },
   attention: { accent: '#F2B44B', energy: 0.55 },
 };
 
@@ -35,18 +33,15 @@ const QUIET_CALM_ENERGY = 0.15;
  * The console's background: a dark field with anima's orb. `full` keeps the
  * orb in the middle behind the conversation; `quiet` rests it at the edge so
  * the text stays clear, with a soft wash of the accent colour at the top; `off`
- * is the plain field. While the owner talks the orb comes forward and shows
- * their words, whichever background is chosen.
+ * is the plain field.
  */
 export function HaloBackdrop({
   mode,
-  words = '',
   variant = 'full',
   accent = 'pink',
   agentId = '',
 }: {
   mode: PresenceMode;
-  words?: string;
   variant?: ChatBackground;
   accent?: AppearanceAccent;
   agentId?: string;
@@ -63,37 +58,28 @@ export function HaloBackdrop({
         ? 1
         : 0.8,
   );
-  const shown = revealInvisible(words.trim()).text;
   return (
-    <>
-      <div
-        className="halo-backdrop"
-        data-mode={mode}
-        data-variant={variant}
-        aria-hidden
-      >
-        {variant !== 'off' && (
-          <>
-            <div
-              className="halo-glow"
-              style={{ ['--halo-accent' as string]: orbStyle.color }}
-            />
-            {variant === 'quiet' && <div className="halo-wash" />}
-            <HaloOrb
-              accent={orbStyle.color}
-              energy={energy}
-              pixel={orbPixel(orbStyle.grain)}
-              className="halo-backdrop-orb"
-            />
-          </>
-        )}
-      </div>
-      {/* Above the chat, below the composer: the owner's words while they talk. */}
-      {mode === 'listening' && (
-        <p className="halo-words" aria-hidden>
-          {shown || 'Listening…'}
-        </p>
+    <div
+      className="halo-backdrop"
+      data-mode={mode}
+      data-variant={variant}
+      aria-hidden
+    >
+      {variant !== 'off' && (
+        <>
+          <div
+            className="halo-glow"
+            style={{ ['--halo-accent' as string]: orbStyle.color }}
+          />
+          {variant === 'quiet' && <div className="halo-wash" />}
+          <HaloOrb
+            accent={orbStyle.color}
+            energy={energy}
+            pixel={orbPixel(orbStyle.grain)}
+            className="halo-backdrop-orb"
+          />
+        </>
       )}
-    </>
+    </div>
   );
 }

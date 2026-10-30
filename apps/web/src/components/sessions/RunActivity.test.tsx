@@ -222,6 +222,38 @@ describe('RunActivity', () => {
     expect(onCancelQueued).toHaveBeenCalledWith(run);
   });
 
+  it('offers to steer a queued message into the reply in progress', async () => {
+    const onSteerQueued = vi.fn();
+    const run = runFixture('run_q', {
+      input: { text: 'Also check Sunday', attachmentIds: [], skill: null },
+    });
+    const view = render(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={emptyLiveRun(run)}
+        actions={{ onSteerQueued }}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Steer' }));
+    expect(onSteerQueued).toHaveBeenCalledWith(run);
+
+    // Steering carries text only: a message with files waits its turn.
+    view.rerender(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={emptyLiveRun(
+          runFixture('run_f', {
+            input: { text: 'See this', attachmentIds: ['file'], skill: null },
+          }),
+        )}
+        actions={{ onSteerQueued }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Steer' })).not.toBeInTheDocument();
+  });
+
   it('shows the compaction phase and a check-in’s run without its prompt', () => {
     const run = runFixture('run_c', {
       status: 'running',

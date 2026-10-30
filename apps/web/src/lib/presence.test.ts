@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   presenceMode,
   resetPresence,
-  setPresenceListening,
   setPresenceSpeaking,
   getPresenceSnapshotForTest,
 } from './presence';
@@ -10,20 +9,11 @@ import {
 afterEach(() => resetPresence());
 
 describe('presenceMode', () => {
-  const quiet = { listening: null, speaking: false };
+  const quiet = { speaking: false };
   it('is calm when nothing is happening', () => {
     expect(
       presenceMode({ signals: quiet, running: false, waiting: false }),
     ).toBe('calm');
-  });
-  it('puts the owner talking above everything else', () => {
-    expect(
-      presenceMode({
-        signals: { listening: { words: '' }, speaking: true },
-        running: true,
-        waiting: true,
-      }),
-    ).toBe('listening');
   });
   it('shows a waiting approval before speech or work', () => {
     expect(
@@ -49,9 +39,8 @@ describe('presenceMode', () => {
 });
 
 it('keeps the same snapshot when a signal does not change', () => {
-  setPresenceListening('hi');
+  setPresenceSpeaking(true);
   const first = getPresenceSnapshotForTest();
-  setPresenceListening('hi');
-  setPresenceSpeaking(false);
+  setPresenceSpeaking(true);
   expect(getPresenceSnapshotForTest()).toBe(first);
 });

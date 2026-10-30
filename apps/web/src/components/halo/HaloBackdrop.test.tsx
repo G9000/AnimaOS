@@ -2,15 +2,6 @@ import { render } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { HaloBackdrop } from './HaloBackdrop';
 
-it('shows the owner’s words on the orb only while listening', () => {
-  const view = render(<HaloBackdrop mode="listening" words="Move my 3pm" />);
-  expect(view.container.querySelector('.halo-words')).toHaveTextContent(
-    'Move my 3pm',
-  );
-  view.rerender(<HaloBackdrop mode="calm" words="Move my 3pm" />);
-  expect(view.container.querySelector('.halo-words')).toBeNull();
-});
-
 it('falls back to a gradient orb without WebGL and stays hidden from assistive tech', () => {
   const view = render(<HaloBackdrop mode="attention" />);
   const backdrop = view.container.querySelector('.halo-backdrop');
@@ -37,14 +28,9 @@ it('keeps the orb behind the chat in the full background, with no wash', () => {
   expect(view.container.querySelector('.halo-backdrop-orb')).not.toBeNull();
 });
 
-it('draws nothing but the field when the background is off, yet still shows the owner’s words', () => {
-  const view = render(
-    <HaloBackdrop mode="listening" variant="off" words="Call Mira" />,
-  );
+it('draws nothing but the field when the background is off', () => {
+  const view = render(<HaloBackdrop mode="thinking" variant="off" />);
   expect(view.container.querySelector('.halo-backdrop-orb')).toBeNull();
   expect(view.container.querySelector('.halo-glow')).toBeNull();
   expect(view.container.querySelector('.halo-wash')).toBeNull();
-  expect(view.container.querySelector('.halo-words')).toHaveTextContent(
-    'Call Mira',
-  );
 });

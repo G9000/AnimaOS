@@ -720,6 +720,36 @@ describe('useSessionCommands', () => {
     expect(options.setError).toHaveBeenCalledWith('already finished');
   });
 
+  it('steers a queued message: out of the queue first, then into the reply, draft untouched', async () => {
+    const stop = vi
+      .spyOn(daemon, 'stopRun')
+      .mockResolvedValueOnce(runFixture('run_q', { status: 'cancelled' }))
+      .mockRejectedValueOnce(new Error('already started'));
+    const active = runFixture('run_7', { sessionId: 'room-7', status: 'running' });
+    const queued = runFixture('run_q', {
+      sessionId: 'room-7',
+      input: { text: 'Also Sunday', attachmentIds: [], skill: null },
+    });
+    const { result, options } = setup({ activeRun: active, draft: 'half typed' });
+
+    await act(async () => result.current.steerQueued(queued));
+    expect(stop).toHaveBeenCalledWith('agent-main', 'run_q');
+    expect(options.queueSend).toHaveBeenCalledWith(
+      options.session,
+      CHAT_KEY,
+      'Also Sunday',
+      expect.any(String),
+      'steer',
+    );
+    expect(options.updateChat).not.toHaveBeenCalled();
+
+    // A message the queue could not give back is never sent twice.
+    vi.mocked(options.queueSend).mockClear();
+    await act(async () => result.current.steerQueued(queued));
+    expect(options.queueSend).not.toHaveBeenCalled();
+    expect(options.setError).toHaveBeenCalledWith('already started');
+  });
+
   it('sends a run’s message again under a new key, only in its own session', () => {
     const { result, options } = setup();
     act(() =>

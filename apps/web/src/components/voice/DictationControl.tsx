@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useBrowserDictation } from '../../hooks/useBrowserDictation';
-import { setPresenceListening } from '../../lib/presence';
 import { revealInvisible } from '../../lib/skills';
 import { useVoiceSettings } from '../../lib/voice-settings';
 import { MicIcon } from '../icons';
@@ -84,22 +83,11 @@ export function DictationControl({
       document.removeEventListener('keyup', up);
     };
   }, [pushToTalk, compact, disabled, beginPushToTalk, finishPushToTalk]);
-  // The composer's microphone wakes the orb; the words themselves go
-  // straight into the input.
-  useEffect(() => {
-    if (!compact) return;
-    setPresenceListening(active ? '' : null);
-  }, [compact, active]);
+  // The composer shows the words being heard in the input itself.
   const interim = active ? dictation.interim : '';
   useEffect(() => {
     onInterim?.(interim);
   }, [onInterim, interim]);
-  useEffect(
-    () => () => {
-      if (compact) setPresenceListening(null);
-    },
-    [compact],
-  );
   if (!dictation.supported) return null;
   const label =
     pushToTalk && !active

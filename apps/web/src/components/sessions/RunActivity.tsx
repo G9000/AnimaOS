@@ -19,6 +19,8 @@ import { PlanNoteCard } from './PlanCard';
 import { ToolStepCard } from './ToolStepCard';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { ChevronIcon } from '../icons';
+import { HaloOrb } from '../halo/HaloOrb';
+import { orbPixel, useAgentOrbStyle } from '../../lib/orb-style-preferences';
 import {
   mergeAcpSnapshots,
   parseCodingSession,
@@ -145,6 +147,7 @@ export function ToolBlock({
   head?: TurnHead;
 }) {
   const [open, setOpen] = useState(false);
+  const orbStyle = useAgentOrbStyle(actions?.sessionAgentId ?? '');
   const count = steps.length;
   const total =
     elapsedMs ?? steps.reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
@@ -194,11 +197,18 @@ export function ToolBlock({
       ))}
       <div className="tool-block-card" data-open={expanded || undefined}>
         {active ? (
-          <p className="tool-block-label" aria-label={label}>
-            <span className="tool-block-live" aria-hidden />
+          <div className="tool-block-label" aria-label={label}>
+            {/* The agent's own orb, small and busy, while it works. */}
+            <span className="tool-block-live" aria-hidden>
+              <HaloOrb
+                accent={orbStyle.color}
+                energy={0.85}
+                pixel={orbPixel(orbStyle.grain)}
+              />
+            </span>
             <span className="tool-block-title">{title}</span>
             <span className="tool-block-meta">{meta}</span>
-          </p>
+          </div>
         ) : (
           <button
             type="button"
@@ -306,6 +316,22 @@ export function RunActivity({
         <AttachmentReferences ids={unknownIds} />
         <div className="run-queued-meta">
           <span>Queued</span>
+          {/* Steering takes text only; a message with files or a skill
+           *  waits its turn. */}
+          {actions?.onSteerQueued &&
+            run.input.text.trim() !== '' &&
+            run.input.attachmentIds.length === 0 &&
+            !run.input.skill &&
+            !run.input.documentEditContext && (
+              <button
+                type="button"
+                className="studio-tool-button"
+                title="Add this to the reply in progress"
+                onClick={() => actions.onSteerQueued?.(run)}
+              >
+                Steer
+              </button>
+            )}
           {actions?.onCancelQueued && (
             <button
               type="button"

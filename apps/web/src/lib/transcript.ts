@@ -111,6 +111,8 @@ type ToolsItem = Extract<TranscriptItem, { kind: 'tools' }>;
 /** What the owner can do from the transcript. */
 export interface TranscriptActions {
   onCancelQueued?: (run: Run) => void;
+  /** Moves a queued message into the reply in progress. */
+  onSteerQueued?: (run: Run) => void;
   /** Stops a run in progress (a plan card's Stop). */
   onStopRun?: (run: Run) => void;
   /** Takes back a message the daemon has not accepted (S3b-I). */

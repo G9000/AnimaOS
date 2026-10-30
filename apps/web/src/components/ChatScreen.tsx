@@ -30,7 +30,6 @@ import {
 } from './icons';
 import { MarkdownMessage } from './MarkdownMessage';
 import { ErrorBanner, formatTime } from './ui-bits';
-import { isMacPlatform } from '../lib/platform';
 import {
   ComposerMode,
   type ComposerModeState,
@@ -1468,30 +1467,6 @@ export function Composer({
               />
               <div className="composer-controls">
                 <ComposerMode mode={mode} model={model} />
-                {runActive && (
-                  <>
-                    <button
-                      type="button"
-                      className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
-                      disabled={!canSend}
-                      onClick={() => send()}
-                      title="Wait for the current reply, then send this message"
-                    >
-                      Wait
-                    </button>
-                    {steerable && (
-                      <button
-                        type="button"
-                        className="composer-queue-action cursor-pointer rounded px-2 py-1 text-xs text-ink-2 disabled:opacity-40"
-                        disabled={!canSend}
-                        onClick={() => onSteer?.()}
-                        title="Add this message to the reply in progress"
-                      >
-                        Steer
-                      </button>
-                    )}
-                  </>
-                )}
                 <DictationControl
                   compact
                   disabled={!canPick || voiceDisabled}
@@ -1524,24 +1499,6 @@ export function Composer({
             </div>
           </div>
         </AttachmentDropZone>
-        {/* A hint only when there is something to know. */}
-        {(steerable || offline || sending || runActive) && (
-          <div className="composer-hints">
-            {steerable && (
-              <span>
-                {/* Ctrl+Enter on every non-Mac platform, never ⌘⏎ (S3b-E). */}
-                {`⏎ queue · ${isMacPlatform() ? '⌘⏎' : 'Ctrl+Enter'} steer · ⇧⏎ new line`}
-              </span>
-            )}
-            <span>
-              {offline
-                ? 'Offline · your draft stays here'
-                : sending
-                  ? 'Working on your message…'
-                  : 'Replying · you can keep writing'}
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );

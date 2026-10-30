@@ -1570,6 +1570,10 @@ export function ViewHarness() {
     liveRuns: live.state.runs,
     sessions: sessions.sessions,
     stopRun: (run) => void stopRun(run),
+    steerQueued:
+      activeRun && activeSession?.capabilities.steer
+        ? (run) => void commands.steerQueued(run)
+        : undefined,
     // Its text goes back to the recovery panel with its key, so a resend
     // joins a request that did reach the daemon (S3b-I).
     cancelPending: (key) => {
