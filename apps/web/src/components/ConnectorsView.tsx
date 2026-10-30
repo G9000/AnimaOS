@@ -1296,25 +1296,6 @@ export function ConnectorsView({
           )}
           {(mode === 'all' || mode === 'connections') && (
             <>
-              <details className="connections-oauth-setup" ref={oauthSetup}>
-                <summary>OAuth app setup</summary>
-                <p>
-                  Add the daemon credentials used to start Google and Microsoft
-                  account connections.
-                </p>
-                <div className="oauth-grid">
-                  <OAuthAppCard
-                    key={`${agentId}:google`}
-                    provider="google"
-                    onChanged={() => oauthChanged('google')}
-                  />
-                  <OAuthAppCard
-                    key={`${agentId}:microsoft`}
-                    provider="microsoft"
-                    onChanged={() => oauthChanged('microsoft')}
-                  />
-                </div>
-              </details>
               <section className="connections-section" aria-labelledby="service-connections-heading">
                 <div className="connections-section-heading connections-section-bar">
                   <div>
@@ -1406,6 +1387,28 @@ export function ConnectorsView({
                 disabled={disabled || ownerBusy}
                 onGrantsChanged={onMcpGrantsChanged}
               />
+              <details
+                className="sk-disclosure connections-oauth-setup"
+                ref={oauthSetup}
+              >
+                <summary>OAuth app setup</summary>
+                <p>
+                  Add the daemon credentials used to start Google and Microsoft
+                  account connections.
+                </p>
+                <div className="oauth-grid">
+                  <OAuthAppCard
+                    key={`${agentId}:google`}
+                    provider="google"
+                    onChanged={() => oauthChanged('google')}
+                  />
+                  <OAuthAppCard
+                    key={`${agentId}:microsoft`}
+                    provider="microsoft"
+                    onChanged={() => oauthChanged('microsoft')}
+                  />
+                </div>
+              </details>
               <dialog
                 ref={catalog}
                 className="connections-catalog"

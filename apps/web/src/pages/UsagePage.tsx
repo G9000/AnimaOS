@@ -106,10 +106,17 @@ function Card({
   value: string;
   children?: ReactNode;
 }) {
+  // A name (the busiest chat) reads as text, not as a big figure.
+  const text = /[a-z]{3}/i.test(value) && !/^[\d$.,\s%]+[kKMB]?$/.test(value);
   return (
     <div className="usage-card" role="group" aria-label={label}>
       <span className="usage-card-label">{label}</span>
-      <strong className="usage-card-value">{value}</strong>
+      <strong
+        className={`usage-card-value${text ? ' is-text' : ''}`}
+        title={text ? value : undefined}
+      >
+        {value}
+      </strong>
       {children}
     </div>
   );

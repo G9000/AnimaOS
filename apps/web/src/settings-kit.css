@@ -602,3 +602,135 @@
   > button[aria-pressed='true'][data-tone='deny'] {
   color: #b8382b;
 }
+
+/* ── Usage: figures in serif; a name (busiest chat) as plain text ── */
+.settings-window .usage-card-value.is-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.settings-window .usage-card-label {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-3);
+}
+
+/* ── Logs: one line per entry; the logger name shortens, full on hover ── */
+.settings-window .system-log-row {
+  grid-template-columns: 92px 48px minmax(120px, 180px) minmax(0, 1fr);
+  align-items: baseline;
+}
+
+.settings-window .system-log-target-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-window .system-log-target {
+  overflow-wrap: normal;
+}
+
+/* ── Work: one toolbar line, then who to manage, then the list ── */
+.settings-window .work-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-window .work-agent-filter {
+  flex: 0 1 220px;
+}
+
+.settings-window .work-search {
+  flex: 1 1 220px;
+}
+
+.settings-window .work-toolbar .field {
+  height: 32px;
+}
+
+.settings-window .work-toolbar > button {
+  margin-left: auto;
+}
+
+.work-manage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.work-manage-label {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.work-manage .ui-button {
+  height: 28px;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+/* ── Automations ── */
+.settings-window .automations-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-window .automations-header {
+  justify-content: space-between;
+}
+
+/* ── One heading style for every settings section ──
+ * Pages not built from SettingsSection still read alike: the same size,
+ * weight and help text as the kit. */
+.settings-window .settings-form .settings-group-title,
+.settings-window .settings-form.settings-profile .settings-group-title,
+.settings-window .runtime-section h2,
+.settings-window .usage-chart-section h3,
+.settings-window .usage-breakdowns > summary,
+.settings-window [aria-labelledby='health-recent-logs'] h2 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink);
+}
+
+.settings-window .settings-form .settings-group-help,
+.settings-window .runtime-help {
+  max-width: 66ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+/* Sections on every settings page sit 32px apart. */
+.settings-window .settings-form,
+.settings-window .runtime-page,
+.settings-window .usage-page {
+  gap: 32px;
+}
+
+.connections-oauth-setup > p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}

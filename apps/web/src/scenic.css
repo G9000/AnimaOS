@@ -7646,30 +7646,6 @@ details.settings-item > :not(summary) {
   font-size: 12px;
   text-align: center;
 }
-
-/* OAuth app setup: two provider cards with controls cut to one size. */
-.connections-oauth-setup {
-  padding: 0;
-  border: 1px solid rgb(236 230 218 / 0.14);
-  border-radius: 4px;
-  background: rgb(236 230 218 / 0.025);
-}
-.connections-oauth-setup > summary {
-  padding: 14px 16px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-ink);
-}
-.connections-oauth-setup[open] > summary {
-  padding-bottom: 4px;
-}
-.connections-oauth-setup > p {
-  margin: 0;
-  padding: 0 16px;
-  font-size: 12px;
-  color: rgb(236 230 218 / 0.55);
-}
 .oauth-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -8449,19 +8425,6 @@ details.settings-item > :not(summary) {
 }
 .connections-catalog li > button:disabled {
   cursor: not-allowed;
-}
-.connections-oauth-setup {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgb(236 230 218 / 0.12);
-  color: var(--color-ink-2);
-  font-size: 12px;
-}
-.connections-oauth-setup summary {
-  cursor: pointer;
-}
-.connections-oauth-setup p {
-  color: var(--color-ink-3);
-  font-size: 11px;
 }
 .connections-telegram-detail {
   display: flex;

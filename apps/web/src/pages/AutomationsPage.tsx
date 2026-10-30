@@ -330,13 +330,19 @@ export function AutomationsPage({
         className="automations-section"
         aria-labelledby="automations-heading"
       >
-        <div className="automations-header">
-          <h2 id="automations-heading" className="sr-only">
-            Automations
-          </h2>
+        <div className="sk-section-head automations-header">
+          <div className="sk-section-text">
+            <h2 id="automations-heading" className="sk-section-title">
+              Your automations
+            </h2>
+            <p className="sk-section-desc">
+              Reminders, check-ins and routines. Results land in the main chat.
+            </p>
+          </div>
+          <div className="sk-section-action">
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button is-primary"
             disabled={!online}
             onClick={() => setEditing({ automation: null })}
           >
@@ -344,12 +350,13 @@ export function AutomationsPage({
           </button>
           <button
             type="button"
-            className="studio-tool-button"
+            className="ui-button"
             disabled={!online || hasHeartbeat}
             onClick={() => void view.createHeartbeat(localTimeZone())}
           >
             Add heartbeat
           </button>
+          </div>
         </div>
         {editing && (
           <AutomationEditor
@@ -362,10 +369,12 @@ export function AutomationsPage({
           />
         )}
         {view.loaded && view.automations.length === 0 ? (
-          <p className="automations-empty">
-            No automations yet. Create one, add the heartbeat, or ask your
-            companion to schedule something.
-          </p>
+          <div className="sk-card">
+            <p className="sk-empty automations-empty">
+              No automations yet. Create one, add the heartbeat, or ask your
+              companion to schedule something.
+            </p>
+          </div>
         ) : (
           <>
             {section(

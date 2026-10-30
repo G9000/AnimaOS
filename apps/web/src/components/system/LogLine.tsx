@@ -14,7 +14,10 @@ export const LogLine = memo(function LogLine({ line }: { line: LogLineData }) {
       <span className={`system-log-level system-log-level-${line.level}`}>
         {LOG_LEVEL_LABELS[line.level] ?? line.level}
       </span>
-      <RevealedText text={line.target} className="system-log-target" />
+      {/* One line; the full logger name shows on hover. */}
+      <span className="system-log-target-cell" title={line.target}>
+        <RevealedText text={line.target} className="system-log-target" />
+      </span>
       <RevealedText text={line.message} className="system-log-message" />
     </div>
   );

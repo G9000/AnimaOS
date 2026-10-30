@@ -417,8 +417,8 @@ export function WorkspaceHub({
                   </p>
                   )}
                   <div className="work-toolbar">
-                    <label className="min-w-40 flex-1 space-y-2 text-sm">
-                      Agent
+                    <label className="work-agent-filter">
+                      <span className="sr-only">Agent</span>
                       <select
                         className="field"
                         aria-label="Agent"
@@ -434,8 +434,8 @@ export function WorkspaceHub({
                       </select>
                     </label>
                     {section !== 'Tasks' && (
-                      <label className="min-w-40 flex-[2] space-y-2 text-sm">
-                        Search
+                      <label className="work-search">
+                        <span className="sr-only">Search</span>
                         <input
                           className="field"
                           value={query}
@@ -461,7 +461,10 @@ export function WorkspaceHub({
                     </button>
                   </div>
                   {section !== 'Notes' && (
-                    <div className="flex flex-wrap gap-3">
+                    <div className="work-manage">
+                      <span className="work-manage-label" aria-hidden="true">
+                        Manage
+                      </span>
                       {agents
                         .filter(
                           (agent) => !selectedId || agent.id === selectedId,
@@ -470,11 +473,12 @@ export function WorkspaceHub({
                           <button
                             key={agent.id}
                             type="button"
-                            className="ui-button"
+                            className="ui-button is-quiet"
+                            aria-label={`Manage ${agent.name}’s ${section.toLowerCase()}`}
                             onClick={() => setManagedId(agent.id)}
                           >
-                            <AgentAvatar id={agent.id} name={agent.name} size={18} />
-                            Manage {agent.name}’s {section.toLowerCase()}
+                            <AgentAvatar id={agent.id} name={agent.name} size={16} />
+                            {agent.name}
                           </button>
                         ))}
                     </div>
@@ -508,7 +512,7 @@ export function WorkspaceHub({
                           : ''}
                       </p>}
                       {visibleEntries?.length === 0 && (
-                        <p className="rounded-2xl border border-dashed border-line p-8 text-sm text-ink-3">
+                        <p className="sk-card sk-empty">
                           {query
                             ? 'No matches. Try another search.'
                             : errors?.length

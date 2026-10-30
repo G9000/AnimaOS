@@ -56,14 +56,24 @@ export function ConnectedAccountsPanel({
       className="connections-section space-y-4"
       aria-label="Connected account search and workflows"
     >
-      <button
-        type="button"
-        className={accountButton}
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
-        Search and account workflows
-      </button>
+      <div className="sk-card">
+        <button
+          type="button"
+          className="sk-row sk-nav"
+          aria-label="Search and account workflows"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <span className="sk-row-text">
+            <span className="sk-row-title">Search and account workflows</span>
+            <span className="sk-row-desc">
+              Search across connected accounts and set what it may do with
+              them.
+            </span>
+          </span>
+          <span aria-hidden="true">{open ? '−' : '+'}</span>
+        </button>
+      </div>
       {open &&
         (online ? (
           <AccountContents
