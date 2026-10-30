@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -7,6 +7,65 @@ import { ApprovalCard } from './ApprovalCard';
 import { daemon } from '../../lib/daemon-api';
 
 describe('ApprovalCard', () => {
+  const imageArgs = { _anima_exact_image: true, prompt: '<img src=x> A blue bird', sourceAttachmentId: null, sourceName: null, sourceSha256: null, provider: 'openai', model: 'gpt-image-2.5-sunburst', size: '1024x1024', quality: 'medium', count: 1, disclosure: 'OpenAI API charges apply.' };
+  it('offers an exact single-use image request with plain prompt and transfer disclosure', async () => {
+    const request = approvalFixture('image', { tool: 'generate_image', arguments: JSON.stringify(imageArgs), expiresAtMs: 4_000_000_000_000 });
+    const onDecide = vi.fn().mockResolvedValue(null);
+    const { container } = render(<ApprovalCard approval={request} onDecide={onDecide} canPersist />);
+    expect(screen.getByLabelText('Image prompt')).toHaveTextContent('<img src=x> A blue bird');
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText(/sent to OpenAI/)).toHaveTextContent('API charges apply');
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow for this session' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Allow once and generate' }));
+    expect(onDecide).toHaveBeenCalledWith(request, { decision: 'allow_once' });
+  });
+  it.each([
+    { arguments: '{}' },
+    { arguments: JSON.stringify({ ...imageArgs, sourceAttachmentId: 'source' }) },
+    { arguments: JSON.stringify({ ...imageArgs, extra: true }) },
+    { arguments: JSON.stringify(imageArgs), argumentsTruncated: true },
+  ])('blocks incomplete image approval without reusable grants', (change) => {
+    render(<ApprovalCard approval={approvalFixture('image', { tool: 'generate_image', ...change })} onDecide={vi.fn()} canPersist />);
+    expect(screen.getByRole('alert')).toHaveTextContent('incomplete');
+    expect(screen.getByRole('button', { name: 'Allow once and generate' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Always allow' })).toBeNull();
+  });
+  it('previews the exact edit source through authenticated bytes and denies a failed preview', async () => {
+    let finish!: (blob: Blob) => void;
+    const download = vi.spyOn(daemon, 'downloadAttachment').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:source');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const request = approvalFixture('edit-image', { tool: 'edit_image', arguments: JSON.stringify({ ...imageArgs, sourceAttachmentId: 'source-id', sourceName: 'Original.png', sourceSha256: 'a'.repeat(64) }), expiresAtMs: 4_000_000_000_000 });
+    const onDecide = vi.fn().mockResolvedValue(null);
+    const { unmount } = render(<ApprovalCard approval={request} onDecide={onDecide} />);
+    expect(screen.getByRole('button', { name: 'Allow once and edit' })).toBeDisabled();
+    expect(download).toHaveBeenCalledWith(request.agentId, 'source-id', { signal: expect.any(AbortSignal) });
+    const sourceReview = screen.getByLabelText('Selected input image');
+    expect(sourceReview).toHaveTextContent('Original.png');
+    expect(sourceReview).not.toHaveTextContent('source-id');
+    expect(sourceReview).not.toHaveTextContent('a'.repeat(64));
+    await act(async () => finish(new Blob(['png'], { type: 'image/png' })));
+    const image = screen.getByRole('img', { name: 'Original.png' });
+    expect(create).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Allow once and edit' })).toBeEnabled();
+    fireEvent.error(image);
+    expect(screen.getByRole('button', { name: 'Allow once and edit' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(onDecide).toHaveBeenCalledWith(request, { decision: 'deny' });
+    unmount();
+    expect(revoke).toHaveBeenCalledWith('blob:source');
+    download.mockRestore(); create.mockRestore(); revoke.mockRestore();
+  });
+  it('does not fetch image bytes for a read-only approval', () => {
+    const download = vi.spyOn(daemon, 'downloadAttachment');
+    const request = approvalFixture('edit-image', { tool: 'edit_image', arguments: JSON.stringify({ ...imageArgs, sourceAttachmentId: 'source-id', sourceName: 'Original.png', sourceSha256: 'a'.repeat(64) }) });
+    render(<ApprovalCard approval={request} />);
+    expect(download).not.toHaveBeenCalled();
+    expect(screen.getByText('Image approval is available to the owner.')).toBeVisible();
+    download.mockRestore();
+  });
   it('never falls back to reusable approval for malformed document requests', async () => {
     const onDecide = vi.fn().mockResolvedValue(null);
     render(<ApprovalCard approval={approvalFixture('document', { tool: 'apply_document_edit', arguments: '{}', expiresAtMs: 4_000_000_000_000 })} onDecide={onDecide} canPersist />);

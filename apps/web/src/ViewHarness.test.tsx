@@ -16,8 +16,8 @@ import {
   type Session,
   type SessionMessage,
   type BrowserPolicy,
-  type BrowserScope,
   type ChatResult,
+  type SessionImages,
 } from '@animaos/sdk';
 
 import { toolNamesForProfile } from './lib/agent-access';
@@ -374,14 +374,16 @@ function mockBrowserPolicy(): BrowserPolicy {
   return policy;
 }
 
-async function openBrowserPolicyPicker() {
-  const details = screen.getByText('Browser task').closest('details')!;
-  details.open = true;
-  fireEvent(details, new Event('toggle'));
-  return screen.findByLabelText('Browser policy for next message');
+function expectNoComposerBrowserControls() {
+  expect(screen.queryByText('Browser task')).not.toBeInTheDocument();
+  expect(
+    screen.queryByLabelText('Browser policy for next message'),
+  ).not.toBeInTheDocument();
+  expect(daemon.browserScopes.policies).not.toHaveBeenCalled();
+  expect(daemon.browserScopes.get).not.toHaveBeenCalled();
 }
 
-it('M46 sends one explicit browser selection from an existing chat without carrying it to the next message', async () => {
+it('sends ordinary messages from an existing chat without browser selection or scope reads', async () => {
   const user = userEvent.setup();
   mockBrowserPolicy();
   const { input } = await openLiveSession({ kind: 'chat' });
@@ -389,63 +391,54 @@ it('M46 sends one explicit browser selection from an existing chat without carry
     async (agentId, sessionId, input) =>
       acceptedRun(agentId, sessionId, input.text),
   );
-  const details = screen.getByText('Browser task').closest('details')!;
-  details.open = true;
-  fireEvent(details, new Event('toggle'));
-  await screen.findByRole('option', { name: /local-quotes/ });
-  await user.selectOptions(
-    screen.getByLabelText('Browser policy for next message'),
-    'local-quotes',
-  );
+  expectNoComposerBrowserControls();
+  expect(daemon.startRun).not.toHaveBeenCalled();
   await user.type(input, 'Compare offers');
   await user.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() =>
-    expect(daemon.startRun).toHaveBeenCalledWith(
-      'agent-main',
-      'room-7',
-      expect.objectContaining({
-        browserSelection: { policyId: 'local-quotes', selectedInputIds: [] },
-      }),
-      expect.any(String),
-    ),
-  );
-  expect(screen.getByLabelText('Browser policy for next message')).toHaveValue(
-    '',
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(1));
+  expect(daemon.startRun).toHaveBeenCalledWith(
+    'agent-main', 'room-7', expect.objectContaining({ text: 'Compare offers' }),
+    expect.any(String),
   );
   await user.type(input, 'Just a chat');
   await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(daemon.startRun).mock.calls[1][2]).not.toHaveProperty(
-    'browserSelection',
-  );
+  for (const [, , sent] of vi.mocked(daemon.startRun).mock.calls)
+    expect(sent).not.toHaveProperty('browserSelection');
+  expectNoComposerBrowserControls();
 });
 
-it('sends the selected dedicated account through the composer and send queue', async () => {
+it('does not read or attach a configured dedicated account from the simplified composer', async () => {
   const user = userEvent.setup();
   const base = mockBrowserPolicy();
-  const website = { ...base, authenticated: true, interactive: true, origin: 'https://example.com', allowedOrigins: ['https://example.com'] };
+  const website = {
+    ...base, authenticated: true, interactive: true,
+    origin: 'https://example.com', allowedOrigins: ['https://example.com'],
+  };
   vi.mocked(daemon.browserScopes.policies).mockResolvedValue([website]);
-  vi.spyOn(daemon.browserScopes, 'setup').mockResolvedValue({ available: true, reason: null, setupCommand: 'bun run browser:setup' });
-  vi.spyOn(daemon.browserScopes, 'profiles').mockResolvedValue([{
+  const setup = vi.spyOn(daemon.browserScopes, 'setup').mockResolvedValue({
+    available: true, reason: null, setupCommand: 'bun run browser:setup',
+  });
+  const profiles = vi.spyOn(daemon.browserScopes, 'profiles').mockResolvedValue([{
     id: 'account-ready', agentId: 'agent-main', policyId: website.id,
     origin: website.origin, revision: 2, digest: 'd'.repeat(64), ready: true,
     revoked: false, loginActive: false,
   }]);
   const { input } = await openLiveSession({ kind: 'chat' });
-  vi.mocked(daemon.startRun).mockImplementation(async (agentId, sessionId, sent) => acceptedRun(agentId, sessionId, sent.text));
-  await user.selectOptions(await openBrowserPolicyPicker(), website.id);
-  const websites = screen.getByText('Websites and sign-in').closest('details')!;
-  websites.open = true;
-  fireEvent(websites, new Event('toggle'));
-  await user.selectOptions(await screen.findByLabelText('Account for next message'), 'account-ready');
-  await user.type(input, 'Use my dedicated account');
+  vi.mocked(daemon.startRun).mockImplementation(
+    async (agentId, sessionId, sent) => acceptedRun(agentId, sessionId, sent.text),
+  );
+  expectNoComposerBrowserControls();
+  expect(screen.queryByLabelText('Account for next message')).not.toBeInTheDocument();
+  await user.type(input, 'An ordinary request');
   await user.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledWith(
-    'agent-main', 'room-7', expect.objectContaining({ browserSelection: { policyId: website.id, profileId: 'account-ready', selectedInputIds: [] } }), expect.any(String),
-  ));
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(daemon.startRun).mock.calls[0][2]).not.toHaveProperty('browserSelection');
+  expect(setup).not.toHaveBeenCalled();
+  expect(profiles).not.toHaveBeenCalled();
 });
 
-it('M46 sends browser selection from the resolved main session without creating another chat', async () => {
+it('sends an ordinary message from the resolved main session without creating another chat', async () => {
   const user = userEvent.setup();
   mockBrowserPolicy();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
@@ -455,165 +448,55 @@ it('M46 sends browser selection from the resolved main session without creating 
   mockProviders();
   render(<ViewHarness />);
   const input = await readyComposer('Message Alpha…');
-  const details = screen.getByText('Browser task').closest('details')!;
-  details.open = true;
-  fireEvent(details, new Event('toggle'));
-  await screen.findByRole('option', { name: /local-quotes/ });
-  await user.selectOptions(
-    screen.getByLabelText('Browser policy for next message'),
-    'local-quotes',
-  );
-  await user.type(input, 'First browser task');
+  expectNoComposerBrowserControls();
+  expect(daemon.startRun).not.toHaveBeenCalled();
+  await user.type(input, 'First ordinary request');
   await user.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() =>
-    expect(daemon.startRun).toHaveBeenCalledWith(
-      'alpha',
-      expect.any(String),
-      expect.objectContaining({
-        browserSelection: { policyId: 'local-quotes', selectedInputIds: [] },
-      }),
-      expect.any(String),
-    ),
+  await waitFor(() => expect(daemon.startRun).toHaveBeenCalledTimes(1));
+  expect(daemon.startRun).toHaveBeenCalledWith(
+    'alpha', expect.any(String),
+    expect.objectContaining({ text: 'First ordinary request' }), expect.any(String),
   );
+  expect(vi.mocked(daemon.startRun).mock.calls[0][2]).not.toHaveProperty('browserSelection');
   expect(daemon.ensureMainSession).toHaveBeenCalledExactlyOnceWith('alpha');
   expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
-it('M46 keeps active browser scope Stop CAS and artifacts when a newer ordinary message is queued', async () => {
-  const user = userEvent.setup();
-  const policy = mockBrowserPolicy();
+it('does not read, stop or expose browser scopes for active and queued chat runs', async () => {
+  mockBrowserPolicy();
+  const stopScope = vi.spyOn(daemon.browserScopes, 'stop').mockRejectedValue(
+    new Error('Browser scope controls are not part of the simplified composer'),
+  );
   const active = runFixture('browser-active', {
-    sessionId: 'room-7',
-    status: 'running',
-    createdAtMs: 100,
-    startedAtMs: 100,
-    input: {
-      text: 'Browser comparison in progress',
-      attachmentIds: [],
-      skill: null,
-    },
+    sessionId: 'room-7', status: 'running', createdAtMs: 100, startedAtMs: 100,
+    input: { text: 'Comparison in progress', attachmentIds: [], skill: null },
   });
   const queued = runFixture('plain-follow-up', {
-    sessionId: 'room-7',
-    status: 'queued',
-    createdAtMs: 200,
-    input: {
-      text: 'Queued ordinary follow-up',
-      attachmentIds: [],
-      skill: null,
-    },
-  });
-  const currentScope: BrowserScope = {
-    id: 'browser-scope-active',
-    agentId: 'agent-main',
-    runId: active.id,
-    sessionId: 'room-7',
-    version: 7,
-    enabled: true,
-    state: 'active',
-    policyId: policy.id,
-    origin: policy.origin,
-    policyDigest: policy.policyDigest,
-    installationId: policy.installationId,
-    installationDigest: policy.installationDigest,
-    selectedInputIds: [],
-    expiresAtMs: Date.now() + 60000,
-    actionsUsed: 3,
-    requestsUsed: 2,
-    wireBytesUsed: 1200,
-    physicalLeaseHeld: true,
-    document: null,
-    artifacts: [
-      {
-        id: 'att-11111111-1111-4111-8111-111111111111',
-        kind: 'csv',
-        bytes: 72,
-        sha256: 'c'.repeat(64),
-      },
-    ],
-    toolNames: ['read_file', 'browser_navigate', 'browser_observe'],
-    error: null,
-  };
-  const getScope = vi
-    .mocked(daemon.browserScopes.get)
-    .mockImplementation(async (_agentId, runId) =>
-      runId === active.id ? currentScope : null,
-    );
-  const stopScope = vi.spyOn(daemon.browserScopes, 'stop').mockResolvedValue({
-    ...currentScope,
-    version: 8,
-    state: 'closed',
-    enabled: false,
-    physicalLeaseHeld: false,
+    sessionId: 'room-7', status: 'queued', createdAtMs: 200,
+    input: { text: 'Queued ordinary follow-up', attachmentIds: [], skill: null },
   });
   const { stream } = await openLiveSession({ kind: 'chat', activeRuns: 1 });
-  act(() =>
-    stream.push(snapshotEvent([snapshotRun(active), snapshotRun(queued)])),
-  );
+  act(() => stream.push(snapshotEvent([snapshotRun(active), snapshotRun(queued)])));
   await screen.findByText('Queued ordinary follow-up');
-  await openBrowserPolicyPicker();
-
-  await waitFor(() =>
-    expect(getScope).toHaveBeenCalledWith('agent-main', active.id, {
-      signal: expect.any(AbortSignal),
-    }),
-  );
-  expect(getScope).not.toHaveBeenCalledWith(
-    'agent-main',
-    queued.id,
-    expect.anything(),
-  );
-  const controls = screen.getByRole('region', {
-    name: 'Browser task controls',
-  });
-  expect(
-    within(controls).getByRole('button', {
-      name: 'Download browser-output.csv',
-    }),
-  ).toBeVisible();
-  expect(
-    within(controls).getByText(/Physical browser cleanup is pending/),
-  ).toBeVisible();
-  await user.click(
-    within(controls).getByRole('button', { name: 'Stop browser' }),
-  );
-  await waitFor(() =>
-    expect(stopScope).toHaveBeenCalledExactlyOnceWith('agent-main', active.id, {
-      expectedVersion: 7,
-    }),
-  );
-  expect(
-    within(controls).getByRole('button', {
-      name: 'Download browser-output.csv',
-    }),
-  ).toBeVisible();
+  expectNoComposerBrowserControls();
+  expect(screen.queryByRole('region', { name: 'Browser task controls' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Stop browser' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Download browser-output.csv' })).not.toBeInTheDocument();
+  expect(stopScope).not.toHaveBeenCalled();
 });
 
-it('M46 main resolution does not clear a browser selection in an opened historical chat', async () => {
+it('keeps an opened historical chat and its ordinary draft when main resolution finishes', async () => {
   const user = userEvent.setup();
-  const policyA = mockBrowserPolicy();
-  const policyB = {
-    ...policyA,
-    id: 'other-quotes',
-    policyDigest: 'd'.repeat(64),
-  };
-  vi.mocked(daemon.browserScopes.policies).mockResolvedValue([
-    policyA,
-    policyB,
-  ]);
+  mockBrowserPolicy();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
     agents: [snapshot('alpha', 'Alpha', 1)],
   });
   mockProviders();
-  routes.sessions.push(
-    sessionFixture('existing-chat', {
-      agentId: 'alpha',
-      title: 'Existing quotes',
-      origin: 'api',
-      lastActivityAtMs: Date.now(),
-    }),
-  );
+  routes.sessions.push(sessionFixture('existing-chat', {
+    agentId: 'alpha', title: 'Existing quotes', origin: 'api',
+    lastActivityAtMs: Date.now(),
+  }));
   const creating = deferred<void>();
   const ensureMain = vi.mocked(daemon.ensureMainSession);
   const resolveMain = ensureMain.getMockImplementation()!;
@@ -621,53 +504,37 @@ it('M46 main resolution does not clear a browser selection in an opened historic
     await creating.promise;
     return resolveMain(agentId);
   });
-  const startRun = vi
-    .mocked(daemon.startRun)
-    .mockImplementation(async (agentId, sessionId, input) =>
-      acceptedRun(agentId, sessionId, input.text),
-    );
+  const startRun = vi.mocked(daemon.startRun).mockImplementation(
+    async (agentId, sessionId, input) => acceptedRun(agentId, sessionId, input.text),
+  );
   render(<ViewHarness />);
-  const homeInput = await screen.findByPlaceholderText('Message Alpha…');
-  expect(homeInput).toBeDisabled();
+  expect(await screen.findByPlaceholderText('Message Alpha…')).toBeDisabled();
   await waitFor(() => expect(ensureMain).toHaveBeenCalledTimes(1));
   expect(startRun).not.toHaveBeenCalled();
-
   await openSessions(user);
-  await user.click(
-    await screen.findByRole('button', { name: 'Existing quotes' }),
-  );
+  await user.click(await screen.findByRole('button', { name: 'Existing quotes' }));
   await waitFor(() => expect(window.location.hash).toBe('#/s/existing-chat'));
-  const existingInput = screen.getByPlaceholderText('Message Alpha…');
-  await waitFor(() => expect(existingInput).toBeEnabled());
-  const otherPicker = await openBrowserPolicyPicker();
-  await user.selectOptions(otherPicker, policyB.id);
-  expect(otherPicker).toHaveValue(policyB.id);
+  const input = screen.getByPlaceholderText('Message Alpha…');
+  await waitFor(() => expect(input).toBeEnabled());
+  await user.type(input, 'Existing chat request');
   await act(async () => creating.resolve());
-
-  expect(startRun).not.toHaveBeenCalled();
   expect(window.location.hash).toBe('#/s/existing-chat');
-  expect(screen.getByLabelText('Browser policy for next message')).toHaveValue(
-    policyB.id,
-  );
-  await user.type(existingInput, 'Use the second selection');
+  expect(screen.getByPlaceholderText('Message Alpha…')).toHaveValue('Existing chat request');
+  expect(startRun).not.toHaveBeenCalled();
+  expectNoComposerBrowserControls();
   await user.click(screen.getByRole('button', { name: 'Send' }));
-  await waitFor(() =>
-    expect(startRun).toHaveBeenCalledWith(
-      'alpha',
-      'existing-chat',
-      expect.objectContaining({
-        text: 'Use the second selection',
-        browserSelection: { policyId: policyB.id, selectedInputIds: [] },
-      }),
-      expect.any(String),
-    ),
+  await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
+  expect(startRun).toHaveBeenCalledWith(
+    'alpha', 'existing-chat', expect.objectContaining({ text: 'Existing chat request' }),
+    expect.any(String),
   );
+  expect(startRun.mock.calls[0][2]).not.toHaveProperty('browserSelection');
   expect(daemon.createSession).not.toHaveBeenCalled();
 });
 
-it('M46 failed main resolution waits for retry before accepting a browser-selected message', async () => {
+it('waits for explicit retry before sending an ordinary message after main resolution fails', async () => {
   const user = userEvent.setup();
-  const policy = mockBrowserPolicy();
+  mockBrowserPolicy();
   vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
   vi.spyOn(daemon, 'listAgents').mockResolvedValue({
     agents: [snapshot('alpha', 'Alpha', 1)],
@@ -675,45 +542,29 @@ it('M46 failed main resolution waits for retry before accepting a browser-select
   mockProviders();
   const ensureMain = vi.mocked(daemon.ensureMainSession);
   const resolveMain = ensureMain.getMockImplementation()!;
-  ensureMain
-    .mockRejectedValueOnce(new Error('Temporary main resolution failure'))
+  ensureMain.mockRejectedValueOnce(new Error('Temporary main resolution failure'))
     .mockImplementation(resolveMain);
-  const startRun = vi
-    .mocked(daemon.startRun)
-    .mockImplementation(async (agentId, sessionId, input) =>
-      acceptedRun(agentId, sessionId, input.text),
-    );
+  const startRun = vi.mocked(daemon.startRun).mockImplementation(
+    async (agentId, sessionId, input) => acceptedRun(agentId, sessionId, input.text),
+  );
   render(<ViewHarness />);
   const input = await screen.findByPlaceholderText('Message Alpha…');
-  expect(await screen.findByRole('alert')).toHaveTextContent(
-    'Temporary main resolution failure',
-  );
+  expect(await screen.findByRole('alert')).toHaveTextContent('Temporary main resolution failure');
   expect(input).toBeDisabled();
   expect(startRun).not.toHaveBeenCalled();
+  expectNoComposerBrowserControls();
   await user.click(screen.getByRole('button', { name: 'Retry main chat' }));
-  await waitFor(() =>
-    expect(screen.getByPlaceholderText('Message Alpha…')).toBeEnabled(),
-  );
-  await user.selectOptions(await openBrowserPolicyPicker(), policy.id);
-  await user.type(
-    screen.getByPlaceholderText('Message Alpha…'),
-    'Recover this first message',
-  );
+  await waitFor(() => expect(screen.getByPlaceholderText('Message Alpha…')).toBeEnabled());
+  expect(startRun).not.toHaveBeenCalled();
+  await user.type(screen.getByPlaceholderText('Message Alpha…'), 'Recover this first message');
   await user.click(screen.getByRole('button', { name: 'Send' }));
-
   await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
   expect(ensureMain).toHaveBeenCalledTimes(2);
   expect(daemon.createSession).not.toHaveBeenCalled();
   const [agentId, sessionId, sentInput] = startRun.mock.calls[0];
-  expect([agentId, sessionId, sentInput.text]).toEqual([
-    'alpha',
-    'chat:new-1',
-    'Recover this first message',
-  ]);
-  expect(sentInput.browserSelection).toEqual({
-    policyId: policy.id,
-    selectedInputIds: [],
-  });
+  expect([agentId, sessionId, sentInput.text]).toEqual(['alpha', 'chat:new-1', 'Recover this first message']);
+  expect(sentInput).not.toHaveProperty('browserSelection');
+  expectNoComposerBrowserControls();
 });
 
 /** What the runs route answers for a message whose run already finished. */
@@ -971,6 +822,17 @@ beforeEach(() => {
           (session) => session.agentId === agentId && session.id === sessionId,
         )?.clearGeneration ?? 0,
       results: [],
+    }),
+  );
+  vi.spyOn(daemon.images, 'list').mockImplementation(
+    async (agentId, sessionId): Promise<SessionImages> => ({
+      clearGeneration:
+        routes.sessions.find(
+          (session) => session.agentId === agentId && session.id === sessionId,
+        )?.clearGeneration ?? 0,
+      provider: 'openai',
+      model: 'gpt-image-2.5-sunburst',
+      operations: [],
     }),
   );
   mockRuns();

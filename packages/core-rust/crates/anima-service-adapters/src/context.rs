@@ -25,6 +25,7 @@ impl ServiceTokenEstimator {
     pub fn raw_message_tokens(message: &Message) -> u64 {
         TokenEstimator::raw_message_tokens(message)
             .saturating_add(document_rendered_bytes(&message.content) as u64)
+            .saturating_add(crate::document_visuals::reserved_tokens(&message.content))
     }
 
     pub fn content_tokens(&self, content: &Content) -> u64 {
@@ -33,6 +34,11 @@ impl ServiceTokenEstimator {
         self.ordinary
             .content_tokens(content)
             .saturating_add(derived)
+            .saturating_add(
+                (crate::document_visuals::reserved_tokens(content) as f64
+                    * self.calibration().max(1.0))
+                .ceil() as u64,
+            )
     }
 
     pub fn message_tokens(&self, message: &Message) -> u64 {

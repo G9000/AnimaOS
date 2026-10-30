@@ -13,6 +13,73 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 const OWNER: &str = "http://localhost:4200";
 
+#[tokio::test]
+async fn generated_image_bytes_require_an_acknowledged_version() {
+    let (temp, state, agent) = fixture();
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 1024, 1024);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&vec![255; 1024 * 1024 * 4])
+            .unwrap();
+    }
+    let saved =
+        crate::attachments::files::save_upload(&temp.0, "2026-10-30", "pending.png", &bytes)
+            .unwrap();
+    let row = AttachmentRecord {
+        id: "image_pending".into(),
+        agent_id: agent.clone(),
+        session_id: "chat:files".into(),
+        name: "image.png".into(),
+        mime: "image/png".into(),
+        size: bytes.len() as u64,
+        kind: crate::attachments::AttachmentKind::Image,
+        path: saved.path,
+        created_at_ms: 1,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    };
+    state
+        .read()
+        .await
+        .history
+        .store()
+        .upsert_attachments(std::slice::from_ref(&row))
+        .await
+        .unwrap();
+    let app = router(state.clone(), DaemonConfig::default());
+    let path = format!("/api/agents/{agent}/attachments/image_pending");
+    assert_eq!(
+        app.clone()
+            .oneshot(get(&path, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let accept = crate::routes::owner_test_support::authenticate(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/agents/{agent}/sessions/chat:files/runs"))
+            .header("host", "127.0.0.1:8080")
+            .header("idempotency-key", "unacknowledged-image")
+            .header("origin", OWNER),
+    )
+    .header("content-type", "application/json")
+    .body(Body::from(
+        json!({"text":"Read this image","attachmentIds":["image_pending"]}).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(
+        app.oneshot(accept).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+}
+
 struct Temp(PathBuf);
 impl Temp {
     fn new() -> Self {

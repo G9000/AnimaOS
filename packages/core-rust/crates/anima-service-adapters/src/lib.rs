@@ -7,7 +7,9 @@ pub mod community_bundles;
 pub mod connectors;
 pub mod context;
 pub mod document_content;
+pub mod document_visuals;
 pub mod email;
+pub mod image;
 pub mod paired_devices;
 pub mod speech;
 pub use audio_content::{
@@ -23,6 +25,12 @@ pub use browser::{
     BrowserRoute, BrowserScope, BrowserSession,
 };
 pub use context::ServiceTokenEstimator;
+pub use image::{
+    GeneratedImage, ImageError, ImageInput, ImagePort, ImagePrompt, ImageRequest, ImageUsage,
+    IMAGE_BACKGROUND, IMAGE_COUNT, IMAGE_MODEL, IMAGE_OUTPUT_DIMENSION, IMAGE_OUTPUT_FORMAT,
+    IMAGE_QUALITY, IMAGE_SIZE, MAX_IMAGE_DIMENSION, MAX_IMAGE_INPUT_BYTES, MAX_IMAGE_OUTPUT_BYTES,
+    MAX_IMAGE_PIXELS, MAX_IMAGE_PROMPT_BYTES,
+};
 pub use speech::{
     SpeechAudio, SpeechAvailability, SpeechError, SpeechPort, SpeechText, MAX_SPEECH_DURATION_MS,
     MAX_SPEECH_INPUT_BYTES, MAX_SPEECH_INPUT_CHARS, MAX_SPEECH_PCM_BYTES, MAX_SPEECH_WAV_BYTES,

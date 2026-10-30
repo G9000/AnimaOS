@@ -26,6 +26,7 @@ const options = () => ({
   chatKey: 'first',
   agentId: 'agent',
   sessionId: 'session' as string | null,
+  clearGeneration: 0,
   ensureSession: vi.fn(async () => 'created'),
   enabled: true,
 });
@@ -34,6 +35,72 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
+
+it('discards saved image drafts on same-session clear and rejects callbacks captured before it', () => {
+  const upload = vi.spyOn(transport, 'uploadAttachmentWithProgress');
+  const props = options();
+  const { result, rerender } = renderHook(useAttachments, { initialProps: props });
+  act(() => { expect(result.current.restore([attachment])).toBe(true); });
+  expect(result.current.readyAttachmentIds).toEqual([attachment.id]);
+  const stale = result.current;
+
+  rerender({ ...props, clearGeneration: 1 });
+  expect(result.current.items).toEqual([]);
+  expect(result.current.readyAttachments).toEqual([]);
+  expect(result.current.readyAttachmentIds).toEqual([]);
+  act(() => {
+    expect(stale.restore([attachment])).toBe(false);
+    stale.add([file()]);
+  });
+  expect(result.current.items).toEqual([]);
+  expect(upload).not.toHaveBeenCalled();
+
+  const currentImage = { ...attachment, id: 'att_new', name: 'new.png' };
+  act(() => { expect(result.current.restore([currentImage])).toBe(true); });
+  act(() => {
+    stale.clear();
+    stale.remove(result.current.items[0].localId);
+  });
+  expect(result.current.readyAttachmentIds).toEqual([currentImage.id]);
+});
+
+it('aborts an upload and ignores its late bytes when only the same session clear generation changes', async () => {
+  const pending = deferred<typeof attachment>();
+  const upload = vi.spyOn(transport, 'uploadAttachmentWithProgress').mockReturnValue(pending.promise);
+  const props = options();
+  const { result, rerender } = renderHook(useAttachments, { initialProps: props });
+  await act(async () => result.current.add([file()]));
+  expect(upload).toHaveBeenCalledOnce();
+  const signal = upload.mock.calls[0][3]?.signal;
+
+  rerender({ ...props, clearGeneration: 1 });
+  expect(result.current.items).toEqual([]);
+  expect(signal?.aborted).toBe(true);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local');
+  await act(async () => pending.resolve(attachment));
+  expect(result.current.readyAttachmentIds).toEqual([]);
+  expect(result.current.error).toBeNull();
+});
+
+it('preserves drafts and recovery in other conversations while the cleared conversation stays empty', () => {
+  const props = options();
+  const { result, rerender } = renderHook(useAttachments, { initialProps: props });
+  act(() => { expect(result.current.restore([attachment])).toBe(true); });
+  const other = { ...props, chatKey: 'other', sessionId: 'other-session', clearGeneration: 3 };
+  rerender(other);
+  act(() => { expect(result.current.restore([], ['recovered_other'])).toBe(true); });
+  rerender(props);
+  expect(result.current.readyAttachmentIds).toEqual([attachment.id]);
+  const cleared = { ...props, clearGeneration: 1 };
+  rerender(cleared);
+  expect(result.current.readyAttachmentIds).toEqual([]);
+  rerender(other);
+  expect(result.current.readyAttachmentIds).toEqual(['recovered_other']);
+  rerender(cleared);
+  expect(result.current.readyAttachmentIds).toEqual([]);
+  act(() => { expect(result.current.restore([], ['recovered_current'])).toBe(true); });
+  expect(result.current.readyAttachmentIds).toEqual(['recovered_current']);
+});
 
 it('reserves the cap synchronously and keeps upload progress pending until success', async () => {
   const pending = deferred<typeof attachment>();

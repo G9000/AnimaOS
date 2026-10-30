@@ -1,5 +1,11 @@
 # Documentation changelog
 
+## 2026-10-30
+
+- Document bounded Windows PDF page evidence, optional local OCR, authenticated page previews, and OCR or page-only project citations. Record the observed decimal-recognition limitation and pending live-model accuracy checks. Align the daemon route inventory and capability descriptions with the two page-preview endpoints.
+
+- Document owner-reviewed OpenAI image creation and selected-image editing, immutable saved versions, charge uncertainty and local verification limits. Add the authenticated image ledger to the Rust daemon API inventory.
+
 ## 2026-10-23
 
 - Document lifetime profile ownership, shared durable execution limits and snapshot format 28, embeddable harness controls, and the Windows/Linux reliability gate with a separate opt-in matched provider evaluation.

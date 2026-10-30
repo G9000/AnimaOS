@@ -17,6 +17,40 @@ const attachment: UploadedAttachment = {
 };
 
 describe('attachments client', () => {
+  it('previews one original PDF page through the bounded authenticated route', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
+      headers: { 'content-type': 'image/png' },
+    }));
+    const signal = new AbortController().signal;
+    const client = createDaemonClient({ baseUrl: '', fetch });
+    const page = await client.attachments.previewPage('agent/a', 'att:1?', 12, { signal });
+    expect(page.type).toBe('image/png');
+    expect(new Uint8Array(await page.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/agents/agent%2Fa/attachments/att%3A1%3F/pages/12');
+    expect(init.signal).toBe(signal);
+    expect(init.cache).toBe('no-store');
+    expect(new Headers(init.headers).get('accept')).toBe('image/png');
+  });
+
+  it.each([0, -1, 1.5, 101, NaN, Infinity])('refuses invalid PDF page %s before a request', async (page) => {
+    const fetch = vi.fn();
+    const client = createDaemonClient({ fetch });
+    await expect(client.attachments.previewPage('agent', 'attachment', page)).rejects.toThrow(/page/i);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a page response that is not PNG or exceeds the preview bound', async () => {
+    const responseHeaders: Record<string, string>[] = [
+      { 'content-type': 'text/html' },
+      { 'content-type': 'image/png', 'content-length': String(2 * 1024 * 1024 + 1) },
+    ];
+    for (const headers of responseHeaders) {
+      const client = createDaemonClient({ fetch: async () => new Response('untrusted', { headers }) });
+      await expect(client.attachments.previewPage('agent', 'attachment', 1)).rejects.toThrow(/bounded response/i);
+    }
+  });
+
   it('exposes the resource and uploads exactly one named FormData file on the encoded session route', async () => {
     const fetch = vi.fn(async () =>
       Response.json({ attachment }, { status: 201 }),

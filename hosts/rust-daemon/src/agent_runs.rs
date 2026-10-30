@@ -36,6 +36,7 @@ pub(crate) mod chat_revisions;
 mod compact;
 mod conversations;
 pub(crate) mod helper_options;
+mod images;
 pub(crate) mod main_chat_clear;
 mod queue_controls;
 pub(crate) use queue_controls::QueuedRunPatch;

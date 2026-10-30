@@ -203,6 +203,7 @@ async fn mixed_documents_share_two_attempts_ten_statuses_and_four_source_reads()
             captured.fetch_add(1, Ordering::SeqCst);
             read_attachment_bytes(root, record)
         }),
+        Arc::new(Semaphore::new(4)),
     )
     .await;
     let snapshots = parse_document_snapshots(&input).unwrap();
@@ -405,6 +406,7 @@ async fn m66_selected_xlsx_admission_keeps_selection_original_and_coverage() {
             read_capture.lock().unwrap().push(record.id.clone());
             read_attachment_bytes(root, record)
         }),
+        Arc::new(Semaphore::new(4)),
     )
     .await;
 
@@ -584,7 +586,7 @@ async fn run(
     extractor: Arc<dyn DocumentExtractor>,
     cancel: CancelSignal,
 ) {
-    admit(
+    admit_with_reader(
         state,
         agent,
         "chat:docs",
@@ -595,8 +597,51 @@ async fn run(
         extractor,
         cancel,
         None,
+        Arc::new(read_attachment_bytes),
+        Arc::new(Semaphore::new(4)),
     )
     .await;
+}
+
+#[tokio::test]
+async fn admission_exhausted_read_pool_never_reads_or_extracts() {
+    let (_temp, state, agent, id, config, row) = fixture().await;
+    let slots = Arc::new(Semaphore::new(4));
+    let _held = slots.clone().try_acquire_many_owned(4).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let extraction = extractor();
+    let mut input = crate::agent_runs::attachments::attachment_content(
+        "original",
+        std::slice::from_ref(&row),
+        None,
+    );
+    let original = input.text.clone();
+    admit_with_reader(
+        &state,
+        &agent,
+        "chat:docs",
+        &id,
+        RunSource::Web,
+        &config,
+        &mut input,
+        extraction.clone(),
+        CancelSignal::new(),
+        None,
+        Arc::new(move |root, record| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            read_attachment_bytes(root, record)
+        }),
+        slots,
+    )
+    .await;
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+    assert_eq!(extraction.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(input.text, original);
+    let snapshots = parse_document_snapshots(&input).unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].extraction.status, Status::Unavailable);
+    assert!(snapshots[0].extraction.blocks.is_empty());
 }
 
 #[tokio::test]
@@ -879,6 +924,7 @@ async fn admission_stop_and_absolute_deadline_cover_first_and_postparse_reads() 
                     task_cancel,
                     deadline,
                     reader,
+                    Arc::new(Semaphore::new(4)),
                 )
                 .await;
                 input

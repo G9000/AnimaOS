@@ -1286,6 +1286,7 @@ export function ViewHarness() {
     chatKey: activeChatKey,
     agentId: activeSession?.agentId ?? agentId,
     sessionId: routeSessionId,
+    clearGeneration,
     ensureSession: () =>
       attachmentSession.ensureSession().then((session) => session.id),
     enabled:
@@ -1812,6 +1813,7 @@ export function ViewHarness() {
           items: attachments.items,
           onAdd: attachments.add,
           onRemove: attachments.remove,
+          onUseSaved: (attachment) => attachments.restore([attachment]),
           error: attachments.error,
         },
         savedAttachmentCount: savedAttachmentIds.length,

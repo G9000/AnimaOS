@@ -39,4 +39,20 @@ export class AttachmentsClient {
       { signal: options.signal },
     );
   }
+
+  async previewPage(
+    agentId: string,
+    attachmentId: string,
+    page: number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Blob> {
+    if (!Number.isInteger(page) || page < 1 || page > 100) {
+      throw new RangeError('PDF page must be an integer from 1 to 100');
+    }
+    return this.client.requestBoundedBlob(
+      `/api/agents/${encodeURIComponent(agentId)}/attachments/${encodeURIComponent(attachmentId)}/pages/${page}`,
+      { signal: options.signal, cache: 'no-store' },
+      { maxBytes: 2 * 1024 * 1024, contentType: 'image/png' },
+    );
+  }
 }

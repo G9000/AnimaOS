@@ -73,6 +73,8 @@ const OPERATE_TOOLS = [
   'web_search',
   'search_tools',
   'describe_tool',
+  'generate_image',
+  'edit_image',
 ];
 
 function agent(id: string, createdAtMs: number): AgentDetail {
@@ -93,6 +95,14 @@ function agent(id: string, createdAtMs: number): AgentDetail {
 }
 
 describe('workspace access profiles', () => {
+  it('offers paid image tools only in explicit Operate access without changing old grants', () => {
+    for (const tool of ['generate_image', 'edit_image']) {
+      expect(toolNamesForProfile('operate')).toContain(tool);
+      expect(toolNamesForProfile('observe')).not.toContain(tool);
+      expect(toolNamesForProfile('collaborate')).not.toContain(tool);
+    }
+    expect(deriveAccessProfile(OPERATE_TOOLS.filter((tool) => tool !== 'generate_image' && tool !== 'edit_image'))).toBe('custom');
+  });
   it('offers generated document writes only with a write profile and preserves old grants as custom', () => {
     expect(toolNamesForProfile('observe')).toContain('read_document_source');
     expect(toolNamesForProfile('observe')).not.toContain('write_document');

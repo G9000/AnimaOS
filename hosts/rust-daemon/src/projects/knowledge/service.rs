@@ -378,6 +378,109 @@ impl KnowledgeService {
         })
     }
 
+    pub(crate) async fn citation_page(
+        &self,
+        state: &SharedDaemonState,
+        project_id: &str,
+        agent: &str,
+        citation_id: &str,
+    ) -> Result<Vec<u8>, ProjectError> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        if citation_id.len() > 128
+            || !citation_id.starts_with("cite_")
+            || citation_id.chars().any(char::is_control)
+        {
+            return Err(ProjectError::NotFound);
+        }
+        let scope = tokio::time::timeout_at(
+            deadline,
+            Scope::capture(state, project_id, agent, Purpose::Manual),
+        )
+        .await
+        .map_err(|_| ProjectError::Deadline)??;
+        let cancel = CancelSignal::new();
+        let cache = self.cache()?;
+        let project = project_id.to_owned();
+        let id = citation_id.to_owned();
+        let hit = read_retained_with_slots(
+            move || cache.run(|store| store.citation(&project, &id)),
+            &cancel,
+            deadline,
+            self.inner.reads.clone(),
+        )
+        .await
+        .map_err(worker_error)?
+        .map_err(|_| ProjectError::AccessUnavailable)?
+        .ok_or(ProjectError::NotFound)?;
+        let page = pdf_page_locator(&hit.locator).ok_or(ProjectError::AccessUnavailable)?;
+        let witness = self.witness(&scope, std::slice::from_ref(&hit), &cancel, deadline)?;
+        witness.check(state).await?;
+        let source = scope
+            .sources
+            .iter()
+            .find(|source| source.id == hit.source_id)
+            .ok_or(ProjectError::AccessRevoked)?
+            .clone();
+        let bytes = match &source.grant {
+            SourceGrant::Folder(grant) => {
+                let grant = grant.clone();
+                let relative = hit.relative_path.clone();
+                let digest = hit.source_sha256.clone();
+                let physical_scope = scope.clone();
+                let physical_source = source.clone();
+                read_retained_with_slots(
+                    move || {
+                        physical_scope.check_source(&physical_source)?;
+                        folder::read_document(&grant, &relative, &digest)
+                            .map_err(|_| ProjectError::ScopeChanged)
+                    },
+                    &cancel,
+                    deadline,
+                    self.inner.reads.clone(),
+                )
+                .await
+                .map_err(worker_error)??
+            }
+            SourceGrant::Connected(_) => {
+                let snapshot = scope
+                    .read_connected_retained(
+                        state,
+                        &source,
+                        &cancel,
+                        deadline,
+                        self.inner.reads.clone(),
+                    )
+                    .await?;
+                if snapshot.name != hit.relative_path || snapshot.source_sha256 != hit.source_sha256
+                {
+                    return Err(ProjectError::ScopeChanged);
+                }
+                snapshot.bytes
+            }
+        };
+        scope.check(state).await?;
+        let evidence = tokio::select! { biased;
+            () = scope.lease.cancelled() => return Err(ProjectError::AccessRevoked),
+            () = tokio::time::sleep_until(deadline) => return Err(ProjectError::Deadline),
+            value = self.inner.extractor.inspect_pdf(bytes, vec![page], cancel.clone(), Some(deadline)) => value.map_err(worker_error)?,
+        };
+        if evidence.source_sha256 != hit.source_sha256
+            || evidence.pages.len() != 1
+            || evidence.pages[0].page != page
+            || anima_document_visual::validate_pdf_evidence(&evidence).is_err()
+        {
+            return Err(ProjectError::AccessUnavailable);
+        }
+        witness.check(state).await?;
+        scope.check(state).await?;
+        Ok(evidence
+            .pages
+            .into_iter()
+            .next()
+            .ok_or(ProjectError::AccessUnavailable)?
+            .png)
+    }
+
     /// Retires derived rows against the currently published grants, including after restart.
     pub(crate) async fn reconcile(
         &self,
@@ -589,6 +692,7 @@ impl KnowledgeService {
     ) -> Result<Vec<String>, ProjectError> {
         let mut remaining = folder::MAX_PASS_BYTES;
         let mut ready_sources = Vec::new();
+        let mut recognition_pages_left = 2usize;
         for source in &scope.sources {
             scope.check(state).await?;
             let snapshot = self
@@ -643,42 +747,92 @@ impl KnowledgeService {
             for document in snapshot.documents {
                 scope.check(state).await?;
                 check(cancel, deadline)?;
-                let chunks =
-                    if let Some(format) = extraction::document_format(&document.relative_path) {
-                        let extracted = loop {
-                            // Background indexing yields between attempts to the shared interactive Office worker.
-                            tokio::task::yield_now().await;
-                            scope.check(state).await?;
-                            let result = self
-                                .inner
-                                .extractor
-                                .extract_knowledge(
-                                    format,
-                                    document.bytes.clone(),
-                                    cancel.clone(),
-                                    Some(deadline),
-                                )
-                                .await;
-                            scope.check(state).await?;
-                            match result {
-                                Err(WorkerFailure::Busy) => pause(scope, cancel, deadline).await?,
-                                result => break result,
-                            }
-                        };
-                        match extracted {
-                            Ok(value) => {
-                                omitted += value.omissions.len();
-                                extraction::extracted_chunks(&value)
-                            }
-                            Err(WorkerFailure::Cancelled) => return Err(ProjectError::Cancelled),
-                            Err(WorkerFailure::TimedOut) => return Err(ProjectError::Deadline),
-                            Err(_) => Err("Knowledge extraction is unavailable".into()),
+                let chunks = if let Some(format) =
+                    extraction::document_format(&document.relative_path)
+                {
+                    let extracted = loop {
+                        // Background indexing yields between attempts to the shared interactive Office worker.
+                        tokio::task::yield_now().await;
+                        scope.check(state).await?;
+                        let result = self
+                            .inner
+                            .extractor
+                            .extract_knowledge(
+                                format,
+                                document.bytes.clone(),
+                                cancel.clone(),
+                                Some(deadline),
+                            )
+                            .await;
+                        scope.check(state).await?;
+                        match result {
+                            Err(WorkerFailure::Busy) => pause(scope, cancel, deadline).await?,
+                            result => break result,
                         }
-                    } else {
-                        std::str::from_utf8(&document.bytes)
-                            .map_err(|_| "Knowledge text encoding is unsupported".to_owned())
-                            .and_then(|text| extraction::text_chunks(text, "text#line=1"))
                     };
+                    match extracted {
+                        Ok(value) => {
+                            omitted += value.omissions.len();
+                            let mut chunks = extraction::extracted_chunks(&value);
+                            if let (Ok(chunks), Some(coverage)) = (&mut chunks, value.pdf_coverage)
+                            {
+                                let pages = (1..=coverage.page_count).filter(|page| {
+                                        !value.blocks.iter().any(|block| matches!(block.locator,
+                                            anima_service_adapters::document_content::DocumentLocator::PdfPage { page: found } if found == *page))
+                                    }).take(2).collect::<Vec<_>>();
+                                if !pages.is_empty() {
+                                    let count = pages.len().min(recognition_pages_left);
+                                    recognition_pages_left -= count;
+                                    let inspected = if count > 0 {
+                                        let requested =
+                                            pages.iter().copied().take(count).collect::<Vec<_>>();
+                                        let result = tokio::select! { biased;
+                                            () = scope.lease.cancelled() => return Err(ProjectError::AccessRevoked),
+                                            () = cancel.cancelled() => return Err(ProjectError::Cancelled),
+                                            () = tokio::time::sleep_until(deadline) => return Err(ProjectError::Deadline),
+                                            value = self.inner.extractor.inspect_pdf(document.bytes.clone(), requested.clone(), cancel.clone(), Some(deadline)) => value,
+                                        };
+                                        scope.check(state).await?;
+                                        result.ok().and_then(|evidence| {
+                                            extraction::visual_chunks(
+                                                &evidence,
+                                                &document.sha256,
+                                                &requested,
+                                            )
+                                            .ok()
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    let mut derived = inspected.unwrap_or_default();
+                                    let represented = derived
+                                        .iter()
+                                        .filter_map(|chunk| pdf_page_locator(&chunk.locator))
+                                        .collect::<BTreeSet<_>>();
+                                    let missing = pages
+                                        .into_iter()
+                                        .filter(|page| !represented.contains(page))
+                                        .collect::<Vec<_>>();
+                                    if !missing.is_empty() {
+                                        omitted += missing.len();
+                                    }
+                                    if let Ok(references) = extraction::page_references(&missing) {
+                                        derived.extend(references);
+                                    }
+                                    chunks.extend(derived);
+                                }
+                            }
+                            chunks
+                        }
+                        Err(WorkerFailure::Cancelled) => return Err(ProjectError::Cancelled),
+                        Err(WorkerFailure::TimedOut) => return Err(ProjectError::Deadline),
+                        Err(_) => Err("Knowledge extraction is unavailable".into()),
+                    }
+                } else {
+                    std::str::from_utf8(&document.bytes)
+                        .map_err(|_| "Knowledge text encoding is unsupported".to_owned())
+                        .and_then(|text| extraction::text_chunks(text, "text#line=1"))
+                };
                 let Ok(chunks) = chunks else {
                     omitted += 1;
                     continue;
@@ -837,6 +991,7 @@ impl KnowledgeService {
                 .find(|source| source.id == hit.source_id)
                 .ok_or(ProjectError::AccessRevoked)?;
             if anima_document_store_sqlite::source_sha256(hit.text.as_bytes()) != hit.chunk_sha256
+                || anima_document_store_sqlite::passage_origin(&hit.locator).is_err()
                 || extraction::unsafe_text(&hit.text)
             {
                 return Err(ProjectError::AccessUnavailable);
@@ -991,7 +1146,12 @@ fn public_hit(hit: SearchHit, scope: &Scope) -> KnowledgeHit {
                 },
             })
         });
+    let recognition = match anima_document_store_sqlite::passage_origin(&hit.locator).ok() {
+        Some(anima_document_store_sqlite::PassageOrigin::Literal) | None => None,
+        other => other,
+    };
     KnowledgeHit {
+        recognition,
         citation_id: hit.citation_id,
         resource_id: hit.source_id,
         document_id: hit.document_id,
@@ -1017,6 +1177,10 @@ fn fingerprint(snapshot: &FolderSnapshot) -> String {
                     document.sha256
                 )
             })
+            .chain(std::iter::once(format!(
+                "pipeline:{}",
+                extraction::ocr_pipeline()
+            )))
             .chain(std::iter::once(format!(
                 "omitted:{}",
                 snapshot.omitted_count
@@ -1083,3 +1247,13 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+fn pdf_page_locator(locator: &str) -> Option<u32> {
+    let rest = locator.strip_prefix("pdf#page=")?;
+    let number = rest.split(';').next()?;
+    if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let page = number.parse::<u32>().ok()?;
+    (1..=100).contains(&page).then_some(page)
+}

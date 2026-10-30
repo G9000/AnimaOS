@@ -55,6 +55,7 @@ mod chat_results;
 mod chat_reviews;
 mod conversation_shares;
 mod document_edits;
+mod images;
 mod oauth_apps;
 mod oauth_callback;
 mod personality;
@@ -162,7 +163,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         projects::remove_resource, projects::resource_order, projects::preview_resource,
         projects::context, projects::chats, projects::set_chat_project,
         project_knowledge::add_source, project_knowledge::status, project_knowledge::refresh,
-        project_knowledge::search, project_knowledge::citation,
+        project_knowledge::search, project_knowledge::citation, project_knowledge::citation_page,
         project_connected_sources::choices, project_connected_sources::add,
         workflow_templates::list, workflow_templates::save, workflow_templates::get, workflow_templates::delete, workflow_templates::run,
         account_workflow_rules::list, account_workflow_rules::create, account_workflow_rules::update, account_workflow_rules::delete, account_workflow_rules::events,
@@ -273,6 +274,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         chat_models::get_model_preferences, chat_models::update_model_preferences,
         chat_reviews::list_reviews, chat_reviews::request_review, chat_reviews::cancel_review,
         chat_results::list, chat_results::save, chat_results::pin,
+        images::list,
         conversation_shares::list, conversation_shares::create, conversation_shares::revoke,
         conversation_shares::get, conversation_shares::messages,
         chat_controls::revise_session,
@@ -314,7 +316,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         system::begin_drain, system::drain_status, system::cancel_drain, system::shutdown,
         system::status, system::action, system::open_console_session,
         status::get_status,
-        attachments::upload, attachments::serve,
+        attachments::upload, attachments::serve, attachments::page,
         voice::capabilities, voice::transcribe, voice::cancel,
         speech::capabilities, speech::generate, speech::cancel,
     ),
@@ -1074,6 +1076,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/projects/{project_id}/knowledge/refresh", axum::routing::post(project_knowledge::refresh))
         .route("/api/projects/{project_id}/knowledge/search", get(project_knowledge::search))
         .route("/api/projects/{project_id}/knowledge/citations/{citation_id}", get(project_knowledge::citation))
+        .route("/api/projects/{project_id}/knowledge/citations/{citation_id}/page", get(project_knowledge::citation_page))
         .route("/api/projects/{project_id}/chats", get(projects::chats))
         .route("/api/agents/{agent_id}/sessions/{session_id}/project", axum::routing::put(projects::set_chat_project))
         .route("/api/agents/{agent_id}/connectors/microsoft-files", get(microsoft_files::status))
@@ -1257,6 +1260,7 @@ fn router_with_services_with_policies_and_integrations(
         .route("/api/agents/{agent_id}/sessions/{session_id}/reviews", get(chat_reviews::list_reviews).post(chat_reviews::request_review))
         .route("/api/agents/{agent_id}/sessions/{session_id}/reviews/{review_id}/cancel", axum::routing::post(chat_reviews::cancel_review))
         .route("/api/agents/{agent_id}/sessions/{session_id}/results", get(chat_results::list).post(chat_results::save))
+        .route("/api/agents/{agent_id}/sessions/{session_id}/images", get(images::list))
         .route("/api/agents/{agent_id}/sessions/{session_id}/results/{result_id}", axum::routing::patch(chat_results::pin))
         .route("/api/agents/{agent_id}/sessions/{session_id}/shares", get(conversation_shares::list).post(conversation_shares::create))
         .route("/api/agents/{agent_id}/sessions/{session_id}/shares/{share_id}", axum::routing::delete(conversation_shares::revoke))
@@ -1288,6 +1292,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/attachments/{attachment_id}",
             get(attachments::serve),
+        )
+        .route(
+            "/api/agents/{agent_id}/attachments/{attachment_id}/pages/{page}",
+            get(attachments::page),
         )
         .route("/api/agents/{agent_id}/runs/{run_id}", get(runs::get_run))
         .route(

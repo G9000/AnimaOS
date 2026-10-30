@@ -1913,6 +1913,8 @@ pub(crate) struct DaemonState {
     pub(crate) connected_search_service: Option<crate::connected_search::WeakSearchService>,
     pub(crate) account_workflows: crate::account_workflows::AccountWorkflowState,
     pub(crate) workspace: Option<WorkspaceConfig>,
+    pub(crate) workspace_document_authority:
+        crate::attachments::documents::authority::WorkspaceDocumentAuthority,
     /// An explicit fixture-owned pool keeps HTTP download tests independent.
     #[cfg(test)]
     pub(crate) workspace_download_read_slots: Option<Arc<tokio::sync::Semaphore>>,
@@ -2712,6 +2714,7 @@ impl DaemonState {
             mail_records: HashMap::new(),
             mail_drafts: HashMap::new(),
             workspace: None,
+            workspace_document_authority: Default::default(),
             #[cfg(test)]
             workspace_download_read_slots: None,
             model_adapter,
@@ -3087,6 +3090,7 @@ impl DaemonState {
             .acknowledged
             .try_lock()
             .map_err(|_| "Control plane cannot be restored during a pending save")?;
+        self.workspace_document_authority.revoke_all();
         self.execution_budgets = snapshot.execution_budgets.clone();
         self.execution_budget_candidate_snapshot = None;
         self.execution_budget_failures.clear();
@@ -4287,6 +4291,8 @@ impl DaemonState {
             let before = mcp_permissions(runtime.config());
             let after = mcp_permissions(&config);
             runtime.replace_config(config);
+            self.workspace_document_authority
+                .update(agent_id, runtime.config().allows_tool("read_document"));
             if before != after {
                 if let Some(manager) = &self.mcp_manager {
                     manager.note_agent_permissions_changed(agent_id);
@@ -4297,7 +4303,8 @@ impl DaemonState {
 
     /// Apply a fully validated partial config update to an existing agent and
     /// refresh its snapshot. Runs in flight keep the config they started with;
-    /// the patch applies to later runs.
+    /// the patch applies to later runs. Fresh workspace-document delivery also
+    /// observes read-permission revocation during an active run.
     pub(crate) fn update_agent(
         &mut self,
         agent_id: &str,
@@ -4316,6 +4323,8 @@ impl DaemonState {
         let before = mcp_permissions(runtime.config());
         runtime.update_config(patch);
         let snapshot = runtime.snapshot();
+        self.workspace_document_authority
+            .update(agent_id, snapshot.state.config.allows_tool("read_document"));
         if before != mcp_permissions(&snapshot.state.config) {
             if let Some(manager) = &self.mcp_manager {
                 manager.note_agent_permissions_changed(agent_id);
@@ -4351,6 +4360,14 @@ impl DaemonState {
         room_id: &str,
         lease: Option<crate::projects::ProjectAccessLease>,
     ) -> Arc<dyn ModelAdapter> {
+        let workspace_read = self.workspace_document_authority.lease(
+            agent_id,
+            self.workspace.is_some()
+                && self
+                    .agents
+                    .get(agent_id)
+                    .is_some_and(|runtime| runtime.config().allows_tool("read_document")),
+        );
         let attachments = crate::attachments::model::AttachmentModelAdapter::new(
             self.profile_model_adapter(),
             self.history.store(),
@@ -4359,7 +4376,9 @@ impl DaemonState {
                 .map(|workspace| workspace.root_path.clone()),
             agent_id.to_string(),
             crate::sessions::session_id_for_room(room_id),
-        );
+        )
+        .with_workspace_read_lease(workspace_read)
+        .with_workspace_scope_lease(self.workspace_document_authority.scope_lease());
         Arc::new(crate::fallback_model::FallbackModelAdapter::new(
             crate::projects::bind_model_adapter(Arc::new(attachments), lease),
         ))
@@ -4369,6 +4388,7 @@ impl DaemonState {
         snapshot.state.config.tools =
             self.resolve_restored_agent_tools(&snapshot.state.id, snapshot.state.config.tools)?;
         let agent_id = snapshot.state.id.clone();
+        self.workspace_document_authority.revoke(&agent_id);
         let mut runtime = AgentRuntime::from_snapshot(snapshot, self.profile_model_adapter());
         self.wire_runtime(&mut runtime);
         if runtime.state().status == AgentStatus::Running {
@@ -4420,6 +4440,7 @@ impl DaemonState {
     }
 
     pub(crate) fn remove_agent(&mut self, agent_id: &str) {
+        self.workspace_document_authority.revoke(agent_id);
         self.browser_permission_epochs.remove(agent_id);
         if let Some(manager) = &self.mcp_manager {
             manager.retire_agent(agent_id);

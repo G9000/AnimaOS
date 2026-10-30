@@ -31,6 +31,7 @@ mod fallback_model;
 mod filesystem_checkpoints;
 mod foreign_sessions;
 mod history;
+pub(crate) mod images;
 mod jobs;
 mod keychain;
 mod learning;

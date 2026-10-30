@@ -27,6 +27,7 @@ import {
   chatExportTarget,
 } from './sessions/ChatExportDownload';
 import { isKnowledgeCitationLink, ProjectKnowledgeLink } from './projects/ProjectKnowledgeLink';
+import { AttachmentPageLink, isAttachmentPageLink } from './attachments/AttachmentPageLink';
 
 function isAbsoluteWebUrl(href: string | undefined): boolean {
   return href !== undefined && /^https?:\/\//i.test(href);
@@ -218,7 +219,9 @@ const components: Components = {
     </blockquote>
   ),
   a: ({ children, href, className, node: _node, ...props }) =>
-    isKnowledgeCitationLink(href) ? (
+    isAttachmentPageLink(href) ? (
+      <AttachmentPageLink href={href!}>{children}</AttachmentPageLink>
+    ) : isKnowledgeCitationLink(href) ? (
       <ProjectKnowledgeLink href={href!}>{children}</ProjectKnowledgeLink>
     ) : workspaceArtifactPath(href) ? (
       <WorkspaceArtifactLink path={href!}>{children}</WorkspaceArtifactLink>

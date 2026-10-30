@@ -789,3 +789,148 @@ async fn project_knowledge_context_exclusion_fences_old_witness_but_manual_searc
     assert!(excluded.passages.is_empty());
     assert_eq!(search(&fixture, "cobalt").await.hits.len(), 1);
 }
+
+#[test]
+fn pdf_citation_page_locator_keeps_original_page_and_refuses_other_formats() {
+    assert_eq!(pdf_page_locator("pdf#page=7;byte=4096"), Some(7));
+    assert_eq!(pdf_page_locator("pdf#page=100"), Some(100));
+    for locator in [
+        "pdf#page=0",
+        "pdf#page=101",
+        "pdf#page=-1",
+        "pdf#page=1.0",
+        "text#lines=1-2",
+        "pdf#page=1/path",
+    ] {
+        assert_eq!(pdf_page_locator(locator), None);
+    }
+}
+
+struct ScanKnowledgeExtractor;
+#[async_trait::async_trait]
+impl DocumentExtractor for ScanKnowledgeExtractor {
+    async fn extract(
+        &self,
+        _: anima_service_adapters::document_content::DocumentFormat,
+        _: Vec<u8>,
+        _: CancelSignal,
+        _: Option<Instant>,
+    ) -> Result<anima_service_adapters::document_content::ExtractedDocumentText, WorkerFailure>
+    {
+        Err(WorkerFailure::Unavailable)
+    }
+
+    async fn extract_knowledge(
+        &self,
+        format: anima_service_adapters::document_content::DocumentFormat,
+        _: Vec<u8>,
+        _: CancelSignal,
+        _: Option<Instant>,
+    ) -> Result<anima_service_adapters::document_content::ExtractedDocumentText, WorkerFailure>
+    {
+        use anima_service_adapters::document_content::*;
+        let mut value = ExtractedDocumentText::empty_for(format, DocumentExtractionStatus::NoText);
+        value.omissions.push(DocumentOmission::TextLayerOnly);
+        value.pdf_coverage = Some(PdfCoverage {
+            page_count: 2,
+            text_page_count: 0,
+            included_page_count: 0,
+        });
+        Ok(value)
+    }
+
+    async fn inspect_pdf(
+        &self,
+        bytes: Vec<u8>,
+        pages: Vec<u32>,
+        _: CancelSignal,
+        _: Option<Instant>,
+    ) -> Result<anima_document_visual::PdfEvidence, WorkerFailure> {
+        use base64::Engine;
+        Ok(anima_document_visual::PdfEvidence {
+            version: 1, source_sha256: anima_document_store_sqlite::source_sha256(&bytes),
+            page_count: 2, pages: pages.into_iter().map(|page| anima_document_visual::PdfPageEvidence {
+                page, width: 1, height: 1,
+                png: base64::engine::general_purpose::STANDARD.decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAsTj2FAAAAABJRU5ErkJggg=="
+                ).unwrap(),
+                recognized: if page == 1 {
+                    anima_document_visual::RecognizedText::Text { text: "scanrecognitionmarker cobalt harbour".into(), language: "en-US".into() }
+                } else { anima_document_visual::RecognizedText::Unavailable },
+            }).collect(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn scanned_project_knowledge_preserves_recognition_and_page_only_citation_provenance() {
+    let mut fixture = fixture("ordinary notes");
+    let bytes = include_bytes!("../../../tests/fixtures/documents/m55-selected.pdf");
+    std::fs::write(fixture.source.path().join("scan.pdf"), bytes).unwrap();
+    fixture.service = KnowledgeService::with_cache_and_extractor(
+        fixture.service.inner.cache.clone(),
+        Arc::new(ScanKnowledgeExtractor),
+    );
+    fixture.state.write().await.project_knowledge = fixture.service.clone();
+    let found = search(&fixture, "scanrecognitionmarker").await;
+    assert_eq!(found.hits.len(), 1);
+    assert!(matches!(
+        found.hits[0].recognition,
+        Some(anima_document_store_sqlite::PassageOrigin::Ocr { .. })
+    ));
+    let citation = fixture
+        .service
+        .citation(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            &found.hits[0].citation_id,
+        )
+        .await
+        .unwrap();
+    assert!(citation.text.contains("scanrecognitionmarker"));
+    let by_title = search(&fixture, "scan").await;
+    let page_only = by_title
+        .hits
+        .iter()
+        .find(|hit| {
+            matches!(
+                hit.recognition,
+                Some(anima_document_store_sqlite::PassageOrigin::PageImage { .. })
+            )
+        })
+        .unwrap();
+    let page_citation = fixture
+        .service
+        .citation(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            &page_only.citation_id,
+        )
+        .await
+        .unwrap();
+    assert!(page_citation.text.is_empty());
+    let png = fixture
+        .service
+        .citation_page(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            &page_only.citation_id,
+        )
+        .await
+        .unwrap();
+    assert!(png.starts_with(b"\x89PNG"));
+    std::fs::write(fixture.source.path().join("scan.pdf"), b"changed source").unwrap();
+    assert!(fixture
+        .service
+        .citation_page(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            &page_only.citation_id
+        )
+        .await
+        .is_err());
+}

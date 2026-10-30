@@ -956,8 +956,10 @@ fn registry_defines_every_registered_tool_schema() {
         ("complete_reminder", &["id"][..], &[][..]),
         ("snooze_reminder", &["id", "minutes"][..], &[][..]),
         ("read_file", &["file_path"][..], &["offset", "limit"][..]),
-        ("read_document", &["file_path"][..], &[][..]),
+        ("read_document", &["file_path"][..], &["pages"][..]),
         ("read_document_source", &["file_path"][..], &[][..]),
+        ("generate_image", &["prompt"][..], &[][..]),
+        ("edit_image", &["prompt"][..], &[][..]),
         ("inspect_office_document", &["source"][..], &["cursor"][..]),
         (
             "propose_document_edit",
@@ -1164,6 +1166,19 @@ fn browser_navigation_schema_requires_exactly_one_typed_destination() {
 #[test]
 fn registry_encodes_parameter_constraints() {
     let registry = ToolRegistry::new();
+
+    let pages = parameter_schema(&registry, "read_document", "pages");
+    assert_eq!(pages.get("type"), Some(&DataValue::String("array".into())));
+    assert_eq!(pages.get("minItems"), Some(&DataValue::Number(1.0)));
+    assert_eq!(pages.get("maxItems"), Some(&DataValue::Number(2.0)));
+    assert_eq!(pages.get("uniqueItems"), Some(&DataValue::Bool(true)));
+    let page = pages
+        .get("items")
+        .and_then(data_object)
+        .expect("page schema");
+    assert_eq!(page.get("type"), Some(&DataValue::String("integer".into())));
+    assert_eq!(page.get("minimum"), Some(&DataValue::Number(1.0)));
+    assert_eq!(page.get("maximum"), Some(&DataValue::Number(100.0)));
 
     for (tool, property) in [
         ("memory_search", "limit"),

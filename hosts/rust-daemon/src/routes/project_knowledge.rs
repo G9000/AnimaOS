@@ -241,3 +241,44 @@ pub(super) async fn citation(
             .await,
     )
 }
+
+#[utoipa::path(get,path="/api/projects/{project_id}/knowledge/citations/{citation_id}/page",tag="projects",
+    params(("project_id"=String,Path),("citation_id"=String,Path)),
+    responses((status=200,description="Verified current source page",body=Vec<u8>,content_type="image/png"),
+    (status=404,description="Source page unavailable")))]
+pub(super) async fn citation_page(
+    State(state): State<AppState>,
+    Path((id, citation_id)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    if let Err(error) = authorize(&state, &request, true) {
+        return error;
+    }
+    let params = match query(request.uri()) {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
+    let agent = match agent(&params) {
+        Ok(value) => value,
+        Err(error) => return error,
+    };
+    match service(&state)
+        .await
+        .citation_page(&state.daemon, &id, &agent, &citation_id)
+        .await
+    {
+        Ok(png) => {
+            let mut response = (StatusCode::OK, png).into_response();
+            response.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("image/png"),
+            );
+            response.headers_mut().insert(
+                "x-content-type-options",
+                axum::http::HeaderValue::from_static("nosniff"),
+            );
+            no_store(response)
+        }
+        Err(error) => rejected(error),
+    }
+}

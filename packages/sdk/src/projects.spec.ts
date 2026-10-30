@@ -9,6 +9,21 @@ function fixture() {
 }
 
 describe('ProjectsClient', () => {
+  it('previews a citation page from its identity and current member scope without a caller page or source URL', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
+      headers: { 'content-type': 'image/png' },
+    }));
+    const client = createDaemonClient({ baseUrl: '', fetch }).projects;
+    const signal = new AbortController().signal;
+    const page = await client.previewKnowledgeCitationPage('p/a', 'opaque/a', 'agent one', { signal });
+    expect(page.type).toBe('image/png');
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/projects/p%2Fa/knowledge/citations/opaque%2Fa/page?asAgentId=agent+one');
+    expect(init.signal).toBe(signal);
+    expect(init.cache).toBe('no-store');
+    expect(new Headers(init.headers).get('accept')).toBe('image/png');
+  });
+
   it('shares only a selected connected citation with explicit project consent and a revision witness', async () => {
     const { client, requestJson } = fixture();
     const signal = new AbortController().signal;

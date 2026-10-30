@@ -25,6 +25,7 @@ import { PLAN_TOOL, parsePlan } from '../../lib/plan';
 import { formatTime } from '../ui-bits';
 import { PlanCard } from './PlanCard';
 import { DocumentEditCard } from '../documents/DocumentEditCard';
+import { ImageApprovalCard } from '../images/ImageApprovalCard';
 import { daemon } from '../../lib/daemon-api';
 
 const loadDocumentReview = (proposalId: string, agentId: string, sessionId: string, options: { signal: AbortSignal }): Promise<unknown> =>
@@ -103,6 +104,9 @@ function MatcherEditor({
  * editable scope for "for this session" and "always".
  */
 export function ApprovalCard(props: ApprovalCardProps) {
+  if (props.approval.tool === 'generate_image' || props.approval.tool === 'edit_image') {
+    return <ImageApprovalCard approval={props.approval} onDecide={props.onDecide} />;
+  }
   if (props.approval.tool === 'apply_document_edit') {
     return <DocumentEditCard approval={props.approval} onDecide={props.onDecide} load={loadDocumentReview} />;
   }

@@ -133,11 +133,13 @@ oversized or unsupported sources can be refused. Symlinks/reparse points and
 nonregular files are rejected; hard-link behavior follows existing workspace
 reads. Four physical source-read leases are shared with attachment admission, and
 one absolute ten-second deadline covers capture/extraction/fitting. Stop does not
-release capacity while physical work survives. No automatic retry or reparse.
+release capacity while physical work survives. No automatic retry or reparse for text-only reads. Explicit page inspection
+verifies and rerenders bounded pages during fresh model delivery.
 
 See the [M67 plan](../superpowers/plans/2026-10-16-companion-workspace-documents-m67.md).
 Local synthetic tool/history tests verify the workflow; they do not establish
-independent model answer quality or add OCR, editing or visual fidelity.
+independent model answer quality. Explicit PDF page inspection is described below;
+editing and full Office visual fidelity remain separate.
 
 ## Documents selected in chat
 
@@ -170,8 +172,8 @@ PDF coverage is **text layer only**, with at most 100 pages. Anima examines ever
 accepted page, even after the retained text fills. The outcome reports total
 pages, pages producing nonblank text, and pages whose excerpts were included.
 An empty text result does not establish whether a page is scanned or image-only.
-The native locator `pdf#page=N` identifies the source page; there is no visual
-layout, OCR or page rendering. A known limit can shorten a PDF excerpt at a
+The native locator `pdf#page=N` identifies the source page. This outcome describes the text layer.
+The separate page-evidence path below supplies rendered pages and local OCR. A known limit can shorten a PDF excerpt at a
 UTF-8 boundary. Invalid page `Contents` references or failed supported page-stream
 decoding discard the whole PDF excerpt. Page content supports unfiltered streams
 or a single FlateDecode filter with strict zlib completion and checksum checking.
@@ -179,6 +181,53 @@ Other filters, chains and empty filter arrays are unsupported in this slice.
 The library can tolerate malformed unused objects and some resource/font/form
 data, so success does not certify that every PDF object is valid or every visual
 element produced text.
+
+## Read scanned PDF pages and inspect tables or charts
+
+On Windows, attach a supported PDF in your own chat and ask about its contents.
+Within the context budget, Anima inspects up to the first two selected pages.
+An image-capable model receives page images and available local OCR text.
+A text-only model receives recognized text and a limitation about visual
+relationships. Pages share the four-image allowance with uploaded images.
+Omitted pages are identified; a partial view is not a full document review.
+
+For a PDF already in the workspace, enable **Allow reading workspace documents**
+and ask for the original page numbers. The read_document tool accepts one or
+two unique, ascending numbers in pages, for example pages 7 and 8. Text-only
+reads keep their existing behavior. Fresh image delivery rechecks the captured
+source hash and current read permission. Its transient user message follows
+all sibling tool results and is not saved as a new owner turn. Historical
+textual tool results remain captured snapshots.
+
+Click **Preview PDF page** beside an attachment to inspect an original page.
+Page links in the answer use the authenticated preview. Project citations also
+show their original PDF page after current access and source checks. Changed
+or deleted originals and revoked grants can make fresh delivery unavailable.
+
+Rendering uses Windows' built-in PDF APIs and installed OCR languages.
+No OCR provider or language package is downloaded. Recognition can contain
+errors. Chart labels alone do not establish a chart's visual meaning or an
+exact value. A local fixture read 137.42 as 137 42, so verify punctuation and
+amounts against the page image. The page image is the evidence for a visual
+interpretation.
+
+Sources retain the 2 MiB and 100-page admission bounds. Each operation renders
+at most two pages, with a longest edge of 1,600 pixels and a 2 MiB PNG limit per
+page. The ten-second deadline, shared physical worker slot, 256 MiB process
+limit, and retained read capacity still apply. Rendering reserves its before
+and after reads within the four-read model-request bound. Pixels stay out of
+public session metadata, logs, and saved conversation turns.
+
+Project knowledge indexes recognized text from up to two pages without
+retained text per indexing pass. Results identify OCR language and pipeline.
+A page without recognized text can have a page-only citation searchable by
+document title, with no invented passage. Other content remains partial.
+Derived cache entries never grant source access.
+
+This PDF path does not render native DOCX, XLSX, or PPTX layout. Their existing
+text and stored-cell readers retain their documented coverage.
+
+## Read stored workbook cells
 
 XLSX coverage is **stored cells only**, in workbook sheet order with numeric
 sheet/row/column locators. Visible, hidden and very-hidden sheets are labeled and
@@ -225,9 +274,9 @@ read waits also yield to Stop and the extraction deadline; late work cannot
 publish a usable result. A stuck physical worker retains its slot until its
 retirement is proved.
 
-OCR, other Office formats and native extraction on other operating systems
-remain unsupported in this slice; their originals can still be stored and
-downloaded. Browser dictation, compatible-model image input and [selected audio transcription](voice.md) are
+Office page rendering, Office OCR and native document extraction on other
+operating systems remain unsupported in this slice; their originals can still
+be stored and downloaded. Browser dictation, compatible-model image input and [selected audio transcription](voice.md) are
 separate capabilities. Extraction itself makes no model request, enables no
 tool permission and writes no Fact or knowledge collection. Compaction can
 summarize verified excerpts as untrusted conversation data under its existing

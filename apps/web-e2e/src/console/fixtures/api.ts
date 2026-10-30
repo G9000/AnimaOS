@@ -610,12 +610,21 @@ export async function installConsoleFixture(
     const extension =
       options.chatSuite &&
       path.match(
-        /^\/api\/agents\/companion\/sessions\/([^/]+)\/(model-preferences|capabilities|reviews|results|shares)(?:\/([^/]+))?$/,
+        /^\/api\/agents\/companion\/sessions\/([^/]+)\/(model-preferences|capabilities|reviews|results|shares|images)(?:\/([^/]+))?$/,
       );
     if (extension) {
       const [, id, resource, child] = extension;
-      const generation =
-        state.sessions.find((s) => s.id === id)?.clearGeneration ?? 0;
+      const currentSession = state.sessions.find((s) => s.id === id);
+      const generation = currentSession?.clearGeneration ?? 0;
+      if (get && resource === 'images' && !child) {
+        if (!currentSession) return json(route, { error: 'Unknown session' }, 404);
+        return json(route, {
+          clearGeneration: generation,
+          provider: 'openai',
+          model: 'gpt-image-2.5-sunburst',
+          operations: [],
+        });
+      }
       if (resource === 'model-preferences') {
         const view = modelView(id);
         if (method === 'PATCH') {

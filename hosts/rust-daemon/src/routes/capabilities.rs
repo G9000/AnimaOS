@@ -89,7 +89,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             ("camera", "Camera observation", "planned", "Observe an authorized camera through a bounded perception module."),
             ("voice", "Voice", "partial", "Selected WAV transcription, local audio capture, and selected-reply speech output require explicit opt-in and configuration. Device coverage and provider quality remain unverified."),
             ("smart-home", "Smart home", "planned", "Connect devices, inspect their state, and verify authorized actions."),
-            ("document-engine", "Document processing", "partial", "Explicitly granted document tools inspect and propose bounded structural DOCX, XLSX and PPTX changes in private durable storage. Applying requires an exact owner AllowOnce review and current native authority. Generated documents and PDF output remain available through write_document; OCR and rendered Office fidelity remain unavailable."),
+            ("document-engine", "Document processing", "partial", "Explicitly granted document tools inspect and propose bounded structural DOCX, XLSX and PPTX changes in private durable storage. Applying requires an exact owner AllowOnce review and current native authority. Generated documents and PDF output remain available through write_document. Selected PDF pages can be rendered on Windows with optional local OCR; recognition is unverified. Rendered Office fidelity remains unavailable."),
             ("coding-agents", "External coding agents", "planned", "Connect an external coding worker through a bounded execution adapter."),
             ("community-bundles", "Community bundles", "partial", "Reviewed MCP and skill installation is implemented with explicit owner review and configuration. This does not provide an arbitrary execution bridge."),
         ].into_iter().map(|(id, label, status, description)| PlannedExtension { id, label, status, description }).collect(),
@@ -99,7 +99,7 @@ pub(super) fn inventory(state: &DaemonState) -> CapabilityInventory {
             "Storage labels describe configuration, not a successful storage health check.",
             "Saved tasks and memories do not imply automatic resumption of interrupted runs. Uncertain scheduled actions require review.",
             "Background shell processes are managed only while this daemon is running. Shell access is not an operating-system sandbox.",
-            "Native text and document tools retain workspace authority and approvals. Imported Office edits cover a bounded structural subset with exact owner review; unsupported spreadsheet calculation, rendered fidelity and OCR remain unavailable.",
+            "Native text and document tools retain workspace authority and approvals. Imported Office edits cover a bounded structural subset with exact owner review; PDF recognition can be inaccurate or unavailable; spreadsheet calculation and rendered Office fidelity remain unavailable.",
             "Community bundles support reviewed MCP and skill installation. A portable arbitrary execution bridge is not available.",
         ],
     }

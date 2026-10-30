@@ -42,7 +42,27 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 363, "complete registered operation count");
+    assert_eq!(actual.len(), 366, "complete registered operation count");
+    let visual_page_additions = [
+        (
+            "GET",
+            "/api/agents/{agent_id}/attachments/{attachment_id}/pages/{page}",
+        ),
+        (
+            "GET",
+            "/api/projects/{project_id}/knowledge/citations/{citation_id}/page",
+        ),
+    ];
+    for (method, path) in visual_page_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "source-bound PDF page operation must be registered"
+        );
+    }
+    let image_additions = [("GET", "/api/agents/{agent_id}/sessions/{session_id}/images")];
+    for (method, path) in image_additions {
+        assert!(actual.contains(&(method.to_string(), path.to_string())));
+    }
     let connected_preview_additions = [
         (
             "GET",
@@ -687,7 +707,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                    && !image_additions.contains(&(method.as_str(), path.as_str()))
                     && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
+                    && !visual_page_additions.contains(&(method.as_str(), path.as_str()))
                     && !connected_preview_additions.contains(&(method.as_str(), path.as_str()))
                     && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
                     && !project_additions.contains(&(method.as_str(), path.as_str()))
@@ -750,7 +772,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| !connected_account_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !image_additions.contains(&(method.as_str(), path.as_str()))
                 && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
+                && !visual_page_additions.contains(&(method.as_str(), path.as_str()))
                 && !connected_preview_additions.contains(&(method.as_str(), path.as_str()))
                 && !microsoft_file_additions.contains(&(method.as_str(), path.as_str()))
                 && !project_additions.contains(&(method.as_str(), path.as_str()))

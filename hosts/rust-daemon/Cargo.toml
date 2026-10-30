@@ -12,6 +12,7 @@ anima-harness = { path = "../../packages/core-rust/crates/anima-harness" }
 anima-execution-store-sqlite = { path = "../../packages/core-rust/crates/anima-execution-store-sqlite" }
 anima-memory-store-sqlite = { path = "../../packages/core-rust/crates/anima-memory-store-sqlite" }
 anima-document-content = { path = "../../packages/core-rust/crates/anima-document-content" }
+anima-document-visual = { path = "../../packages/core-rust/crates/anima-document-visual" }
 anima-document-store-sqlite = { path = "../../packages/core-rust/crates/anima-document-store-sqlite" }
 anima-mcp-oauth = { path = "../../packages/core-rust/crates/anima-mcp-oauth" }
 anima-model-adapters = { path = "../../packages/core-rust/crates/anima-model-adapters" }
@@ -89,6 +90,7 @@ path = "tests/fixtures/mcp_stdio_peer.rs"
 workspace = true
 
 [dev-dependencies]
+png = "0.18.1"
 anima-harness = { path = "../../packages/core-rust/crates/anima-harness", features = ["test-support"] }
 
 # Only `anima` ships in releases (dist-workspace.toml).

@@ -146,6 +146,7 @@ dependencies = [
  "anima-core",
  "anima-document-content",
  "anima-document-store-sqlite",
+ "anima-document-visual",
  "anima-execution-store-sqlite",
  "anima-harness",
  "anima-mcp-oauth",
@@ -173,6 +174,7 @@ dependencies = [
  "iana-time-zone",
  "keyring",
  "meval",
+ "png",
  "process-wrap",
  "regex",
  "reqwest 0.12.28",
@@ -231,6 +233,20 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "tempfile",
+]
+
+[[package]]
+name = "anima-document-visual"
+version = "0.1.0"
+dependencies = [
+ "anima-document-content",
+ "anima-service-adapters",
+ "pdf-extract",
+ "png",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -320,8 +336,10 @@ dependencies = [
  "anima-service-adapters",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "futures",
+ "png",
  "reqwest 0.12.28",
  "serde_json",
  "tokio",
@@ -367,6 +385,7 @@ dependencies = [
  "log",
  "mailparse",
  "nom 8.0.0",
+ "png",
  "serde",
  "serde_jcs",
  "serde_json",

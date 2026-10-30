@@ -11,6 +11,7 @@ import {
 } from '../../lib/attachments';
 import { revealInvisible } from '../../lib/skills';
 import { formatAttachmentSize } from './AttachmentChips';
+import { PdfPagePreview } from './PdfPagePreview';
 
 const EXTRACTION_STATUS_LABELS = {
   ready: 'Main body text extracted',
@@ -376,6 +377,12 @@ function AttachmentFile({
   const extractionDescription = describeDocumentExtraction(
     attachment.kind === 'document' ? attachment.extraction : undefined,
   );
+  const pdfPages =
+    attachment.id && attachment.kind === 'document' && attachment.mime === 'application/pdf' &&
+    extractionDescription && attachment.extraction && 'format' in attachment.extraction &&
+    attachment.extraction.format === 'pdf'
+      ? attachment.extraction.pageCount
+      : null;
   const preview = useAttachmentPreview(
     agentId,
     attachment.id,
@@ -480,6 +487,9 @@ function AttachmentFile({
         </span>
       )}
       {error && <span role="alert">{error}</span>}
+      {attachment.id && pdfPages !== null && pdfPages > 0 && <PdfPagePreview source={{
+        kind: 'attachment', agentId, attachmentId: attachment.id, pageCount: pdfPages,
+      }} />}
     </li>
   );
 }

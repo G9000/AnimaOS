@@ -3,6 +3,7 @@
 use std::io::{self, Read, Write};
 
 use anima_core::CancelSignal;
+use anima_document_visual::{validate_pdf_evidence, PdfEvidence, PdfPageSelection};
 use anima_service_adapters::document_content::{
     validate_document_extraction, validate_knowledge_document_extraction, DocumentFormat,
     ExtractedDocumentText, MAX_KNOWLEDGE_DOCUMENT_TEXT_BYTES,
@@ -23,6 +24,7 @@ const MAX_STDERR: usize = 4 * 1024;
 enum ExtractionMode {
     Preview,
     Knowledge,
+    Pages { first: u32, second: Option<u32> },
 }
 
 impl ExtractionMode {
@@ -30,6 +32,7 @@ impl ExtractionMode {
         match self {
             Self::Preview => MAX_FRAME,
             Self::Knowledge => MAX_KNOWLEDGE_FRAME,
+            Self::Pages { .. } => 256 * 1024,
         }
     }
 
@@ -37,8 +40,30 @@ impl ExtractionMode {
         match self {
             Self::Preview => validate_document_extraction(value),
             Self::Knowledge => validate_knowledge_document_extraction(value),
+            Self::Pages { .. } => return Err(invalid()),
         }
         .map_err(|_| invalid())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WorkerOutput {
+    Text(ExtractedDocumentText),
+    Pages(PdfEvidence),
+}
+
+impl WorkerOutput {
+    fn text(self) -> Result<ExtractedDocumentText, WorkerFailure> {
+        match self {
+            Self::Text(value) => Ok(value),
+            Self::Pages(_) => Err(WorkerFailure::InvalidOutput),
+        }
+    }
+    fn pages(self) -> Result<PdfEvidence, WorkerFailure> {
+        match self {
+            Self::Pages(value) => Ok(value),
+            Self::Text(_) => Err(WorkerFailure::InvalidOutput),
+        }
     }
 }
 
@@ -60,6 +85,17 @@ pub(crate) trait DocumentExtractor: Send + Sync {
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure>;
+
+    async fn inspect_pdf(
+        &self,
+        bytes: Vec<u8>,
+        pages: Vec<u32>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<PdfEvidence, WorkerFailure> {
+        let _ = (bytes, pages, cancel, deadline);
+        Err(WorkerFailure::Unavailable)
+    }
 
     /// Separate indexing envelope; preview-only test extractors fail closed.
     async fn extract_knowledge(
@@ -94,6 +130,37 @@ pub(crate) fn shared_physical_slot() -> std::sync::Arc<tokio::sync::Semaphore> {
 
 #[async_trait]
 impl DocumentExtractor for DocumentWorker {
+    async fn inspect_pdf(
+        &self,
+        bytes: Vec<u8>,
+        pages: Vec<u32>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<PdfEvidence, WorkerFailure> {
+        if bytes.len() > MAX_INPUT || PdfPageSelection::new(pages.clone()).is_err() {
+            return Err(WorkerFailure::InvalidOutput);
+        }
+        if cancel.is_cancelled() {
+            return Err(WorkerFailure::Cancelled);
+        }
+        if deadline.is_some_and(|value| Instant::now() >= value) {
+            return Err(WorkerFailure::TimedOut);
+        }
+        let mode = ExtractionMode::Pages {
+            first: pages[0],
+            second: pages.get(1).copied(),
+        };
+        #[cfg(windows)]
+        {
+            physical::inspect_pdf(mode, bytes, cancel, deadline).await
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (mode, bytes);
+            Err(WorkerFailure::Unavailable)
+        }
+    }
+
     async fn extract(
         &self,
         format: DocumentFormat,
@@ -172,6 +239,20 @@ fn read_request_mode(
         3 => (ExtractionMode::Knowledge, DocumentFormat::Docx),
         4 => (ExtractionMode::Knowledge, DocumentFormat::Pdf),
         5 => (ExtractionMode::Knowledge, DocumentFormat::Xlsx),
+        6 => {
+            let mut selection = [0; 9];
+            reader.read_exact(&mut selection)?;
+            let first = u32::from_le_bytes(selection[1..5].try_into().map_err(|_| invalid())?);
+            let last = u32::from_le_bytes(selection[5..9].try_into().map_err(|_| invalid())?);
+            let second = match selection[0] {
+                1 if last == 0 => None,
+                2 => Some(last),
+                _ => return Err(invalid()),
+            };
+            let pages = second.map_or_else(|| vec![first], |last| vec![first, last]);
+            PdfPageSelection::new(pages).map_err(|_| invalid())?;
+            (ExtractionMode::Pages { first, second }, DocumentFormat::Pdf)
+        }
         _ => return Err(invalid()),
     };
     let mut header = [0; 4];
@@ -223,12 +304,19 @@ pub fn document_worker_entry() -> io::Result<()> {
         output.write_all(READY)?;
         output.flush()?;
         let (mode, format, bytes) = read_request_mode(&mut io::stdin().lock())?;
-        // Synchronous Rust parser: no runtime, threads, converter, or subprocess.
+        if let ExtractionMode::Pages { first, second } = mode {
+            let pages = second.map_or_else(|| vec![first], |last| vec![first, last]);
+            let selection = PdfPageSelection::new(pages).map_err(|_| invalid())?;
+            let value = anima_document_visual::render_pdf_pages(&bytes, &selection)
+                .map_err(|_| invalid())?;
+            return super::worker_visual::write(&mut output, &value);
+        }
         let extracted = match mode {
             ExtractionMode::Preview => anima_document_content::extract_document(format, &bytes),
             ExtractionMode::Knowledge => {
                 anima_document_content::extract_knowledge_document(format, &bytes)
             }
+            ExtractionMode::Pages { .. } => return Err(invalid()),
         };
         write_result_mode(&mut output, &extracted, mode)
     }
@@ -258,7 +346,10 @@ async fn exchange(
     stdout: impl tokio::io::AsyncRead + Unpin,
     bytes: Vec<u8>,
 ) -> Result<Option<ExtractedDocumentText>, WorkerFailure> {
-    exchange_mode(format, ExtractionMode::Preview, stdin, stdout, bytes).await
+    exchange_mode(format, ExtractionMode::Preview, stdin, stdout, bytes)
+        .await?
+        .map(WorkerOutput::text)
+        .transpose()
 }
 
 #[cfg(any(windows, test))]
@@ -268,7 +359,7 @@ async fn exchange_mode(
     mut stdin: impl tokio::io::AsyncWrite + Unpin,
     mut stdout: impl tokio::io::AsyncRead + Unpin,
     bytes: Vec<u8>,
-) -> Result<Option<ExtractedDocumentText>, WorkerFailure> {
+) -> Result<Option<WorkerOutput>, WorkerFailure> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut ready = [0; READY.len()];
     stdout
@@ -279,19 +370,32 @@ async fn exchange_mode(
         return Err(WorkerFailure::InvalidOutput);
     }
     // The READY check is the only gate to transmitting untrusted document bytes.
-    let format_code = match format {
-        DocumentFormat::Docx => 0,
-        DocumentFormat::Pdf => 1,
-        DocumentFormat::Xlsx => 2,
-    } + if mode == ExtractionMode::Knowledge {
-        3
+    let format_code = if matches!(mode, ExtractionMode::Pages { .. }) {
+        6
     } else {
-        0
+        (match format {
+            DocumentFormat::Docx => 0,
+            DocumentFormat::Pdf => 1,
+            DocumentFormat::Xlsx => 2,
+        }) + if mode == ExtractionMode::Knowledge {
+            3
+        } else {
+            0
+        }
     };
     stdin
         .write_all(&[format_code])
         .await
         .map_err(|_| WorkerFailure::Unavailable)?;
+    if let ExtractionMode::Pages { first, second } = mode {
+        let mut selection = vec![if second.is_some() { 2 } else { 1 }];
+        selection.extend(first.to_le_bytes());
+        selection.extend(second.unwrap_or(0).to_le_bytes());
+        stdin
+            .write_all(&selection)
+            .await
+            .map_err(|_| WorkerFailure::Unavailable)?;
+    }
     stdin
         .write_all(&(bytes.len() as u32).to_le_bytes())
         .await
@@ -305,6 +409,15 @@ async fn exchange_mode(
         .await
         .map_err(|_| WorkerFailure::Unavailable)?;
     drop(stdin);
+    if let ExtractionMode::Pages { first, second } = mode {
+        let value = super::worker_visual::read(&mut stdout).await?;
+        validate_pdf_evidence(&value).map_err(|_| WorkerFailure::InvalidOutput)?;
+        let expected = second.map_or_else(|| vec![first], |last| vec![first, last]);
+        if value.pages.iter().map(|page| page.page).collect::<Vec<_>>() != expected {
+            return Err(WorkerFailure::InvalidOutput);
+        }
+        return Ok(Some(WorkerOutput::Pages(value)));
+    }
     let mut length = [0; 4];
     stdout
         .read_exact(&mut length)
@@ -335,13 +448,13 @@ async fn exchange_mode(
     if result.format != format {
         return Err(WorkerFailure::InvalidOutput);
     }
-    Ok(Some(result))
+    Ok(Some(WorkerOutput::Text(result)))
 }
 
 #[cfg(any(windows, test))]
 async fn drain_stderr(
     mut reader: impl tokio::io::AsyncRead + Unpin,
-) -> Result<Option<ExtractedDocumentText>, WorkerFailure> {
+) -> Result<Option<WorkerOutput>, WorkerFailure> {
     use tokio::io::AsyncReadExt;
     let mut used = 0usize;
     let mut buffer = [0; 512];
@@ -373,7 +486,7 @@ mod physical {
     use tokio::task::JoinHandle;
     use tokio_util::sync::CancellationToken;
 
-    type Task = JoinHandle<Result<Option<ExtractedDocumentText>, WorkerFailure>>;
+    type Task = JoinHandle<Result<Option<WorkerOutput>, WorkerFailure>>;
 
     struct Runtime {
         permit: Arc<Semaphore>,
@@ -434,7 +547,27 @@ mod physical {
         cancel: CancelSignal,
         deadline: Option<Instant>,
     ) -> Result<ExtractedDocumentText, WorkerFailure> {
-        extract_with_program_mode(format, mode, bytes, cancel, deadline, Program::Daemon).await
+        extract_with_program_mode(format, mode, bytes, cancel, deadline, Program::Daemon)
+            .await?
+            .text()
+    }
+
+    pub(super) async fn inspect_pdf(
+        mode: ExtractionMode,
+        bytes: Vec<u8>,
+        cancel: CancelSignal,
+        deadline: Option<Instant>,
+    ) -> Result<PdfEvidence, WorkerFailure> {
+        extract_with_program_mode(
+            DocumentFormat::Pdf,
+            mode,
+            bytes,
+            cancel,
+            deadline,
+            Program::Daemon,
+        )
+        .await?
+        .pages()
     }
 
     #[cfg(test)]
@@ -453,7 +586,8 @@ mod physical {
             deadline,
             program,
         )
-        .await
+        .await?
+        .text()
     }
 
     async fn extract_with_program_mode(
@@ -463,7 +597,7 @@ mod physical {
         cancel: CancelSignal,
         deadline: Option<Instant>,
         program: Program,
-    ) -> Result<ExtractedDocumentText, WorkerFailure> {
+    ) -> Result<WorkerOutput, WorkerFailure> {
         let runtime = runtime();
         let permit = runtime
             .permit
@@ -568,7 +702,7 @@ mod physical {
         cancel: CancelSignal,
         stop: CancellationToken,
         deadline: Instant,
-        sender: oneshot::Sender<Result<ExtractedDocumentText, WorkerFailure>>,
+        sender: oneshot::Sender<Result<WorkerOutput, WorkerFailure>>,
         program: Program,
     ) {
         let (format, mode, bytes) = request;
@@ -778,7 +912,10 @@ mod physical {
                     }
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
-                let extraction = result.expect("bounded real worker completed");
+                let extraction = result
+                    .expect("bounded real worker completed")
+                    .text()
+                    .unwrap();
                 let text = extraction
                     .blocks
                     .iter()
@@ -797,6 +934,7 @@ mod physical {
                         assert!(text.len() > 16 * 1024);
                         validate_knowledge_document_extraction(&extraction).unwrap();
                     }
+                    ExtractionMode::Pages { .. } => panic!("text-only test mode"),
                 }
                 // A success response follows whole-Job and both-pipes retirement.
                 // Give the independent owner its final permit-drop scheduling step.

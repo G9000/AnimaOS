@@ -11,6 +11,7 @@ mod chatgpt;
 mod common;
 mod controlled;
 mod google;
+mod image;
 mod models;
 mod ollama;
 mod openai_compatible;
@@ -27,6 +28,7 @@ pub use chatgpt::{
     ChatGptCatalogDispatch, ChatGptModelsAdapter, ChatGptModelsFailure, ChatGptModelsReason,
     ChatGptModelsStage, ChatGptResponsesAdapter,
 };
+pub use image::OpenAiImageAdapter;
 pub use models::{
     canonical_provider_id, estimate_cost_micros, model_info, model_table, price_usage,
     CostEstimate, ModelInfo, ModelPricing, PRICING_TABLE_DATE,

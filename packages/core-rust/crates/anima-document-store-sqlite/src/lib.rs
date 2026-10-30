@@ -1,6 +1,8 @@
-//! Persistent, bounded local document passages, independent of private agent memory.
+//! Persistent, bounded document passages and page evidence, independent of private agent memory.
 
 pub mod connected;
+mod provenance;
+pub use provenance::{passage_origin, pdf_ocr_locator, pdf_page_locator, PassageOrigin};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -44,7 +46,7 @@ const MAX_LOCATOR_BYTES: usize = 256;
 pub struct ChunkInput {
     /// Displayable page, paragraph, cell, or line location, never an access capability.
     pub locator: String,
-    /// Complete literal passage text.
+    /// Source or recognized text, empty only for a typed page-image citation.
     pub text: String,
 }
 
@@ -60,7 +62,7 @@ pub struct DocumentInput {
     pub title: String,
     /// Lowercase SHA-256 of the original bytes, checked again by the host on citation reads.
     pub source_sha256: String,
-    /// Bounded extracted passages in document order.
+    /// Bounded source text, recognized text, or page-only evidence in document order.
     pub chunks: Vec<ChunkInput>,
 }
 
@@ -80,13 +82,13 @@ pub struct SearchHit {
     pub title: String,
     /// Exact original document revision hash.
     pub source_sha256: String,
-    /// SHA-256 of the complete literal chunk text.
+    /// SHA-256 of stored chunk text, including the empty text of a page-only row.
     pub chunk_sha256: String,
     /// Host-derived position within the document.
     pub locator: String,
     /// Bounded query-centered passage excerpt.
     pub excerpt: String,
-    /// Complete bounded passage text for a reauthorized citation read.
+    /// Complete bounded text for a reauthorized citation read, empty for page-only evidence.
     pub text: String,
 }
 
@@ -479,8 +481,11 @@ fn validate_documents(documents: &[DocumentInput]) -> Result<(), StoreError> {
         }
         let mut document_bytes = 0usize;
         for chunk in &document.chunks {
-            if !valid_metadata(&chunk.locator, MAX_LOCATOR_BYTES)
-                || chunk.text.trim().is_empty()
+            let valid_text = match passage_origin(&chunk.locator)? {
+                PassageOrigin::PageImage { .. } => chunk.text.is_empty(),
+                PassageOrigin::Literal | PassageOrigin::Ocr { .. } => !chunk.text.trim().is_empty(),
+            };
+            if !valid_text
                 || chunk.text.len() > MAX_CHUNK_TEXT_BYTES
                 || chunk.text.chars().any(|character| {
                     character.is_control() && !matches!(character, '\t' | '\n' | '\r')
@@ -561,7 +566,7 @@ fn excerpt(text: &str, terms: &[String]) -> String {
     excerpt_with_limit(text, terms, MAX_SEARCH_EXCERPT_BYTES)
 }
 
-/// Shortens a literal passage around a query match while preserving UTF-8 boundaries.
+/// Shortens source or recognized text around a query match with UTF-8 boundaries intact.
 /// The requested byte budget is capped at the store's search-excerpt limit.
 pub fn excerpt_for_query(text: &str, query: &str, max_bytes: usize) -> String {
     excerpt_with_limit(

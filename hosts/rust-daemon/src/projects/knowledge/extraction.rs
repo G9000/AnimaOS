@@ -124,3 +124,63 @@ mod tests {
         }
     }
 }
+
+pub(super) fn ocr_pipeline() -> String {
+    format!(
+        "winrt-pdf-ocr-v{}-edge{}-user-profile",
+        anima_document_visual::PDF_EVIDENCE_VERSION,
+        anima_document_visual::MAX_RASTER_EDGE
+    )
+}
+
+pub(super) fn page_references(pages: &[u32]) -> Result<Vec<ChunkInput>, String> {
+    pages
+        .iter()
+        .map(|&page| {
+            let locator = anima_document_store_sqlite::pdf_page_locator(page, &ocr_pipeline())
+                .map_err(|_| "Page citation target is invalid")?;
+            Ok(ChunkInput {
+                locator,
+                text: String::new(),
+            })
+        })
+        .collect()
+}
+
+pub(super) fn visual_chunks(
+    evidence: &anima_document_visual::PdfEvidence,
+    expected_digest: &str,
+    pages: &[u32],
+) -> Result<Vec<ChunkInput>, String> {
+    anima_document_visual::validate_pdf_evidence(evidence)
+        .map_err(|_| "Page evidence is invalid")?;
+    if evidence.source_sha256 != expected_digest
+        || evidence
+            .pages
+            .iter()
+            .map(|page| page.page)
+            .collect::<Vec<_>>()
+            != pages
+    {
+        return Err("Page evidence source binding is invalid".into());
+    }
+    let mut chunks = Vec::new();
+    for page in &evidence.pages {
+        match &page.recognized {
+            anima_document_visual::RecognizedText::Text { text, language } => {
+                let locator = anima_document_store_sqlite::pdf_ocr_locator(
+                    page.page,
+                    language,
+                    &ocr_pipeline(),
+                )
+                .map_err(|_| "Recognized passage origin is invalid")?;
+                match text_chunks(text, &locator) {
+                    Ok(recognized) if !recognized.is_empty() => chunks.extend(recognized),
+                    _ => chunks.extend(page_references(&[page.page])?),
+                }
+            }
+            _ => chunks.extend(page_references(&[page.page])?),
+        }
+    }
+    Ok(chunks)
+}

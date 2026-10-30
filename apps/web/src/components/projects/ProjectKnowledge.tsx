@@ -62,6 +62,7 @@ export function ProjectKnowledge({ agentId, agents = NO_AGENTS, project, api, in
       </div>;
     })}
     {!folders.length && <p>Add a folder or connected source to search its documents here.</p>}
-    {(knowledge.opening || knowledge.citation) && <ProjectCitationDialog citation={knowledge.citation} opening={knowledge.opening} onClose={knowledge.closeCitation} />}
+    {(knowledge.opening || knowledge.citation) && <ProjectCitationDialog citation={knowledge.citation} opening={knowledge.opening} onClose={knowledge.closeCitation}
+      pageScope={{ agentId, projectId: project.id, api }} />}
   </section>;
 }

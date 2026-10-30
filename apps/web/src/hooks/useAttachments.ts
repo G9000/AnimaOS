@@ -17,6 +17,8 @@ export interface AttachmentOptions {
   chatKey: string | null;
   agentId: string | null;
   sessionId: string | null;
+  /** A chat clear starts a new attachment draft scope for the same session. */
+  clearGeneration?: number;
   ensureSession(): Promise<string>;
   enabled: boolean;
 }
@@ -30,9 +32,11 @@ export function useAttachments({
   chatKey,
   agentId,
   sessionId,
+  clearGeneration = 0,
   ensureSession,
   enabled,
 }: AttachmentOptions) {
+  const draftKey = chatKey === null ? null : JSON.stringify([chatKey, clearGeneration]);
   const drafts = useRef(new Map<string, AttachmentDraft[]>());
   const errors = useRef(new Map<string, string>());
   const operations = useRef(new Map<string, Upload>());
@@ -41,7 +45,7 @@ export function useAttachments({
     drafts: new Map<string, AttachmentDraft[]>(),
     errors: new Map<string, string>(),
   }));
-  const { generation } = useRenderScope(chatKey, agentId, sessionId, enabled);
+  const { generation } = useRenderScope(draftKey, agentId, sessionId, enabled);
   const boundary = useLatest({
     chatKey,
     agentId,
@@ -89,11 +93,11 @@ export function useAttachments({
   useEffect(() => {
     mounted.current = true;
     return () => {
-      if (chatKey) cancelKey(chatKey);
+      if (draftKey) cancelKey(draftKey);
       notify();
       mounted.current = false;
     };
-  }, [chatKey, agentId, sessionId, enabled]);
+  }, [draftKey, agentId, sessionId, enabled]);
   useEffect(
     () => () => {
       for (const key of drafts.current.keys()) cancelKey(key);
@@ -122,15 +126,15 @@ export function useAttachments({
     notify();
   };
   const add = (files: readonly File[]) => {
-    if (!active() || !chatKey || !agentId || files.length === 0) return;
-    const previous = drafts.current.get(chatKey) ?? [];
+    if (!active() || !draftKey || !agentId || files.length === 0) return;
+    const previous = drafts.current.get(draftKey) ?? [];
     const selected = files.slice(
       0,
       Math.max(0, MAX_DRAFT_ATTACHMENTS - previous.length),
     );
     if (selected.length < files.length)
-      errors.current.set(chatKey, ATTACHMENT_ERRORS.limit);
-    else errors.current.delete(chatKey);
+      errors.current.set(draftKey, ATTACHMENT_ERRORS.limit);
+    else errors.current.delete(draftKey);
     const additions = selected.map((file) => {
       const classification = classifyAttachmentFile(file);
       return {
@@ -146,7 +150,7 @@ export function useAttachments({
           : {}),
       } as AttachmentDraft;
     });
-    drafts.current.set(chatKey, [...previous, ...additions]);
+    drafts.current.set(draftKey, [...previous, ...additions]);
     notify();
     const valid = additions.filter((item) => item.status === 'uploading');
     if (!valid.length) return;
@@ -160,7 +164,7 @@ export function useAttachments({
       const item = additions[index];
       if (item.status !== 'uploading') continue;
       const operation: Upload = {
-        key: chatKey,
+        key: draftKey,
         controller: new AbortController(),
         generation,
       };
@@ -205,25 +209,25 @@ export function useAttachments({
     }
   };
   const remove = (localId: string) => {
-    if (!chatKey || boundary.current.generation !== generation) return;
+    if (!draftKey || boundary.current.generation !== generation) return;
     const operation = operations.current.get(localId);
     operations.current.delete(localId);
     operation?.controller.abort();
-    const items = drafts.current.get(chatKey) ?? [];
+    const items = drafts.current.get(draftKey) ?? [];
     const item = items.find((value) => value.localId === localId);
     if (item) revoke(item);
     drafts.current.set(
-      chatKey,
+      draftKey,
       items.filter((value) => value.localId !== localId),
     );
-    errors.current.delete(chatKey);
+    errors.current.delete(draftKey);
     notify();
   };
   const clear = () => {
-    if (!chatKey || boundary.current.generation !== generation) return;
-    cancelKey(chatKey);
-    drafts.current.set(chatKey, []);
-    errors.current.delete(chatKey);
+    if (!draftKey || boundary.current.generation !== generation) return;
+    cancelKey(draftKey);
+    drafts.current.set(draftKey, []);
+    errors.current.delete(draftKey);
     notify();
   };
   const restore = (
@@ -231,12 +235,12 @@ export function useAttachments({
     attachmentIds?: readonly string[],
   ) => {
     if (
-      !chatKey ||
+      !draftKey ||
       !mounted.current ||
       boundary.current.generation !== generation
     )
       return false;
-    const items = drafts.current.get(chatKey) ?? [];
+    const items = drafts.current.get(draftKey) ?? [];
     const ids = new Set(
       items.map((item) => item.attachment?.id ?? item.savedAttachmentId),
     );
@@ -262,16 +266,16 @@ export function useAttachments({
         };
       });
     if (items.length + recovered.length > MAX_DRAFT_ATTACHMENTS) {
-      errors.current.set(chatKey, ATTACHMENT_ERRORS.limit);
+      errors.current.set(draftKey, ATTACHMENT_ERRORS.limit);
       notify();
       return false;
     }
-    drafts.current.set(chatKey, [...items, ...recovered]);
-    errors.current.delete(chatKey);
+    drafts.current.set(draftKey, [...items, ...recovered]);
+    errors.current.delete(draftKey);
     notify();
     return true;
   };
-  const items = chatKey ? (snapshot.drafts.get(chatKey) ?? []) : [];
+  const items = draftKey ? (snapshot.drafts.get(draftKey) ?? []) : [];
   return {
     items,
     readyAttachments: items.flatMap((item) =>
@@ -283,7 +287,7 @@ export function useAttachments({
         : [],
     ),
     uploading: items.some((item) => item.status === 'uploading'),
-    error: (chatKey ? snapshot.errors.get(chatKey) : null) ?? null,
+    error: (draftKey ? snapshot.errors.get(draftKey) : null) ?? null,
     add,
     remove,
     clear,

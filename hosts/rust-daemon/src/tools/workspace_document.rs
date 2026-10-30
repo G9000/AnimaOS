@@ -31,6 +31,9 @@ pub(super) fn read_document(
     call: ToolCall,
 ) -> BoxFuture<'static, TaskResult<Content>> {
     Box::pin(async move {
+        if call.args.contains_key("pages") {
+            return read_pdf_pages(context, call).await;
+        }
         let deadline = Instant::now() + Duration::from_secs(10);
         let result = async {
             let (path, format) = arguments(&call)?;
@@ -242,3 +245,53 @@ fn fit_envelope(
 #[cfg(test)]
 #[path = "workspace_document_tests.rs"]
 mod tests;
+
+async fn read_pdf_pages(context: ToolExecutionContext, mut call: ToolCall) -> TaskResult<Content> {
+    use crate::attachments::documents::pages::{
+        workspace, WorkspaceSelection, WORKSPACE_VISUALS_KEY,
+    };
+    use anima_document_visual::RecognizedText;
+    let result = async {
+        let Some(DataValue::Array(raw)) = call.args.remove("pages") else { return Err("pages must contain one or two original PDF page numbers"); };
+        let pages = raw.iter().map(|value| match value {
+            DataValue::Number(page) if page.is_finite() && page.fract() == 0.0 && (1.0..=100.0).contains(page) => Ok(*page as u32),
+            _ => Err("pages must contain one or two original PDF page numbers"),
+        }).collect::<Result<Vec<_>, _>>()?;
+        anima_document_visual::PdfPageSelection::new(pages.clone()).map_err(|_| "pages must be unique and ascending, with at most two entries")?;
+        let (path, format) = arguments(&call)?;
+        if format != DocumentFormat::Pdf { return Err("visual page inspection requires a PDF"); }
+        let root = context.workspace_root.ok_or(UNAVAILABLE)?;
+        let cancel = context.cancel.ok_or(UNAVAILABLE)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let evidence = workspace(root, path.clone(), None, pages.clone(), context.document_extractor.as_ref(), cancel, deadline).await.map_err(failure)?;
+        let observations = evidence.pages.iter().map(|page| {
+            let recognized = match &page.recognized {
+                RecognizedText::Text { text, language } => {
+                    let mut end = text.len().min(3072);
+                    while !text.is_char_boundary(end) { end -= 1; }
+                    serde_json::json!({"kind":"ocr_recognized_text","text":&text[..end],"language":language,"truncated":end < text.len(),"accuracy":"not_verified_transcription"})
+                },
+                RecognizedText::Empty => serde_json::json!({"kind":"no_recognized_text"}),
+                RecognizedText::Unavailable => serde_json::json!({"kind":"recognition_unavailable"}),
+            };
+            serde_json::json!({"page":page.page,"locator":format!("pdf#page={}",page.page),"recognized":recognized})
+        }).collect::<Vec<_>>();
+        let descriptor = WorkspaceSelection { path: path.clone(), source_sha256: evidence.source_sha256.clone(), pages };
+        let text = serde_json::to_string(&serde_json::json!({
+            "kind":"workspace_pdf_page_evidence","trust":"untrusted_data",
+            "source":{"path":path,"sha256":evidence.source_sha256},
+            "pageCount":evidence.page_count,"pages":observations,
+            "visualDelivery":"Requested pages are supplied separately when model capability and context allow. Do not infer unseen graphics from OCR labels."
+        })).map_err(|_| UNAVAILABLE)?;
+        if text.len() > MAX_DOCUMENT_RENDERED_BYTES { return Err("PDF page evidence text exceeds its context limit"); }
+        let descriptor = serde_json::to_string(&descriptor).map_err(|_| UNAVAILABLE)?;
+        Ok::<_, &'static str>(Content {
+            text, attachments: None,
+            metadata: Some(std::collections::BTreeMap::from([(WORKSPACE_VISUALS_KEY.into(), DataValue::String(descriptor))])),
+        })
+    }.await;
+    match result {
+        Ok(content) => TaskResult::success(content, 0),
+        Err(error) => TaskResult::error(error, 0),
+    }
+}

@@ -80,6 +80,7 @@ function renderView(overrides: Partial<SessionViewProps> = {}) {
 }
 
 beforeEach(() => {
+  vi.spyOn(daemon.images, 'list').mockImplementation(() => new Promise(() => {}));
   // The header reads the session's usage; most tests have none.
   vi.spyOn(daemon, 'getSession').mockResolvedValue(sessionFixture('room-7'));
   vi.spyOn(daemon.interactions, 'list').mockResolvedValue([]);
@@ -89,6 +90,41 @@ beforeEach(() => {
 });
 
 describe('artifact conversation layout', () => {
+  it('returns the chosen saved image to the composer with its original identity and no automatic send', async () => {
+    const attachment = { id: 'saved-image', name: 'Saved picture.png', mime: 'image/png', size: 20, kind: 'image' as const, path: 'attachments/saved.png', createdAtMs: 2 };
+    vi.mocked(daemon.images.list).mockResolvedValue({ clearGeneration: 0, provider: 'openai', model: 'gpt-image-2.5-sunburst', operations: [{ id: 'op', prompt: 'A bird', sourceAttachmentId: null, createdAtMs: 1, status: 'succeeded', version: { id: 'v', attachment, parentAttachmentId: null, width: 1024, height: 1024, model: 'gpt-image-2.5-sunburst', createdAtMs: 2 } }] });
+    vi.spyOn(daemon, 'downloadAttachment').mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:saved');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const onUseSaved = vi.fn().mockReturnValue(true);
+    const composer = { draft: '', setDraft: vi.fn(), sending: false, disabled: false, offline: false, onSend: vi.fn(), error: null, onDismissError: vi.fn(), attachments: { items: [], onAdd: vi.fn(), onRemove: vi.fn(), onUseSaved } };
+    renderView({ session: sessionFixture('chat:images'), composer });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open image version 1' }));
+    await screen.findByRole('img', { name: 'Saved picture.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit in chat' }));
+    expect(onUseSaved).toHaveBeenCalledWith(attachment);
+    expect(composer.onSend).not.toHaveBeenCalled();
+    expect(composer.setDraft).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message Nova' })).toHaveFocus());
+  });
+  it('requires removing another image instead of silently changing the selected edit input', async () => {
+    const attachment = { id: 'saved-image', name: 'Saved picture.png', mime: 'image/png', size: 20, kind: 'image' as const, path: 'attachments/saved.png', createdAtMs: 2 };
+    vi.mocked(daemon.images.list).mockResolvedValue({ clearGeneration: 0, provider: 'openai', model: 'gpt-image-2.5-sunburst', operations: [{ id: 'op', prompt: 'A bird', sourceAttachmentId: null, createdAtMs: 1, status: 'succeeded', version: { id: 'v', attachment, parentAttachmentId: null, width: 1024, height: 1024, model: 'gpt-image-2.5-sunburst', createdAtMs: 2 } }] });
+    vi.spyOn(daemon, 'downloadAttachment').mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:saved');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const onUseSaved = vi.fn().mockReturnValue(true);
+    const onSend = vi.fn();
+    const onRemove = vi.fn();
+    renderView({ session: sessionFixture('chat:images'), composer: { draft: '', setDraft: vi.fn(), sending: false, disabled: false, offline: false, onSend, error: null, onDismissError: vi.fn(), attachments: { items: [{ localId: 'other', name: 'other.png', kind: 'image', status: 'ready', progress: 100, attachment: { ...attachment, id: 'other-image' } }], onAdd: vi.fn(), onRemove, onUseSaved } } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open image version 1' }));
+    await screen.findByRole('img', { name: 'Saved picture.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit in chat' }));
+    expect(onUseSaved).not.toHaveBeenCalled();
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText('Remove the other selected image before choosing this version to edit.')).toBeVisible();
+  });
   it('keeps a selected document target beside an editable draft and sends it only explicitly', async () => {
     const path = 'artifacts/report.docx';
     const sha256 = 'a'.repeat(64);

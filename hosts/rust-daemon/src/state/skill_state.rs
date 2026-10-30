@@ -32,6 +32,11 @@ impl DaemonState {
     /// Sets (or clears) the workspace. The last scan described the old
     /// folder, so it is forgotten and a scan in flight is dropped.
     pub(crate) fn set_workspace(&mut self, workspace: Option<WorkspaceConfig>) {
+        if self.workspace.as_ref().map(|known| &known.root_path)
+            != workspace.as_ref().map(|next| &next.root_path)
+        {
+            self.workspace_document_authority.revoke_all();
+        }
         self.workspace = workspace;
         self.skills.reset_scan();
     }
@@ -103,5 +108,24 @@ mod tests {
             state.workspace.as_ref().map(|known| &known.root_path),
             Some(&workspace.root_path)
         );
+    }
+    #[test]
+    fn workspace_switch_retires_read_leases_without_reusing_old_authority() {
+        let mut state = DaemonState::new();
+        let before = state.workspace_document_authority.lease("agent", true);
+        let workspace = WorkspaceConfig {
+            root_path: std::env::temp_dir().join("anima-document-authority-test"),
+            company_name: String::new(),
+            mission: String::new(),
+            values: vec![],
+        };
+        state.set_workspace(Some(workspace.clone()));
+        assert!(before.is_cancelled());
+        let current = state.workspace_document_authority.lease("agent", true);
+        state.set_workspace(Some(workspace));
+        assert!(!current.is_cancelled());
+        state.set_workspace(None);
+        assert!(current.is_cancelled());
+        assert!(before.is_cancelled());
     }
 }

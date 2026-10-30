@@ -36,6 +36,8 @@ pub(crate) struct KnowledgeStatus {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct KnowledgeHit {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) recognition: Option<anima_document_store_sqlite::PassageOrigin>,
     pub(crate) citation_id: String,
     pub(crate) resource_id: String,
     pub(crate) document_id: String,

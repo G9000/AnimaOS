@@ -847,7 +847,21 @@ pub(crate) async fn load_context_for_query(
                         "/api/projects/{}/knowledge/citations/{}?asAgentId={}",
                         scope.project.id, hit.citation_id, scope.agent_id
                     );
-                    let item = serde_json::json!({"title":hit.title,"location":hit.locator,"citation":citation,"sourceSha256":hit.source_sha256,"quotedPassage":excerpt});
+                    let mut item = serde_json::json!({"title":hit.title,"location":hit.locator,"citation":citation,"sourceSha256":hit.source_sha256});
+                    match &hit.recognition {
+                        Some(anima_document_store_sqlite::PassageOrigin::Ocr { .. }) => {
+                            item["recognizedText"] = serde_json::json!(excerpt);
+                            item["recognition"] = serde_json::to_value(&hit.recognition)
+                                .map_err(|_| ProjectError::AccessUnavailable)?;
+                            item["accuracy"] = serde_json::json!(
+                                "OCR can contain errors. This is not a verified transcription."
+                            );
+                        }
+                        Some(anima_document_store_sqlite::PassageOrigin::PageImage { .. }) => {
+                            item["pageEvidence"] = serde_json::json!("Reference to the original page only. No recognized passage or visual interpretation is included.");
+                        }
+                        _ => item["quotedPassage"] = serde_json::json!(excerpt),
+                    }
                     quoted.push(item);
                     let selected = serde_json::to_string(&quoted)
                         .map_err(|_| ProjectError::AccessUnavailable)?;

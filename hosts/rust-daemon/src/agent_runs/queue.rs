@@ -663,6 +663,8 @@ impl AgentRunCoordinator {
         }
         let (record, previous_title, previous_recovery_mirrored, execution_candidate, persist) = {
             let mut guard = self.state.write().await;
+            crate::images::validate_generated_attachments(&guard, &attachments)
+                .map_err(ApiError::conflict)?;
             // Attachment/history validation above may await I/O. Recovery data
             // is not authority; recheck the exact claim under admission's lock.
             if let Some(admission) = &recovery {

@@ -216,6 +216,11 @@ pub(super) async fn serve(
     if !is_valid_session_id(&agent_id) || !valid_attachment_id(&attachment_id) {
         return rejected(ApiError::bad_request_static(ATTACHMENT_INVALID_ID));
     }
+    let _image_transaction = if attachment_id.starts_with("image_") {
+        Some(state.agent_runs.control_plane_transaction().await)
+    } else {
+        None
+    };
     let store = {
         let guard = state.daemon.read().await;
         if !guard.agents.contains_key(&agent_id) {
@@ -230,6 +235,11 @@ pub(super) async fn serve(
     };
     let root = {
         let guard = state.daemon.read().await;
+        if let Err(error) =
+            crate::images::validate_generated_attachments(&guard, std::slice::from_ref(&record))
+        {
+            return rejected(ApiError::conflict(error));
+        }
         if !guard.agents.contains_key(&agent_id)
             || guard.sessions.get(&agent_id, &record.session_id).is_none()
             || guard.pending_history_deletions.iter().any(|d| {
@@ -269,6 +279,108 @@ pub(super) async fn serve(
     headers.insert(header::CONTENT_TYPE, content_type);
     headers.insert(header::CONTENT_DISPOSITION, content_disposition);
     headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    no_store(response)
+}
+
+#[utoipa::path(get,path="/api/agents/{agent_id}/attachments/{attachment_id}/pages/{page}",tag="attachments",
+    params(("agent_id"=String,Path),("attachment_id"=String,Path),("page"=u32,Path)),
+    responses((status=200,description="Verified current PDF page raster",body=Vec<u8>,content_type="image/png"),
+    (status=409,description="Document changed or page unavailable")))]
+pub(super) async fn page(
+    State(state): State<AppState>,
+    Path((agent_id, attachment_id, page)): Path<(String, String, u32)>,
+    request: Request,
+) -> Response {
+    use crate::attachments::documents::{pages, worker::DocumentWorker};
+    if let Err(response) = authorize(&state, &request, true) {
+        return response;
+    }
+    if !is_valid_session_id(&agent_id)
+        || !valid_attachment_id(&attachment_id)
+        || !(1..=100).contains(&page)
+    {
+        return rejected(ApiError::bad_request_static(ATTACHMENT_INVALID_ID));
+    }
+    let (store, root) = {
+        let guard = state.daemon.read().await;
+        if guard.ensure_profile_owned().is_err() || !guard.agents.contains_key(&agent_id) {
+            return rejected(ApiError::not_found());
+        }
+        let Some(workspace) = guard.workspace.as_ref() else {
+            return rejected(ApiError::conflict(ATTACHMENT_NEEDS_WORKSPACE));
+        };
+        (guard.history.store(), workspace.root_path.clone())
+    };
+    let record = match store.get_attachment(&agent_id, &attachment_id).await {
+        Ok(Some(record)) => record,
+        _ => return rejected(ApiError::not_found()),
+    };
+    {
+        let guard = state.daemon.read().await;
+        if guard.sessions.get(&agent_id, &record.session_id).is_none()
+            || guard.pending_history_deletions.iter().any(|item| {
+                item.agent_id == agent_id
+                    && item
+                        .session_id
+                        .as_ref()
+                        .is_none_or(|id| id == &record.session_id)
+            })
+        {
+            return rejected(ApiError::not_found());
+        }
+    }
+    let cancel = anima_core::CancelSignal::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let evidence = match pages::attachment(
+        store.as_ref(),
+        root.clone(),
+        &agent_id,
+        &record.session_id,
+        &record,
+        vec![page],
+        &DocumentWorker,
+        cancel,
+        deadline,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => {
+            return rejected(ApiError::conflict(
+                "PDF page is unavailable or the source changed",
+            ))
+        }
+    };
+    let guard = state.daemon.read().await;
+    if guard.ensure_profile_owned().is_err()
+        || guard
+            .workspace
+            .as_ref()
+            .map(|workspace| &workspace.root_path)
+            != Some(&root)
+        || !guard.agents.contains_key(&agent_id)
+        || guard.sessions.get(&agent_id, &record.session_id).is_none()
+        || guard.pending_history_deletions.iter().any(|item| {
+            item.agent_id == agent_id
+                && item
+                    .session_id
+                    .as_ref()
+                    .is_none_or(|id| id == &record.session_id)
+        })
+    {
+        return rejected(ApiError::conflict(ATTACHMENT_CHANGED));
+    }
+    let Some(page) = evidence.pages.into_iter().next() else {
+        return rejected(ApiError::not_found());
+    };
+    let mut response = (StatusCode::OK, page.png).into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    response.headers_mut().insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
     );

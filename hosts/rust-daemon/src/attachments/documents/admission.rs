@@ -11,6 +11,7 @@ use anima_service_adapters::document_content::{
     ExtractedDocumentText, DOCUMENT_EXTRACTS_METADATA_KEY, MAX_DOCUMENT_RENDERED_BYTES,
 };
 use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
+use tokio::sync::Semaphore;
 
 use super::{
     document_format,
@@ -30,8 +31,6 @@ use crate::{
 pub(crate) type SourceReader =
     Arc<dyn Fn(&Path, &AttachmentRecord) -> Result<Vec<u8>, AttachmentError> + Send + Sync>;
 
-/// Four retained physical read leases, no queue. Cancellation drops only the
-/// await; the bounded blocking task keeps its lease until the OS read returns.
 pub(crate) async fn read_source(
     root: PathBuf,
     record: AttachmentRecord,
@@ -39,9 +38,34 @@ pub(crate) async fn read_source(
     cancel: &CancelSignal,
     deadline: tokio::time::Instant,
 ) -> Result<Vec<u8>, WorkerFailure> {
-    super::source_read::read_retained(move || reader(&root, &record), cancel, deadline)
-        .await?
-        .map_err(|_| WorkerFailure::Unavailable)
+    read_source_with_slots(
+        root,
+        record,
+        reader,
+        cancel,
+        deadline,
+        super::source_read::shared_read_slots(),
+    )
+    .await
+}
+
+/// Cancellation drops only the await; the blocking task retains its read lease.
+pub(crate) async fn read_source_with_slots(
+    root: PathBuf,
+    record: AttachmentRecord,
+    reader: SourceReader,
+    cancel: &CancelSignal,
+    deadline: tokio::time::Instant,
+    slots: Arc<Semaphore>,
+) -> Result<Vec<u8>, WorkerFailure> {
+    super::source_read::read_retained_with_slots(
+        move || reader(&root, &record),
+        cancel,
+        deadline,
+        slots,
+    )
+    .await?
+    .map_err(|_| WorkerFailure::Unavailable)
 }
 
 /// Only a newly selected owner Web message can acquire a derived snapshot.
@@ -70,6 +94,7 @@ pub(crate) async fn admit(
         cancel,
         deadline,
         Arc::new(read_attachment_bytes),
+        super::source_read::shared_read_slots(),
     )
     .await;
 }
@@ -87,9 +112,12 @@ async fn admit_with_reader(
     cancel: CancelSignal,
     deadline: Option<tokio::time::Instant>,
     reader: SourceReader,
+    slots: Arc<Semaphore>,
 ) {
     if let Some(metadata) = &mut input.metadata {
         metadata.remove(DOCUMENT_EXTRACTS_METADATA_KEY);
+        metadata.remove(anima_service_adapters::document_visuals::DOCUMENT_VISUALS_KEY);
+        metadata.remove(crate::attachments::documents::pages::WORKSPACE_VISUALS_KEY);
     }
     let (store, root, max_bytes) = {
         let guard = state.read().await;
@@ -185,12 +213,13 @@ async fn admit_with_reader(
         } else if record.size > MAX_DOCUMENT_INPUT_BYTES {
             ExtractedDocumentText::empty_for(format, Status::TooLarge)
         } else {
-            let bytes = read_source(
+            let bytes = read_source_with_slots(
                 root.clone(),
                 record.clone(),
                 Arc::clone(&reader),
                 &cancel,
                 document_deadline,
+                slots.clone(),
             )
             .await;
             match bytes {
@@ -226,12 +255,13 @@ async fn admit_with_reader(
             continue;
         }
         if !extraction.blocks.is_empty() {
-            if read_source(
+            if read_source_with_slots(
                 root.clone(),
                 record.clone(),
                 Arc::clone(&reader),
                 &cancel,
                 document_deadline,
+                slots.clone(),
             )
             .await
             .is_err()
@@ -265,6 +295,29 @@ async fn admit_with_reader(
     }
     if let Ok(snapshots) = fit_document_snapshots(&snapshots, max_bytes) {
         if !snapshots.is_empty() {
+            use anima_service_adapters::document_visuals::{
+                VisualDocumentSelection, DOCUMENT_VISUALS_KEY,
+            };
+            let visual = snapshots
+                .iter()
+                .filter_map(|snapshot| {
+                    let coverage = snapshot.extraction.pdf_coverage?;
+                    (coverage.page_count > 0).then(|| VisualDocumentSelection {
+                        attachment_id: snapshot.attachment_id.clone(),
+                        source_sha256: snapshot.source_sha256.clone(),
+                        pages: (1..=coverage.page_count.min(2)).collect(),
+                    })
+                })
+                .take(2)
+                .collect::<Vec<_>>();
+            if !visual.is_empty() {
+                if let Ok(json) = serde_json::to_string(&visual) {
+                    input.metadata.get_or_insert_with(Default::default).insert(
+                        DOCUMENT_VISUALS_KEY.into(),
+                        anima_core::DataValue::String(json),
+                    );
+                }
+            }
             if let Ok(value) = document_snapshots_metadata(&snapshots) {
                 input
                     .metadata

@@ -25,6 +25,19 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+it('opens a selected PDF page beside its existing text-layer status without trusting its path', async () => {
+  const load = vi.spyOn(daemon, 'previewAttachmentPage').mockResolvedValue(new Blob(['page'], { type: 'image/png' }));
+  render(<MessageAttachments agentId="current_agent" attachments={[{
+    ...uploaded, type: 'file', kind: 'document', name: 'scan.pdf', mime: 'application/pdf', path: 'https://untrusted.test/source.pdf',
+    extraction: { version: 2, format: 'pdf', status: 'no_text', pageCount: 3, textPageCount: 0, includedPageCount: 0, omissions: ['text_layer_only'] },
+  }]} />);
+  expect(screen.getByText(/Only the PDF text layer was read/)).toBeVisible();
+  expect(load).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByRole('combobox', { name: 'PDF page' }), { target: { value: '3' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview PDF page 3' }));
+  await screen.findByRole('img', { name: 'Original PDF page 3' });
+  expect(load).toHaveBeenCalledWith('current_agent', 'att_1', 3, { signal: expect.any(AbortSignal) });
+});
 it('previews only authenticated Blob URLs, reveals names and handles failed image decode', async () => {
   const download = vi
     .spyOn(daemon, 'downloadAttachment')
@@ -49,7 +62,7 @@ it('downloads with SDK Blob and server filename, revoking its temporary URL', as
     .mockResolvedValue(new Blob(['text']));
   const click = vi
     .spyOn(HTMLAnchorElement.prototype, 'click')
-    .mockImplementation(function () {
+    .mockImplementation(function (this: HTMLAnchorElement) {
       expect(this.href).toBe('blob:authenticated');
       expect(this.download).toBe('brief.txt');
     });

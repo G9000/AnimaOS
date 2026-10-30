@@ -1,7 +1,10 @@
 //! Selected-message document admission; parsing stays behind the owned worker.
 pub(crate) mod admission;
+pub(crate) mod authority;
+pub(crate) mod pages;
 pub(crate) mod source_read;
 pub(crate) mod worker;
+mod worker_visual;
 
 pub(crate) const DOCX_MIME: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

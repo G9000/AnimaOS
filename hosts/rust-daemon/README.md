@@ -199,6 +199,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/approval-policy`                                                     |
 | `GET`    | `/api/agents/{agent_id}/approval-rules`                                                      |
 | `GET`    | `/api/agents/{agent_id}/attachments/{attachment_id}`                                         |
+| `GET` | `/api/agents/{agent_id}/attachments/{attachment_id}/pages/{page}` |
 | `GET`    | `/api/agents/{agent_id}/autonomy`                                                            |
 | `GET`    | `/api/agents/{agent_id}/avatar`                                                              |
 | `GET`    | `/api/agents/{agent_id}/browser-policies`                                                    |
@@ -242,6 +243,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}`                                               |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/clarifications`                                |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/export`                                        |
+| `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/images`                                        |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/messages`                                      |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/runs`                                          |
 | `GET`    | `/api/agents/{agent_id}/sessions/{session_id}/voice`                                         |
@@ -530,6 +532,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `POST` | `/api/projects/{project_id}/knowledge/refresh` |
 | `GET` | `/api/projects/{project_id}/knowledge/search` |
 | `GET` | `/api/projects/{project_id}/knowledge/citations/{citation_id}` |
+| `GET` | `/api/projects/{project_id}/knowledge/citations/{citation_id}/page` |
 | `GET` | `/api/projects/{project_id}/chats` |
 | `PUT` | `/api/agents/{agent_id}/sessions/{session_id}/project` |
 | `GET` | `/api/document-edits/{proposal_id}` |
@@ -775,9 +778,9 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 363 operations, including selected connected project sources and owner-only preview inspection. See [conversation controls](../../docs/companion/chat-suite.md) for conversation authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 366 operations, including source-bound PDF page previews, saved image versions, selected connected project sources and owner-only preview inspection. See [conversation controls](../../docs/companion/chat-suite.md) for conversation authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
-Project Sources also supports explicit read-only folder grants outside the workspace. The project knowledge endpoints add grants, report index coverage, refresh selected folders, search local document passages and open citations after rechecking access and current source bytes. Shared project chats retrieve relevant quoted passages within their existing context budget. The SQLite keyword index is a private, derived cache; folder grants remain in durable project records. Removal and membership changes revoke access, and stale citations refuse changed files. PDF extraction uses text layers; OCR and spreadsheet recalculation are not included.
+Project Sources also supports explicit read-only folder grants outside the workspace. The project knowledge endpoints add grants, report index coverage, refresh selected folders, search local document passages and open citations after rechecking access and current source bytes. Shared project chats retrieve relevant quoted passages within their existing context budget. The SQLite keyword index is a private, derived cache; folder grants remain in durable project records. Removal and membership changes revoke access, and stale citations refuse changed files. PDF text-layer extraction remains available. On Windows, refresh can recognize up to two PDF pages without retained text per pass, preserving OCR provenance or page-only references. Citation page previews recheck current access and source bytes. Spreadsheet recalculation is not included.
 
 ### Agents
 
@@ -843,6 +846,8 @@ Before a run whose context leaves out turns no summary covers, the run compacts 
 
 ### Attachments and voice
 
+Native `generate_image` and `edit_image` require exact owner review of each OpenAI request and its possible API charge. Editing uses exactly one image attached to the accepted owner message and preserves the original. Successful outputs have immutable attachment/version identities in the conversation's Images gallery; owner-only `GET /api/agents/{agent_id}/sessions/{session_id}/images` reads their local ledger without generating again. Interrupted requests remain uncertain and are never automatically retried. See [image creation and editing](../../docs/companion/images.md) for setup, bounds and verification limits.
+
 Selected WAV audio remains a File reference unless the owner explicitly requests
 transcription. Native transcription is disabled by default; enable
 `ANIMAOS_STT_ENABLED=true` with the server OpenAI Platform API-key configuration.
@@ -872,7 +877,7 @@ Runs and steers accept `attachmentIds` alongside text and skill; attachment-only
 
 Browser dictation and read-aloud use browser speech APIs when available, and cancel when their chat becomes inactive. Browser support and microphone permission vary; browsers may use an external speech service. These controls remain separate from the opt-in daemon transcription and speech actions described above. Local mocked tests do not establish live provider image acceptance, speech quality or microphone behavior.
 
-An explicitly configured `read_document` tool can read an existing workspace DOCX, PDF or XLSX without an attachment upload. The owner enables it separately in Settings; defaults and unrelated grants stay unchanged. Existing filesystem grant checks also apply to helpers and connector-triggered runs. A held-root bounded read captures at most 2 MiB; the returned untrusted tool envelope includes the relative path, captured-byte SHA-256, typed locators and coverage within 16 KiB total serialized output. It is a byte snapshot, with no current-path freshness promise. Reads share the retained four-slot source pool and the existing single owned Windows document worker under one ten-second deadline. A run cancellation signal is required; there is no retry, formula calculation, OCR, edit or automatic grant. Source files stay unchanged. See [document use and limits](../../docs/companion/documents.md).
+An explicitly configured `read_document` tool can read an existing workspace DOCX, PDF or XLSX without an attachment upload. The owner enables it separately in Settings; defaults and unrelated grants stay unchanged. Existing filesystem grant checks also apply to helpers and connector-triggered runs. A held-root bounded read captures at most 2 MiB; the returned untrusted tool envelope includes the relative path, captured-byte SHA-256, typed locators and coverage within 16 KiB total serialized output. The textual result is a captured byte snapshot. For PDFs, optional `pages` selects up to two original pages with local OCR when available. Fresh model delivery rechecks the read grant and source digest; rendered images stay in the model request. Reads share the retained four-slot source pool and the existing single owned Windows document worker under one ten-second deadline. A run cancellation signal is required; there is no retry, formula calculation, edit or automatic grant. Source files stay unchanged. See [document use and limits](../../docs/companion/documents.md).
 
 ### Live runs
 

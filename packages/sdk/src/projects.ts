@@ -74,6 +74,7 @@ export interface ProjectKnowledgeSource {
 export interface ProjectKnowledgeStatus extends ProjectKnowledgeBinding { sources: ProjectKnowledgeSource[] }
 export interface ProjectKnowledgeHit {
   citationId: string; resourceId: string; documentId: string; title: string; locator: string; excerpt: string;
+  recognition?: { kind: 'ocr'; language: string; pipeline: string } | { kind: 'page_image'; pipeline: string };
   origin?: { ownerAgentId: string; connectorId: string; provider: string; remoteId: string;
     ownerName?: string; accountLabel?: string | null; revisionSha256: string; verifiedAtMs: number; coverage: string };
 }
@@ -177,6 +178,14 @@ export class ProjectsClient {
 
   openKnowledgeCitation(id: string, citationId: string, asAgentId: string, options: { signal?: AbortSignal } = {}): Promise<ProjectKnowledgeCitation> {
     return this.client.requestJson(`${path(id)}/knowledge/citations/${encodeURIComponent(citationId)}?${new URLSearchParams({ asAgentId })}`, options);
+  }
+
+  previewKnowledgeCitationPage(id: string, citationId: string, asAgentId: string, options: { signal?: AbortSignal } = {}): Promise<Blob> {
+    return this.client.requestBoundedBlob(
+      `${path(id)}/knowledge/citations/${encodeURIComponent(citationId)}/page?${new URLSearchParams({ asAgentId })}`,
+      { signal: options.signal, cache: 'no-store' },
+      { maxBytes: 2 * 1024 * 1024, contentType: 'image/png' },
+    );
   }
 
   chats(id: string, asAgentId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal } = {}): Promise<ProjectChatPage> {

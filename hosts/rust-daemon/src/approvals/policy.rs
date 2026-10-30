@@ -136,7 +136,14 @@ const EXEC_TOOLS: &[&str] = &[
     "acp_execute",
     "acp_other",
 ];
-const NETWORK_TOOLS: &[&str] = &["web_fetch", "exa_search", "web_search", "acp_fetch"];
+const NETWORK_TOOLS: &[&str] = &[
+    "web_fetch",
+    "exa_search",
+    "web_search",
+    "acp_fetch",
+    "generate_image",
+    "edit_image",
+];
 
 #[test]
 fn m83_anonymous_search_uses_ordinary_network_approval_class() {

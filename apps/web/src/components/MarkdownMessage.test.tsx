@@ -16,6 +16,7 @@ import { ProjectKnowledgeScope } from './projects/ProjectKnowledgeLink';
 /** Counts Markdown parses; the real renderer still renders. */
 const parses = vi.hoisted(() => vi.fn());
 const documentOwnerScope = { agentId: 'a', sessionId: 'current' };
+const pageOwnerScope = { agentId: 'a', sessionId: 'chat' };
 vi.mock('react-markdown', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-markdown')>();
   const Parsed = (props: Parameters<typeof actual.default>[0]) => {
@@ -26,6 +27,34 @@ vi.mock('react-markdown', async (importOriginal) => {
 });
 
 describe('MarkdownMessage', () => {
+  it('opens an attachment page citation through authenticated preview instead of a raw anchor', async () => {
+    const load = vi.spyOn(daemon, 'previewAttachmentPage').mockResolvedValue(new Blob(['page'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:markdown-page');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    render(<ChatExportScope.Provider value={pageOwnerScope}>
+      <MarkdownMessage>{'[Page 2](/api/agents/a/attachments/att_one/pages/2)'}</MarkdownMessage>
+    </ChatExportScope.Provider>);
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'Page 2' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await screen.findByRole('img', { name: 'Original PDF page 2' });
+    expect(load).toHaveBeenCalledWith('a', 'att_one', 2, { signal: expect.any(AbortSignal) });
+  });
+
+  it.each([
+    'https://elsewhere.example/api/agents/a/attachments/att_one/pages/2',
+    '/api/agents/other/attachments/att_one/pages/2',
+    '/api/agents/a/attachments/att_one/pages/2?source=/private/file',
+  ])('keeps foreign, cross-agent or malformed attachment page references inert: %s', (href) => {
+    const load = vi.spyOn(daemon, 'previewAttachmentPage');
+    render(<ChatExportScope.Provider value={pageOwnerScope}>
+      <MarkdownMessage>{`[Source page](${href})`}</MarkdownMessage>
+    </ChatExportScope.Provider>);
+    expect(screen.queryByRole('link', { name: 'Source page' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Source page' })).not.toBeInTheDocument();
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it('opens a knowledge citation through the authoritative in-app callback only after a click', () => {
     const open = vi.fn();
     render(<ProjectKnowledgeScope.Provider value={{ agentId: 'a', projectId: 'project_one', onOpen: open }}>

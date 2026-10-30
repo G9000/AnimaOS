@@ -92,6 +92,8 @@ pub(crate) fn attachment_content(
     metadata.remove(ATTACHMENT_RECORDS_KEY);
     metadata.remove(ATTACHMENT_INPUT_TEXT_KEY);
     metadata.remove(anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY);
+    metadata.remove(anima_service_adapters::document_visuals::DOCUMENT_VISUALS_KEY);
+    metadata.remove(crate::attachments::documents::pages::WORKSPACE_VISUALS_KEY);
     if records.is_empty() {
         return Content {
             text: text.into(),
@@ -122,7 +124,7 @@ pub(crate) fn attachment_content(
                     == Some(anima_service_adapters::document_content::DocumentFormat::Pdf) =>
             {
                 format!(
-                    "Attached document: {} ({}). Original saved; any admitted PDF excerpt covers the text layer only, without OCR or visual layout.",
+                    "Attached document: {} ({}). Original saved. Text-layer excerpts omit OCR and visual layout; separately supplied page evidence identifies the pages actually inspected.",
                     row.name, row.path
                 )
             }
@@ -226,6 +228,8 @@ pub(crate) async fn accepted_content(
         &input.attachment_ids,
     )
     .await?;
+    crate::images::validate_generated_attachments(&*state.read().await, &rows)
+        .map_err(ApiError::conflict)?;
     if let Some(skill) = input.skill {
         metadata.insert(
             crate::skills::SKILL_METADATA_KEY.into(),

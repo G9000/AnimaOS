@@ -47,5 +47,6 @@ function VerifiedCitation({ agentId, project, api, invalidate, citationId, onClo
     if (indexVersion !== null) void open.current(citationId);
   }, [citationId, indexVersion, open]);
   return <ProjectCitationDialog citation={knowledge.citation} opening={knowledge.opening || (indexVersion === null && !knowledge.error)}
-    error={knowledge.error ?? (indexVersion !== null && !knowledge.opening && !knowledge.citation ? 'This citation is no longer current. Close it and open the source again.' : null)} onClose={onClose} />;
+    error={knowledge.error ?? (indexVersion !== null && !knowledge.opening && !knowledge.citation ? 'This citation is no longer current. Close it and open the source again.' : null)} onClose={onClose}
+    pageScope={{ agentId, projectId: project.id, api }} />;
 }

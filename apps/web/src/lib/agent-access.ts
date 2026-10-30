@@ -118,6 +118,8 @@ const OPERATE_TOOLS = [
   'web_search',
   'search_tools',
   'describe_tool',
+  'generate_image',
+  'edit_image',
 ] as const;
 
 export const ACCESS_PROFILES = {

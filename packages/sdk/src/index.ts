@@ -2,6 +2,8 @@ export { AgentsClient, agent } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export type { AgentPersonality, SaveAgentPersonality } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
+export { ImagesClient } from './images.js';
+export type { ImageVersion, ImageOperation, SessionImages } from './images.js';
 export { VoiceClient } from './voice.js';
 export { SpeechClient, speechTextIsValid } from './speech.js';
 export type {

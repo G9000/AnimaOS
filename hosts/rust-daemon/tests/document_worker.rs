@@ -273,3 +273,125 @@ async fn document_worker_cli_rejects_every_other_private_mode_before_host_initia
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 }
+
+#[tokio::test]
+#[ignore = "single native verification owner runs physical PDF page acceptance explicitly"]
+async fn document_worker_cli_renders_pdf_pages_under_existing_physical_limits() {
+    use sha2::{Digest, Sha256};
+    let bytes = include_bytes!("fixtures/documents/visual-scan-and-chart.pdf");
+    assert!(
+        anima_document_content::extract_pdf(bytes).blocks.is_empty(),
+        "physical scan fixture must contain no PDF text layer"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let mut native = tokio::process::Command::new(env!("CARGO_BIN_EXE_anima-daemon"));
+    native
+        .arg("--document-worker-v2")
+        .env_clear()
+        .env("ANIMAOS_RS_MAX_REQUEST_BYTES", "invalid")
+        .current_dir(directory.path())
+        .env("TEMP", directory.path())
+        .env("TMP", directory.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for name in ["SystemRoot", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            native.env(name, value);
+        }
+    }
+    let mut command = CommandWrap::from(native);
+    command.wrap(KillOnDrop);
+    let mut flags = CreationFlags(Default::default());
+    flags.0 .0 = 0x08000000;
+    command.wrap(flags).wrap(JobObject);
+    let mut child = command.spawn().unwrap();
+    let mut stdin = child.stdin().take().unwrap();
+    let mut stdout = child.stdout().take().unwrap();
+    let mut stderr = child.stderr().take().unwrap();
+    let mut exchange = tokio::spawn(async move {
+        let mut ready = [0; b"ANIMA-DOCUMENT-READY-v2\n".len()];
+        stdout.read_exact(&mut ready).await.unwrap();
+        assert_eq!(&ready, b"ANIMA-DOCUMENT-READY-v2\n");
+        stdin.write_all(&[6, 2]).await.unwrap();
+        stdin.write_u32_le(1).await.unwrap();
+        stdin.write_u32_le(2).await.unwrap();
+        stdin.write_u32_le(bytes.len() as u32).await.unwrap();
+        stdin.write_all(bytes).await.unwrap();
+        stdin.shutdown().await.unwrap();
+        drop(stdin);
+        let length = stdout.read_u32_le().await.unwrap() as usize;
+        assert!(length <= 256 * 1024);
+        let mut json = vec![0; length];
+        stdout.read_exact(&mut json).await.unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(
+            manifest["source_sha256"],
+            hex::encode(Sha256::digest(bytes))
+        );
+        let entries = manifest["pages"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        let mut pages = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            assert_eq!(entry["page"], index as u32 + 1);
+            let length = entry["png_bytes"].as_u64().unwrap() as usize;
+            assert!((1..=2 * 1024 * 1024).contains(&length));
+            let mut png = vec![0; length];
+            stdout.read_exact(&mut png).await.unwrap();
+            assert_eq!(entry["png_sha256"], hex::encode(Sha256::digest(&png)));
+            pages.push(anima_document_visual::PdfPageEvidence {
+                page: index as u32 + 1,
+                width: entry["width"].as_u64().unwrap() as u32,
+                height: entry["height"].as_u64().unwrap() as u32,
+                png,
+                recognized: serde_json::from_value(entry["recognized"].clone()).unwrap(),
+            });
+        }
+        let value = anima_document_visual::PdfEvidence {
+            version: 1,
+            source_sha256: hex::encode(Sha256::digest(bytes)),
+            page_count: 2,
+            pages,
+        };
+        anima_document_visual::validate_pdf_evidence(&value).unwrap();
+        assert!(
+            value.pages[0].png != value.pages[1].png,
+            "physical PDF pages must have distinct rasters"
+        );
+        match &value.pages[0].recognized {
+            anima_document_visual::RecognizedText::Text { text, .. } => {
+                let uppercase = text.to_ascii_uppercase();
+                assert!(uppercase.contains("SCAN"));
+                assert!(text.contains("7319"));
+                assert!(uppercase.contains("TOTAL"));
+                println!("Physical scan OCR: expected markers verified");
+            }
+            anima_document_visual::RecognizedText::Unavailable => {
+                println!("Physical scan OCR: unavailable; original page pixels verified");
+            }
+            anima_document_visual::RecognizedText::Empty => {
+                panic!("installed recognizer found no text on the physical scan")
+            }
+        }
+        let mut extra = [0; 1];
+        assert_eq!(stdout.read(&mut extra).await.unwrap(), 0);
+        assert_eq!(stderr.read(&mut extra).await.unwrap(), 0);
+    });
+    let result = tokio::time::timeout(Duration::from_secs(10), &mut exchange).await;
+    child.start_kill().unwrap();
+    child.wait().await.unwrap();
+    if result.is_err() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), &mut exchange).await;
+    }
+    result
+        .expect("bounded PDF visual worker exchange")
+        .expect("valid original-page pixels");
+    let owned_directory = directory.path().to_path_buf();
+    directory
+        .close()
+        .expect("retired worker temporary directory must be removable");
+    assert!(
+        !owned_directory.exists(),
+        "worker-owned temporary artifacts must be removed after retirement"
+    );
+}

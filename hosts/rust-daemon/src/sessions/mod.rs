@@ -300,6 +300,8 @@ pub(crate) struct SessionRecord {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) chat_results: Vec<crate::chat_results::ChatResult>,
     #[serde(default)]
+    pub(crate) image_operations: Vec<crate::images::ImageOperation>,
+    #[serde(default)]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default)]
     pub(crate) parent_run_id: Option<String>,
@@ -371,6 +373,7 @@ impl SessionRecord {
             chat_reviews: Vec::new(),
             conversation_shares: Vec::new(),
             chat_results: Vec::new(),
+            image_operations: Vec::new(),
             parent_session_id: None,
             parent_run_id: None,
             parent_agent_id: None,
@@ -897,6 +900,7 @@ impl SessionRegistry {
                 checkpoint.validate_for(&record.agent_id, &record.id, record.room_id())?;
             }
             crate::chat_results::validate_session(record)?;
+            crate::images::validate_session(record)?;
         }
         Ok(())
     }
@@ -907,6 +911,7 @@ impl SessionRegistry {
         for mut record in records {
             if live_agents.contains(&record.agent_id) {
                 crate::chat_review::interrupt_on_restore(&mut record.chat_reviews);
+                crate::images::recover(&mut record.image_operations);
                 registry.insert(record);
             }
         }

@@ -3,15 +3,19 @@ import { createPortal } from 'react-dom';
 import type { ProjectKnowledgeCitation } from '@animaos/sdk';
 import { useLatest } from '../../hooks/useLatest';
 import { connectedProviderName } from './connected-source-presentation';
+import { PdfPagePreview, type CitationPageScope } from '../attachments/PdfPagePreview';
 import './projects.css';
 
-/** Plain text only: a cited passage remains untrusted source material. */
-export function ProjectCitationDialog({ citation, opening, error, onClose }: {
+/** Cited passages and rendered pages remain untrusted source material. */
+export function ProjectCitationDialog({ citation, opening, error, onClose, pageScope }: {
   citation: ProjectKnowledgeCitation | null; opening: boolean; error?: string | null; onClose: () => void;
+  pageScope?: CitationPageScope;
 }) {
   const titleId = useId();
   const close = useRef<HTMLButtonElement>(null);
   const onCloseLatest = useLatest(onClose);
+  const pageMatch = citation ? /^pdf#page=(\d+)(?:;|$)/.exec(citation.locator) : null;
+  const page = pageMatch ? Number(pageMatch[1]) : null;
   useEffect(() => {
     const previous = document.activeElement;
     close.current?.focus();
@@ -36,8 +40,18 @@ export function ProjectCitationDialog({ citation, opening, error, onClose }: {
           <p>{connectedProviderName(citation.origin.provider)} · {citation.origin.accountLabel ?? citation.origin.ownerName ?? 'Connected account'} · verified {new Date(citation.origin.verifiedAtMs).toLocaleString()}</p>
           <p>{citation.origin.coverage}</p>
         </div>}
-        <pre tabIndex={0}>{citation.text}</pre>
-        <p className="project-note">Bounded passage verified against the current source when opened.</p>
+        {citation.recognition && <div className="project-note">
+          <p>{citation.recognition.kind === 'ocr' ? 'Recognized text' : 'Page evidence'}</p>
+          <p>{citation.recognition.kind === 'ocr'
+            ? 'Text recognition may contain errors. Check the original page.'
+            : 'No recognized passage is available. Open the original page to inspect it.'}</p>
+        </div>}
+        {citation.text && citation.recognition?.kind !== 'page_image' && <pre tabIndex={0}>{citation.text}</pre>}
+        {pageScope && citation && page !== null && <PdfPagePreview source={{
+          kind: 'citation', ...pageScope, citationId: citation.citationId, page,
+          projectRevision: citation.projectRevision, accessEpoch: citation.accessEpoch, memberGeneration: citation.memberGeneration,
+        }} />}
+        {!citation.recognition && <p className="project-note">Bounded passage verified against the current source when opened.</p>}
       </>}
     </section>
   </div>, document.body);

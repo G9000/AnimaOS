@@ -89,39 +89,39 @@ beforeEach(() => {
   api.transcribe.mockImplementation(async () => result());
 });
 
-it('makes zero transcription requests while idle, uploading, selected or sent normally', async () => {
+it('keeps the simplified composer attachment-only and makes zero transcription requests', async () => {
   const onSend = vi.fn();
   render(
     <Composer
-      agentName="Nova"
-      draft="ordinary message"
-      setDraft={vi.fn()}
-      sending={false}
-      disabled={false}
-      onSend={onSend}
-      error={null}
-      onDismissError={vi.fn()}
-      conversationKey="chat-a"
+      agentName="Nova" draft="ordinary message" setDraft={vi.fn()}
+      sending={false} disabled={false} onSend={onSend}
+      error={null} onDismissError={vi.fn()} conversationKey="chat-a"
       nativeVoice={scope}
       attachments={{ items: [audio], onAdd: vi.fn(), onRemove: vi.fn() }}
     />,
   );
   expect(api.transcribe).not.toHaveBeenCalled();
   expect(api.capabilities).not.toHaveBeenCalled();
-  await selectAudio();
-  expect(api.transcribe).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'More input options' }));
+  expect(screen.getByRole('button', { name: 'Attach files' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Record audio' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Audio to transcribe' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Transcribe with OpenAI API' })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Send' }));
   expect(onSend).toHaveBeenCalledOnce();
   expect(api.transcribe).not.toHaveBeenCalled();
+  expect(api.capabilities).not.toHaveBeenCalled();
 });
 
-it('requires the named transfer consent action, previews editable text, appends to the current draft only on Use and never sends', async () => {
+it('requires exact consent and delivers edited text to the current draft only on explicit Use in a component harness', async () => {
   const pending = deferred<VoiceTranscription>();
   api.transcribe.mockReturnValue(pending.promise);
   const onSend = vi.fn();
+  const onUse = vi.fn();
   function Harness() {
     const [draft, setDraft] = useState('original');
     return (
+      <>
       <Composer
         agentName="Nova"
         draft={draft}
@@ -132,9 +132,18 @@ it('requires the named transfer consent action, previews editable text, appends 
         error={null}
         onDismissError={vi.fn()}
         conversationKey="chat-a"
-        nativeVoice={scope}
         attachments={{ items: [audio], onAdd: vi.fn(), onRemove: vi.fn() }}
       />
+      <NativeTranscription
+        scope={scope}
+        conversationKey="chat-a"
+        items={[audio]}
+        onUse={(text) => {
+          onUse(text);
+          setDraft((current) => `${current} ${text}`);
+        }}
+      />
+      </>
     );
   }
   render(<Harness />);
@@ -160,6 +169,7 @@ it('requires the named transfer consent action, previews editable text, appends 
   expect(screen.getByRole('textbox', { name: 'Message Nova' })).toHaveValue(
     'newer draft',
   );
+  expect(onUse).not.toHaveBeenCalled();
   const preview = screen.getByRole('textbox', { name: 'Transcript preview' });
   fireEvent.change(preview, { target: { value: 'edited transcript' } });
   await userEvent.click(screen.getByRole('button', { name: 'Use transcript' }));
@@ -169,6 +179,7 @@ it('requires the named transfer consent action, previews editable text, appends 
   expect(
     screen.queryByRole('textbox', { name: 'Transcript preview' }),
   ).not.toBeInTheDocument();
+  expect(onUse).toHaveBeenCalledExactlyOnceWith('edited transcript');
   expect(onSend).not.toHaveBeenCalled();
 });
 

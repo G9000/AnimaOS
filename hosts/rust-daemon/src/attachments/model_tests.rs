@@ -389,7 +389,8 @@ async fn document_snapshot_reloaded_binding_reaches_generate_and_stream_without_
             Some(temp.0.clone()),
             "agent".into(),
             "chat:session".into(),
-        );
+        )
+        .with_document_read_slots(Arc::new(tokio::sync::Semaphore::new(4)));
         let saved = document_content(&[row.clone()]);
         let reloaded: Content =
             serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
@@ -804,6 +805,7 @@ async fn fixture(
         "agent".into(),
         "chat:session".into(),
     )
+    .with_document_read_slots(Arc::new(tokio::sync::Semaphore::new(4)))
 }
 
 #[tokio::test]
@@ -1276,4 +1278,584 @@ async fn attachment_model_failed_run_snapshot_and_history_retain_only_references
     assert!(!serde_json::to_string(&stored.message)
         .unwrap()
         .contains("data:"));
+}
+
+struct PageExtractor;
+#[async_trait]
+impl crate::attachments::documents::worker::DocumentExtractor for PageExtractor {
+    async fn extract(
+        &self,
+        _: anima_service_adapters::document_content::DocumentFormat,
+        _: Vec<u8>,
+        _: anima_core::CancelSignal,
+        _: Option<tokio::time::Instant>,
+    ) -> Result<
+        anima_service_adapters::document_content::ExtractedDocumentText,
+        crate::attachments::documents::worker::WorkerFailure,
+    > {
+        Err(crate::attachments::documents::worker::WorkerFailure::Unavailable)
+    }
+
+    async fn inspect_pdf(
+        &self,
+        bytes: Vec<u8>,
+        pages: Vec<u32>,
+        _: anima_core::CancelSignal,
+        _: Option<tokio::time::Instant>,
+    ) -> Result<
+        anima_document_visual::PdfEvidence,
+        crate::attachments::documents::worker::WorkerFailure,
+    > {
+        use base64::Engine;
+        use sha2::{Digest, Sha256};
+        Ok(anima_document_visual::PdfEvidence {
+            version: 1, source_sha256: hex::encode(Sha256::digest(&bytes)), page_count: anima_document_content::extract_pdf(&bytes).pdf_coverage.map_or(2, |coverage| coverage.page_count),
+            pages: pages.into_iter().map(|page| anima_document_visual::PdfPageEvidence {
+                page, width: 1, height: 1,
+                png: base64::engine::general_purpose::STANDARD.decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAsTj2FAAAAABJRU5ErkJggg=="
+                ).unwrap(),
+                recognized: anima_document_visual::RecognizedText::Text {
+                    text: "Cobalt Harbour 7319".into(), language: "en-US".into(),
+                },
+            }).collect(),
+        })
+    }
+}
+
+fn visual_content(row: &AttachmentRecord) -> Content {
+    let mut value = crate::agent_runs::attachments::attachment_content(
+        "Read the selected PDF",
+        std::slice::from_ref(row),
+        None,
+    );
+    let selections = vec![
+        anima_service_adapters::document_visuals::VisualDocumentSelection {
+            attachment_id: row.id.clone(),
+            source_sha256: row.sha256.clone(),
+            pages: vec![1, 2],
+        },
+    ];
+    value.metadata.as_mut().unwrap().insert(
+        anima_service_adapters::document_visuals::DOCUMENT_VISUALS_KEY.into(),
+        DataValue::String(serde_json::to_string(&selections).unwrap()),
+    );
+    value
+}
+
+#[tokio::test]
+async fn selected_pdf_pages_are_transient_verified_image_input_with_page_citations() {
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "scan");
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    let original = request("agent", "chat:session", visual_content(&row));
+    let prepared = adapter
+        .prepare_request(&config("gpt-4o"), &original)
+        .await
+        .unwrap();
+    let page_images = prepared.messages[0]
+        .content
+        .attachments
+        .iter()
+        .flatten()
+        .filter(|attachment| attachment.attachment_type == AttachmentType::Image)
+        .collect::<Vec<_>>();
+    assert_eq!(page_images.len(), 2);
+    assert!(page_images
+        .iter()
+        .all(|image| image.data.starts_with("data:image/png;base64,")));
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("OCR RECOGNIZED TEXT"));
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("/attachments/scan/pages/2"));
+    assert!(!original.messages[0].content.text.contains("Cobalt Harbour"));
+    assert!(!original.messages[0]
+        .content
+        .attachments
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|attachment| attachment.data.starts_with("data:")));
+    assert!(prepared.messages[0]
+        .content
+        .metadata
+        .as_ref()
+        .is_none_or(|metadata| !metadata
+            .contains_key(anima_service_adapters::document_visuals::DOCUMENT_VISUALS_KEY)));
+}
+
+#[tokio::test]
+async fn text_only_model_gets_recognized_text_and_an_honest_visual_limitation() {
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "scan");
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    let prepared = adapter
+        .prepare_request(
+            &config("o3-mini"),
+            &request("agent", "chat:session", visual_content(&row)),
+        )
+        .await
+        .unwrap();
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("Cobalt Harbour 7319"));
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("cannot inspect visual relationships"));
+    assert!(!prepared.messages[0]
+        .content
+        .attachments
+        .iter()
+        .flatten()
+        .any(|attachment| attachment.attachment_type == AttachmentType::Image));
+}
+
+#[tokio::test]
+async fn document_read_capacity_applies_to_visual_text_and_compaction_hydration() {
+    use anima_service_adapters::document_content::DOCUMENT_EXTRACTS_METADATA_KEY;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "capacity");
+    let slots = Arc::new(tokio::sync::Semaphore::new(4));
+    let _held = slots.clone().try_acquire_many_owned(4).unwrap();
+    let adapter = fixture(std::slice::from_ref(&row), Some(temp.0.clone()))
+        .await
+        .with_document_read_slots(slots)
+        .with_document_extractor(Arc::new(PageExtractor));
+    let mut input = visual_content(&row);
+    let snapshots = document_content(std::slice::from_ref(&row));
+    input.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        snapshots.metadata.as_ref().unwrap()[DOCUMENT_EXTRACTS_METADATA_KEY].clone(),
+    );
+    let reads = Arc::new(AtomicUsize::new(0));
+    let captured = reads.clone();
+    let prepared = adapter
+        .prepare_request_using_reader(
+            &config("gpt-4o"),
+            &request("agent", "chat:session", input),
+            Arc::new(move |root, record| {
+                captured.fetch_add(1, Ordering::SeqCst);
+                read_attachment_bytes(root, record)
+            }),
+        )
+        .await
+        .unwrap();
+    let output = &prepared.messages[0].content;
+    assert!(output
+        .text
+        .contains("PDF visual page inspection unavailable"));
+    assert!(!output.text.contains("derived capacity"));
+    assert!(!output.text.contains("Cobalt Harbour"));
+    assert!(!output
+        .attachments
+        .iter()
+        .flatten()
+        .any(|attachment| attachment.attachment_type == AttachmentType::Image));
+    assert_eq!(reads.load(Ordering::SeqCst), 0);
+
+    let mut messages = request("agent", "chat:session", snapshots).messages;
+    adapter.prepare_compaction_documents(&mut messages).await;
+    assert!(!messages[0].content.text.contains("derived capacity"));
+}
+
+#[tokio::test]
+async fn changed_pdf_bytes_cannot_release_old_page_pixels_or_ocr() {
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "scan");
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    std::fs::write(temp.0.join(&row.path), b"changed").unwrap();
+    let prepared = adapter
+        .prepare_request(
+            &config("gpt-4o"),
+            &request("agent", "chat:session", visual_content(&row)),
+        )
+        .await
+        .unwrap();
+    assert!(!prepared.messages[0].content.text.contains("Cobalt Harbour"));
+    assert!(!prepared.messages[0]
+        .content
+        .attachments
+        .iter()
+        .flatten()
+        .any(|attachment| attachment.attachment_type == AttachmentType::Image));
+}
+
+#[tokio::test]
+async fn visual_pdf_keeps_verified_text_layer_passages_beyond_rendered_pages() {
+    use anima_service_adapters::document_content::*;
+    let temp = Temp::new();
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/visual-three-pages.pdf"
+    ));
+    let saved = save_upload(&temp.0, "2026-10-30", "three.pdf", bytes).unwrap();
+    let row = AttachmentRecord {
+        id: "three".into(),
+        agent_id: "agent".into(),
+        session_id: "chat:session".into(),
+        name: "three.pdf".into(),
+        mime: crate::attachments::documents::PDF_MIME.into(),
+        size: bytes.len() as u64,
+        kind: AttachmentKind::Document,
+        path: saved.path,
+        created_at_ms: 0,
+        workspace_root: saved.workspace_root,
+        sha256: saved.sha256,
+    };
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    let mut input = visual_content(&row);
+    let extraction = anima_document_content::extract_pdf(bytes);
+    assert!(extraction
+        .blocks
+        .iter()
+        .any(|block| block.text.contains("LATE_PAGE_THREE_COBALT_7319")));
+    input.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        document_snapshots_metadata(&[DocumentSnapshot {
+            attachment_id: row.id.clone(),
+            source_sha256: row.sha256.clone(),
+            extraction,
+        }])
+        .unwrap(),
+    );
+    let prepared = adapter
+        .prepare_request(&config("gpt-4o"), &request("agent", "chat:session", input))
+        .await
+        .unwrap();
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("LATE_PAGE_THREE_COBALT_7319"));
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("OCR RECOGNIZED TEXT"));
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("inspected_pages=1, 2"));
+}
+
+#[tokio::test]
+async fn current_pdf_visual_input_respects_maximum_calibration_at_final_boundary() {
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "scan");
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    let mut cfg = config("gpt-4o");
+    cfg.settings
+        .get_or_insert_with(Default::default)
+        .additional
+        .insert("contextBudgetTokens".into(), DataValue::Number(40_000.0));
+    let prepared = adapter
+        .prepare_request(
+            &cfg,
+            &request("agent", "chat:session", visual_content(&row)),
+        )
+        .await
+        .unwrap();
+    let images = prepared.messages[0]
+        .content
+        .attachments
+        .iter()
+        .flatten()
+        .filter(|attachment| attachment.attachment_type == AttachmentType::Image)
+        .count();
+    assert_eq!(
+        images, 1,
+        "two pages would exceed the calibrated current-input budget"
+    );
+    assert!(prepared.messages[0]
+        .content
+        .text
+        .contains("Other pages were not visually inspected"));
+}
+
+#[tokio::test]
+async fn workspace_page_projection_follows_all_sibling_tool_results_and_requires_current_grant() {
+    use sha2::{Digest, Sha256};
+    let temp = Temp::new();
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/m55-selected.pdf"
+    ));
+    std::fs::write(temp.0.join("scan.pdf"), bytes).unwrap();
+    let adapter = fixture(&[], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor));
+    let mut input = request(
+        "agent",
+        "chat:session",
+        Content {
+            text: "Inspect page two".into(),
+            ..Content::default()
+        },
+    );
+    let mut assistant = input.messages[0].clone();
+    assistant.id = "assistant".into();
+    assistant.role = MessageRole::Assistant;
+    assistant.content.metadata = Some(BTreeMap::from([(
+        "toolCalls".into(),
+        DataValue::Array(vec![
+            DataValue::Object(BTreeMap::from([
+                ("id".into(), DataValue::String("read-pages".into())),
+                ("name".into(), DataValue::String("read_document".into())),
+                (
+                    "args".into(),
+                    DataValue::Object(BTreeMap::from([
+                        ("file_path".into(), DataValue::String("scan.pdf".into())),
+                        (
+                            "pages".into(),
+                            DataValue::Array(vec![DataValue::Number(2.0)]),
+                        ),
+                    ])),
+                ),
+            ])),
+            DataValue::Object(BTreeMap::from([
+                ("id".into(), DataValue::String("tool-second".into())),
+                ("name".into(), DataValue::String("list_dir".into())),
+                ("args".into(), DataValue::Object(BTreeMap::new())),
+            ])),
+        ]),
+    )]));
+    let mut first = assistant.clone();
+    first.id = "tool-first".into();
+    first.role = MessageRole::Tool;
+    let selection = crate::attachments::documents::pages::WorkspaceSelection {
+        path: "scan.pdf".into(),
+        source_sha256: hex::encode(Sha256::digest(&bytes)),
+        pages: vec![2],
+    };
+    first.content.metadata = Some(BTreeMap::from([
+        (
+            crate::attachments::documents::pages::WORKSPACE_VISUALS_KEY.into(),
+            DataValue::String(serde_json::to_string(&selection).unwrap()),
+        ),
+        ("toolCallId".into(), DataValue::String("read-pages".into())),
+    ]));
+    let mut second = first.clone();
+    second.id = "tool-second".into();
+    second.content.metadata = None;
+    input.messages.extend([assistant, first, second]);
+    let cfg = config("gpt-4o");
+    let denied = adapter.prepare_request(&cfg, &input).await.unwrap();
+    assert_eq!(denied.messages.len(), 4);
+    let mut allowed = cfg.clone();
+    allowed.tools = Some(vec![anima_core::ToolDescriptor {
+        name: "read_document".into(),
+        description: "Read documents".into(),
+        parameters_schema: BTreeMap::new(),
+        examples: None,
+    }]);
+    let schema_only = adapter.prepare_request(&allowed, &input).await.unwrap();
+    assert_eq!(
+        schema_only.messages.len(),
+        4,
+        "advertised schemas are not live authority"
+    );
+    let grant = anima_core::CancelSignal::new();
+    let adapter = adapter.with_workspace_read_lease(grant.clone());
+    let prepared = adapter.prepare_request(&cfg, &input).await.unwrap();
+    assert_eq!(prepared.messages.len(), 5);
+    assert_eq!(prepared.messages[2].role, MessageRole::Tool);
+    assert_eq!(prepared.messages[3].role, MessageRole::Tool);
+    assert_eq!(prepared.messages[4].role, MessageRole::User);
+    assert!(prepared.messages[4]
+        .content
+        .text
+        .contains("Original page 2"));
+    assert!(
+        prepared.messages[4].content.attachments.as_ref().unwrap()[0]
+            .data
+            .starts_with("data:image/png;base64,")
+    );
+    assert_eq!(
+        input.messages.len(),
+        4,
+        "transient evidence must not alter saved turns"
+    );
+    let mut next_turn = input.clone();
+    next_turn.messages.push(
+        request(
+            "agent",
+            "chat:session",
+            Content {
+                text: "A different question".into(),
+                ..Content::default()
+            },
+        )
+        .messages
+        .remove(0),
+    );
+    let later = adapter.prepare_request(&cfg, &next_turn).await.unwrap();
+    assert_eq!(
+        later.messages.len(),
+        next_turn.messages.len(),
+        "historical workspace tool calls must not override a new owner turn"
+    );
+    grant.cancel();
+    let revoked = adapter.prepare_request(&allowed, &input).await.unwrap();
+    assert_eq!(
+        revoked.messages.len(),
+        4,
+        "revoked authority must suppress fresh page delivery"
+    );
+}
+
+#[tokio::test]
+async fn changed_workspace_scope_suppresses_selected_pdf_preparation() {
+    let temp = Temp::new();
+    let row = pdf_record(&temp, "scan");
+    let scope = anima_core::CancelSignal::new();
+    let adapter = fixture(&[row.clone()], Some(temp.0.clone()))
+        .await
+        .with_document_extractor(Arc::new(PageExtractor))
+        .with_workspace_scope_lease(scope.clone());
+    scope.cancel();
+    let result = adapter
+        .prepare_request(
+            &config("gpt-4o"),
+            &request("agent", "chat:session", visual_content(&row)),
+        )
+        .await;
+    assert!(result.is_err());
+}
+
+struct BusyPageExtractor {
+    calls: std::sync::atomic::AtomicUsize,
+}
+#[async_trait]
+impl crate::attachments::documents::worker::DocumentExtractor for BusyPageExtractor {
+    async fn extract(
+        &self,
+        _: anima_service_adapters::document_content::DocumentFormat,
+        _: Vec<u8>,
+        _: anima_core::CancelSignal,
+        _: Option<tokio::time::Instant>,
+    ) -> Result<
+        anima_service_adapters::document_content::ExtractedDocumentText,
+        crate::attachments::documents::worker::WorkerFailure,
+    > {
+        Err(crate::attachments::documents::worker::WorkerFailure::Busy)
+    }
+    async fn inspect_pdf(
+        &self,
+        _: Vec<u8>,
+        _: Vec<u32>,
+        _: anima_core::CancelSignal,
+        _: Option<tokio::time::Instant>,
+    ) -> Result<
+        anima_document_visual::PdfEvidence,
+        crate::attachments::documents::worker::WorkerFailure,
+    > {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(crate::attachments::documents::worker::WorkerFailure::Busy)
+    }
+}
+
+#[tokio::test]
+async fn busy_visual_worker_preserves_both_single_page_text_sources_within_four_reads() {
+    use anima_service_adapters::document_content::*;
+    use anima_service_adapters::document_visuals::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let temp = Temp::new();
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/documents/visual-one-page.pdf"
+    ));
+    let make = |id: &str| {
+        let name = format!("{id}.pdf");
+        let saved = save_upload(&temp.0, "2026-10-30", &name, bytes).unwrap();
+        AttachmentRecord {
+            id: id.into(),
+            agent_id: "agent".into(),
+            session_id: "chat:session".into(),
+            name,
+            mime: crate::attachments::documents::PDF_MIME.into(),
+            size: bytes.len() as u64,
+            kind: AttachmentKind::Document,
+            path: saved.path,
+            created_at_ms: 0,
+            workspace_root: saved.workspace_root,
+            sha256: saved.sha256,
+        }
+    };
+    let rows = vec![make("one"), make("two")];
+    let mut input =
+        crate::agent_runs::attachments::attachment_content("Read both PDFs", &rows, None);
+    let snapshots = rows
+        .iter()
+        .map(|row| DocumentSnapshot {
+            attachment_id: row.id.clone(),
+            source_sha256: row.sha256.clone(),
+            extraction: anima_document_content::extract_pdf(bytes),
+        })
+        .collect::<Vec<_>>();
+    input.metadata.as_mut().unwrap().insert(
+        DOCUMENT_EXTRACTS_METADATA_KEY.into(),
+        document_snapshots_metadata(&snapshots).unwrap(),
+    );
+    let selections = rows
+        .iter()
+        .map(|row| VisualDocumentSelection {
+            attachment_id: row.id.clone(),
+            source_sha256: row.sha256.clone(),
+            pages: vec![1],
+        })
+        .collect::<Vec<_>>();
+    input.metadata.as_mut().unwrap().insert(
+        DOCUMENT_VISUALS_KEY.into(),
+        DataValue::String(serde_json::to_string(&selections).unwrap()),
+    );
+    let extractor = Arc::new(BusyPageExtractor {
+        calls: AtomicUsize::new(0),
+    });
+    let adapter = fixture(&rows, Some(temp.0.clone()))
+        .await
+        .with_document_extractor(extractor.clone());
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let mut cfg = config("gpt-4o");
+    cfg.settings
+        .get_or_insert_with(Default::default)
+        .additional
+        .insert("contextBudgetTokens".into(), DataValue::Number(200_000.0));
+    let prepared = adapter
+        .prepare_request_using_reader(
+            &cfg,
+            &request("agent", "chat:session", input),
+            Arc::new(move |root, row| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                read_attachment_bytes(root, row)
+            }),
+        )
+        .await
+        .unwrap();
+    let text = &prepared.messages[0].content.text;
+    assert!(text.contains("attachment=one"));
+    assert!(text.contains("attachment=two"));
+    assert!(text.contains("SINGLE_PAGE_TEXT_7319"));
+    assert_eq!(extractor.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        extractor.calls.load(Ordering::SeqCst) + reads.load(Ordering::SeqCst),
+        4
+    );
 }

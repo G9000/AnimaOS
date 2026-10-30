@@ -646,20 +646,22 @@ describe('owner external tools', () => {
       screen.getByRole('textbox', { name: 'Absolute executable path' }),
       executable,
     );
-    await user.click(
-      screen.getByRole('checkbox', {
-        name: 'I trust this local program and its arguments',
-      }),
-    );
+    const secondTrust = screen.getByRole('checkbox', {
+      name: 'I trust this local program and its arguments',
+    });
+    const secondArgs = screen.getByRole('textbox', {
+      name: 'Arguments — one per line',
+    });
+    await user.click(secondTrust);
     const oneEmpty = screen.getByRole('checkbox', {
       name: 'Pass one empty argument',
     });
     expect(oneEmpty).not.toBeChecked();
     await user.click(oneEmpty);
     expect(oneEmpty).toBeChecked();
-    expect(trust).not.toBeChecked();
-    expect(args).toHaveValue('');
-    await user.click(trust);
+    expect(secondTrust).not.toBeChecked();
+    expect(secondArgs).toHaveValue('');
+    await user.click(secondTrust);
     await user.click(
       screen.getByRole('button', { name: 'Save server' }),
     );
@@ -769,6 +771,9 @@ describe('owner external tools', () => {
     expect(mock.connect).not.toHaveBeenCalled();
     expect(mock.discover).not.toHaveBeenCalled();
     expect(mock.setGrant).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add a server' }),
+    );
     await userEvent.selectOptions(
       screen.getByRole('combobox', { name: 'Connection type' }),
       'stdio',

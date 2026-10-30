@@ -722,6 +722,13 @@ export const daemon = {
     attachmentId: string,
     options: { signal?: AbortSignal } = {},
   ) => setupClient.attachments.download(agentId, attachmentId, options),
+  previewAttachmentPage: (
+    agentId: string,
+    attachmentId: string,
+    page: number,
+    options: { signal?: AbortSignal } = {},
+  ) => setupClient.attachments.previewPage(agentId, attachmentId, page, options),
+  images: setupClient.images,
   updateSession: (
     agentId: string,
     sessionId: string,

@@ -1,6 +1,7 @@
 import { AgentsClient } from './agents.js';
 import { AgentFilesClient } from './agent-files.js';
 import { AttachmentsClient } from './attachments.js';
+import { ImagesClient } from './images.js';
 import { VoiceClient } from './voice.js';
 import { SpeechClient } from './speech.js';
 import { GoalsClient } from './goals.js';
@@ -79,6 +80,7 @@ export class DaemonConnectionError extends Error {
 export class DaemonClient {
   readonly agentFiles: AgentFilesClient;
   readonly attachments: AttachmentsClient;
+  readonly images: ImagesClient;
   readonly voice: VoiceClient;
   readonly speech: SpeechClient;
   readonly agencies: AgenciesClient;
@@ -135,6 +137,7 @@ export class DaemonClient {
     this.fetchImpl = fetchImpl;
     this.agentFiles = new AgentFilesClient(this);
     this.attachments = new AttachmentsClient(this);
+    this.images = new ImagesClient(this);
     this.voice = new VoiceClient(this);
     this.speech = new SpeechClient(this);
     this.agencies = new AgenciesClient(this);

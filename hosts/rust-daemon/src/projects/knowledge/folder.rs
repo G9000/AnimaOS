@@ -237,6 +237,14 @@ pub(super) fn verify_document(
     relative: &str,
     expected_sha256: &str,
 ) -> Result<usize, String> {
+    read_document(grant, relative, expected_sha256).map(|bytes| bytes.len())
+}
+
+pub(super) fn read_document(
+    grant: &KnowledgeFolderGrant,
+    relative: &str,
+    expected_sha256: &str,
+) -> Result<Vec<u8>, String> {
     if !crate::projects::valid_relative_path(relative) {
         return Err(UNAVAILABLE.into());
     }
@@ -248,7 +256,7 @@ pub(super) fn verify_document(
         return Err(UNAVAILABLE.into());
     }
     open_grant(grant)?;
-    Ok(bytes.len())
+    Ok(bytes)
 }
 
 struct Walker<'a, F> {

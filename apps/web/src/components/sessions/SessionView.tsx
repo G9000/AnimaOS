@@ -61,6 +61,7 @@ import {
   type ChatPanelName,
 } from './ChatExtensions';
 import { WorkspaceArtifactLayout } from '../artifacts/WorkspaceArtifactPreview';
+import { ImageGallery } from '../images/ImageGallery';
 import type { ChatModelPreferencesView } from '@animaos/sdk';
 
 export interface SessionComposerState {
@@ -96,6 +97,7 @@ export interface SessionComposerState {
     items: readonly AttachmentDraft[];
     onAdd(files: readonly File[]): void;
     onRemove(localId: string): void;
+    onUseSaved?(attachment: UploadedAttachment): boolean;
     error?: string | null;
   };
   /** Plan or Do for what is sent next. */
@@ -387,12 +389,16 @@ export function SessionView({
   const sessionId = session?.id ?? null;
   const viewRef = useRef<HTMLElement | null>(null);
   const [previewSelection, setPreviewSelection] = useState<PreviewEditContext | null>(null);
+  const [imageSelectionError, setImageSelectionError] = useState<string | null>(null);
+  const [imageDraftFocus, setImageDraftFocus] = useState(0);
   const selectedEditContext = previewSelection ?? composer.documentEditContext ?? null;
   const selectionSubmitted = useRef(false);
   const selectionGeneration = useRef(0);
   const clearRecoveredEdit = composer.onClearDocumentEditContext;
   useResetOnChange([session?.agentId, sessionId, session?.clearGeneration, composer.disabled, composer.offline], () => {
     setPreviewSelection(null);
+    setImageSelectionError(null);
+    setImageDraftFocus(0);
     selectionSubmitted.current = false;
     selectionGeneration.current++;
   });
@@ -401,6 +407,28 @@ export function SessionView({
     setPreviewSelection(context && validPreviewEditContext(context) ? context : null);
     if (!context) clearRecoveredEdit?.();
   }, [clearRecoveredEdit]);
+  const chooseSavedImage = (attachment: UploadedAttachment): boolean => {
+    if (!session?.capabilities.send || composer.disabled || composer.offline || composer.sending || !composer.attachments?.onUseSaved) return false;
+    const otherImage = composer.attachments.items.some((item) => (item.kind === 'image' || item.attachment?.kind === 'image' || item.savedAttachmentId) && (item.attachment?.id ?? item.savedAttachmentId) !== attachment.id);
+    if (otherImage) {
+      setImageSelectionError('Remove the other selected image before choosing this version to edit.');
+      return false;
+    }
+    if (!composer.attachments.onUseSaved(attachment)) {
+      setImageSelectionError('This saved image could not be added. Remove an attachment and try again.');
+      return false;
+    }
+    choosePreviewSelection(null);
+    setImageSelectionError(null);
+    setImageDraftFocus((value) => value + 1);
+    return true;
+  };
+  useEffect(() => {
+    if (!imageDraftFocus) return;
+    const frame = requestAnimationFrame(() => viewRef.current?.querySelector<HTMLTextAreaElement>('[data-workspace-composer]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [imageDraftFocus]);
+  const imageRefresh = useMemo(() => ({ messages, runs, contextRefreshKey }), [messages, runs, contextRefreshKey]);
   useEffect(() => {
     if (!selectedEditContext) return;
     const generation = selectionGeneration.current;
@@ -711,6 +739,8 @@ export function SessionView({
         ) : null}
       </div>
       {renderMessages()}
+      {session?.kind === 'chat' && <ImageGallery agentId={session.agentId} sessionId={session.id} clearGeneration={session.clearGeneration ?? 0} refreshKey={imageRefresh} enabled={!composer.offline && !missing} />}
+      {imageSelectionError && <p role="alert" className="px-4 text-sm text-danger">{imageSelectionError}</p>}
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts
           sessionId={session.id}
@@ -875,6 +905,7 @@ export function SessionView({
           sessionId={session.id}
           clearGeneration={session.clearGeneration ?? 0}
           onEditSelection={session.capabilities.send && !composer.disabled && !composer.offline ? choosePreviewSelection : undefined}
+          onUseSavedImage={session.capabilities.send && !composer.disabled && !composer.offline && composer.attachments?.onUseSaved ? chooseSavedImage : undefined}
         >
           {view}
         </WorkspaceArtifactLayout>

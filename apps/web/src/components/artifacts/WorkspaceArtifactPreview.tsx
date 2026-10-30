@@ -11,7 +11,8 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
-import type { PreviewEditContext } from '@animaos/sdk';
+import type { ImageVersion, PreviewEditContext, UploadedAttachment } from '@animaos/sdk';
+import { ImageArtifactPreview, type ImagePreviewSelection } from '../images/ImageArtifactPreview';
 import { daemon } from '../../lib/daemon-api';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import {
@@ -38,6 +39,12 @@ const ArtifactScope = createContext<
   ((path: string, opener: HTMLElement) => void) | null
 >(null);
 const InsideLink = createContext(false);
+const ImageArtifactScope = createContext<((selection: ImagePreviewSelection, opener: HTMLElement) => void) | null>(null);
+
+export function ImageArtifactLink({ versions, versionId, label, children }: { versions: readonly ImageVersion[]; versionId: string; label: string; children: ReactNode }) {
+  const open = useContext(ImageArtifactScope);
+  return <button type="button" className="text-left text-accent" aria-label={label} disabled={!open} onClick={(event) => open?.({ versions, versionId }, event.currentTarget)}>{children}</button>;
+}
 
 export function ArtifactLinkBoundary({ children }: { children: ReactNode }) {
   return <InsideLink.Provider value>{children}</InsideLink.Provider>;
@@ -78,6 +85,7 @@ export function WorkspaceArtifactLayout(props: {
   sessionId: string;
   clearGeneration: number;
   onEditSelection?: (context: PreviewEditContext | null) => void;
+  onUseSavedImage?: (attachment: UploadedAttachment) => boolean;
   children: ReactNode;
 }) {
   return (
@@ -97,9 +105,12 @@ function ArtifactSession({
   sessionId,
   clearGeneration,
   onEditSelection,
+  onUseSavedImage,
   children,
 }: Parameters<typeof WorkspaceArtifactLayout>[0]) {
   const [path, setPath] = useState<string | null>(null);
+  const [image, setImage] = useState<ImagePreviewSelection | null>(null);
+  const hasPreview = Boolean(path || image);
   const [closing, setClosing] = useState(false);
   const draftHandoff = useRef<PreviewEditContext | null>(null);
   const focusDraft = useRef(false);
@@ -131,21 +142,40 @@ function ArtifactSession({
       opener.current = element;
       cancelFullscreen();
       setClosing(false);
+      setImage(null);
       setPath(target);
       panel.current?.focus();
     },
     [cancelFullscreen, onEditSelection],
   );
+  const openImage = useCallback((selection: ImagePreviewSelection, element: HTMLElement) => {
+    if (!selection.versions.some((version) => version.id === selection.versionId)) return;
+    focusDraft.current = false;
+    onEditSelection?.(null);
+    opener.current = element;
+    cancelFullscreen();
+    setClosing(false);
+    setPath(null);
+    setImage(selection);
+  }, [cancelFullscreen, onEditSelection]);
   useEffect(() => {
-    if (path && !closing) panel.current?.focus();
+    if (hasPreview && !closing) panel.current?.focus();
     else if (!focusDraft.current && opener.current?.isConnected && !opener.current.closest('[inert]'))
       opener.current.focus();
-  }, [path, closing]);
+  }, [hasPreview, closing]);
   const finishClose = useCallback(() => {
     cancelFullscreen();
     setPath(null);
+    setImage(null);
     setClosing(false);
   }, [cancelFullscreen]);
+  const useSavedImage = useCallback((attachment: UploadedAttachment) => {
+    if (!onUseSavedImage?.(attachment)) return false;
+    focusDraft.current = true;
+    if (window.matchMedia?.('(max-width: 767px)').matches) finishClose();
+    else cancelFullscreen();
+    return true;
+  }, [onUseSavedImage, finishClose, cancelFullscreen]);
   useEffect(() => {
     if (path !== null || !draftHandoff.current) return;
     const selection = draftHandoff.current;
@@ -244,10 +274,11 @@ function ArtifactSession({
   );
   return (
     <ArtifactScope.Provider value={open}>
+      <ImageArtifactScope.Provider value={openImage}>
       <div
         ref={layoutRef}
         className="workspace-artifact-layout chat-results-layout relative flex h-full min-h-0 min-w-0 flex-1"
-        data-open={Boolean(path && !closing)}
+        data-open={hasPreview && !closing}
         data-resizing={resizing || undefined}
         data-fullscreen={fullscreen || undefined}
         data-fullscreen-animating={fullscreenAnimating || undefined}
@@ -264,7 +295,7 @@ function ArtifactSession({
         >
           {children}
         </div>
-        {path && !closing && !fullscreen && (
+        {hasPreview && !closing && !fullscreen && (
           <div className="workspace-artifact-divider-slot">
             <div
               role="separator"
@@ -283,7 +314,7 @@ function ArtifactSession({
           </div>
         )}
         <div ref={slotRef} className="workspace-artifact-slot">
-          {path && (
+          {hasPreview && (
             <aside
               ref={panel}
               tabIndex={-1}
@@ -301,7 +332,7 @@ function ArtifactSession({
                 }
               }}
             >
-              {/\.html?$/i.test(path) ? <ArtifactFile
+              {image ? <ImageArtifactPreview key={image.versionId} selection={image} agentId={agentId} onSelect={(versionId) => setImage({ ...image, versionId })} onUseSaved={onUseSavedImage ? useSavedImage : undefined} onClose={close} fullscreen={targetFullscreen} onToggleFullscreen={toggleFullscreen} /> : path && /\.html?$/i.test(path) ? <ArtifactFile
                 key={path}
                 path={path}
                 storageKey={`anima-artifact:${JSON.stringify([agentId, sessionId, clearGeneration, path])}`}
@@ -312,11 +343,12 @@ function ArtifactSession({
                 agentId={agentId}
                 sessionId={sessionId}
                 onEditSelection={onEditSelection ? selectForDraft : undefined}
-              /> : <OfficeArtifactFile path={path} agentId={agentId} sessionId={sessionId} onEditSelection={onEditSelection ? selectForDraft : undefined} onClose={close} fullscreen={targetFullscreen} onToggleFullscreen={toggleFullscreen} />}
+              /> : path && <OfficeArtifactFile path={path} agentId={agentId} sessionId={sessionId} onEditSelection={onEditSelection ? selectForDraft : undefined} onClose={close} fullscreen={targetFullscreen} onToggleFullscreen={toggleFullscreen} />}
             </aside>
           )}
         </div>
       </div>
+      </ImageArtifactScope.Provider>
     </ArtifactScope.Provider>
   );
 }
