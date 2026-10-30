@@ -186,6 +186,14 @@ async fn image_create_then_selected_edit_preserves_both_versions_and_deduplicate
         .await
         .is_err());
     assert_eq!(port.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(first["observation"]["state"], "bytes_matched");
+    assert_eq!(first["observation"]["limit"], "saved_bytes_only");
+    assert_eq!(first["observation"]["operationId"], first["id"]);
+    assert_eq!(first["observation"]["versionId"], first["version"]["id"]);
+    assert_eq!(
+        first["observation"]["attachmentId"],
+        first["version"]["attachment"]["id"]
+    );
     let attachment = first["version"]["attachment"]["id"]
         .as_str()
         .unwrap()

@@ -38,6 +38,7 @@ async function openImagesConsole(page: Page) {
   };
   state.attachments = [original.attachment, edited.attachment];
   const fixture = await installConsoleFixture(page, state, { chatSuite: { ownerApiKey: OWNER_KEY } });
+  await page.route('**/api/capabilities', (route) => route.request().headers()['x-api-key'] !== OWNER_KEY ? route.fallback() : route.fulfill({ json: { schemaVersion: 1, tools: [], extensions: [], limitations: [], persistence: { controlPlane: 'durable', memory: 'durable', executionJournal: true }, runtime: { instanceId: 'offline-image-fixture', observedAtMs: 10, daemonVersion: 'fixture', images: { ledgerVersion: 1, observationVersion: 1, configuration: { state: 'configured', reason: 'Synthetic fixture only.' } }, pdfPages: { version: 1 }, limits: 'Offline support fixture, no provider or live outcome is proven.' } } }));
   const record = (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());

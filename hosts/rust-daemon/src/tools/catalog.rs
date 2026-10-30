@@ -435,7 +435,12 @@ impl RunToolCatalog {
                 "search_tools requires a query of 1 to 256 characters and limit from 1 to 5".into(),
             );
         }
-        self.scope(agent, run).await?;
+        let state = self.scope(agent, run).await?;
+        let runtime_observation = {
+            let guard = state.read().await;
+            self.scope_current(&guard).map_err(str::to_string)?;
+            crate::routes::capabilities::runtime_observation(&guard)
+        };
         let query = query.trim().to_lowercase();
         let words: Vec<_> = query
             .split(|c: char| !c.is_alphanumeric())
@@ -489,7 +494,7 @@ impl RunToolCatalog {
                 continue;
             }
             summaries.push(json!({"name":entry.descriptor.name,"description":clip(&entry.descriptor.description,384),"hydrated":true}));
-            let result = json!({"tools":summaries,"schemaVisibility":"Exact schemas are advertised on the next model request; execution still requires current grants and approval."}).to_string();
+            let result = json!({"tools":summaries,"runtimeObservation":runtime_observation,"schemaVisibility":"Exact schemas are advertised on the next model request; execution still requires current grants and approval."}).to_string();
             if result.len() > MAX_RESULT_BYTES {
                 summaries.pop();
                 continue;
@@ -497,10 +502,30 @@ impl RunToolCatalog {
             names.push(entry.descriptor.name.clone());
             schema_bytes += entry.bytes;
         }
-        // Cancellation/deletion during the scan cannot publish a partial catalog.
-        self.scope(agent, run).await?;
+        let result = {
+            let guard = state.read().await;
+            self.scope_current(&guard).map_err(str::to_string)?;
+            let mut retained = Vec::new();
+            for (name, summary) in names.into_iter().zip(summaries) {
+                if self.entry_current(&guard, &name).is_ok() {
+                    retained.push((name, summary));
+                }
+            }
+            let runtime_observation = crate::routes::capabilities::runtime_observation(&guard);
+            loop {
+                let tools: Vec<_> = retained.iter().map(|(_, summary)| summary).collect();
+                let result = json!({"tools":tools,"runtimeObservation":runtime_observation,"schemaVisibility":"Exact schemas are advertised on the next model request; execution still requires current grants and approval."}).to_string();
+                if result.len() <= MAX_RESULT_BYTES {
+                    names = retained.into_iter().map(|(name, _)| name).collect();
+                    break result;
+                }
+                if retained.pop().is_none() {
+                    return Err("Runtime observation exceeds the result budget".into());
+                }
+            }
+        };
         self.hydrate(&names);
-        Ok(json!({"tools":summaries,"schemaVisibility":"Exact schemas are advertised on the next model request; execution still requires current grants and approval."}).to_string())
+        Ok(result)
     }
 
     pub(crate) async fn describe(
@@ -517,7 +542,13 @@ impl RunToolCatalog {
         if entry.bytes > MAX_SCHEMA_BYTES {
             return Err("Tool schema exceeds the run hydration budget".into());
         }
-        let result = json!({"name":entry.descriptor.name,"description":clip(&entry.descriptor.description,384),"hydrated":true,"schemaVisibility":"The exact descriptor is advertised on the next model request. Current grants and ordinary approval remain required."}).to_string();
+        let result = {
+            let state = self.state.upgrade().ok_or(REFUSED)?;
+            let guard = state.read().await;
+            self.check_current(&guard, agent, run, name)?;
+            let runtime_observation = crate::routes::capabilities::runtime_observation(&guard);
+            json!({"name":entry.descriptor.name,"description":clip(&entry.descriptor.description,384),"hydrated":true,"runtimeObservation":runtime_observation,"schemaVisibility":"The exact descriptor is advertised on the next model request. Current grants and ordinary approval remain required."}).to_string()
+        };
         if result.len() > MAX_RESULT_BYTES {
             return Err("Tool summary exceeds the result budget".into());
         }
@@ -651,7 +682,7 @@ fn execute(
                         return TaskResult::error(
                             "search_tools limit must be an integer from 1 to 5",
                             0,
-                        )
+                        );
                     }
                 };
                 catalog.search(&agent, run, query, limit).await

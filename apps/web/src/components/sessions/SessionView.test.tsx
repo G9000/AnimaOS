@@ -79,7 +79,10 @@ function renderView(overrides: Partial<SessionViewProps> = {}) {
   };
 }
 
+const capabilityInventory = (supported = true) => ({ schemaVersion: 1, tools: [], persistence: { controlPlane: 'sqlite', memory: 'sqlite', executionJournal: true }, extensions: [], limitations: [], ...(supported ? { runtime: { images: { ledgerVersion: 1, observationVersion: 1 } } } : {}) }) as Awaited<ReturnType<typeof daemon.capabilities>>;
+
 beforeEach(() => {
+  vi.spyOn(daemon, 'capabilities').mockResolvedValue(capabilityInventory());
   vi.spyOn(daemon.images, 'list').mockImplementation(() => new Promise(() => {}));
   // The header reads the session's usage; most tests have none.
   vi.spyOn(daemon, 'getSession').mockResolvedValue(sessionFixture('room-7'));
@@ -1185,5 +1188,31 @@ describe('SessionView', () => {
     expect(screen.getByText('Check-in · every 30 min')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Edit automation' }));
     expect(props.onEditAutomation).toHaveBeenCalledWith(automation);
+  });
+});
+
+describe('image backend compatibility', () => {
+  it('keeps an unused old-backend chat quiet without requesting the missing image endpoint', async () => {
+    vi.mocked(daemon.capabilities).mockResolvedValue(capabilityInventory(false));
+    renderView({ session: sessionFixture('chat:1'), messages: [{ id: 'prompt', role: 'User', content: { text: 'generate_image could be useful later' }, created_at_ms: 1 }] });
+    await act(async () => {});
+    expect(daemon.images.list).not.toHaveBeenCalled();
+    expect(screen.queryByText(/running backend does not advertise image history/)).toBeNull();
+  });
+
+  it('reports missing backend support for actual native image activity in this conversation', async () => {
+    vi.mocked(daemon.capabilities).mockResolvedValue(capabilityInventory(false));
+    const imageRun = runFixture('image-run', { toolsStarted: ['generate_image'], status: 'failed', finishedAtMs: 2, error: { code: 'unsupported', message: 'Image tool unavailable' } });
+    renderView({ session: sessionFixture('chat:1'), runs: [emptyLiveRun(imageRun)] });
+    expect(await screen.findByText(/running backend does not advertise image history/)).toBeVisible();
+    expect(daemon.images.list).not.toHaveBeenCalled();
+  });
+
+  it('does not show another conversation image work in an unused old-backend chat', async () => {
+    vi.mocked(daemon.capabilities).mockResolvedValue(capabilityInventory(false));
+    const imageRun = runFixture('foreign-image-run', { sessionId: 'chat:other', toolsStarted: ['edit_image'] });
+    renderView({ session: sessionFixture('chat:1'), runs: [emptyLiveRun(imageRun)] });
+    await act(async () => {});
+    expect(screen.queryByText(/running backend does not advertise image history/)).toBeNull();
   });
 });

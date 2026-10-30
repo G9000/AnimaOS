@@ -3,6 +3,11 @@
 pub mod connected;
 mod provenance;
 pub use provenance::{passage_origin, pdf_ocr_locator, pdf_page_locator, PassageOrigin};
+mod semantic;
+pub use semantic::{
+    EmbeddingPassage, EmbeddingProfile, HybridSearch, PassageEmbedding, SemanticCoverage,
+    EMBEDDING_WINDOW_CONTRACT,
+};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -150,7 +155,7 @@ impl DocumentStore {
         text_limit: usize,
         database_bytes: u64,
     ) -> Result<Self, StoreError> {
-        let connection = Connection::open(path)?;
+        let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(2))?;
         let page_size: u64 = connection.pragma_query_value(None, "page_size", |row| row.get(0))?;
         let maximum_pages = database_bytes
@@ -197,6 +202,7 @@ impl DocumentStore {
                  VALUES('delete',old.id,old.title,old.text);
              END;",
         )?;
+        semantic::initialize(&mut connection)?;
         checkpoint(&connection);
         Ok(Self {
             connection: Mutex::new(connection),
@@ -223,14 +229,10 @@ impl DocumentStore {
         validate_id(source_id)?;
         validate_documents(documents)?;
         let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "DELETE FROM documents WHERE corpus_id=?1 AND source_id=?2",
+        let existing_bytes: u64 = connection.query_row(
+            "SELECT coalesce(sum(length(CAST(text AS BLOB))),0) FROM chunks
+             WHERE NOT(corpus_id=?1 AND source_id=?2)",
             params![corpus_id, source_id],
-        )?;
-        let existing_bytes: u64 = transaction.query_row(
-            "SELECT coalesce(sum(length(CAST(text AS BLOB))),0) FROM chunks",
-            [],
             |row| row.get(0),
         )?;
         let incoming_bytes = documents
@@ -244,37 +246,55 @@ impl DocumentStore {
         {
             return Err(StoreError::InvalidInput("aggregate cache text exceeded"));
         }
-        {
-            let mut insert_document = transaction.prepare("INSERT INTO documents(corpus_id,source_id,document_id,relative_path,title,source_sha256) VALUES(?1,?2,?3,?4,?5,?6)")?;
-            let mut insert_chunk = transaction.prepare("INSERT INTO chunks(corpus_id,source_id,document_id,source_sha256,citation_id,chunk_sha256,locator,title,text) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)")?;
-            for document in documents {
-                insert_document.execute(params![
-                    corpus_id,
-                    source_id,
-                    document.document_id,
-                    document.relative_path,
-                    document.title,
-                    document.source_sha256
-                ])?;
-                for (index, chunk) in document.chunks.iter().enumerate() {
-                    let chunk_sha256 = source_sha256(chunk.text.as_bytes());
-                    let citation_id =
-                        citation_identity(corpus_id, source_id, document, chunk, index);
-                    insert_chunk.execute(params![
+        let publish = |connection: &mut Connection| -> rusqlite::Result<()> {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "DELETE FROM documents WHERE corpus_id=?1 AND source_id=?2",
+                params![corpus_id, source_id],
+            )?;
+            {
+                let mut insert_document = transaction.prepare("INSERT INTO documents(corpus_id,source_id,document_id,relative_path,title,source_sha256) VALUES(?1,?2,?3,?4,?5,?6)")?;
+                let mut insert_chunk = transaction.prepare("INSERT INTO chunks(corpus_id,source_id,document_id,source_sha256,citation_id,chunk_sha256,locator,title,text,embedding_window_count) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")?;
+                for document in documents {
+                    insert_document.execute(params![
                         corpus_id,
                         source_id,
                         document.document_id,
-                        document.source_sha256,
-                        citation_id,
-                        chunk_sha256,
-                        chunk.locator,
+                        document.relative_path,
                         document.title,
-                        chunk.text
+                        document.source_sha256
                     ])?;
+                    for (index, chunk) in document.chunks.iter().enumerate() {
+                        let chunk_sha256 = source_sha256(chunk.text.as_bytes());
+                        let citation_id =
+                            citation_identity(corpus_id, source_id, document, chunk, index);
+                        insert_chunk.execute(params![
+                            corpus_id,
+                            source_id,
+                            document.document_id,
+                            document.source_sha256,
+                            citation_id,
+                            chunk_sha256,
+                            chunk.locator,
+                            document.title,
+                            chunk.text,
+                            semantic::window_count(&chunk.text)
+                        ])?;
+                    }
                 }
             }
+            transaction.commit()
+        };
+        match publish(&mut connection) {
+            Ok(()) => {}
+            Err(error) if semantic::is_full(&error) => {
+                // Text evidence has priority over every disposable derived vector.
+                // The failed transaction has rolled back the original text revision.
+                connection.execute("DELETE FROM passage_embeddings", [])?;
+                publish(&mut connection)?;
+            }
+            Err(error) => return Err(error.into()),
         }
-        transaction.commit()?;
         // Maintenance cannot turn a successful commit into a reported rollback.
         checkpoint(&connection);
         Ok(())
@@ -613,3 +633,6 @@ fn excerpt_with_limit(text: &str, terms: &[String], max_bytes: usize) -> String 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod semantic_tests;

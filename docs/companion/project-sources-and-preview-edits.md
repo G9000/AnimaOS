@@ -10,6 +10,16 @@ The Sources panel shows indexing state, coverage, omissions and the last index t
 
 Connected content is bounded. A selected file can supply up to 2 MiB of input and 1 MiB of extracted text in supported formats. Mail conversations include at most 25 messages and 1 MiB of text, with attachments omitted. IMAP currently supplies only the selected retained message and is labelled partial. Unsupported content, provider failures, pagination limits and omissions appear as partial or unavailable coverage.
 
+## Search by meaning and exact terms
+
+Enter a question in **Search project knowledge**, such as "How can we back out?" Meaning search can retrieve a termination clause without the same words. Exact phrases, codenames, and numeric identifiers retain keyword priority. Open the citation to review the selected passage and its current source.
+
+**Meaning and keyword search** means a loaded local learned model participated. **Keyword search only** means meaning search did not participate. A missing, busy, or loading local model leaves keyword search available. A remote or hashed memory provider does not enable project meaning search.
+
+Meaning search processes selected project text locally with the loaded FastEmbed model. Existing remote memory settings do not authorize sending these documents to an embedding provider. Selected account content still uses the project's existing read-only account grant.
+
+Meaning coverage is separate from document indexing coverage. Each search prepares a bounded batch, so later searches can add meaning coverage. The result shows incomplete coverage and omissions. Reloading the local model starts a fresh derived meaning index. Empty results do not establish that information is absent from the source documents.
+
 ## Request a change from a preview
 
 Open a workspace HTML, Word, Excel or PowerPoint file beside the chat. For HTML, choose **Select content to edit** to open a safe text-selection view. For Office files, choose a supported editable paragraph, cell, chart target or slide text from its content preview. The available targets depend on the file's supported structure; the content preview does not promise exact page or slide layout.

@@ -35,3 +35,11 @@ This release supports direct owner Web/API chats. Helpers, connectors, delegated
 Automated checks use fake image ports and loopback HTTP servers. They exercise request shape, byte limits, source identity, exact approval, immutable versions and interrupted outcomes. Local checks do not establish live OpenAI account/model availability, actual billing or output quality. A live-provider acceptance run requires separate authorization.
 
 Provider behavior was checked against the official [image generation guide](https://developers.openai.com/api/docs/guides/image-generation), [image edits reference](https://developers.openai.com/api/reference/resources/images/methods/edit) and [pricing documentation](https://developers.openai.com/api/docs/pricing) on 30 October 2026.
+
+## Backend compatibility and saved-byte observations
+
+The gallery checks the responding daemon's advertised image-history contract. A regular chat remains quiet when an older backend does not advertise it. Known native image work receives compact compatibility or loading guidance. Refresh reads support and local history; it never resends generation. Failed refreshes preserve already known versions.
+
+For each saved version, an optional host observation identifies the operation, attachment, immutable version, observation time and `saved_bytes_only` limit. `bytes_matched` includes the SHA-256 and byte count checked against the saved attachment record. Missing or changed bytes produce `unavailable`. A read budget or occupied physical reader produces `not_checked`. Historical request status stays separate from these fresh observations. An older backend without this evidence leaves saved bytes unobserved.
+
+Readback is bounded to 16 MiB per batch and a fixed shared physical-reader capacity. A cancelled HTTP request cannot release physical capacity before its disk read finishes. Session clear, deletion, project rebinding, workspace change or changed ledger state invalidates stale response publication. Matching bytes do not establish visual correctness, user viewing or provider billing.

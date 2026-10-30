@@ -15,8 +15,8 @@ use super::extraction;
 use super::folder::{self, FolderSnapshot};
 use super::scope::{DocumentWitness, KnowledgeWitness, Purpose, Scope, Source, SourceGrant};
 use super::types::{
-    KnowledgeCitation, KnowledgeHit, KnowledgeSearch, KnowledgeSourceState, KnowledgeSourceStatus,
-    KnowledgeStatus,
+    KnowledgeCitation, KnowledgeHit, KnowledgeSearch, KnowledgeSearchRetrieval,
+    KnowledgeSourceState, KnowledgeSourceStatus, KnowledgeStatus,
 };
 use crate::app::SharedDaemonState;
 use crate::attachments::documents::source_read::read_retained_with_slots;
@@ -44,6 +44,7 @@ struct Inner {
     cache: Option<Arc<Cache>>,
     jobs: Arc<Semaphore>,
     reads: Arc<Semaphore>,
+    inference: Arc<Semaphore>,
     queue_capacity: Arc<Semaphore>,
     pending: Mutex<BTreeSet<(String, u64, String, IndexRefresh)>>,
     extractor: Arc<dyn DocumentExtractor>,
@@ -77,6 +78,7 @@ pub(crate) struct KnowledgeRetrieval {
     pub(crate) passages: Vec<KnowledgeHit>,
     pub(crate) sources: Vec<KnowledgeSourceStatus>,
     pub(crate) witness: KnowledgeWitness,
+    pub(crate) retrieval: KnowledgeSearchRetrieval,
 }
 
 impl std::fmt::Debug for KnowledgeService {
@@ -123,6 +125,7 @@ impl KnowledgeService {
                 cache,
                 jobs: Arc::new(Semaphore::new(1)),
                 reads: Arc::new(Semaphore::new(2)),
+                inference: Arc::new(Semaphore::new(1)),
                 queue_capacity: Arc::new(Semaphore::new(32)),
                 pending: Mutex::new(BTreeSet::new()),
                 extractor,
@@ -285,7 +288,7 @@ impl KnowledgeService {
     ) -> Result<KnowledgeSearch, ProjectError> {
         validate_query(query, limit)?;
         let scope = Scope::capture(state, project_id, agent, Purpose::Manual).await?;
-        let (hits, witness) = self
+        let (hits, witness, retrieval) = self
             .search_scope(state, &scope, query, limit, cancel, deadline)
             .await?;
         witness.check(state).await?;
@@ -295,6 +298,7 @@ impl KnowledgeService {
                 .into_iter()
                 .map(|hit| public_hit(hit, &scope))
                 .collect(),
+            retrieval,
         })
     }
 
@@ -312,7 +316,7 @@ impl KnowledgeService {
         if &scope.project != project {
             return Err(ProjectError::ScopeChanged);
         }
-        let (hits, witness) = self
+        let (hits, witness, retrieval) = self
             .search_scope(state, &scope, query, 8, cancel, deadline)
             .await?;
         witness.check(state).await?;
@@ -323,6 +327,7 @@ impl KnowledgeService {
                 .collect(),
             sources: self.projection(&scope).sources,
             witness,
+            retrieval,
         })
     }
 
@@ -540,13 +545,17 @@ impl KnowledgeService {
         limit: usize,
         cancel: CancelSignal,
         deadline: Option<Instant>,
-    ) -> Result<(Vec<SearchHit>, KnowledgeWitness), ProjectError> {
+    ) -> Result<(Vec<SearchHit>, KnowledgeWitness, KnowledgeSearchRetrieval), ProjectError> {
         let deadline = deadline
             .unwrap_or_else(|| Instant::now() + DEFAULT_DEADLINE)
             .min(Instant::now() + DEFAULT_DEADLINE);
         check(&cancel, deadline)?;
         if scope.sources.is_empty() {
-            return Ok((Vec::new(), self.witness(scope, &[], &cancel, deadline)?));
+            return Ok((
+                Vec::new(),
+                self.witness(scope, &[], &cancel, deadline)?,
+                KnowledgeSearchRetrieval::keyword("No sources are selected"),
+            ));
         }
         self.reconcile(state, &scope.project.id).await?;
         scope.check(state).await?;
@@ -563,6 +572,21 @@ impl KnowledgeService {
                 return Err(error);
             }
         };
+        let semantic = self
+            .semantic_search(
+                state,
+                scope,
+                &ready_sources,
+                query,
+                limit,
+                &cancel,
+                deadline,
+            )
+            .await?;
+        if let Some(outcome) = semantic.outcome {
+            let witness = self.witness(scope, &outcome.hits, &cancel, deadline)?;
+            return Ok((outcome.hits, witness, semantic.retrieval));
+        }
         let cache = self.cache()?;
         let physical_scope = scope.clone();
         let shared = state.clone();
@@ -586,7 +610,7 @@ impl KnowledgeService {
         check(&cancel, deadline)?;
         scope.check(state).await?;
         let witness = self.witness(scope, &hits, &cancel, deadline)?;
-        Ok((hits, witness))
+        Ok((hits, witness, semantic.retrieval))
     }
 
     async fn acquire_job(
@@ -1247,6 +1271,9 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+#[path = "semantic.rs"]
+mod semantic;
 
 fn pdf_page_locator(locator: &str) -> Option<u32> {
     let rest = locator.strip_prefix("pdf#page=")?;

@@ -1,3 +1,4 @@
+import type { RuntimeCapabilityObservation } from './capabilities.js';
 import type { DaemonClient } from './client.js';
 
 export interface ChatToolCapability {
@@ -13,6 +14,7 @@ export interface ChatToolCapability {
 }
 
 export interface ChatCapabilities {
+  runtime?: RuntimeCapabilityObservation;
   agentId: string;
   sessionId: string;
   basis: 'active_turn' | 'next_owner_turn';

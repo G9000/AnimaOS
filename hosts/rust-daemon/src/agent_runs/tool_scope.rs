@@ -35,6 +35,7 @@ pub(crate) struct ChatCapabilities {
     tools: Vec<ChatToolCapability>,
     connections: Vec<ChatConnectionCapability>,
     notice: &'static str,
+    runtime: crate::routes::capabilities::RuntimeCapabilityObservation,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -293,10 +294,21 @@ impl super::AgentRunCoordinator {
             }
         }).collect();
         Ok(ChatCapabilities {
-            agent_id: agent_id.into(), session_id: session_id.into(), basis, run_id, preparing, tools,
-            connections: connection_views.into_iter().map(|v| ChatConnectionCapability {
-                id: v.record.id, label: v.record.label, state: v.state.as_str().into(),
-            }).collect(),
+            runtime: crate::routes::capabilities::runtime_observation(&state),
+            agent_id: agent_id.into(),
+            session_id: session_id.into(),
+            basis,
+            run_id,
+            preparing,
+            tools,
+            connections: connection_views
+                .into_iter()
+                .map(|v| ChatConnectionCapability {
+                    id: v.record.id,
+                    label: v.record.label,
+                    state: v.state.as_str().into(),
+                })
+                .collect(),
             notice: "Scope is rechecked for every call. Approval rules, argument-specific safeguards, provider credentials and service availability can still prevent execution. This view grants no permissions.",
         })
     }

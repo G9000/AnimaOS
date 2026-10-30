@@ -425,6 +425,19 @@ export function SessionView({
     return () => cancelAnimationFrame(frame);
   }, [imageDraftFocus]);
   const imageRefresh = useMemo(() => ({ messages, runs, contextRefreshKey }), [messages, runs, contextRefreshKey]);
+  const knownImageWork = useMemo(() => {
+    const imageTool = (name: unknown) => name === 'generate_image' || name === 'edit_image';
+    if (runs.some(({ run, tools }) => run.agentId === session?.agentId && run.sessionId === sessionId &&
+      (run.toolsStarted.some(imageTool) || run.actionReceipts?.some((receipt) => imageTool(receipt.name)) || tools.some((tool) => imageTool(tool.name))))) return true;
+    const imageCalls = new Set(messages.flatMap((message) => {
+      const calls = message.role === 'Assistant' ? message.content.metadata?.toolCalls : null;
+      return Array.isArray(calls) ? calls.flatMap((call: unknown) => {
+        if (!call || typeof call !== 'object' || !('name' in call) || !('id' in call)) return [];
+        return imageTool(call.name) && typeof call.id === 'string' ? [call.id] : [];
+      }) : [];
+    }));
+    return messages.some((message) => message.role === 'Tool' && typeof message.content.metadata?.toolCallId === 'string' && imageCalls.has(message.content.metadata.toolCallId));
+  }, [messages, runs, session?.agentId, sessionId]);
   useEffect(() => {
     if (!selectedEditContext) return;
     const generation = selectionGeneration.current;
@@ -737,7 +750,7 @@ export function SessionView({
         ) : null}
       </div>
       {renderMessages()}
-      {session?.kind === 'chat' && <ImageGallery agentId={session.agentId} sessionId={session.id} clearGeneration={session.clearGeneration ?? 0} refreshKey={imageRefresh} enabled={!composer.offline && !missing} />}
+      {session?.kind === 'chat' && <ImageGallery agentId={session.agentId} sessionId={session.id} clearGeneration={session.clearGeneration ?? 0} refreshKey={imageRefresh} knownImageWork={knownImageWork} enabled={!composer.offline && !missing} />}
       {imageSelectionError && <p role="alert" className="px-4 text-sm text-danger">{imageSelectionError}</p>}
       {session?.kind === 'chat' && skillDrafts && (
         <SessionSkillDrafts

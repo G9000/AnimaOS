@@ -17,6 +17,11 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::{info, warn};
 
+mod project;
+#[cfg(test)]
+pub(crate) use project::offline_project_runtime;
+pub(crate) use project::LocalProjectEmbedder;
+
 pub(crate) type SharedMemoryEmbeddings = Arc<AsyncRwLock<MemoryEmbeddingRuntime>>;
 
 /// Memories re-embedded per step of a model rebuild. The memory lock is never
@@ -1010,6 +1015,7 @@ impl MemoryTextEmbedder for LocalMemoryEmbedder {
 
 #[derive(Clone)]
 struct FastEmbedMemoryEmbedder {
+    project_session: String,
     model_name: String,
     dimension: usize,
     prompt_style: FastEmbedPromptStyle,
@@ -1054,6 +1060,7 @@ impl FastEmbedMemoryEmbedder {
         }
         let model = TextEmbedding::try_new(options).map_err(fastembed_error)?;
         Ok(Self {
+            project_session: uuid::Uuid::new_v4().to_string(),
             model_name: config.model_name,
             dimension: config.dimension,
             prompt_style: config.prompt_style,

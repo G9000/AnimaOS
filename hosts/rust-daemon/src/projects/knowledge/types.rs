@@ -72,6 +72,54 @@ pub(crate) struct KnowledgeSearch {
     #[serde(flatten)]
     pub(crate) binding: KnowledgeStatus,
     pub(crate) hits: Vec<KnowledgeHit>,
+    pub(crate) retrieval: KnowledgeSearchRetrieval,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum KnowledgeSearchMode {
+    Keyword,
+    Hybrid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SemanticSearchState {
+    Ready,
+    Partial,
+    Unavailable,
+}
+
+/// Reports learned local participation separately from current text-index coverage.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KnowledgeSearchRetrieval {
+    pub(crate) mode: KnowledgeSearchMode,
+    pub(crate) semantic_state: SemanticSearchState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    pub(crate) indexed_windows: usize,
+    pub(crate) eligible_windows: usize,
+    pub(crate) omitted_windows: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<&'static str>,
+}
+
+impl KnowledgeSearchRetrieval {
+    pub(super) fn keyword(reason: &'static str) -> Self {
+        Self {
+            mode: KnowledgeSearchMode::Keyword,
+            semantic_state: SemanticSearchState::Unavailable,
+            provider: None,
+            model: None,
+            indexed_windows: 0,
+            eligible_windows: 0,
+            omitted_windows: 0,
+            reason: Some(reason),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

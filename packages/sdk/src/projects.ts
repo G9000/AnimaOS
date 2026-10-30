@@ -78,7 +78,17 @@ export interface ProjectKnowledgeHit {
   origin?: { ownerAgentId: string; connectorId: string; provider: string; remoteId: string;
     ownerName?: string; accountLabel?: string | null; revisionSha256: string; verifiedAtMs: number; coverage: string };
 }
-export interface ProjectKnowledgeSearch extends ProjectKnowledgeStatus { hits: ProjectKnowledgeHit[] }
+/** Actual retrieval used for this search; source indexing status is separate. */
+export interface ProjectKnowledgeRetrieval {
+  mode: 'hybrid' | 'keyword'; semanticState: 'ready' | 'partial' | 'unavailable';
+  provider?: 'fastembed'; model?: string;
+  indexedWindows: number; eligibleWindows: number; omittedWindows: number; reason?: string;
+}
+export interface ProjectKnowledgeSearch extends ProjectKnowledgeStatus {
+  hits: ProjectKnowledgeHit[];
+  /** Absent on older daemons; clients must not infer a retrieval mode. */
+  retrieval?: ProjectKnowledgeRetrieval;
+}
 export interface ProjectKnowledgeCitation extends ProjectKnowledgeBinding, ProjectKnowledgeHit { text: string }
 
 /** Profile-owned groupings. Member selectors never replace owner authentication. */

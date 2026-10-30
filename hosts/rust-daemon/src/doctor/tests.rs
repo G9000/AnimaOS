@@ -62,6 +62,16 @@ async fn doctor_reports_observations_without_echoing_private_text() {
         .schedules
         .insert("test-job".into(), record());
     let snapshot = report(&shared).await;
+    let value = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(value["runtime"]["images"]["ledgerVersion"], 1);
+    assert!(value["runtime"]["instanceId"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty()));
+    assert!(value["runtime"]["limits"]
+        .as_str()
+        .unwrap()
+        .contains("do not deploy"));
+    assert_eq!(value["externalProbes"], false);
     let text = serde_json::to_string(&snapshot).unwrap();
     assert!(!text.contains("secret owner text"));
     assert!(!text.contains("agent-a"));
@@ -76,6 +86,7 @@ async fn doctor_reports_observations_without_echoing_private_text() {
     assert!(snapshot.checks.iter().all(|c| c.elapsed_ms <= 1000));
     let lock = shared.write().await;
     let busy = report(&shared).await;
+    assert!(busy.runtime.is_none());
     assert!(busy.checks.iter().all(|c| c.status == CheckStatus::Unknown));
     drop(lock);
 }

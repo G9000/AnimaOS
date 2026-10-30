@@ -165,6 +165,16 @@ export function WorkspaceCapabilities({ online }: { online: boolean }) {
         </div>
       ) : inventory ? (
         <>
+          <section aria-label="Running backend support" className="tools-authority">
+            <h3>Running backend support</h3>
+            {inventory.runtime ? <>
+              <p>Instance {inventory.runtime.instanceId} · version {inventory.runtime.daemonVersion} · observed {new Date(inventory.runtime.observedAtMs).toLocaleString()}</p>
+              <p>{inventory.runtime.images.ledgerVersion === 1 ? 'Image history API supported' : 'Image history API unadvertised'} · {inventory.runtime.pdfPages.version === 1 ? 'PDF page preview API supported' : 'PDF page preview API unadvertised'}.</p>
+              {inventory.runtime.buildRevision && <p>Backend build {inventory.runtime.buildRevision}</p>}
+              <p>Image configuration {inventory.runtime.images.configuration.state}. {inventory.runtime.images.configuration.reason}</p>
+              <p>{inventory.runtime.limits}</p>
+            </> : <p>This backend does not advertise image history or PDF page preview support. Code checks do not confirm features in the running backend.</p>}
+          </section>
           <section
             aria-labelledby="registered-tools-heading"
             className="tools-section"

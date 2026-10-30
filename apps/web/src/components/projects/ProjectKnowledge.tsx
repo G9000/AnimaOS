@@ -38,6 +38,11 @@ export function ProjectKnowledge({ agentId, agents = NO_AGENTS, project, api, in
       <button disabled={!query.trim() || knowledge.searching || !folders.length}>Search knowledge</button>
     </form>
     {knowledge.searching && <p role="status">Searching project knowledge…</p>}
+    {knowledge.searched && knowledge.retrieval && <p className="project-note" role="status">
+      {knowledge.retrieval.mode === 'hybrid' ? 'Meaning and keyword search' : 'Keyword search only'}
+      {knowledge.retrieval.semanticState === 'partial' && <> · Meaning search coverage: {knowledge.retrieval.indexedWindows} of {knowledge.retrieval.eligibleWindows} passage windows indexed; {knowledge.retrieval.omittedWindows} omitted.</>}
+      {knowledge.retrieval.reason && <> · {knowledge.retrieval.reason}</>}
+    </p>}
     {(knowledge.error || error) && <p role="alert">{error ?? knowledge.error}</p>}
     {knowledge.searched && !knowledge.hits.length && <p role="status">No matching passages in the indexed documents.</p>}
     {!!knowledge.hits.length && <ul className="project-knowledge-results" aria-label="Matching passages">{knowledge.hits.map((hit) => <li key={hit.citationId}>

@@ -67,6 +67,9 @@ async fn capability_inventory_matches_registered_tools_without_granting_access()
         .collect();
     assert_eq!(actual, expected);
     assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["runtime"]["images"]["ledgerVersion"], 1);
+    assert_eq!(value["runtime"]["pdfPages"]["version"], 1);
+    assert!(value["runtime"]["observedAtMs"].as_u64().unwrap() > 0);
     assert_eq!(value["persistence"]["controlPlane"], "ephemeral");
     assert_eq!(value["persistence"]["memory"], "ephemeral");
     assert_eq!(value["persistence"]["executionJournal"], false);
@@ -117,6 +120,9 @@ async fn m75_capability_inventory_reports_supported_partial_slices_without_activ
     let body = to_bytes(response.into_body(), 128 * 1024).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["runtime"]["images"]["ledgerVersion"], 1);
+    assert_eq!(value["runtime"]["pdfPages"]["version"], 1);
+    assert!(value["runtime"]["observedAtMs"].as_u64().unwrap() > 0);
     let extensions = value["extensions"].as_array().unwrap();
     for (id, expected_status) in [
         ("voice", "partial"),

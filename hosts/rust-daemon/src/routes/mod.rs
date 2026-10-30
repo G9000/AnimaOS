@@ -9,7 +9,7 @@ mod autonomy;
 mod browser;
 #[cfg(test)]
 mod browser_tests;
-mod capabilities;
+pub(crate) mod capabilities;
 mod chat_controls;
 mod chatgpt;
 mod coding;

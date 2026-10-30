@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Project, ProjectsClient, ProjectKnowledgeBinding, ProjectKnowledgeCitation, ProjectKnowledgeHit, ProjectKnowledgeStatus } from '@animaos/sdk';
+import type { Project, ProjectsClient, ProjectKnowledgeBinding, ProjectKnowledgeCitation, ProjectKnowledgeHit, ProjectKnowledgeSearch, ProjectKnowledgeStatus } from '@animaos/sdk';
 import { DaemonHttpError } from '@animaos/sdk';
 import { useLatest } from './useLatest';
 import { useResetOnChange } from './useResetOnChange';
@@ -19,6 +19,7 @@ export function useProjectKnowledge(agentId: string, project: Project | null, vi
   const onInvalidate = useLatest(invalidate);
   const [status, setStatus] = useState<ProjectKnowledgeStatus | null>(null);
   const [hits, setHits] = useState<ProjectKnowledgeHit[]>([]);
+  const [retrieval, setRetrieval] = useState<NonNullable<ProjectKnowledgeSearch['retrieval']> | null>(null);
   const [citation, setCitation] = useState<ProjectKnowledgeCitation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -39,11 +40,11 @@ export function useProjectKnowledge(agentId: string, project: Project | null, vi
     return () => abort();
   }, [token, abort]);
   useResetOnChange([token], () => {
-    setStatus(null); setHits([]); setCitation(null); setError(null); setSearching(false); setOpening(false); setRefreshing(false); setSearched(false);
+    setStatus(null); setHits([]); setRetrieval(null); setCitation(null); setError(null); setSearching(false); setOpening(false); setRefreshing(false); setSearched(false);
   });
 
   const clearReads = useCallback(() => {
-    abort('search'); abort('citation'); setHits([]); setCitation(null); setSearching(false); setOpening(false); setSearched(false);
+    abort('search'); abort('citation'); setHits([]); setRetrieval(null); setCitation(null); setSearching(false); setOpening(false); setSearched(false);
   }, [abort]);
   const closeCitation = useCallback(() => { abort('citation'); setCitation(null); setOpening(false); }, [abort]);
   const failed = useCallback((failure: unknown) => {
@@ -112,7 +113,7 @@ export function useProjectKnowledge(agentId: string, project: Project | null, vi
       if (!request.publishable() || !accepts(value)) return;
       if (!publishStatus(value, true)) return;
       // Polls started while the search ran must not replace its accepted snapshot.
-      abort('status'); setHits(value.hits); setSearched(true);
+      abort('status'); setHits(value.hits); setRetrieval(value.retrieval ?? null); setSearched(true);
     } catch (failure) { if (request.publishable()) failed(failure); }
     finally { if (request.current()) setSearching(false); }
   }, [scope, project, clearReads, startOperation, api, agentId, accepts, publishStatus, failed, abort]);
@@ -136,6 +137,6 @@ export function useProjectKnowledge(agentId: string, project: Project | null, vi
     } catch (failure) { if (request.publishable()) failed(failure); }
     finally { if (request.current()) setRefreshing(false); }
   }, [clearReads, scope, project, startOperation, api, agentId, accepts, publishStatus, failed, abort]);
-  return { status: scope ? status : null, hits: scope ? hits : [], citation: scope ? citation : null,
+  return { status: scope ? status : null, hits: scope ? hits : [], retrieval: scope ? retrieval : null, citation: scope ? citation : null,
     error, searching, opening, refreshing, searched, search, openCitation, closeCitation, refresh, clearSearch: clearReads };
 }

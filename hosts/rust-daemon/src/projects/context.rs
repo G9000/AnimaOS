@@ -752,7 +752,7 @@ pub(crate) async fn load_context_for_query(
         {
             return Err(ProjectError::InstructionBudget);
         }
-        let prefix = text.clone();
+        let mut prefix = text.clone();
         let mut knowledge_witness = None;
         let query: String = query
             .chars()
@@ -767,6 +767,7 @@ pub(crate) async fn load_context_for_query(
             .collect();
         let mut knowledge_hits = Vec::new();
         let mut available_knowledge_sources = Vec::new();
+        let mut knowledge_retrieval = None;
         if !query.trim().is_empty()
             && scope
                 .project
@@ -788,6 +789,7 @@ pub(crate) async fn load_context_for_query(
             {
                 Ok(retrieval) => {
                     retrieval.witness.check(state).await?;
+                    knowledge_retrieval = Some(retrieval.retrieval);
                     available_knowledge_sources = retrieval
                         .sources
                         .iter()
@@ -810,6 +812,22 @@ pub(crate) async fn load_context_for_query(
                     | ProjectError::Cancelled,
                 ) => return Err(ProjectError::ScopeChanged),
                 Err(_) => {}
+            }
+        }
+        if let Some(retrieval) = knowledge_retrieval {
+            let line = format!(
+                "    {}\n",
+                serde_json::json!({
+                    "projectKnowledgeSearch": retrieval,
+                    "coverage": "Search is bounded. Empty results do not establish that a fact is absent from the project sources.",
+                })
+            );
+            let candidate = format!("{text}{line}");
+            if candidate.chars().count() <= budget.max_total_chars
+                && budget.tokens(&candidate) <= budget.max_tokens
+            {
+                text = candidate;
+                prefix = text.clone();
             }
         }
         let mut parts = Vec::new();

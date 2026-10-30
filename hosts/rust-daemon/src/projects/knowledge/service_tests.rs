@@ -522,6 +522,137 @@ async fn search(fixture: &Fixture, query: &str) -> KnowledgeSearch {
 }
 
 #[tokio::test]
+async fn keyword_fallback_does_not_claim_learned_project_search() {
+    let fixture = fixture("NIGHTJAR clause 9.4 retains exact keyword search");
+    let found = search(&fixture, "NIGHTJAR").await;
+    assert_eq!(found.hits.len(), 1);
+    assert_eq!(
+        found.retrieval.mode,
+        super::super::types::KnowledgeSearchMode::Keyword
+    );
+    assert_eq!(
+        found.retrieval.semantic_state,
+        super::super::types::SemanticSearchState::Unavailable
+    );
+    assert!(found.retrieval.provider.is_none());
+    assert!(found.retrieval.model.is_none());
+    assert_eq!(found.retrieval.indexed_windows, 0);
+}
+
+#[tokio::test]
+async fn busy_memory_runtime_cannot_block_project_keyword_search() {
+    let fixture = fixture("NIGHTJAR keyword evidence remains available");
+    let memory = fixture.state.read().await.memory_embeddings_handle();
+    let _busy = memory.write().await;
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        fixture.service.search(
+            &fixture.state,
+            &fixture.project,
+            &fixture.agent,
+            "NIGHTJAR",
+            8,
+            CancelSignal::new(),
+            Some(Instant::now() + Duration::from_secs(1)),
+        ),
+    )
+    .await
+    .expect("a busy memory write must not hold project search past its deadline")
+    .unwrap();
+    assert_eq!(response.hits.len(), 1);
+    assert_eq!(
+        response.retrieval.mode,
+        super::super::types::KnowledgeSearchMode::Keyword
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires explicit cached local E5 files; no download or remote provider"]
+async fn offline_learned_search_uses_current_project_witnesses() {
+    let snapshot = std::env::var("ANIMAOS_PROJECT_SEARCH_OFFLINE_MODEL_DIR")
+        .expect("provide a complete local E5 snapshot");
+    let runtime = tokio::task::spawn_blocking(move || {
+        let runtime =
+            crate::memory_embeddings::offline_project_runtime(std::path::Path::new(&snapshot))
+                .unwrap();
+        runtime
+            .local_project_embedder()
+            .unwrap()
+            .embed_query("warmup")
+            .unwrap();
+        runtime
+    })
+    .await
+    .unwrap();
+    let fixture = fixture("Either party may terminate this agreement upon thirty days written notice. Outstanding invoices remain payable following cancellation.");
+    fixture
+        .state
+        .write()
+        .await
+        .replace_memory_embeddings(runtime);
+    let found = search(&fixture, "How can we back out?").await;
+    assert_eq!(
+        found.retrieval.mode,
+        super::super::types::KnowledgeSearchMode::Hybrid
+    );
+    assert_eq!(found.hits.len(), 1);
+    let citation = found.hits[0].citation_id.clone();
+    assert!(fixture
+        .service
+        .citation(&fixture.state, &fixture.project, &fixture.agent, &citation)
+        .await
+        .unwrap()
+        .text
+        .contains("terminate"));
+    let project = fixture
+        .state
+        .read()
+        .await
+        .projects
+        .get(&fixture.project)
+        .unwrap()
+        .clone();
+    let automatic = fixture
+        .service
+        .retrieve(
+            &fixture.state,
+            &project,
+            &fixture.agent,
+            "How can we back out?",
+            CancelSignal::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(automatic.passages[0].citation_id, citation);
+    std::fs::write(
+        fixture.source.path().join("notes.txt"),
+        "The replacement document describes conference catering.",
+    )
+    .unwrap();
+    assert!(fixture
+        .service
+        .citation(&fixture.state, &fixture.project, &fixture.agent, &citation)
+        .await
+        .is_err());
+    let changed = search(&fixture, "How can we back out?").await;
+    assert!(changed.hits.iter().all(|hit| hit.citation_id != citation));
+    assert!(fixture
+        .service
+        .search(
+            &fixture.state,
+            &fixture.project,
+            &fixture.outsider,
+            "How can we back out?",
+            8,
+            CancelSignal::new(),
+            None
+        )
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn project_knowledge_finds_late_passages_and_rejects_outsiders() {
     let fixture = fixture(&format!(
         "{} cobalt harbour latepassage",

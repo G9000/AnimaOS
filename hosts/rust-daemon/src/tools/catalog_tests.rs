@@ -398,3 +398,31 @@ async fn tool_discovery_auto_memory_pins_the_exact_source_descriptor() {
     assert!(catalog.check(&agent, &run, "core_memory").await.is_err());
     assert!(!catalog.visible_tool_names().contains("core_memory"));
 }
+
+#[tokio::test]
+async fn tool_discovery_observes_the_running_instance_without_claiming_deployment_or_effects() {
+    let (state, agent, run, catalog) = fixture(&["calculate"]).await;
+    let before = serde_json::to_value(state.read().await.control_plane_snapshot()).unwrap();
+    for text in [
+        catalog.search(&agent, &run, "calculate", 1).await.unwrap(),
+        catalog.describe(&agent, &run, "calculate").await.unwrap(),
+    ] {
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let observation = &value["runtimeObservation"];
+        assert!(observation["instanceId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()));
+        assert!(observation["observedAtMs"].as_u64().unwrap() > 0);
+        assert_eq!(observation["images"]["ledgerVersion"], 1);
+        assert_eq!(
+            observation["images"]["configuration"]["state"],
+            "unconfigured"
+        );
+        assert!(observation["limits"].as_str().unwrap().contains("deploy"));
+        assert!(text.len() <= 4096);
+    }
+    assert_eq!(
+        serde_json::to_value(state.read().await.control_plane_snapshot()).unwrap(),
+        before
+    );
+}

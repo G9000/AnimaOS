@@ -11,6 +11,19 @@ export interface ImageVersion {
   createdAtMs: number;
 }
 
+/** A host byte-readback observation. It proves neither visual quality nor remote outcomes. */
+export type ImageObservation = {
+  operationId: string;
+  versionId: string;
+  attachmentId: string;
+  observedAtMs: number;
+  limit: 'saved_bytes_only';
+} & (
+  | { state: 'bytes_matched'; sha256: string; byteLength: number }
+  | { state: 'unavailable'; reason: 'bytes_unavailable' }
+  | { state: 'not_checked'; reason: 'budget_exceeded' | 'reader_busy' }
+);
+
 export interface ImageOperation {
   id: string;
   prompt: string;
@@ -18,6 +31,8 @@ export interface ImageOperation {
   createdAtMs: number;
   status: 'dispatching' | 'succeeded' | 'failed' | 'outcome_unknown';
   version: ImageVersion | null;
+  /** Missing on older daemons; saved metadata alone is not a readback. */
+  observation?: ImageObservation;
 }
 
 export interface SessionImages {
@@ -49,6 +64,26 @@ function validVersion(value: unknown, source: unknown): value is ImageVersion {
     text(attachment.path, 4096) && count(attachment.createdAtMs);
 }
 
+function validObservation(value: unknown, operation: RecordValue, version: ImageVersion): value is ImageObservation {
+  const target = ['operationId', 'versionId', 'attachmentId', 'observedAtMs', 'limit', 'state'];
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const observation = value as RecordValue;
+  if (observation.operationId !== operation.id || observation.versionId !== version.id ||
+    observation.attachmentId !== version.attachment.id || observation.limit !== 'saved_bytes_only' ||
+    !count(observation.observedAtMs) || observation.observedAtMs === 0) return false;
+  switch (observation.state) {
+    case 'bytes_matched':
+      return closed(value, [...target, 'sha256', 'byteLength']) &&
+        typeof value.sha256 === 'string' && /^[a-f0-9]{64}$/.test(value.sha256) && value.byteLength === version.attachment.size;
+    case 'unavailable':
+      return closed(value, [...target, 'reason']) && value.reason === 'bytes_unavailable';
+    case 'not_checked':
+      return closed(value, [...target, 'reason']) && (value.reason === 'budget_exceeded' || value.reason === 'reader_busy');
+    default:
+      return false;
+  }
+}
+
 function validPage(value: unknown): value is SessionImages {
   if (!closed(value, ['clearGeneration', 'provider', 'model', 'operations']) || !count(value.clearGeneration) ||
     value.provider !== 'openai' || value.model !== 'gpt-image-2.5-sunburst' ||
@@ -57,13 +92,15 @@ function validPage(value: unknown): value is SessionImages {
   const versions = new Set<string>();
   const attachments = new Set<string>();
   return value.operations.every((operation: unknown) => {
-    if (!closed(operation, ['id', 'prompt', 'sourceAttachmentId', 'createdAtMs', 'status', 'version']) ||
+    const keys = ['id', 'prompt', 'sourceAttachmentId', 'createdAtMs', 'status', 'version'];
+    if ((!closed(operation, keys) && !closed(operation, [...keys, 'observation'])) ||
       !id(operation.id) || operations.has(operation.id) || !text(operation.prompt, 2048) || !operation.prompt.trim() || operation.prompt.includes('\0') ||
       !nullableId(operation.sourceAttachmentId) || !count(operation.createdAtMs) ||
       typeof operation.status !== 'string' || !['dispatching', 'succeeded', 'failed', 'outcome_unknown'].includes(operation.status)) return false;
     operations.add(operation.id);
-    if (operation.status !== 'succeeded') return operation.version === null;
+    if (operation.status !== 'succeeded') return operation.version === null && !Object.hasOwn(operation, 'observation');
     if (!validVersion(operation.version, operation.sourceAttachmentId) || versions.has(operation.version.id) || attachments.has(operation.version.attachment.id)) return false;
+    if (Object.hasOwn(operation, 'observation') && !validObservation(operation.observation, operation, operation.version)) return false;
     versions.add(operation.version.id);
     attachments.add(operation.version.attachment.id);
     return true;

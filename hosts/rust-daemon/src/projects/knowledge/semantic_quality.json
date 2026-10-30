@@ -1,0 +1,21 @@
+{
+  "description": "Synthetic English acceptance labels authored independently of vectors. No private documents. Meaning cases require the expected document ranked first. Keyword baseline is measured separately. This small set is not a production quality estimate.",
+  "documents": [
+    {"id": "termination", "text": "Either party may terminate this agreement without cause upon thirty days written notice. Outstanding invoices remain payable following cancellation."},
+    {"id": "expenses", "text": "Employees receive reimbursement for approved travel expenses after submitting itemized receipts within fourteen days of returning."},
+    {"id": "recovery", "text": "Following service disruption, operators restore the database from the last verified snapshot and replay transaction logs before resuming traffic."},
+    {"id": "identifier", "text": "NIGHTJAR launch uses approval code XR-7319. The separate code XR-7320 belongs to another release."},
+    {"id": "catering", "text": "The catering menu includes seasonal fruit, vegetarian dishes, and chilled drinking water for conference attendees."},
+    {"id": "delivery", "text": "Shipments arrive at the eastern loading dock every Tuesday. Warehouse staff record package weights and carton counts."},
+    {"id": "security", "text": "Visitors must wear badges inside the building. Reception keeps spare badges in a locked cabinet."}
+  ],
+  "meaningCases": [
+    {"query": "How can we back out?", "expected": "termination"},
+    {"query": "How do I get paid back for a work trip?", "expected": "expenses"},
+    {"query": "What gets us running again after an outage?", "expected": "recovery"}
+  ],
+  "keywordCases": [
+    {"query": "NIGHTJAR", "expected": "identifier"},
+    {"query": "XR-7319", "expected": "identifier"}
+  ]
+}

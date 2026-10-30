@@ -10,14 +10,64 @@ const project: Project = { id: 'p', title: 'Research', revision: 4, accessEpoch:
   createdAtMs: 1, updatedAtMs: 1, resourceCount: 1, chatCount: 0 };
 const binding = { projectRevision: 4, accessEpoch: 2, memberGeneration: 3 };
 const hit = { citationId: 'c', resourceId: 'r', documentId: 'd', title: 'Research.pdf', locator: 'Page 8', excerpt: 'Evidence excerpt' };
+const hybrid = { mode: 'hybrid', semanticState: 'ready', provider: 'fastembed', model: 'local-model',
+  indexedWindows: 4, eligibleWindows: 4, omittedWindows: 0 };
 function client() {
   return { knowledgeStatus: vi.fn().mockResolvedValue({ ...binding, sources: [] }),
-    searchKnowledge: vi.fn().mockResolvedValue({ ...binding, sources: [], hits: [hit] }),
+    searchKnowledge: vi.fn().mockResolvedValue({ ...binding, sources: [], hits: [hit], retrieval: hybrid }),
     openKnowledgeCitation: vi.fn().mockResolvedValue({ ...binding, ...hit, text: 'Verified passage' }),
     refreshKnowledge: vi.fn().mockResolvedValue({ ...binding, sources: [] }) };
 }
 describe('project knowledge lifetime', () => {
   afterEach(() => vi.useRealTimers());
+  it('publishes retrieval metadata with accepted passages and clears it before a replacement search', async () => {
+    const api = client(); let resolve!: (value: unknown) => void;
+    const { result } = renderHook(() => useProjectKnowledge('a', project, true, api as unknown as ProjectsClient, vi.fn()));
+    await act(() => result.current.search('evidence'));
+    expect(result.current.retrieval).toEqual(hybrid);
+    api.searchKnowledge.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    let pending!: Promise<void>; act(() => { pending = result.current.search('replacement'); });
+    expect(result.current.retrieval).toBeNull(); expect(result.current.searched).toBe(false);
+    const keyword = { mode: 'keyword', semanticState: 'unavailable', indexedWindows: 0, eligibleWindows: 4,
+      omittedWindows: 4, reason: 'Local meaning search is unavailable.' };
+    await act(async () => { resolve({ ...binding, sources: [], hits: [], retrieval: keyword }); await pending; });
+    expect(result.current.retrieval).toEqual(keyword); expect(result.current.searched).toBe(true);
+  });
+
+  it('cannot restore learned mode from an aborted search after a newer keyword result', async () => {
+    const api = client(); let resolve!: (value: unknown) => void;
+    api.searchKnowledge.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const keyword = { mode: 'keyword', semanticState: 'unavailable', indexedWindows: 0, eligibleWindows: 4, omittedWindows: 4 };
+    api.searchKnowledge.mockResolvedValueOnce({ ...binding, sources: [], hits: [], retrieval: keyword });
+    const { result } = renderHook(() => useProjectKnowledge('a', project, true, api as unknown as ProjectsClient, vi.fn()));
+    let pending!: Promise<void>; act(() => { pending = result.current.search('old'); });
+    await act(() => result.current.search('new'));
+    await act(async () => { resolve({ ...binding, sources: [], hits: [hit], retrieval: hybrid }); await pending; });
+    expect(result.current.retrieval).toEqual(keyword); expect(result.current.hits).toEqual([]);
+  });
+
+  it('does not infer retrieval mode for a daemon response without metadata', async () => {
+    const api = client();
+    api.searchKnowledge.mockResolvedValueOnce({ ...binding, sources: [], hits: [hit] });
+    const { result } = renderHook(() => useProjectKnowledge('a', project, true, api as unknown as ProjectsClient, vi.fn()));
+    await act(() => result.current.search('evidence'));
+    expect(result.current.searched).toBe(true); expect(result.current.retrieval).toBeNull();
+  });
+
+  it.each(['clear', 'blank query', 'failure'] as const)('clears learned mode on %s', async (action) => {
+    const api = client();
+    const { result } = renderHook(() => useProjectKnowledge('a', project, true, api as unknown as ProjectsClient, vi.fn()));
+    await act(() => result.current.search('evidence'));
+    expect(result.current.retrieval).toEqual(hybrid);
+    if (action === 'clear') act(() => result.current.clearSearch());
+    else if (action === 'blank query') await act(() => result.current.search(' '));
+    else {
+      api.searchKnowledge.mockRejectedValueOnce(new Error('Search failed'));
+      await act(() => result.current.search('replacement'));
+    }
+    expect(result.current.retrieval).toBeNull();
+  });
+
   it('clears and aborts a late search when project revision changes', async () => {
     const api = client(); let resolve!: (value: unknown) => void;
     api.searchKnowledge.mockImplementation(() => new Promise((done) => { resolve = done; }));
@@ -28,8 +78,8 @@ describe('project knowledge lifetime', () => {
     const signal = api.searchKnowledge.mock.calls[0][2].signal as AbortSignal;
     rerender({ selected: { ...project, revision: 5 } });
     expect(signal.aborted).toBe(true);
-    await act(async () => { resolve({ ...binding, sources: [], hits: [hit] }); await pending; });
-    expect(result.current.hits).toEqual([]);
+    await act(async () => { resolve({ ...binding, sources: [], hits: [hit], retrieval: hybrid }); await pending; });
+    expect(result.current.hits).toEqual([]); expect(result.current.retrieval).toBeNull();
   });
 
   it.each(['accessEpoch', 'memberGeneration'] as const)('refuses a citation with mismatched %s', async (field) => {
@@ -49,7 +99,7 @@ describe('project knowledge lifetime', () => {
     expect(result.current.hits).toHaveLength(1);
     let pending!: Promise<void>; act(() => { pending = result.current.openCitation('c'); });
     rerender({ selected: null });
-    expect(result.current.hits).toEqual([]); expect(result.current.citation).toBeNull();
+    expect(result.current.hits).toEqual([]); expect(result.current.citation).toBeNull(); expect(result.current.retrieval).toBeNull();
     await act(async () => { resolve({ ...binding, ...hit, text: 'Revoked passage' }); await pending; });
     expect(result.current.citation).toBeNull();
   });
@@ -60,7 +110,7 @@ describe('project knowledge lifetime', () => {
     await act(() => result.current.search('evidence')); await act(() => result.current.openCitation('c'));
     expect(result.current.citation?.text).toBe('Verified passage');
     await act(() => result.current.refresh('r'));
-    expect(result.current.hits).toEqual([]); expect(result.current.citation).toBeNull();
+    expect(result.current.hits).toEqual([]); expect(result.current.citation).toBeNull(); expect(result.current.retrieval).toBeNull();
     expect(api.refreshKnowledge).toHaveBeenCalledWith('p', { asAgentId: 'a', resourceId: 'r' }, { signal: expect.any(AbortSignal) });
   });
 
@@ -80,8 +130,8 @@ describe('project knowledge lifetime', () => {
     const signal = first.searchKnowledge.mock.calls[0][2].signal as AbortSignal;
     rerender({ api: second });
     expect(signal.aborted).toBe(true);
-    await act(async () => { resolve({ ...binding, sources: [], hits: [hit] }); await pending; });
-    expect(result.current.hits).toEqual([]);
+    await act(async () => { resolve({ ...binding, sources: [], hits: [hit], retrieval: hybrid }); await pending; });
+    expect(result.current.hits).toEqual([]); expect(result.current.retrieval).toBeNull();
   });
 
   it('clears results and rechecks project access when a changed citation is refused', async () => {
@@ -95,19 +145,20 @@ describe('project knowledge lifetime', () => {
     expect(invalidate).toHaveBeenCalled();
   });
 
-  it('polls only while indexing and clears evidence when its generation changes', async () => {
+  it.each(['generation', 'unavailable', 'removed'] as const)('clears passages and retrieval mode when a source becomes %s', async (change) => {
     vi.useFakeTimers();
     const api = client(); const source = { resourceId: 'r', status: 'indexing', documentCount: 1, generation: 1, omittedCount: 0, indexedAtMs: null };
     api.knowledgeStatus.mockResolvedValueOnce({ ...binding, sources: [source] })
-      .mockResolvedValue({ ...binding, sources: [{ ...source, status: 'ready', generation: 2 }] });
-    api.searchKnowledge.mockResolvedValue({ ...binding, sources: [source], hits: [hit] });
+      .mockResolvedValue({ ...binding, sources: change === 'removed' ? [] : [{ ...source,
+        status: change === 'unavailable' ? 'unavailable' : 'ready', generation: change === 'generation' ? 2 : 1 }] });
+    api.searchKnowledge.mockResolvedValue({ ...binding, sources: [source], hits: [hit], retrieval: hybrid });
     const { result } = renderHook(() => useProjectKnowledge('a', project, true, api as unknown as ProjectsClient, vi.fn()));
     await act(async () => { await Promise.resolve(); });
     await act(() => result.current.search('evidence'));
-    expect(result.current.hits).toHaveLength(1);
+    expect(result.current.hits).toHaveLength(1); expect(result.current.retrieval).toEqual(hybrid);
     await act(async () => { await vi.advanceTimersByTimeAsync(KNOWLEDGE_POLL_MS); });
     expect(api.knowledgeStatus).toHaveBeenCalledTimes(2);
-    expect(result.current.hits).toEqual([]);
+    expect(result.current.hits).toEqual([]); expect(result.current.retrieval).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(KNOWLEDGE_POLL_MS * 3); });
     expect(api.knowledgeStatus).toHaveBeenCalledTimes(2);
   });

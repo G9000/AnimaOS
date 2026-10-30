@@ -1,3 +1,20 @@
+/** A snapshot of the responding daemon. Configuration is not a provider health probe or a grant. */
+export interface RuntimeCapabilityObservation {
+  instanceId: string;
+  observedAtMs: number;
+  daemonVersion: string;
+  buildRevision?: string | null;
+  images: {
+    ledgerVersion: 1;
+    observationVersion: 1;
+    configuration: {
+      state: 'configured' | 'unconfigured' | 'unknown';
+      reason: string;
+    };
+  };
+  pdfPages: { version: 1 };
+  limits: string;
+}
 /** Registered handlers are not a connection check or an agent permission grant. */
 export interface DaemonCapabilityTool {
   name: string;
@@ -17,6 +34,8 @@ export interface DaemonCapabilityTool {
 
 export interface DaemonCapabilities {
   schemaVersion: 1;
+  /** Missing on older daemons. Do not infer API support from frontend code or health. */
+  runtime?: RuntimeCapabilityObservation;
   /** Owner-selected shared context; membership never transfers agent permissions. */
   projects?: { version: 1; sharedAgents: true; selectedContext: true };
   /** Configuration inventory only; execution still validates interpreter/process custody. */

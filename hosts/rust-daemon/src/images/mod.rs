@@ -1,6 +1,7 @@
 use crate::{attachments::AttachmentRecord, sessions::SessionRecord};
 use serde::{Deserialize, Serialize};
 pub(crate) mod approval;
+pub(crate) mod observation;
 
 pub(crate) const MAX_IMAGE_OPERATIONS: usize = 32;
 pub(crate) const MAX_IMAGE_PROMPT_BYTES: usize = 2048;

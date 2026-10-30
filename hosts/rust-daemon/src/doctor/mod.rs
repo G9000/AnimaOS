@@ -43,6 +43,7 @@ pub(crate) struct DoctorCheck {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DoctorReport {
+    pub(crate) runtime: Option<crate::routes::capabilities::RuntimeCapabilityObservation>,
     pub(crate) checks: Vec<DoctorCheck>,
     pub(crate) external_probes: bool,
 }
@@ -182,6 +183,7 @@ pub(crate) async fn report(state: &SharedDaemonState) -> DoctorReport {
     let start = Instant::now();
     let Ok(g) = tokio::time::timeout(Duration::from_millis(200), state.read()).await else {
         return DoctorReport {
+            runtime: None,
             checks: vec![DoctorCheck {
                 id: "local-state".into(),
                 configured: None,
@@ -193,6 +195,7 @@ pub(crate) async fn report(state: &SharedDaemonState) -> DoctorReport {
             external_probes: false,
         };
     };
+    let runtime = Some(crate::routes::capabilities::runtime_observation(&g));
     let provider_pools = g.provider_keys.configured_provider_count();
     let configured_models = g
         .agents
@@ -349,6 +352,7 @@ pub(crate) async fn report(state: &SharedDaemonState) -> DoctorReport {
         elapsed_ms: then.elapsed().as_millis() as u64,
     });
     DoctorReport {
+        runtime,
         checks,
         external_probes: false,
     }

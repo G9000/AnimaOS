@@ -421,15 +421,58 @@ impl AgentRunCoordinator {
             model: IMAGE_MODEL.into(),
             created_at_ms: now,
         };
-        self.finish_image_locked(
-            &approval,
-            ImageStatus::Succeeded,
-            Some(row),
-            Some(version),
-            usage,
-            publication,
+        let mut result = self
+            .finish_image_locked(
+                &approval,
+                ImageStatus::Succeeded,
+                Some(row),
+                Some(version),
+                usage,
+                publication,
+            )
+            .await?;
+        let operation = {
+            let state = self.state.read().await;
+            authority(&state, &approval).map_err(|_| UNCERTAIN)?;
+            state
+                .sessions
+                .get(&w.run.agent_id, &w.run.session_id)
+                .and_then(|session| {
+                    session
+                        .image_operations
+                        .iter()
+                        .find(|operation| operation.id == id)
+                })
+                .cloned()
+                .ok_or(UNCERTAIN)?
+        };
+        let observation = crate::images::observation::observe_saved_images(
+            Some(w.workspace.clone()),
+            std::slice::from_ref(&operation),
         )
         .await
+        .pop()
+        .flatten();
+        let state = self.state.read().await;
+        authority(&state, &approval).map_err(|_| UNCERTAIN)?;
+        if cancel.is_cancelled()
+            || !state
+                .sessions
+                .get(&w.run.agent_id, &w.run.session_id)
+                .is_some_and(|session| {
+                    session
+                        .image_operations
+                        .iter()
+                        .any(|current| current == &operation)
+                })
+        {
+            return Err(UNCERTAIN.into());
+        }
+        if let Some(observation) = observation {
+            result["observation"] =
+                serde_json::to_value(observation).expect("host image observation serializes");
+        }
+        Ok(result)
     }
 
     async fn start_image(&self, approval: &ImageOwnerApproval, key_id: &str) -> Result<(), String> {

@@ -199,3 +199,23 @@ it('renders mixed implementation status and searchable browser and document grou
   ).toHaveTextContent('read_document');
   expect(screen.queryByText('browser_observe')).not.toBeInTheDocument();
 });
+
+it('reports an older backend as unadvertised without treating code checks as deployment proof', async () => {
+  vi.mocked(daemon.capabilities).mockResolvedValue(inventory);
+  render(<WorkspaceCapabilities online />);
+  expect(await screen.findByText(/does not advertise image history or PDF page preview support/i)).toBeVisible();
+  expect(screen.getByText(/code checks do not confirm features in the running backend/i)).toBeVisible();
+});
+
+it('separates instance support and configuration from observed outcomes', async () => {
+  vi.mocked(daemon.capabilities).mockResolvedValue({ ...inventory, runtime: {
+    instanceId: 'instance-one', observedAtMs: 100, daemonVersion: '0.1.0',
+    images: { ledgerVersion: 1, observationVersion: 1, configuration: { state: 'unconfigured', reason: 'Durable image storage is not configured.' } },
+    pdfPages: { version: 1 }, limits: 'Configuration does not prove provider health or completed outcomes.',
+  } });
+  render(<WorkspaceCapabilities online />);
+  expect(await screen.findByText(/instance-one/)).toBeVisible();
+  expect(screen.getByText(/Image history API supported/)).toBeVisible();
+  expect(screen.getByText(/Durable image storage is not configured/)).toBeVisible();
+  expect(screen.getByText(/Configuration does not prove provider health/)).toBeVisible();
+});
