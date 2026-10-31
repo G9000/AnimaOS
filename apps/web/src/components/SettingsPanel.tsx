@@ -85,7 +85,7 @@ function groupToolNames(
       BUILT_IN_TOOL_GROUPS.find((group) =>
         (group.tools as readonly string[]).includes(name),
       )?.label ??
-      (/^mcp_/.test(name) ? 'Connected tools' : 'Other');
+      (name.startsWith('mcp_') ? 'Connected tools' : 'Other');
     groups.set(label, [...(groups.get(label) ?? []), name]);
   }
   const order = [
