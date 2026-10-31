@@ -1471,7 +1471,7 @@
     --settings-content-max: none;
   }
 
-  .settings-window .settings-form:not(.approvals-page .settings-form):not(:has(.settings-profile-editor-view)),
+  .settings-window .settings-form:not(.approvals-page .settings-form):not(:has(.settings-profile-editor-view)):not(.settings-model-page),
   .settings-window .approvals-page,
   .settings-window .skills-page {
     display: block;
@@ -1584,4 +1584,51 @@
 
 .sk-section-text {
   flex: 1 1 260px;
+}
+
+
+/* ── Model: two set columns rather than free-flowing sections ── */
+.settings-model-columns,
+.settings-model-column {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .settings-model-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 28px 32px;
+  }
+
+  .settings-window .settings-model-page
+    :is(.sk-section, .settings-group):not(:is(.sk-section, .settings-group) *) {
+    padding: 16px 18px 6px;
+    border: 1px solid var(--sk-hairline);
+    border-radius: 4px;
+    background: rgb(236 230 218 / 0.025);
+  }
+
+  .settings-window .settings-model-page :is(.sk-section, .settings-group) .sk-card {
+    border-bottom: 0;
+  }
+
+  /* Helpers and Routes are one fieldset: keep them as two panels with the
+   * column's own rhythm. */
+  .settings-window .settings-model-page .sk-fieldset > * + * {
+    margin-top: 28px;
+  }
+
+  .settings-window .settings-model-page .sk-fieldset > .model-actions {
+    margin-top: 12px;
+  }
+}
+
+/* A fieldset's hidden legend is not a section: the first one sits flush. */
+.settings-window .sk-fieldset > legend + *,
+.settings-window .settings-form .sk-fieldset > legend + * {
+  margin-top: 0;
 }

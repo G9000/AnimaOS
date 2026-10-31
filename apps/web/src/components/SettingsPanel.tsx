@@ -1231,7 +1231,10 @@ export function SettingsPanel({
       )}
 
       {shows('model') && (
-        <>
+        // Two columns on wide screens: what it thinks with on the left,
+        // helpers and keys on the right.
+        <div className="settings-model-columns">
+        <div className="settings-model-column">
         <SettingsSection
           id="settings-model"
           title="Main model"
@@ -1378,6 +1381,9 @@ export function SettingsPanel({
             disabled={controlsDisabled}
             save={(fallbacks) => saveSettings({ fallbacks })}
           />
+          <SideModel providers={providers} disabled={controlsDisabled} />
+        </div>
+        <div className="settings-model-column">
           <DelegationSettings
             key={'delegation:' + agent.id}
             primary={{ provider: agent.provider, model: agent.model }}
@@ -1386,18 +1392,13 @@ export function SettingsPanel({
             disabled={controlsDisabled}
             save={(delegation) => saveSettings({ settings: { delegation } })}
           />
-        </>
-      )}
-
-      {shows('model') && (
-        <>
           <ProviderKeys
             providers={providers}
             onChanged={refreshProviders}
             disabled={controlsDisabled}
           />
-          <SideModel providers={providers} disabled={controlsDisabled} />
-        </>
+        </div>
+        </div>
       )}
 
       {(shows('access') || shows('builtins')) && (
