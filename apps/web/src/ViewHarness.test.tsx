@@ -74,6 +74,12 @@ import {
 import { ViewHarness } from './ViewHarness';
 import { registerAttachmentJourneys } from './test/view-harness-attachments';
 
+/** The custom tools Permissions shows as chips, in name order. */
+const shownTools = () =>
+  [...document.querySelectorAll('.access-tool-chip')]
+    .map((chip) => chip.textContent ?? '')
+    .sort();
+
 // The controller journeys exercise the real child panel against an offline preview.
 // Error and stale-response behavior is covered in AgentFilesPanel.test.tsx.
 beforeEach(() => {
@@ -3772,7 +3778,7 @@ it('M45 reconciles acknowledged bundle removal permissions without overwriting n
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(screen.getByText('Show the tools'));
-  expect(screen.getByText('read_file, unknown_custom')).toBeVisible();
+  expect(shownTools()).toEqual(['read_file', 'unknown_custom'].sort());
   expect(communityBundlesOwnerApi.remove).toHaveBeenCalledTimes(1);
 });
 
@@ -3929,13 +3935,9 @@ it('M43 reconciles canonical grant descriptors without overwriting newer setting
   );
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(screen.getByText('Show the tools'));
-  expect(
-    screen.getByText(
-      ['read_file', 'unknown_custom', external.reviewedTools[0].alias].join(
-        ', ',
-      ),
-    ),
-  ).toBeVisible();
+  expect(shownTools()).toEqual(
+    ['read_file', 'unknown_custom', external.reviewedTools[0].alias].sort(),
+  );
 });
 
 it('M43 reconciles deleted aliases while preserving actual native and unrelated dormant descriptors', async () => {
@@ -3983,14 +3985,10 @@ it('M43 reconciles deleted aliases while preserving actual native and unrelated 
   await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(screen.getByText('Show the tools'));
-  expect(
-    screen.getByText(['read_file', dormant, 'unknown_custom'].join(', ')),
-  ).toBeVisible();
-  expect(
-    screen.queryByText(
-      initial.state.config.tools!.map((tool) => tool.name).join(', '),
-    ),
-  ).not.toBeInTheDocument();
+  expect(shownTools()).toEqual(['read_file', dormant, 'unknown_custom'].sort());
+  expect(shownTools()).not.toEqual(
+    initial.state.config.tools!.map((tool) => tool.name).sort(),
+  );
 });
 
 it('M43 uncertainty survives Chat and Connectors navigation until explicit read-only refresh enables Settings save', async () => {
@@ -4052,11 +4050,9 @@ it('M43 uncertainty survives Chat and Connectors navigation until explicit read-
   await openSettings(user);
   await user.click(screen.getByRole('button', { name: 'Permissions' }));
   await user.click(screen.getByText('Show the tools'));
-  expect(
-    screen.getByText(
-      canonical.state.config.tools!.map((tool) => tool.name).join(', '),
-    ),
-  ).toBeVisible();
+  expect(shownTools()).toEqual(
+    canonical.state.config.tools!.map((tool) => tool.name).sort(),
+  );
   await user.click(screen.getByRole('button', { name: 'Profile' }));
   await user.click(
     within(screen.getByRole('region', { name: 'Identity' })).getByRole(

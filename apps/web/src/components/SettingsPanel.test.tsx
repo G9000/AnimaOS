@@ -23,6 +23,12 @@ import {
 import type { AgentDetail } from '../lib/types';
 import { SettingsPanel, type SettingsSection } from './SettingsPanel';
 
+/** The custom tools Permissions shows as chips, in name order. */
+const shownTools = () =>
+  [...document.querySelectorAll('.access-tool-chip')]
+    .map((chip) => chip.textContent ?? '')
+    .sort();
+
 // Preview transport/lifecycle are covered by AgentFilesPanel.test.tsx. Keep
 // settings focus and save tests independent of an owner network request.
 vi.mock('./AgentFilesPanel', () => ({
@@ -1366,12 +1372,12 @@ describe('SettingsPanel access', () => {
 
     expect(screen.getByText('Custom access')).toBeVisible();
     expect(
-      screen.getByText(/Choose a profile below to replace them when you save/),
+      screen.getByText(/Choose a level below to replace them when you save/),
     ).toBeVisible();
     expect(screen.getByText('5 tools configured')).toBeVisible();
     // The tools themselves stay folded until asked for.
     fireEvent.click(screen.getByText('Show the tools'));
-    expect(screen.getByText(customTools.join(', '))).toBeVisible();
+    expect(shownTools()).toEqual([...customTools].sort());
     expect(
       screen.getByRole('checkbox', { name: 'Allow removing saved facts' }),
     ).toBeChecked();

@@ -62,16 +62,41 @@ const ACCESS_PROFILE_COPY: Record<
   collaborate: {
     label: 'Edit files',
     summary: 'Reads and edits files. Never runs commands.',
-    kicker: 'RECOMMENDED',
+    kicker: 'Recommended',
   },
   operate: {
     label: 'Run commands',
     summary: 'Edits files, runs commands, uses apps and searches the web.',
-    kicker: 'RULES STILL APPLY',
+    kicker: 'Rules still apply',
   },
 };
 
 const OWNER_NAME_LINE = /^The owner's name is (.+)\.$/m;
+
+/** A custom tool list, grouped by what the tools are for (the built-in
+ *  groups), with connected and unknown tools after. Order within a group is
+ *  the agent's own. */
+function groupToolNames(
+  names: readonly string[],
+): { label: string; tools: string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const name of names) {
+    const label =
+      BUILT_IN_TOOL_GROUPS.find((group) =>
+        (group.tools as readonly string[]).includes(name),
+      )?.label ??
+      (/^mcp_/.test(name) ? 'Connected tools' : 'Other');
+    groups.set(label, [...(groups.get(label) ?? []), name]);
+  }
+  const order = [
+    ...BUILT_IN_TOOL_GROUPS.map((group) => group.label),
+    'Connected tools',
+    'Other',
+  ];
+  return [...groups]
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([label, tools]) => ({ label, tools }));
+}
 
 function ownerNameFromSystem(system: string | null | undefined): string {
   return system?.match(OWNER_NAME_LINE)?.[1]?.trim() ?? '';
@@ -1405,11 +1430,11 @@ export function SettingsPanel({
         <SettingsSection
           id="settings-access"
           className="settings-access-section"
-          title={shows('builtins') ? 'Built-in tools' : 'Default access'}
+          title={shows('builtins') ? 'Built-in tools' : 'Access level'}
           description={
             shows('builtins')
               ? 'Turn built-in tools on or off for this agent. Permission rules still decide when an action asks first.'
-              : `Applies to ${agent.name} and every helper it brings in.`
+              : `Which tools ${agent.name} and its helpers have at all. The rules decide when it still asks you first.`
           }
         >
           {shows('builtins') &&
@@ -1434,16 +1459,39 @@ export function SettingsPanel({
                       description={
                         <>
                           <span>{agent.toolNames.length} tools configured</span>{' '}
-                          · picked one by one. Choose a profile below to
-                          replace them when you save.
+                          · picked one by one rather than by a level. Choose a
+                          level below to replace them when you save.
                         </>
                       }
                     >
                       <details className="sk-disclosure">
                         <summary>Show the tools</summary>
-                        <p className="sk-mono-list">
-                          {agent.toolNames.join(', ') || 'No tools configured'}
-                        </p>
+                        {agent.toolNames.length === 0 ? (
+                          <p className="sk-note">No tools configured</p>
+                        ) : (
+                          <div className="access-tool-groups">
+                            {groupToolNames(agent.toolNames).map((group) => (
+                              <div key={group.label} className="access-tool-group">
+                                <span className="access-tool-group-label">
+                                  {group.label}
+                                </span>
+                                <ul
+                                  className="access-tool-chips"
+                                  aria-label={group.label}
+                                >
+                                  {group.tools.map((name, index) => (
+                                    <li
+                                      key={`${name}-${index}`}
+                                      className="access-tool-chip"
+                                    >
+                                      {name}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </details>
                     </SettingsRow>
                   )}

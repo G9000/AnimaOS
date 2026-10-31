@@ -1771,3 +1771,49 @@
 :root[data-appearance-theme='light'] .sk-card > .sk-nav:hover {
   background: rgb(26 26 24 / 0.04);
 }
+
+/* Permissions · custom tools as chips, grouped by what they are for. */
+.access-tool-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.access-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.access-tool-group-label {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.access-tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-tool-chip {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgb(236 230 218 / 0.07);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--color-ink-2, var(--color-ink));
+}
+
+:root[data-appearance-theme='light'] .access-tool-chip {
+  background: rgb(26 26 24 / 0.06);
+}
+
+.sk-badge {
+  letter-spacing: 0;
+  text-transform: none;
+}
