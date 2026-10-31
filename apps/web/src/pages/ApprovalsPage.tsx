@@ -445,7 +445,17 @@ export function ApprovalsPage({
             className="approvals-back"
             onClick={() => setSection('overview')}
           >
-            <span aria-hidden="true">←</span> Permissions
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M10 3.5 5.5 8l4.5 4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Permissions
           </button>
           {section === 'autonomy' ? (
             <AutonomyCard
