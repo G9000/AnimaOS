@@ -151,7 +151,9 @@ function ClassRules({
       )}
       {tool && matcherKind && (
         <details className="sk-disclosure approvals-add-rule-details">
-          <summary>Add rule · {label}</summary>
+          <summary>
+            Add rule<span className="sr-only"> for {label}</span>
+          </summary>
           <form
             className="approvals-add-rule"
             aria-label={`Add a rule for ${label}`}

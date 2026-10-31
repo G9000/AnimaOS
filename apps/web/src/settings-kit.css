@@ -1380,3 +1380,76 @@
   font-size: 13px;
   font-weight: 400;
 }
+
+/* ── Permissions: one width, tight rhythm, nothing pressed to an edge ── */
+.settings-window .approvals-page {
+  gap: 28px;
+  padding: 24px 32px 32px;
+}
+
+.settings-window .approvals-page > * {
+  width: 100%;
+  max-width: 820px;
+}
+
+.settings-window .approvals-page .settings-form {
+  padding: 0;
+}
+
+/* Profile choices: compact rows, the badge on the right. */
+.settings-window .settings-access-options > .sk-row {
+  padding: 9px 0;
+}
+
+.settings-window .settings-access-options .sk-row-desc {
+  font-size: 12px;
+}
+
+/* One kind of action per row: name and scope, the decision on the right,
+ * its own rules and a small Add rule link underneath. */
+.settings-window .approvals-class {
+  gap: 4px;
+  padding: 10px 0;
+}
+
+.settings-window .approvals-class .sk-segmented > button {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.settings-window .approvals-add-rule-details {
+  gap: 8px;
+}
+
+.settings-window .approvals-add-rule-details > summary {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.settings-window .approvals-add-rule-details > summary::before {
+  content: '+';
+  width: auto;
+  height: auto;
+  border: 0;
+  transform: none;
+}
+
+.settings-window .approvals-add-rule-details[open] > summary::before {
+  content: '−';
+  transform: none;
+}
+
+.settings-window .approvals-rule-list {
+  margin-top: 4px;
+}
+
+.settings-window .approvals-shortcuts > .sk-nav {
+  padding: 10px 0;
+}
+
+/* An empty save row adds no gap of its own. */
+.settings-window .settings-form > .settings-save:empty,
+.settings-window .settings-form > .settings-save:not(:has(:not([data-idle]))) {
+  display: none;
+}

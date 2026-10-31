@@ -124,19 +124,6 @@
 .approvals-cards .approval-card {
   max-width: 100%;
 }
-.approvals-class {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--color-line);
-  border-radius: 2px;
-  padding: 12px;
-}
-.approvals-class h3 {
-  color: var(--color-ink-2);
-  font-size: 13px;
-  font-weight: 600;
-}
 .approvals-policy {
   display: flex;
   flex-wrap: wrap;

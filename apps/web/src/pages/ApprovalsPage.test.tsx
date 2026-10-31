@@ -14,6 +14,13 @@ import { approvalFixture } from '../test/live';
 import { sessionFixture } from '../test/sessions';
 import { ApprovalsPage } from './ApprovalsPage';
 
+/** The Add rule link under one kind of action ("Add rule for …" to
+ *  screen readers). */
+const addRuleFor =
+  (label: string) => (_: string, element: Element | null) =>
+    element?.tagName === 'SUMMARY' &&
+    element.textContent === `Add rule for ${label}`;
+
 const gitRule: ApprovalRule = {
   id: 'rule_1',
   agentId: 'agent-main',
@@ -350,7 +357,7 @@ describe('ApprovalsPage', () => {
     expect(
       within(rules).getByText('bash commands starting with “git status”'),
     ).toBeVisible();
-    await user.click(within(rules).getByText('Add rule · Runs commands'));
+    await user.click(within(rules).getByText(addRuleFor('Runs commands')));
     const form = within(rules).getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
@@ -403,7 +410,7 @@ describe('ApprovalsPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByText('Add rule · Runs commands'));
+    await user.click(await screen.findByText(addRuleFor('Runs commands')));
     const form = screen.getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
