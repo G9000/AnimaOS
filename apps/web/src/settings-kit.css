@@ -1817,3 +1817,69 @@
   letter-spacing: 0;
   text-transform: none;
 }
+
+/* ── Choice rows (Access level): an inset, rounded hover like the nav
+ * rows, and a radio that matches the rest of the kit. ── */
+.settings-window .sk-card > .sk-choice,
+.settings-window .settings-access-options > .sk-choice {
+  width: calc(100% + 20px);
+  margin: 0 -10px;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.settings-window .sk-card > .sk-choice + .sk-choice {
+  border-top: 0;
+}
+
+.settings-window .sk-choice:hover {
+  background: rgb(236 230 218 / 0.045);
+}
+
+.settings-window .sk-choice.is-selected,
+.settings-window .sk-choice:has(input:checked) {
+  background: rgb(var(--color-accent-rgb) / 0.08);
+}
+
+.sk-choice input[type='radio'] {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  appearance: none;
+  border: 1.5px solid rgb(236 230 218 / 0.35);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sk-choice input[type='radio']::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  content: '';
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+
+.sk-choice input[type='radio']:checked {
+  border-color: var(--color-accent);
+}
+
+.sk-choice input[type='radio']:checked::after {
+  transform: scale(1);
+}
+
+.sk-choice input[type='radio']:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+:root[data-appearance-theme='light'] .sk-choice input[type='radio'] {
+  border-color: rgb(26 26 24 / 0.35);
+}
+
+:root[data-appearance-theme='light'] .settings-window .sk-choice:hover {
+  background: rgb(26 26 24 / 0.04);
+}
