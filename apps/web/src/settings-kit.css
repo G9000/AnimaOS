@@ -1444,9 +1444,7 @@
   margin-top: 4px;
 }
 
-.settings-window .approvals-shortcuts > .sk-nav {
-  padding: 10px 0;
-}
+
 
 /* An empty save row adds no gap of its own. */
 .settings-window .settings-form > .settings-save:empty,
@@ -1662,4 +1660,114 @@
 
 .approvals-history-more {
   align-self: flex-start;
+}
+
+/* ── Segmented choice, quieter: a soft track, the chosen option a filled
+ * pill. No borders inside borders. ── */
+.sk-segmented {
+  gap: 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(236 230 218 / 0.06);
+}
+
+.sk-segmented > button,
+.settings-window .approvals-class .sk-segmented > button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.sk-segmented > button[aria-pressed='true'] {
+  background: rgb(236 230 218 / 0.13);
+  box-shadow: none;
+  color: var(--color-ink);
+}
+
+.sk-segmented > button[aria-pressed='true'][data-tone='allow'] {
+  color: #9fd8a8;
+}
+
+.sk-segmented > button[aria-pressed='true'][data-tone='deny'] {
+  color: #ff8a7a;
+}
+
+:root[data-appearance-theme='light'] .sk-segmented {
+  background: rgb(26 26 24 / 0.06);
+}
+
+:root[data-appearance-theme='light'] .sk-segmented > button[aria-pressed='true'] {
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+/* The exception + is a quiet icon, clearer when its row is hovered. */
+.approvals-add-exception {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 15px;
+  color: var(--color-ink-3);
+  opacity: 0.55;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease;
+}
+
+.approvals-class:hover .approvals-add-exception,
+.approvals-add-exception:focus-visible,
+.approvals-add-exception[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.approvals-add-exception:hover,
+.approvals-add-exception[aria-expanded='true'] {
+  background: rgb(236 230 218 / 0.08);
+  color: var(--color-ink);
+}
+
+/* ── Rows that open another page: an inset hover, a small chevron ── */
+.sk-card > .sk-nav,
+.settings-window .sk-card > .sk-nav {
+  width: calc(100% + 20px);
+  margin: 0 -10px;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.sk-card > .sk-nav:hover {
+  background: rgb(236 230 218 / 0.045);
+}
+
+.sk-card > .sk-nav + .sk-nav {
+  border-top: 0;
+}
+
+.sk-card > .sk-nav > span[aria-hidden='true'] {
+  font-size: 0;
+}
+
+.sk-card > .sk-nav > span[aria-hidden='true']::after {
+  content: '›';
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-ink-3);
+  transition: transform 120ms ease;
+  display: inline-block;
+}
+
+.sk-card > .sk-nav:hover > span[aria-hidden='true']::after {
+  color: var(--color-ink);
+  transform: translateX(2px);
+}
+
+:root[data-appearance-theme='light'] .sk-card > .sk-nav:hover {
+  background: rgb(26 26 24 / 0.04);
 }
