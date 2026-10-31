@@ -454,11 +454,7 @@ export function ApprovalsPage({
               onModeChanged={() => setPresetRevision((value) => value + 1)}
             />
           ) : (
-            <>
-              <h2 className="approvals-detail-title">Keys for coding apps</h2>
-              {access}
-              <CodingKeys agentId={agentId} />
-            </>
+            <CodingKeys agentId={agentId} />
           )}
         </>
       )}

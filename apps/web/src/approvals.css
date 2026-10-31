@@ -151,12 +151,6 @@
   color: var(--color-ink-2);
   font-size: 12px;
 }
-.approvals-detail-title {
-  margin: -8px 0 0;
-  color: var(--color-ink);
-  font-size: 18px;
-  font-weight: 500;
-}
 .nav-badge,
 .session-approval-badge {
   min-width: 18px;
@@ -171,70 +165,6 @@
 }
 .nav-badge {
   margin-left: auto;
-}
-.coding-keys {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: rgb(255 255 255 / 0.02);
-}
-.coding-key {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 4px 12px;
-  padding: 9px 14px;
-  font-size: 13px;
-}
-.coding-key + .coding-key {
-  border-top: 1px solid rgb(255 255 255 / 0.06);
-}
-.coding-key-icon {
-  color: var(--color-ink-3);
-  font-size: 13px;
-}
-.coding-key-label {
-  color: var(--color-ink);
-}
-.coding-key-name {
-  grid-column: 2;
-  grid-row: 2;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  overflow-wrap: anywhere;
-}
-.coding-key-state {
-  grid-column: 3;
-  grid-row: 1 / span 2;
-  color: var(--color-ink-3);
-  font-size: 12px;
-}
-.coding-key > [role='switch'] {
-  grid-column: 4;
-  grid-row: 1 / span 2;
-}
-@media (min-width: 720px) {
-  .coding-key {
-    grid-template-columns: 16px minmax(0, 14rem) minmax(0, 1fr) auto auto;
-  }
-  .coding-key-name {
-    grid-column: 3;
-    grid-row: 1;
-  }
-  .coding-key-state {
-    grid-column: 4;
-    grid-row: 1;
-  }
-  .coding-key > [role='switch'] {
-    grid-column: 5;
-    grid-row: 1;
-  }
-}
-.coding-keys-note {
-  margin: 0;
 }
 /* Autonomy (spec 2026-10-19): Free / Strict / Custom, the smart check and
  * the floor. */

@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 
 import { daemon, type CodingKey } from '../../lib/daemon-api';
 import { Switch } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from '../settings/SettingsKit';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 function errorText(caught: unknown): string {
@@ -61,45 +67,51 @@ export function CodingKeys({ agentId }: { agentId: string }) {
   };
 
   return (
-    <section className="approvals-section" aria-labelledby="coding-keys">
-      <h2 id="coding-keys">Keys for coding apps</h2>
-      <p className="approvals-help">
-        Coding apps normally use their own sign-in. Turn a key on to hand it to
-        apps anima starts for this agent. anima never sees the value.
-      </p>
+    <SettingsSection
+      id="coding-keys"
+      title="Keys for coding apps"
+      description="Coding apps normally use their own sign-in. Turn a key on to hand it to the apps anima starts for this agent. anima never sees the value."
+    >
       {error && (
         <p className="approvals-error" role="alert">
           {error}
         </p>
       )}
       {keys === null ? (
-        !error && <p className="approvals-empty">Reading keys…</p>
+        !error && (
+          <SettingsCard>
+            <SettingsEmpty>Reading keys…</SettingsEmpty>
+          </SettingsCard>
+        )
       ) : (
-        <ul className="coding-keys" aria-label="Keys for coding apps">
+        <SettingsCard as="ul" label="Keys for coding apps">
           {keys.map((key) => (
-            <li key={key.name} className="coding-key">
-              <span className="coding-key-icon" aria-hidden="true">
-                ⚿
-              </span>
-              <span className="coding-key-label">{key.label}</span>
-              <code className="coding-key-name">{key.name}</code>
-              <span className="coding-key-state">
-                {key.saved ? 'Saved' : 'Not saved'}
-              </span>
-              <Switch
-                checked={key.enabled}
-                disabled={!key.saved || saving}
-                label={`Hand ${key.label} to coding apps`}
-                onChange={(on) => void toggle(key.name, on)}
-              />
-            </li>
+            <SettingsRow
+              as="li"
+              key={key.name}
+              title={key.label}
+              description={<code className="coding-key-name">{key.name}</code>}
+              control={
+                <>
+                  <span className="sk-meta">
+                    {key.saved ? 'Saved' : 'Not saved'}
+                  </span>
+                  <Switch
+                    checked={key.enabled}
+                    disabled={!key.saved || saving}
+                    label={`Hand ${key.label} to coding apps`}
+                    onChange={(on) => void toggle(key.name, on)}
+                  />
+                </>
+              }
+            />
           ))}
-        </ul>
+        </SettingsCard>
       )}
-      <p className="approvals-help coding-keys-note">
-        <span aria-hidden="true">↳</span> Keys come from Settings › Model. A key
-        that isn't saved can't be turned on.
+      <p className="sk-meta coding-keys-note">
+        Keys come from Settings › Model. A key that isn't saved can't be turned
+        on.
       </p>
-    </section>
+    </SettingsSection>
   );
 }
