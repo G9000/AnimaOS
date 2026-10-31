@@ -1552,6 +1552,9 @@
     border: 1px solid var(--sk-hairline);
     border-radius: 4px;
     background: rgb(236 230 218 / 0.025);
+    /* A panel that continues into the next column keeps its frame there. */
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
 
   :root[data-appearance-theme='light']
@@ -1571,4 +1574,14 @@
   .settings-window .approvals-page > .approvals-history-details {
     padding-bottom: 14px;
   }
+}
+
+/* A section's actions move under its description when the column is too
+ * narrow for both. */
+.sk-section-head {
+  flex-wrap: wrap;
+}
+
+.sk-section-text {
+  flex: 1 1 260px;
 }
