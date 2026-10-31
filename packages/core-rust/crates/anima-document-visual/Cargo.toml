@@ -15,9 +15,16 @@ png = "0.18.1"
 pdf-extract = { version = "=0.12.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
+serde_json = "1"
+rawzip = { version = "=0.5.2", default-features = false, features = ["std"] }
+quick-xml = { version = "=0.41.0", default-features = false }
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Data_Pdf", "Foundation", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 
 [dev-dependencies]
-serde_json = "1"
+tempfile = "=3.27.0"
+
+[target.'cfg(windows)'.dev-dependencies]
+win-custody = "=0.1.1"

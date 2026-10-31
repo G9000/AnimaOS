@@ -14,7 +14,7 @@ pub(crate) mod command_binding;
 pub(crate) mod completion;
 pub(crate) mod connected_search;
 mod conversations;
-mod credential_paths;
+pub(crate) mod credential_paths;
 mod discord;
 mod doctor;
 mod document_edits;
@@ -168,6 +168,7 @@ pub(crate) struct ToolExecutionContext {
     /// tool calls, which have no session or owner to ask.
     pub(super) approvals: Option<crate::approvals::ApprovalGate>,
     action_journal: Option<crate::agent_runs::action_receipts::RunActionJournal>,
+    outcome_write: Option<crate::outcomes::OutcomeWriteWitness>,
     profile_owner: Option<crate::profile_owner::ProfileOwner>,
     execution_budget: Option<anima_core::execution_limits::ExecutionContext>,
     budget_reserved_by_core: bool,
@@ -288,6 +289,7 @@ impl ToolExecutionContext {
             cancel: None,
             approvals: None,
             action_journal: None,
+            outcome_write: None,
             profile_owner: None,
             execution_budget: None,
             budget_reserved_by_core: false,
@@ -1062,6 +1064,25 @@ impl ToolExecutionContext {
         }
         self.action_approved = approved;
         self.protected_write = protected;
+        if let Some(journal) = &journal {
+            self.outcome_write = match journal.outcome_write_witness(&tool_call) {
+                Ok(witness) => witness,
+                Err(error) => {
+                    let refused = TaskResult::error(error, 0);
+                    if let Err(error) = journal.finish(&tool_call, &refused, 0).await {
+                        return TaskResult::error(error, 0);
+                    }
+                    return refused;
+                }
+            };
+            if self.outcome_write.is_some() && self.checkpoint_root.is_none() {
+                let refused = TaskResult::error("Outcome repair requires native atomic checkpoint custody; owner review is needed",0);
+                if let Err(error) = journal.finish(&tool_call, &refused, 0).await {
+                    return TaskResult::error(error, 0);
+                }
+                return refused;
+            }
+        }
         let project_lease = self.project_lease.clone();
         handler_started.store(true, Ordering::Release);
         let mut result = handler(self, agent, user_message, tool_call).await;
@@ -1148,6 +1169,12 @@ impl ToolExecutionContext {
     ) -> Result<(), TaskResult<Content>> {
         self.verify_profile_owner().await?;
         self.check_preview_tool(tool_call).await?;
+        if let (Some(coordinator), Some(run)) = (&self.team, &self.run_link) {
+            coordinator
+                .check_outcome_tool(run, self.workspace_root.as_deref(), tool_call)
+                .await
+                .map_err(|error| TaskResult::error(error, 0))?;
+        }
         if let Some(lease) = &self.project_lease {
             lease
                 .check()

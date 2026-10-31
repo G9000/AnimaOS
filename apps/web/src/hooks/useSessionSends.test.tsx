@@ -58,6 +58,43 @@ describe('isRetryableSendError', () => {
 });
 
 describe('useSessionSends', () => {
+  it('offers an outcome send for reload recovery with its exact scope and criteria, without dispatch', () => {
+    const outcome = { criteria: [{ id: 'result', kind: 'file_text', path: 'reports/summary.txt', contains: 'Ready' }], maxCorrections: 1, acceptance: 'owner_required' };
+    sessionStorage.setItem('animaos.pendingSends', JSON.stringify([{ key: 'outcome', text: 'Prepare it', conversation: 'agent-main\u0000session:chat:1', createdAtMs: 1, agentId: 'agent-main', sessionId: 'chat:1', outcome }]));
+    const onRestore = vi.fn();
+    const startRun = vi.spyOn(daemon, 'startRun');
+    renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn(), onRestore }));
+    expect(onRestore).toHaveBeenCalledWith(expect.objectContaining({ key: 'outcome', outcome, agentId: 'agent-main', sessionId: 'chat:1' }));
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed or foreign recovered criteria and never attaches criteria to a steer', async () => {
+    const base = { key: 'outcome', text: 'Prepare it', conversation: 'agent-main\u0000session:chat:1', createdAtMs: 1, agentId: 'agent-main', sessionId: 'chat:1' };
+    const outcome = { criteria: [{ id: 'result', kind: 'response_text' as const, contains: 'Ready' }] };
+    sessionStorage.setItem('animaos.pendingSends', JSON.stringify([{ ...base, outcome: { criteria: [] } }, { ...base, sessionId: 'foreign', outcome }]));
+    const onRestore = vi.fn();
+    const onFailed = vi.fn();
+    const startRun = vi.spyOn(daemon, 'startRun');
+    const { result } = renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed, onRestore }));
+    expect(onRestore).not.toHaveBeenCalled();
+    await act(async () => result.current.send({ ...message('steer-outcome'), mode: 'steer', outcome }));
+    expect(startRun).not.toHaveBeenCalled();
+    expect(onFailed).toHaveBeenCalledTimes(1);
+  });
+  it('retains exact criteria through same-key transport retries', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const startRun = vi.spyOn(daemon, 'startRun').mockRejectedValue(new DaemonConnectionError('', new Error('down')));
+    const { result } = renderHook(() => useSessionSends({ onAccepted: vi.fn(), onFailed: vi.fn() }));
+    const outcome = { criteria: [{ id: 'result', kind: 'response_text' as const, contains: 'Ready' }], maxCorrections: 1 };
+    await act(async () => result.current.send({ ...message('outcome-key'), outcome }));
+    outcome.criteria[0].contains = 'Changed after send';
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(startRun.mock.calls.map(([, , input, key]) => [input.outcome, key])).toEqual([
+      [{ criteria: [{ id: 'result', kind: 'response_text', contains: 'Ready' }], maxCorrections: 1 }, 'outcome-key'],
+      [{ criteria: [{ id: 'result', kind: 'response_text', contains: 'Ready' }], maxCorrections: 1 }, 'outcome-key'],
+    ]);
+    expect(JSON.parse(sessionStorage.getItem('animaos.pendingSends')!)[0].outcome).toEqual({ criteria: [{ id: 'result', kind: 'response_text', contains: 'Ready' }], maxCorrections: 1 });
+  });
   it('retains exact edit context and owner scope through same-key retries and reload recovery', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const startRun = vi.spyOn(daemon, 'startRun').mockRejectedValue(new DaemonConnectionError('', new Error('down')));

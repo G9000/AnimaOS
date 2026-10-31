@@ -3,6 +3,8 @@ export { AgentFilesClient } from './agent-files.js';
 export type { AgentPersonality, SaveAgentPersonality } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { ImagesClient } from './images.js';
+export { DocumentInspectionsClient } from './document-inspections.js';
+export type { ArtifactInspectionReport, InspectionSubject, InspectionEnvelope, InspectionPageRef, InspectionRenderedPage, RasterInk } from './document-inspections.js';
 export type { ImageVersion, ImageOperation, ImageObservation, SessionImages } from './images.js';
 export { VoiceClient } from './voice.js';
 export { SpeechClient, speechTextIsValid } from './speech.js';
@@ -110,6 +112,7 @@ export type {
   SessionUpdateInput,
 } from './sessions.js';
 export { RunsClient, isTerminalRunStatus } from './runs.js';
+export * from './outcomes.js';
 export { WorkflowsClient, WorkflowTemplatesClient } from './workflows.js';
 export { ConnectedSearchClient, AccountWorkflowsClient } from './connected-accounts.js';
 export { MicrosoftFilesClient } from './microsoft-files.js';
@@ -628,3 +631,4 @@ export * from './results.js';
 export * from './conversation-shares.js';
 
 export * from './console-session.js';
+export * from './task-regressions.js';

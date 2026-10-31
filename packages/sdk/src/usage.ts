@@ -15,7 +15,8 @@ export type UsageSource =
   | 'agency'
   | 'approval'
   | 'side_question'
-  | 'skill_evaluation';
+  | 'skill_evaluation'
+  | 'task_regression';
 export type PricingSource =
   'table' | 'override' | 'free' | 'subscription' | 'unknown';
 

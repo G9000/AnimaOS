@@ -189,6 +189,13 @@ impl AgentRunCoordinator {
     pub(crate) async fn shutdown(&self) {
         self.request_shutdown();
         self.skills().close_evaluations().await;
+        crate::task_regressions::TaskRegressionService::new(
+            self.state.clone(),
+            self.control_plane_transactions(),
+            self.work_admission_probe(),
+        )
+        .close()
+        .await;
         self.learning.shutdown().await;
         // Agent runs and retiring evaluation transports share one existing
         // shutdown wait budget; neither adds an unbounded second wait.
@@ -208,6 +215,16 @@ impl AgentRunCoordinator {
                 .is_err()
             {
                 warn!("skill evaluation transport did not retire within the shared shutdown deadline; late usage is unconfirmed and work will not replay");
+                break;
+            }
+        }
+        let task_slots = self.state.read().await.task_regression_slots.clone();
+        while task_slots.available_permits() == 0 {
+            if tokio::time::timeout_at(deadline, tokio::time::sleep(Duration::from_millis(20)))
+                .await
+                .is_err()
+            {
+                warn!("task comparison transport did not retire within the shared shutdown deadline; uncertain work will not replay");
                 break;
             }
         }

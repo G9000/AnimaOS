@@ -19,9 +19,9 @@ pub(crate) use agent_removal::ProjectAgentRemovalCandidate;
 pub(crate) use context::{
     capture_context_scope, capture_run_witness, context_change_summary, current_authorized_witness,
     load_context_for_query, member_read_lease, preview_context, preview_source, recheck_context,
-    validate_active_lease, validate_project_chat_selection, validate_queued_witness,
-    AdmittedProjectContext, CapturedProjectScope, LoadedProjectContext, ProjectChangeReason,
-    ProjectContextChange, ProjectContextReport, ProjectRenderBudget,
+    validate_active_lease, validate_outcome_sources, validate_project_chat_selection,
+    validate_queued_witness, AdmittedProjectContext, CapturedProjectScope, LoadedProjectContext,
+    ProjectChangeReason, ProjectContextChange, ProjectContextReport, ProjectRenderBudget,
 };
 pub(crate) use records::valid_relative_path;
 pub(crate) use records::{

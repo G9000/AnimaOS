@@ -36,6 +36,7 @@ impl DaemonState {
             != workspace.as_ref().map(|next| &next.root_path)
         {
             self.workspace_document_authority.revoke_all();
+            self.document_inspections.revoke_all();
         }
         self.workspace = workspace;
         self.skills.reset_scan();

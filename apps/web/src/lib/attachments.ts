@@ -90,6 +90,7 @@ export interface RecoveredAttachmentDraft {
   agentId?: string;
   sessionId?: string;
   documentEditContext?: import('@animaos/sdk').PreviewEditContext;
+  outcome?: import('@animaos/sdk').OutcomeDefinition;
 }
 export function recoveredDraft(
   send: {
@@ -101,6 +102,7 @@ export function recoveredDraft(
     agentId?: string;
     sessionId?: string;
     documentEditContext?: import('@animaos/sdk').PreviewEditContext;
+    outcome?: import('@animaos/sdk').OutcomeDefinition;
   },
   keepKey = true,
 ): RecoveredAttachmentDraft {
@@ -108,6 +110,7 @@ export function recoveredDraft(
     requestId: send.key,
     text: send.text,
     ...(send.documentEditContext ? { documentEditContext: JSON.parse(JSON.stringify(send.documentEditContext)), agentId: send.agentId, sessionId: send.sessionId } : {}),
+    ...(send.outcome ? { outcome: JSON.parse(JSON.stringify(send.outcome)), agentId: send.agentId, sessionId: send.sessionId } : {}),
     ...(send.skill ? { skill: send.skill } : {}),
     ...(keepKey ? { idempotencyKey: send.key } : {}),
     ...(send.attachmentIds?.length

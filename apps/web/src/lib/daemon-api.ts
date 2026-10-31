@@ -597,6 +597,7 @@ export const daemon = {
   // Reuse the native picker without changing the configured workspace.
   pickKnowledgeFolder: () => setupClient.workspace.pickFolder({ purpose: 'project_knowledge' }),
   documentEdits: setupClient.documentEdits,
+  taskRegressions: setupClient.taskRegressions,
   runs: setupClient.runs,
   interactions: setupClient.interactions,
   voice: setupClient.voice,
@@ -772,6 +773,7 @@ export const daemon = {
     input: StartRunInput,
     idempotencyKey: string,
   ) => setupClient.runs.start(agentId, sessionId, input, { idempotencyKey }),
+  outcomes: setupClient.outcomes,
   stopRun: (agentId: string, runId: string) =>
     setupClient.runs.stop(agentId, runId),
   sessionRuns: (

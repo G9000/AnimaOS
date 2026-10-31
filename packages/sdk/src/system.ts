@@ -16,6 +16,7 @@ export interface SystemInFlight {
   /** Additional native work categories are absent on older daemons. */
   memoryReviews?: number;
   skillEvaluations?: number;
+  taskRegressions?: number;
   doctorRepairs?: number;
   standingIntentChanges?: number;
   executionJobs?: number;

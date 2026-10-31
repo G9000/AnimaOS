@@ -125,6 +125,9 @@ impl RecoveryAdmission {
             .get(&self.source_run_id)
             .filter(|r| r.agent_id == request.agent_id && r.session_id == request.session_id)
             .ok_or_else(ApiError::not_found)?;
+        if source.outcome.is_some() {
+            return Err(ApiError::conflict("Outcome work requires inspection of its retained report; replay through generic recovery is disabled"));
+        }
         if request.document_edit_context != source.effective_input().document_edit_context {
             return Err(ApiError::conflict(
                 "Selected document context cannot change during recovery",
@@ -295,6 +298,7 @@ impl AgentRunCoordinator {
             };
             let key = format!("recovery:{}", source.id);
             let request = AcceptRun {
+                outcome: None,
                 agent_id: source.agent_id.clone(),
                 session_id: source.session_id.clone(),
                 text: source.effective_input().text.clone(),
@@ -379,6 +383,7 @@ impl AgentRunCoordinator {
         let text = continuation_prompt(&source, &answers);
         let key = format!("recovery:{}", source.id);
         let request = AcceptRun {
+            outcome: None,
             agent_id: agent.clone(),
             session_id: source.session_id.clone(),
             text: text.clone(),

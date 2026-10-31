@@ -13,6 +13,23 @@ const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 type Parts = Vec<(String, String)>;
 
 pub(super) fn render(spec: &DocumentSpec, source: &[u8]) -> Result<Vec<u8>, GenerationError> {
+    render_with_compression(spec, source, rawzip::CompressionMethod::DEFLATE)
+}
+
+// Only the source verifier uses this deterministic legacy encoding. New files
+// always use DEFLATE; existing unchanged version-one previews remain readable.
+pub(super) fn render_legacy(
+    spec: &DocumentSpec,
+    source: &[u8],
+) -> Result<Vec<u8>, GenerationError> {
+    render_with_compression(spec, source, rawzip::CompressionMethod::STORE)
+}
+
+fn render_with_compression(
+    spec: &DocumentSpec,
+    source: &[u8],
+    compression: rawzip::CompressionMethod,
+) -> Result<Vec<u8>, GenerationError> {
     let mut parts = Vec::new();
     let mut types = Vec::new();
     let main = match spec.format {
@@ -50,19 +67,44 @@ pub(super) fn render(spec: &DocumentSpec, source: &[u8]) -> Result<Vec<u8>, Gene
         .map(|(path, kind)| format!("<Override PartName=\"/{path}\" ContentType=\"{kind}\"/>"))
         .collect::<String>();
     parts.push(("[Content_Types].xml".into(),format!("{XML}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>{overrides}</Types>")));
+    // Compression must not permit a compact source to produce an unbounded
+    // expanded package. Include the same fixed ZIP headers and source comment
+    // that the previous STORE writer counted against its output allowance.
+    let expanded_bytes = parts
+        .iter()
+        .try_fold(source.len() + 22, |total, (path, body)| {
+            total
+                .checked_add(body.len())?
+                .checked_add(92 + 2 * path.len())
+        });
+    if expanded_bytes.is_none_or(|bytes| bytes > super::MAX_GENERATED_DOCUMENT_BYTES) {
+        return Err(error("Document exceeds the 4 MiB output limit"));
+    }
     let mut output = Output::new();
     let mut archive = rawzip::ZipArchiveWriter::new(&mut output);
     archive.set_comment(source);
     for (path, body) in parts {
         let (mut entry, config) = archive
             .new_file(&path)
-            .compression_method(rawzip::CompressionMethod::STORE)
+            // LibreOffice rejects unencrypted STORE entries with trailing data
+            // descriptors. DEFLATE supports this streaming ZIP writer layout.
+            .compression_method(compression)
             .start()
             .map_err(|_| error("Cannot create Office package"))?;
-        let mut writer = config.wrap(&mut entry);
-        writer.write_all(body.as_bytes())?;
-        let (_, descriptor) = writer.finish()?;
-        entry.finish(descriptor)?;
+        if compression == rawzip::CompressionMethod::DEFLATE {
+            let encoder =
+                flate2::write::DeflateEncoder::new(&mut entry, flate2::Compression::default());
+            let mut writer = config.wrap(encoder);
+            writer.write_all(body.as_bytes())?;
+            let (encoder, descriptor) = writer.finish()?;
+            encoder.finish()?;
+            entry.finish(descriptor)?;
+        } else {
+            let mut writer = config.wrap(&mut entry);
+            writer.write_all(body.as_bytes())?;
+            let (_, descriptor) = writer.finish()?;
+            entry.finish(descriptor)?;
+        }
     }
     archive.finish()?;
     Ok(output.finish())

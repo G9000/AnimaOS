@@ -7,6 +7,19 @@ fn main() -> io::Result<()> {
     if arguments.iter().any(|argument| {
         argument
             .to_string_lossy()
+            .starts_with("--document-inspection-worker-")
+    }) {
+        if arguments.len() != 1 || arguments[0] != "--document-inspection-worker-v1" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "document inspection worker requires exactly --document-inspection-worker-v1",
+            ));
+        }
+        return anima_daemon::document_inspection_worker_entry();
+    }
+    if arguments.iter().any(|argument| {
+        argument
+            .to_string_lossy()
             .starts_with("--document-edit-worker-")
     }) {
         if arguments.len() != 1 || arguments[0] != "--document-edit-worker-v1" {

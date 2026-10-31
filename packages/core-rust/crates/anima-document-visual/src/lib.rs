@@ -9,6 +9,8 @@ use std::{error::Error, fmt, io::Cursor};
 use anima_service_adapters::document_content::DocumentExtractionStatus;
 use serde::{Deserialize, Serialize};
 
+pub mod inspection;
+
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod backend;

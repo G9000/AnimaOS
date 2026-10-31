@@ -10,6 +10,13 @@ import {
 } from './attachments';
 import type { PreviewEditContext } from '@animaos/sdk';
 
+it('preserves the exact public criteria and scope through failed-draft recovery', () => {
+  const outcome = { criteria: [{ id: 'result', kind: 'response_text' as const, contains: 'Ready' }], maxCorrections: 1 };
+  const recovered = recoveredDraft({ key: 'original', text: 'Prepare it', agentId: 'agent', sessionId: 'chat', outcome });
+  outcome.criteria[0].contains = 'Changed after recovery';
+  expect(recovered).toMatchObject({ idempotencyKey: 'original', agentId: 'agent', sessionId: 'chat', outcome: { criteria: [{ id: 'result', kind: 'response_text', contains: 'Ready' }], maxCorrections: 1 } });
+});
+
 it('preserves an exact document edit restriction and owner scope in a recoverable draft', () => {
   const documentEditContext: PreviewEditContext = { version: 1, source: { kind: 'workspace', path: 'report.html', sha256: 'a'.repeat(64), scope: 'd'.repeat(64) }, selection: { kind: 'html_text', start_utf8: 3, end_utf8: 8, expected_text: 'Hello' } };
   const recovered = recoveredDraft({ key: 'original', text: 'Rewrite', agentId: 'agent', sessionId: 'chat', documentEditContext });

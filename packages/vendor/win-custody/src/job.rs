@@ -7,8 +7,10 @@ use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, OwnedHandle, R
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
+    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
     JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOB_OBJECT_LIMIT_PROCESS_MEMORY,
@@ -154,6 +156,17 @@ impl JobLimits {
 #[derive(Debug)]
 pub struct Job(OwnedHandle);
 
+/// Cumulative assignments and current associations for one exact Job.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct JobProcessCounts {
+    /// Assignments over the Job's entire lifetime, including terminated members
+    /// and assignments rejected because of a limit violation.
+    pub total: u32,
+    /// Processes currently associated. Zero alone does not prove every process
+    /// handle has signaled or its resources have retired.
+    pub active: u32,
+}
+
 impl Job {
     /// Creates a job with `limits` and the creator's default security.
     pub fn create(limits: &JobLimits) -> io::Result<Self> {
@@ -254,6 +267,97 @@ impl Job {
         Ok(JobLimits::from_raw(&raw))
     }
 
+    /// Reads the number of current associations, including descendants.
+    ///
+    /// This is accounting evidence, not a process-handle retirement barrier.
+    pub fn active_process_count(&self) -> io::Result<u32> {
+        Ok(self.process_counts()?.active)
+    }
+
+    /// Reads cumulative and current process counts in one kernel observation.
+    pub fn process_counts(&self) -> io::Result<JobProcessCounts> {
+        let mut raw = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: the live job and writable buffer cover the exact queried type.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                self.raw(),
+                JobObjectBasicAccountingInformation,
+                (&mut raw as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                null_mut(),
+            )
+        };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(JobProcessCounts {
+            total: raw.TotalProcesses,
+            active: raw.ActiveProcesses,
+        })
+    }
+
+    /// Reads at most 64 current member IDs, including nested Job members.
+    ///
+    /// This bounded snapshot is not a complete lifetime inventory. IDs can exit
+    /// or be recycled before a caller opens and verifies their exact handles.
+    pub fn process_ids(&self) -> io::Result<Vec<u32>> {
+        #[repr(C)]
+        struct ProcessIds {
+            assigned: u32,
+            returned: u32,
+            ids: [usize; 64],
+        }
+        let mut raw = ProcessIds {
+            assigned: 0,
+            returned: 0,
+            ids: [0; 64],
+        };
+        // SAFETY: this repr(C) buffer has the documented two DWORD fields then
+        // an aligned ULONG_PTR array; the full writable allocation is supplied.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                self.raw(),
+                JobObjectBasicProcessIdList,
+                (&mut raw as *mut ProcessIds).cast(),
+                size_of::<ProcessIds>() as u32,
+                null_mut(),
+            )
+        };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if raw.returned > 64 || raw.returned != raw.assigned {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Job process list exceeded its bound",
+            ));
+        }
+        raw.ids[..raw.returned as usize]
+            .iter()
+            .map(|pid| {
+                u32::try_from(*pid)
+                    .ok()
+                    .filter(|pid| *pid != 0)
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "Job process ID is invalid")
+                    })
+            })
+            .collect()
+    }
+
+    /// Verifies that this exact process handle belongs to this exact Job.
+    /// The process must carry query or limited-query access.
+    pub fn contains(&self, process: &impl AsHandle) -> io::Result<bool> {
+        let mut member = 0;
+        // SAFETY: both handles remain live and member is a writable BOOL.
+        let queried =
+            unsafe { IsProcessInJob(process.as_handle().as_raw_handle(), self.raw(), &mut member) };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(member != 0)
+    }
+
     fn raw(&self) -> RawHandle {
         self.0.as_raw_handle()
     }
@@ -296,6 +400,22 @@ mod tests {
     fn an_empty_limit_set_reads_back_empty() {
         let job = Job::create(&JobLimits::new()).unwrap();
         assert_eq!(job.limits().unwrap(), JobLimits::new());
+    }
+
+    #[test]
+    fn an_empty_job_has_no_processes_and_does_not_contain_the_caller() {
+        let job = Job::create(&JobLimits::new()).unwrap();
+        assert_eq!(
+            job.process_counts().unwrap(),
+            super::JobProcessCounts {
+                total: 0,
+                active: 0
+            }
+        );
+        assert!(job.process_ids().unwrap().is_empty());
+        let caller =
+            crate::Process::open(std::process::id(), crate::ProcessAccess::QueryLimited).unwrap();
+        assert!(!job.contains(&caller).unwrap());
     }
 
     #[test]

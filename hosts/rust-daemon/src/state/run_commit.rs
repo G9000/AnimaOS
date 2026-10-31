@@ -439,7 +439,7 @@ impl DaemonState {
                 &change_set.delta.messages,
             ));
             record.finish(outcome.status, outcome.error(), now_ms);
-            if outcome.status == crate::runs::RunStatus::Completed {
+            if outcome.status == crate::runs::RunStatus::Completed || record.outcome.is_some() {
                 record.reply_sha256 = outcome.reply_message_id.as_ref().and_then(|reply| {
                     change_set
                         .delta

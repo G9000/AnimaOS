@@ -21,6 +21,22 @@ pub(crate) struct OwnerInspectionScope {
     project: crate::projects::QueuedProjectWitness,
 }
 impl OwnerInspectionScope {
+    pub(crate) fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    pub(crate) fn matches_draft(&self, scope: &super::DocumentEditScope) -> bool {
+        self.profile_key == scope.profile_key
+            && self.workspace_key == scope.workspace_key
+            && self.agent_id == scope.agent_id
+            && self.session_id == scope.session_id
+            && self.clear_generation == scope.clear_generation
+    }
     pub(crate) fn source_scope(&self, path: &str, hash: &str) -> Result<String, String> {
         Ok(digest(
             &serde_json::to_vec(&(1_u8, &self.profile_key, &self.workspace_key, path, hash))

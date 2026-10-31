@@ -93,6 +93,82 @@ and a visual Office editor are not available here.
 The separate **Allow reading workspace documents** setting enables the reading
 workflow below; it is not a substitute for the editing permission.
 
+## Inspect Office layout and calculations
+
+On Windows, an operator can configure a pinned local LibreOffice installation
+for explicit inspection. Ask the agent to inspect the layout of a supported
+DOCX, XLSX or PPTX workspace file, selected attachment or private edit candidate.
+The existing `inspect_office_document` tool accepts `verify_layout: true` with
+the exact current source hash. Its ordinary structural inspection remains the
+default. Inspection reads the original bytes, exports that same document to PDF
+and renders the exported pages; it never saves changes to the Office source.
+
+The immutable report identifies the source, converter, configuration, selected
+font directories, PDF and page-image hashes. It records exported page coverage
+and measured non-background pixels. The font inventory excludes fonts supplied
+through other registrations or transient Windows resources. LibreOffice output
+can differ from Microsoft Office. Pixel counts cannot decide whether a blank
+page is intentional, text is clipped, or the document meets your requirements.
+Visual assessment and owner acceptance remain separate.
+
+For admitted workbooks, a separate calculation pass forces `calculateAll` and
+checks every original formula cell, including hidden and unprinted cells. It
+records calculation errors independently of page coverage and does not trust
+stored formula caches. The PDF covers the configured printed sheets and print
+areas; it does not establish complete rendering of hidden or unprinted content.
+
+The initial input subset is deliberately narrow: all external relationships
+and hyperlinks, active content, unknown XML elements or attributes, and unknown
+formula functions are refused before the converter opens a document. Macro
+execution and document updates are disabled, and interaction requests are
+rejected. These controls and checked Windows Job limits constrain resources and
+lifetime; they do not establish OS filesystem or network isolation.
+
+Each inspection accepts at most 4 MiB of source, a 2 MiB exported PDF and ten
+page images, with a 2 MiB PNG limit per page and a 60-second deadline. A longer
+export has partial page coverage. Missing engines, unsupported inputs and
+incomplete execution cannot establish successful inspection. Reports and pages
+use authenticated, non-cacheable owner routes and recheck source, session,
+project and grant authority on every delivery. Stored reports alone do not
+restore authority after restart; request a fresh inspection.
+
+An agent-run inspection also uses that run's existing shared capability and
+artifact allowance and remaining deadline. Corrections and verifier calls do
+not receive a new budget. The worker reserves a finite output ceiling before
+dispatch and records actual bytes after all owned processes and pipes retire;
+uncertain work keeps its conservative charge. Direct authenticated owner
+requests retain their separate per-request and private-storage bounds.
+
+Cleanup requires every captured process to finish and the complete lifetime
+process count to match those witnesses. At most eight processes may be active
+and 64 may participate over an inspection's lifetime. A missed short-lived
+process, uncertain retirement or failed checked removal retains the shared
+worker slot, private directory and conservative charge. Cleanup is not retried.
+The worker uses a fresh short, owner-private folder under the operator's original
+temporary root. Redirected, writable-by-others or overly long roots leave
+inspection unavailable. The task launcher preserves that root through
+`ANIMAOS_TASK_TEMP_ROOT`; ordinary launches use the operating system temporary
+directory. Directory setup consumes the same inspection deadline.
+
+Operator setup supplies both
+`ANIMA_DOCUMENT_INSPECTION_LIBREOFFICE_PROGRAM` (the absolute `program` directory)
+and `ANIMA_DOCUMENT_INSPECTION_LIBREOFFICE_TREE_SHA256` before daemon startup.
+The second value is the versioned whole-installation tree digest used by the
+worker, not the MSI hash or a JSON manifest-file hash. Files are sorted by
+relative path; the hash starts with `anima-office-engine-tree-v1\0`, then includes
+each UTF-8 forward-slash path length as a little-endian u64, path bytes, file
+length as a little-endian u64 and lowercase ASCII SHA-256 of the file bytes.
+The worker verifies and holds the pinned files during inspection. It never
+searches PATH for an Office installation or Python. Absent or invalid setup
+leaves inspection unavailable without preventing ordinary daemon startup.
+
+The owner API exposes `POST /api/document-inspections`,
+`GET /api/document-inspections/{report_sha256}` and
+`GET /api/document-inspections/{report_sha256}/pages/{page}` with `agent_id` and
+`session_id`. The SDK provides `client.documentInspections.inspect`, `get` and
+`page`. A report hash or observation locator is an evidence reference, never an
+approval, access grant or generic quality pass.
+
 ## Download a generated report
 
 Ask the companion to save a text, Markdown or CSV report using its existing
@@ -224,8 +300,9 @@ A page without recognized text can have a page-only citation searchable by
 document title, with no invented passage. Other content remains partial.
 Derived cache entries never grant source access.
 
-This PDF path does not render native DOCX, XLSX, or PPTX layout. Their existing
-text and stored-cell readers retain their documented coverage.
+This PDF path handles PDF sources. The explicit Office inspection path above
+can export admitted DOCX, XLSX and PPTX files through its separately configured
+backend. Existing text and stored-cell readers retain their documented coverage.
 
 ## Read stored workbook cells
 
@@ -233,9 +310,10 @@ XLSX coverage is **stored cells only**, in workbook sheet order with numeric
 sheet/row/column locators. Visible, hidden and very-hidden sheets are labeled and
 included within the limits. Sheet names are quoted as untrusted source metadata.
 Shared/inline strings and scalar values are read; formulas are literal text labeled
-not evaluated, and cached values are labeled possibly stale or missing. Anima does
-not calculate formulas, resolve external relationships, run macros or open workbook
-connections. Raw numbers/date serials do not imply formatted dates, currencies or
+not evaluated, and cached values are labeled possibly stale or missing. This
+stored-cell reader does not calculate formulas, resolve external relationships,
+run macros or open workbook connections. Explicit inspection above has a separate
+calculation pass. Raw numbers/date serials do not imply formatted dates, currencies or
 visual layout. Charts, pivots, images, comments and merged-cell presentation are
 outside this text view. The reader supports transitional OOXML; shared/array
 formulas, date-string cell types and additional relationship-bearing features are
@@ -274,8 +352,8 @@ read waits also yield to Stop and the extraction deadline; late work cannot
 publish a usable result. A stuck physical worker retains its slot until its
 retirement is proved.
 
-Office page rendering, Office OCR and native document extraction on other
-operating systems remain unsupported in this slice; their originals can still
+Automatic Office page rendering, Office OCR and native document extraction on
+other operating systems remain unsupported in this reading path; originals can still
 be stored and downloaded. Browser dictation, compatible-model image input and [selected audio transcription](voice.md) are
 separate capabilities. Extraction itself makes no model request, enables no
 tool permission and writes no Fact or knowledge collection. Compaction can

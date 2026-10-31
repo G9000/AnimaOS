@@ -7,6 +7,13 @@ export interface BrowserStreams {
   disconnect(): void;
   count(): number;
 }
+/** A flat transport boundary keeps Playwright's Unboxed type from expanding
+ *  the recursive JSON criteria reachable through AgentEvent -> Run.outcome. */
+interface SerializedAgentEvent {
+  seq: number;
+  type: AgentEvent['type'];
+  serialized: string;
+}
 export async function installStreams(
   page: Page,
   state: ConsoleFixtureState,
@@ -101,12 +108,26 @@ export async function installStreams(
   );
 }
 export async function emit(page: Page, event: AgentEvent) {
-  await page.evaluate(
-    (event) =>
+  const input: SerializedAgentEvent = {
+    seq: event.seq,
+    type: event.type,
+    serialized: JSON.stringify(event),
+  };
+  await page.evaluate<void, SerializedAgentEvent>(
+    (input) => {
+      const parsed: unknown = JSON.parse(input.serialized);
+      if (
+        typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) ||
+        !('seq' in parsed) || parsed.seq !== input.seq ||
+        !('type' in parsed) || parsed.type !== input.type
+      ) throw new Error('Browser stream event identity changed during serialization');
+      // The helper accepts a full AgentEvent above and serialized that exact
+      // value. Only its transport envelope crosses Playwright's mapped type.
       (
         globalThis as unknown as { consoleStreams: BrowserStreams }
-      ).consoleStreams.emit(event),
-    event,
+      ).consoleStreams.emit(parsed as AgentEvent);
+    },
+    input,
   );
 }
 export async function disconnect(page: Page) {

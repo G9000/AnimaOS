@@ -14,6 +14,7 @@ import {
   type UploadedAttachment,
   type BrowserSelection,
   type SessionMessageSearchHit,
+  type OutcomeDefinition,
 } from '@animaos/sdk';
 
 import { AlertIcon } from './components/icons';
@@ -128,6 +129,7 @@ interface FailedDraft {
   attachments?: UploadedAttachment[];
   skill?: string;
   documentEditContext?: PreviewEditContext;
+  outcome?: OutcomeDefinition;
   agentId?: string;
   sessionId?: string;
 }
@@ -147,6 +149,7 @@ type ChatState = {
     attachmentIds?: string[];
     skill?: string;
     documentEditContext?: PreviewEditContext;
+    outcome?: OutcomeDefinition;
   } | null;
   /** The last Telegram reply's run; `queued` once it completed while the
    *  connector had an approved chat, which queues its reply for delivery. */
@@ -580,7 +583,7 @@ export function ViewHarness() {
             typeof value === 'function' ? value(current.draft) : value;
           return {
             draft,
-            ...(!draft && current.resend?.documentEditContext ? { resend: null } : {}),
+            ...(!draft && (current.resend?.documentEditContext || current.resend?.outcome) ? { resend: null } : {}),
             ...(!draft && current.literalDraft ? { literalDraft: false } : {}),
           };
         });
@@ -1223,6 +1226,7 @@ export function ViewHarness() {
     skill?: string,
     attachmentInput?: SendAttachments,
     documentEditContext?: PreviewEditContext,
+    outcome?: OutcomeDefinition,
     capturedBrowserSelection?: BrowserSelection | null,
   ) => {
     if (
@@ -1249,6 +1253,7 @@ export function ViewHarness() {
       conversation,
       text,
       ...(documentEditContext ? { documentEditContext } : {}),
+      ...(outcome ? { outcome } : {}),
       mode,
       ...(skill ? { skill } : {}),
       ...(target.kind === 'chat' &&
@@ -1308,6 +1313,7 @@ export function ViewHarness() {
     text: string,
     skill?: string,
     attachmentInput?: SendAttachments,
+    outcome?: OutcomeDefinition,
   ) => {
     const homeKey = chatKey(targetId, HOME_CONVERSATION);
     const lifecycleGeneration = agentLifecycleGenerationRef.current;
@@ -1325,7 +1331,7 @@ export function ViewHarness() {
         sending: false,
         failedDrafts: [
           ...current.failedDrafts,
-          { requestId: crypto.randomUUID(), text },
+          { requestId: crypto.randomUUID(), text, ...(outcome ? { outcome } : {}) },
         ],
         error: errorMessage(caught),
       }));
@@ -1371,6 +1377,7 @@ export function ViewHarness() {
       skill,
       attachmentInput,
       undefined,
+      outcome,
       capturedBrowserSelection,
     );
   };
@@ -1500,8 +1507,8 @@ export function ViewHarness() {
     discordReady,
     activeRun,
     updateChat,
-    startChat: (text, skill, attachmentInput) => {
-      if (agent) void startChat(agent.id, text, skill, attachmentInput);
+    startChat: (text, skill, attachmentInput, outcome) => {
+      if (agent) void startChat(agent.id, text, skill, attachmentInput, outcome);
     },
     queueSend,
     slashCommands,
@@ -1870,6 +1877,7 @@ export function ViewHarness() {
         offline: connection === 'offline',
         onSend: commands.send,
         documentEditContext: chat.resend?.documentEditContext,
+        outcome: chat.resend?.outcome,
         onClearDocumentEditContext: clearDocumentEditContext,
         error: workspaceError,
         onDismissError: () => setWorkspaceError(null),
@@ -1921,13 +1929,14 @@ export function ViewHarness() {
                         first.idempotencyKey ||
                         first.attachmentIds?.length ||
                         first.skill ||
-                        first.documentEditContext
+                        first.documentEditContext || first.outcome
                           ? {
                               text: first.text,
                               idempotencyKey:
                                 first.idempotencyKey ?? crypto.randomUUID(),
                               ...(first.skill ? { skill: first.skill } : {}),
                               ...(first.documentEditContext ? { documentEditContext: first.documentEditContext } : {}),
+                              ...(first.outcome ? { outcome: first.outcome } : {}),
                               ...(first.attachmentIds
                                 ? { attachmentIds: first.attachmentIds }
                                 : {}),

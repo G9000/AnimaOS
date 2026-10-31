@@ -66,6 +66,95 @@ async function openM83SearchCards() {
     fireEvent.click(button);
 }
 
+describe('outcome task recovery controls', () => {
+  it.each(['exhausted', 'awaiting_owner'] as const)(
+    'keeps a failed %s outcome report usable without a final reply or generic recovery',
+    (status) => {
+      const run = runFixture('checked-task', {
+        status: 'failed',
+        startedAtMs: 1,
+        finishedAtMs: 2,
+        replyMessageId: null,
+        recoveryAttempt: 0,
+        error: { code: 'run_failed', message: 'Success criteria remain unresolved' },
+        outcome: {
+          definition: {
+            criteria: [{ id: 'reply', kind: 'response_text', contains: 'Ready' }],
+            acceptance: 'owner_required',
+            maxCorrections: 2,
+          },
+          revision: 3,
+          rootRunId: 'checked-task',
+          taskSha256: 'a'.repeat(64),
+          sourceSha256: 'b'.repeat(64),
+          modelSha256: 'c'.repeat(64),
+          workspaceSha256: 'd'.repeat(64),
+          consumedCorrections: status === 'exhausted' ? 2 : 0,
+          status,
+          reportSha256: 'e'.repeat(64),
+          repairPaths: [],
+          iterations: [{
+            ordinal: 1,
+            bindingSha256: 'f'.repeat(64),
+            semanticSha256: '1'.repeat(64),
+            replySha256: '2'.repeat(64),
+            observations: [{
+              criterionId: 'reply',
+              verdict: status === 'exhausted' ? 'not_met' : 'met',
+              detail: status === 'exhausted' ? 'Required text missing.' : 'Required text found.',
+            }],
+          }],
+        },
+      });
+      render(
+        <MessageList
+          agent={{ ...agent, id: run.agentId, messages: [] }}
+          sending={false}
+          scrollerRef={{ current: null }}
+          onSuggestion={vi.fn()}
+          actions={{ onSendAgain: vi.fn() }}
+          items={buildTranscript({ messages: [], runs: [emptyLiveRun(run)], olderHistory: false })}
+        />,
+      );
+
+      expect(screen.getByText('This reply failed: Success criteria remain unresolved')).toBeVisible();
+      expect(screen.getByText('Use this run’s success criteria report to review its evidence and available actions.')).toBeVisible();
+      fireEvent.click(screen.getByText(status === 'exhausted'
+        ? 'Success criteria reached the run’s limit'
+        : 'Success criteria need your acceptance'));
+      expect(screen.getByRole('button', { name: 'Refresh report' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Close task' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Review interrupted work' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Continue remaining work' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry', exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Send again', exact: true })).not.toBeInTheDocument();
+    },
+  );
+
+  it('keeps reviewed recovery available for an ordinary failed run', () => {
+    const run = runFixture('ordinary-task', {
+      status: 'failed',
+      startedAtMs: 1,
+      finishedAtMs: 2,
+      recoveryAttempt: 0,
+      error: { code: 'run_failed', message: 'Provider unavailable' },
+    });
+    render(
+      <MessageList
+        agent={{ ...agent, id: run.agentId, messages: [] }}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        actions={{ onSendAgain: vi.fn() }}
+        items={buildTranscript({ messages: [], runs: [emptyLiveRun(run)], olderHistory: false })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Review interrupted work' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Close task' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Use this run’s success criteria report/)).not.toBeInTheDocument();
+  });
+});
+
 describe('m83 visible search provenance', () => {
   it('renders saved returned sources and ordinary answer citations without fetching search again', async () => {
     const url = 'https://example.com/actual-result?x=1&y=2';

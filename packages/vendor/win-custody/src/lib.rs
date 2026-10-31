@@ -74,7 +74,7 @@ mod token;
 mod wide;
 
 pub use handle::{wait, WaitOutcome};
-pub use job::{Job, JobLimits};
+pub use job::{Job, JobLimits, JobProcessCounts};
 pub use launch::{anonymous_pipe, null_device, read_to_end_bounded, Launch, SuspendedChild};
 pub use mutex::{MutexAcquisition, NamedMutex};
 pub use pipe::{PipeAccess, PipeClient, PipeDirection, PipeError, PipeServer, PipeWait};

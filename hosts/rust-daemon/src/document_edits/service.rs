@@ -273,6 +273,62 @@ pub(crate) fn destination_matches(
 }
 
 impl DocumentEditService {
+    pub(crate) async fn inspect_artifact(
+        &self,
+        run: &RunLink,
+        execution: &anima_core::execution_limits::ExecutionContext,
+        request: crate::document_inspections::InspectionRequest,
+        cancel: CancelSignal,
+    ) -> Result<crate::document_inspections::InspectionEnvelope, String> {
+        if let Some(context) = self.preview_context(run).await? {
+            use crate::document_inspections::InspectionSubject;
+            let (source, hash) = match &request.subject {
+                InspectionSubject::Workspace {
+                    file_path,
+                    expected_sha256,
+                } => (
+                    SourceReference::Workspace {
+                        file_path: file_path.clone(),
+                    },
+                    expected_sha256.clone(),
+                ),
+                InspectionSubject::Attachment {
+                    attachment_id,
+                    expected_sha256,
+                } => (
+                    SourceReference::Attachment {
+                        attachment_id: attachment_id.clone(),
+                    },
+                    expected_sha256.clone(),
+                ),
+                InspectionSubject::Candidate { proposal_id, .. } => {
+                    let state = self.state.read().await;
+                    let record = state
+                        .document_edits
+                        .get(proposal_id)
+                        .ok_or("Document inspection candidate is unavailable")?;
+                    let source = match &record.draft.source {
+                        DocumentEditSource::Workspace { file_path, .. } => {
+                            SourceReference::Workspace {
+                                file_path: file_path.clone(),
+                            }
+                        }
+                        DocumentEditSource::Attachment { attachment_id, .. } => {
+                            SourceReference::Attachment {
+                                attachment_id: attachment_id.clone(),
+                            }
+                        }
+                    };
+                    (source, record.draft.source.sha256().to_owned())
+                }
+            };
+            context.bind_source(&source, &hash)?;
+        }
+        crate::document_inspections::DocumentInspectionService::new(self.state.clone())
+            .inspect_for_run(run, execution, request, cancel)
+            .await
+    }
+
     pub(crate) fn weak(&self) -> WeakDocumentEditService {
         WeakDocumentEditService {
             state: Arc::downgrade(&self.state),

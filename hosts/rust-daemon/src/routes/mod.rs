@@ -55,9 +55,11 @@ mod chat_results;
 mod chat_reviews;
 mod conversation_shares;
 mod document_edits;
+mod document_inspections;
 mod images;
 mod oauth_apps;
 mod oauth_callback;
+mod outcomes;
 mod personality;
 mod profile;
 mod project_connected_sources;
@@ -77,6 +79,7 @@ mod swarms;
 mod system;
 #[cfg(test)]
 mod system_tests;
+mod task_regressions;
 mod tool_results;
 mod usage;
 mod voice;
@@ -138,7 +141,7 @@ use crate::runtime_model::provider_summaries_with_pool;
 #[openapi(
     paths(
         interactions::side_question, interactions::list, interactions::answer,
-        run_recovery::get, run_recovery::continue_run,
+        run_recovery::get, run_recovery::continue_run, outcomes::get, outcomes::accept, outcomes::close,
         automation_events::emit_event,
         api_health_entry,
         capabilities_entry,
@@ -227,6 +230,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         gdrive::status,gdrive::connect,gdrive::disconnect,gdrive::callback,
         microsoft_files::status,microsoft_files::connect,microsoft_files::files,microsoft_files::selection,microsoft_files::disconnect,microsoft_files::callback,
         document_edits::source,document_edits::review,document_edits::cancel,
+        document_inspections::inspect,document_inspections::get,document_inspections::page,
         connected_search::sources,connected_search::configure,connected_search::refresh,connected_search::search,connected_search::item,
         discord::list, discord::create, discord::check, discord::configure, discord::activate, discord::replace, discord::set_enabled, discord::restart, discord::retry, discord::suppress, discord::delete,
         connectors::list_connectors,
@@ -302,6 +306,8 @@ use crate::runtime_model::provider_summaries_with_pool;
         skill_evaluations::get_suite, skill_evaluations::put_suite,
         skill_evaluations::start_evaluation, skill_evaluations::get_evaluation,
         skill_evaluations::cancel_evaluation,
+        task_regressions::suites, task_regressions::define, task_regressions::configuration,
+        task_regressions::start, task_regressions::report, task_regressions::cancel,
         memory_edits::patch_memory, memory_edits::delete_memory, memory_export::export_memories,
         core_memory::get_core_memory, core_memory::add_entry, core_memory::replace_entry, core_memory::delete_entry,
         memory_edits::list_facts, memory_edits::patch_fact, memory_edits::delete_fact,
@@ -405,6 +411,7 @@ struct AppState {
     drive: crate::connectors::drive::DriveManager,
     microsoft_files: crate::connectors::microsoft_files::MicrosoftFileManager,
     document_edits: crate::document_edits::DocumentEditService,
+    task_regressions: crate::task_regressions::TaskRegressionService,
     calendar: crate::connectors::gcalendar::CalendarManager,
     scheduler: SchedulerService,
     jobs: crate::jobs::JobService,
@@ -1006,6 +1013,11 @@ fn router_with_services_with_policies_and_integrations(
         Arc::clone(&state),
         agent_runs.control_plane_transactions(),
     );
+    let task_regressions = crate::task_regressions::TaskRegressionService::new(
+        Arc::clone(&state),
+        agent_runs.control_plane_transactions(),
+        agent_runs.work_admission_probe(),
+    );
     {
         let mut guard = state
             .try_write()
@@ -1018,6 +1030,7 @@ fn router_with_services_with_policies_and_integrations(
     let voice_request_timeout = voice.request_timeout();
     let speech_request_timeout = speech.request_timeout();
     let app_state = AppState {
+        task_regressions,
         connected_search,
         document_edits,
         voice,
@@ -1060,6 +1073,9 @@ fn router_with_services_with_policies_and_integrations(
         );
     let timed_routes = Router::new()
         .route("/api/document-edits/source", get(document_edits::source))
+        .route("/api/document-inspections", axum::routing::post(document_inspections::inspect))
+        .route("/api/document-inspections/{report_sha256}", get(document_inspections::get))
+        .route("/api/document-inspections/{report_sha256}/pages/{page}", get(document_inspections::page))
         .route("/api/document-edits/{proposal_id}", get(document_edits::review).delete(document_edits::cancel))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route("/api/projects/manage", get(projects::manage))
@@ -1298,6 +1314,9 @@ fn router_with_services_with_policies_and_integrations(
             get(attachments::page),
         )
         .route("/api/agents/{agent_id}/runs/{run_id}", get(runs::get_run))
+        .route("/api/agents/{agent_id}/runs/{run_id}/outcome", get(outcomes::get))
+        .route("/api/agents/{agent_id}/runs/{run_id}/outcome/accept", axum::routing::post(outcomes::accept))
+        .route("/api/agents/{agent_id}/runs/{run_id}/outcome/close", axum::routing::post(outcomes::close))
         .route(
             "/api/agents/{agent_id}/runs/{run_id}/learning-review",
             axum::routing::post(learning_reviews::request_review),
@@ -1400,6 +1419,11 @@ fn router_with_services_with_policies_and_integrations(
         )
         .route("/api/skills", get(skills::list_skills))
         .route("/api/skills/{slug}/evaluation-suite", get(skill_evaluations::get_suite).put(skill_evaluations::put_suite))
+        .route("/api/task-regression-suites", get(task_regressions::suites).post(task_regressions::define))
+        .route("/api/task-regression-configs/{agent_id}", get(task_regressions::configuration))
+        .route("/api/task-regressions", axum::routing::post(task_regressions::start))
+        .route("/api/task-regressions/{id}", get(task_regressions::report))
+        .route("/api/task-regressions/{id}/cancel", axum::routing::post(task_regressions::cancel))
         .route("/api/skill-drafts/{draft_id}/evaluation", get(skill_evaluations::get_evaluation).post(skill_evaluations::start_evaluation))
         .route("/api/skill-drafts/{draft_id}/evaluation/cancel", axum::routing::post(skill_evaluations::cancel_evaluation))
         .route("/api/skills/{slug}/learning", get(skills::get_skill_learning))

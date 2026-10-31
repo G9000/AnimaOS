@@ -44,6 +44,8 @@ pub(crate) enum UsageSource {
     SideQuestion,
     /// Fresh tool-free baseline/candidate skill trials.
     SkillEvaluation,
+    /// Complete isolated task comparisons explicitly started by the owner.
+    TaskRegression,
 }
 
 impl UsageSource {
@@ -64,6 +66,7 @@ impl UsageSource {
             Self::Approval => "approval",
             Self::SideQuestion => "side_question",
             Self::SkillEvaluation => "skill_evaluation",
+            Self::TaskRegression => "task_regression",
         }
     }
 }

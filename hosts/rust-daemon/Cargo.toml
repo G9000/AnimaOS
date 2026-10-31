@@ -90,7 +90,9 @@ path = "tests/fixtures/mcp_stdio_peer.rs"
 workspace = true
 
 [dev-dependencies]
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
 png = "0.18.1"
+rawzip = { version = "=0.5.2", default-features = false, features = ["std"] }
 anima-harness = { path = "../../packages/core-rust/crates/anima-harness", features = ["test-support"] }
 
 # Only `anima` ships in releases (dist-workspace.toml).

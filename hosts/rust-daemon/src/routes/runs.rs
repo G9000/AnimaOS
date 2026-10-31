@@ -43,6 +43,8 @@ pub(super) enum StartRunMode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct StartRunRequest {
     #[serde(default)]
+    outcome: Option<serde_json::Value>,
+    #[serde(default)]
     document_edit_context: Option<crate::document_edits::preview_context::PreviewEditContext>,
     #[serde(default, deserialize_with = "crate::browser::optional_selection")]
     browser_selection: Option<crate::browser::BrowserSelection>,
@@ -119,6 +121,19 @@ async fn start_body(state: &AppState, request: Request) -> Result<StartRunReques
 }
 
 fn validate_input(input: &StartRunRequest) -> Result<(), ApiError> {
+    if let Some(value) = &input.outcome {
+        let definition: anima_core::outcomes::OutcomeDefinition =
+            serde_json::from_value(value.clone())
+                .map_err(|_| ApiError::bad_request_static("Invalid outcome definition"))?;
+        definition
+            .validate()
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if matches!(input.mode, StartRunMode::Steer) {
+            return Err(ApiError::bad_request_static(
+                "Outcome criteria cannot steer an active task",
+            ));
+        }
+    }
     if let Some(context) = &input.document_edit_context {
         context.validate().map_err(ApiError::bad_request)?;
         if input.browser_selection.is_some()
@@ -316,6 +331,11 @@ pub(super) async fn start_session_run(
     let Some((room_id, connector, is_discord)) = target else {
         return rejected(ApiError::not_found());
     };
+    if input.outcome.is_some() && connector.is_some() {
+        return rejected(ApiError::bad_request_static(
+            "Outcome tasks cannot use connector delivery",
+        ));
+    }
     if is_discord && (input.skill.is_some() || !input.attachment_ids.is_empty()) {
         return rejected(ApiError::bad_request_static(
             "Discord sessions support text only; skills and attachments are unavailable",
@@ -440,6 +460,9 @@ pub(super) async fn start_session_run(
         StartRunMode::Steer => SessionRunMode::Steer,
     };
     let request = AcceptRun {
+        outcome: input
+            .outcome
+            .map(|value| serde_json::from_value(value).expect("outcome was validated")),
         agent_id,
         session_id,
         text: input.text,

@@ -34,6 +34,7 @@ describe('Rust daemon test owner environment', () => {
     );
     expect(isolated).toEqual({
       ...unchangedEnvironment,
+      RUST_MIN_STACK: '8388608',
       ANIMA_LOCAL_ADMIN_TOKEN: isolated.ANIMAOS_TEST_OWNER_TOKEN,
       ANIMAOS_TEST_OWNER_TOKEN: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
@@ -46,5 +47,12 @@ describe('Rust daemon test owner environment', () => {
 
     expect(first.ANIMAOS_TEST_OWNER_TOKEN).not.toBe(second.ANIMAOS_TEST_OWNER_TOKEN);
     expect(second.ANIMA_LOCAL_ADMIN_TOKEN).toBe(second.ANIMAOS_TEST_OWNER_TOKEN);
+  });
+
+  it('provides a bounded stack for large debug async test frames and preserves explicit overrides', () => {
+    expect(rustDaemonTestEnvironment({}).RUST_MIN_STACK).toBe('8388608');
+    const inherited = { RUST_MIN_STACK: '16777216' };
+    expect(rustDaemonTestEnvironment(inherited).RUST_MIN_STACK).toBe('16777216');
+    expect(inherited.RUST_MIN_STACK).toBe('16777216');
   });
 });

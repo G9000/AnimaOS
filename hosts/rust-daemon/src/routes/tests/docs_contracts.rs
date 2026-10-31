@@ -42,7 +42,33 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 366, "complete registered operation count");
+    assert_eq!(actual.len(), 378, "complete registered operation count");
+    let task_verification_additions = [
+        ("GET", "/api/agents/{agent_id}/runs/{run_id}/outcome"),
+        (
+            "POST",
+            "/api/agents/{agent_id}/runs/{run_id}/outcome/accept",
+        ),
+        ("POST", "/api/agents/{agent_id}/runs/{run_id}/outcome/close"),
+        ("GET", "/api/task-regression-suites"),
+        ("POST", "/api/task-regression-suites"),
+        ("GET", "/api/task-regression-configs/{agent_id}"),
+        ("POST", "/api/task-regressions"),
+        ("GET", "/api/task-regressions/{id}"),
+        ("POST", "/api/task-regressions/{id}/cancel"),
+        ("POST", "/api/document-inspections"),
+        ("GET", "/api/document-inspections/{report_sha256}"),
+        (
+            "GET",
+            "/api/document-inspections/{report_sha256}/pages/{page}",
+        ),
+    ];
+    for (method, path) in task_verification_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "outcome, regression and document inspection operations must be registered"
+        );
+    }
     let visual_page_additions = [
         (
             "GET",
@@ -707,6 +733,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| {
                 !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                    && !task_verification_additions.contains(&(method.as_str(), path.as_str()))
                     && !image_additions.contains(&(method.as_str(), path.as_str()))
                     && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
                     && !visual_page_additions.contains(&(method.as_str(), path.as_str()))
@@ -772,6 +799,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             .iter()
             .filter(|(method, path)| !connected_account_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !task_verification_additions.contains(&(method.as_str(), path.as_str()))
                 && !image_additions.contains(&(method.as_str(), path.as_str()))
                 && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
                 && !visual_page_additions.contains(&(method.as_str(), path.as_str()))

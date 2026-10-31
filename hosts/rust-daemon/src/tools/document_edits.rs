@@ -10,8 +10,18 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InspectArguments {
-    source: SourceReference,
+    source: InspectSource,
     cursor: Option<String>,
+    #[serde(default)]
+    verify_layout: bool,
+    expected_sha256: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum InspectSource {
+    Workspace { file_path: String },
+    Attachment { attachment_id: String },
+    Candidate { proposal_id: String },
 }
 
 pub(super) fn register(registry: &mut ToolRegistry) {
@@ -22,12 +32,15 @@ pub(super) fn register(registry: &mut ToolRegistry) {
         {"type":"object","properties":{"state":{"const":"absent"}},"required":["state"],"additionalProperties":false},
         {"type":"object","properties":{"state":{"const":"present"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["state","sha256"],"additionalProperties":false}]});
     let inspect = generated_documents::schema_data(
-        serde_json::json!({"type":"object","properties":{"source":source,"cursor":{"type":"string","maxLength":96}},"required":["source"],"additionalProperties":false}),
+        serde_json::json!({"type":"object","properties":{"source":{"oneOf":[
+            {"type":"object","properties":{"kind":{"const":"workspace"},"file_path":{"type":"string","minLength":1,"maxLength":1024}},"required":["kind","file_path"],"additionalProperties":false},
+            {"type":"object","properties":{"kind":{"const":"attachment"},"attachment_id":{"type":"string","minLength":1,"maxLength":128}},"required":["kind","attachment_id"],"additionalProperties":false},
+            {"type":"object","properties":{"kind":{"const":"candidate"},"proposal_id":{"type":"string","minLength":1,"maxLength":128}},"required":["kind","proposal_id"],"additionalProperties":false}]},"cursor":{"type":"string","maxLength":96},"verify_layout":{"type":"boolean"},"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["source"],"additionalProperties":false}),
     );
     let DataValue::Object(inspect) = inspect else {
         unreachable!("schema is an object")
     };
-    registry.register(tool_descriptor("inspect_office_document","Inspect a selected uploaded or workspace DOCX, XLSX, PPTX or UTF-8 HTML as untrusted plain data. Requires an explicit read grant and an ordinary owner chat. Returns bounded hash-bound inventory pages; no file effect, executable HTML or Office rendering.",inspect),inspect_document);
+    registry.register(tool_descriptor("inspect_office_document","Inspect selected uploaded or workspace Office/HTML content as untrusted structural data. For explicitly requested actual Office rendering/calculation, set verify_layout=true and expected_sha256 to the exact source hash; source may also name a private candidate proposal_id. Uses a configured local engine on captured original bytes, rejects unsupported active/external content, and returns immutable report references with explicit coverage. Missing engine or unsupported checks are inconclusive. Pixel observations do not certify no clipping or business correctness. Requires the current ordinary owner grant.",inspect),inspect_document);
     let propose = generated_documents::schema_data(
         serde_json::json!({"type":"object","properties":{"source":source,"expected_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"file_path":{"type":"string","minLength":1,"maxLength":1024},"expected_destination":expected,"operations":{"type":"array","minItems":1,"maxItems":128,"items":operation_schema()}},"required":["source","expected_sha256","file_path","expected_destination","operations"],"additionalProperties":false}),
     );
@@ -152,10 +165,33 @@ fn inspect_document(
         result(
             async {
                 let input: InspectArguments = arguments(&call)?;
+                if input.verify_layout {
+                    if input.cursor.is_some() { return Err("Actual document inspection does not accept an inventory cursor".into()); }
+                    let expected_sha256 = input.expected_sha256.ok_or("Actual document inspection requires expected_sha256")?;
+                    use crate::document_inspections::{InspectionRequest, InspectionSubject};
+                    let subject = match input.source {
+                        InspectSource::Workspace { file_path } => InspectionSubject::Workspace { file_path, expected_sha256 },
+                        InspectSource::Attachment { attachment_id } => InspectionSubject::Attachment { attachment_id, expected_sha256 },
+                        InspectSource::Candidate { proposal_id } => InspectionSubject::Candidate { proposal_id, expected_sha256 },
+                    };
+                    let owner = run(&context)?;
+                    let execution = context.execution_budget().ok_or("Document inspection requires the admitted run budget")?;
+                    let inspection = service(&context)?.inspect_artifact(&owner, execution, InspectionRequest { subject }, context.cancel.clone().unwrap_or_default()).await?;
+                    let report = &inspection.report;
+                    let report_url = format!("/api/document-inspections/{}?agent_id={}&session_id={}", inspection.report_sha256, document_edits::service::encode(&owner.agent_id), document_edits::service::encode(&owner.session_id));
+                    let pages: Vec<_> = inspection.pages.iter().map(|page| serde_json::json!({"page":page.page,"png_sha256":page.png_sha256,"ink":report.rendering().pages.iter().find(|rendered|rendered.ordinal==page.page).map(|rendered|&rendered.ink),"observation_locator":format!("page/{}/ink",page.page),"url":format!("/api/document-inspections/{}/pages/{}?agent_id={}&session_id={}",inspection.report_sha256,page.page,document_edits::service::encode(&owner.agent_id),document_edits::service::encode(&owner.session_id))})).collect();
+                    return Ok(serde_json::json!({"version":1,"kind":"inspection_observed","report_sha256":inspection.report_sha256,"report_url":report_url,"source":report.source(),"rendering":{"exported_page_count":report.rendering().exported_page_count,"coverage":report.rendering().coverage,"pages":pages},"calculation":{"total_formulas":report.calculation().total_formulas,"inspected_formulas":report.calculation().inspected_formulas,"error_count":report.calculation().errors.len(),"errors":report.calculation().errors.iter().take(32).collect::<Vec<_>>(),"errors_omitted":report.calculation().errors.len().saturating_sub(32),"observation_locator":"calculation"},"limitations":report.limitations()}));
+                }
+                if input.expected_sha256.is_some() { return Err("expected_sha256 requires verify_layout=true".into()); }
+                let source = match input.source {
+                    InspectSource::Workspace { file_path } => SourceReference::Workspace { file_path },
+                    InspectSource::Attachment { attachment_id } => SourceReference::Attachment { attachment_id },
+                    InspectSource::Candidate { .. } => return Err("Private candidate inspection requires verify_layout=true".into()),
+                };
                 let page = service(&context)?
                     .inspect(
                         &run(&context)?,
-                        input.source,
+                        source,
                         input.cursor.as_deref(),
                         context.cancel.clone().unwrap_or_default(),
                     )

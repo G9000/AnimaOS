@@ -538,6 +538,18 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET` | `/api/document-edits/{proposal_id}` |
 | `DELETE` | `/api/document-edits/{proposal_id}` |
 | `GET` | `/api/document-edits/source` |
+| `GET` | `/api/agents/{agent_id}/runs/{run_id}/outcome` |
+| `POST` | `/api/agents/{agent_id}/runs/{run_id}/outcome/accept` |
+| `POST` | `/api/agents/{agent_id}/runs/{run_id}/outcome/close` |
+| `GET` | `/api/task-regression-suites` |
+| `POST` | `/api/task-regression-suites` |
+| `GET` | `/api/task-regression-configs/{agent_id}` |
+| `POST` | `/api/task-regressions` |
+| `GET` | `/api/task-regressions/{id}` |
+| `POST` | `/api/task-regressions/{id}/cancel` |
+| `POST` | `/api/document-inspections` |
+| `GET` | `/api/document-inspections/{report_sha256}` |
+| `GET` | `/api/document-inspections/{report_sha256}/pages/{page}` |
 
 <!-- openapi-route-inventory:end -->
 
@@ -778,7 +790,7 @@ Catalog presence is metadata, not proof of model/tool acceptance. New selection 
 deliberate; existing/custom model strings and grants remain unchanged until Save.
 Owner-configured [skill evaluation and context quality](../../docs/companion/learning-context-quality.md) add bounded response-only previews before draft promotion.
 
-The registered OpenAPI inventory now contains 366 operations, including source-bound PDF page previews, saved image versions, selected connected project sources and owner-only preview inspection. See [conversation controls](../../docs/companion/chat-suite.md) for conversation authorization, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
+The registered OpenAPI inventory now contains 378 operations, including outcome reports and owner decisions, explicit task regression runs, native document inspection, source-bound PDF page previews, saved image versions, selected connected project sources and owner-only preview inspection. See [outcome tasks](../../docs/companion/outcome-tasks.md), [task regressions](../../docs/companion/task-regressions.md), [document inspection](../../docs/companion/documents.md) and [conversation controls](../../docs/companion/chat-suite.md) for authorization, limits, persistence and UI behavior. Existing operations include active personality editing, main-chat clearing, dedicated browser profiles, owner-controlled background memory maintenance, explicit owner-scoped voice operations, Discord bot checks and interaction settings, resumable workflows, reviewed recovery, saved clarifications, side questions, automation event ingress and reminder delivery status.
 
 Project Sources also supports explicit read-only folder grants outside the workspace. The project knowledge endpoints add grants, report index coverage, refresh selected folders, search local document passages and open citations after rechecking access and current source bytes. Shared project chats retrieve relevant quoted passages within their existing context budget. The SQLite keyword index is a private, derived cache; folder grants remain in durable project records. Removal and membership changes revoke access, and stale citations refuse changed files. PDF text-layer extraction remains available. On Windows, refresh can recognize up to two PDF pages without retained text per pass, preserving OCR provenance or page-only references. Citation page previews recheck current access and source bytes. Spreadsheet recalculation is not included.
 

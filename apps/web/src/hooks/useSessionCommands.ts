@@ -15,6 +15,7 @@ import type {
   SessionQueuedRunPatch,
   UploadedAttachment,
   PreviewEditContext,
+  OutcomeDefinition,
 } from '@animaos/sdk';
 import { validPreviewEditContext } from '@animaos/sdk';
 import type { SendAttachments } from './useSessionSends';
@@ -68,6 +69,7 @@ export interface SessionCommandOptions {
     attachmentIds?: string[];
     skill?: string;
     documentEditContext?: PreviewEditContext;
+    outcome?: OutcomeDefinition;
   } | null;
   attachments?: readonly UploadedAttachment[];
   /** Saved IDs whose display metadata is unavailable (manual run recovery). */
@@ -86,6 +88,7 @@ export interface SessionCommandOptions {
     text: string,
     skill?: string,
     attachments?: SendAttachments,
+    outcome?: OutcomeDefinition,
   ) => void;
   queueSend: (
     target: Pick<Session, 'agentId' | 'id' | 'kind'>,
@@ -96,6 +99,7 @@ export interface SessionCommandOptions {
     skill?: string,
     attachments?: SendAttachments,
     documentEditContext?: PreviewEditContext,
+    outcome?: OutcomeDefinition,
   ) => void;
   /** The commands the composer offers: the built-ins and the skills. */
   slashCommands: readonly SlashCommand[];
@@ -129,7 +133,7 @@ export interface SessionCommandOptions {
 export interface SessionCommands {
   /** Sends the draft, or `text` (a command picked from the menu), as a
    *  queued message; a slash command runs instead. */
-  send: (text?: string, documentEditContext?: PreviewEditContext) => void;
+  send: (text?: string, documentEditContext?: PreviewEditContext, outcome?: OutcomeDefinition) => void;
   /** Steers the draft into the reply in progress (⌘/Ctrl+Enter). */
   steer: () => void;
   /** Stops a run (spec §4.6): the reply in progress, or a queued message. */
@@ -407,11 +411,15 @@ export function useSessionCommands(
       return result;
     };
 
-    const submit = (mode: RunMode, override?: string, selectedContext?: PreviewEditContext) => {
+    const submit = (mode: RunMode, override?: string, selectedContext?: PreviewEditContext, selectedOutcome?: OutcomeDefinition) => {
       const current = latest.current;
       if (!current.canSend() || current.attachmentsBlocked) return;
       const rawText = override ?? current.draft;
       const documentEditContext = selectedContext ?? current.resend?.documentEditContext;
+      const outcome = mode === 'queue' ? selectedOutcome ?? current.resend?.outcome : undefined;
+      if (outcome && current.session && current.session.kind !== 'chat') {
+        current.setError('Success criteria require a new web chat message.'); return;
+      }
       if ((documentEditContext !== undefined && (!validPreviewEditContext(documentEditContext) || !current.session || current.session.kind !== 'chat' || !['web', 'api'].includes(current.session.origin) || current.session.parentRunId || !current.session.capabilities.send || current.chatKey !== `${current.session.agentId}\u0000session:${current.session.id}`)) || (!documentEditContext && rawText.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
         current.setError('This edit needs a current content selection in its original web chat. Select the content again.');
         return;
@@ -438,10 +446,11 @@ export function useSessionCommands(
         JSON.stringify(current.resend?.attachmentIds ?? []) ===
         JSON.stringify(attachmentIds);
       const sameContext = JSON.stringify(current.resend?.documentEditContext) === JSON.stringify(documentEditContext);
+      const sameOutcome = JSON.stringify(current.resend?.outcome) === JSON.stringify(outcome);
       const exactReplay =
         current.resend !== null &&
         current.resend.text === rawText &&
-        sameAttachments && sameContext;
+        sameAttachments && sameContext && sameOutcome;
       const text =
         exactReplay || current.literalDraft ? rawText : rawText.trim();
       if (!text && attachmentIds.length === 0) return;
@@ -455,7 +464,7 @@ export function useSessionCommands(
       // that looks like a local command. Preserve its identity before normalization.
       const command = exactReplay ? null : parsed;
       // A skill is a message: the whole text goes, with its skill (spec §15.3).
-      const restored = current.resend?.text === text && sameAttachments && sameContext;
+      const restored = current.resend?.text === text && sameAttachments && sameContext && sameOutcome;
       const skill = documentEditContext ? undefined :
         (exactReplay ? current.resend?.skill : parsed?.command.skill) ??
         (restored ? current.resend?.skill : undefined);
@@ -472,7 +481,10 @@ export function useSessionCommands(
         return;
       }
       if (!current.routeSessionId) {
-        if (attached) {
+        if (outcome) {
+          current.startChat(text, skill, attached, outcome);
+          current.clearAttachments?.();
+        } else if (attached) {
           current.startChat(text, skill, attached);
           current.clearAttachments?.();
         } else if (skill) current.startChat(text, skill);
@@ -521,7 +533,8 @@ export function useSessionCommands(
         session.capabilities.steer
           ? 'steer'
           : 'queue';
-      if (documentEditContext) current.queueSend(session, chatKey, text, idempotencyKey, 'queue', undefined, attached, documentEditContext);
+      if (outcome) current.queueSend(session, chatKey, text, idempotencyKey, 'queue', skill, attached, documentEditContext, outcome);
+      else if (documentEditContext) current.queueSend(session, chatKey, text, idempotencyKey, 'queue', undefined, attached, documentEditContext);
       else if (attached)
         current.queueSend(
           session,
@@ -546,7 +559,7 @@ export function useSessionCommands(
     };
 
     return {
-      send: (text?: string, documentEditContext?: PreviewEditContext) => submit('queue', text, documentEditContext),
+      send: (text?: string, documentEditContext?: PreviewEditContext, outcome?: OutcomeDefinition) => submit('queue', text, documentEditContext, outcome),
       steer: () => submit('steer'),
       stopRun,
       steerQueued,
@@ -563,6 +576,10 @@ export function useSessionCommands(
           !isOwnerWritten(run)
         )
           return false;
+        if (run.outcome) {
+          latest.current.setError('Use this run’s success criteria report to review its evidence and available actions before starting another task.');
+          return false;
+        }
         if (session.kind === 'discord' && !latest.current.discordReady)
           return false;
         const documentEditContext = run.input.documentEditContext;

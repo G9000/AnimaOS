@@ -87,6 +87,29 @@ afterEach(() => {
 });
 
 describe('useSessionCommands', () => {
+  it('preserves a recovered outcome and its original key while preventing generic retry from resetting run limits', () => {
+    const outcome = { criteria: [{ kind: 'response_text' as const, id: 'result', contains: 'Ready' }] };
+    const { result, options } = setup({ draft: 'Write the report', resend: { text: 'Write the report', idempotencyKey: 'original', outcome } });
+    act(() => result.current.send());
+    expect(options.queueSend).toHaveBeenCalledWith(options.session, CHAT_KEY, 'Write the report', 'original', 'queue', undefined, undefined, undefined, outcome);
+    const run = runFixture('checked', { sessionId: 'room-7', outcome: { definition: outcome, revision: 1, rootRunId: 'checked', taskSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), modelSha256: 'c'.repeat(64), workspaceSha256: 'd'.repeat(64), iterations: [], consumedCorrections: 2, status: 'exhausted', repairPaths: [] } });
+    act(() => expect(result.current.sendAgain(run)).toBe(false));
+    expect(options.queueSend).toHaveBeenCalledTimes(1);
+    expect(options.setError).toHaveBeenCalledWith('Use this run’s success criteria report to review its evidence and available actions before starting another task.');
+  });
+  it('queues explicit criteria with a fresh message and never reuses a recovered key for different criteria', () => {
+    const outcome = { criteria: [{ kind: 'response_text' as const, id: 'result', contains: 'Ready' }], maxCorrections: 2, acceptance: 'report_only' as const };
+    const { result, options } = setup({ draft: 'Write the report', resend: { text: 'Write the report', idempotencyKey: 'old' } });
+    act(() => result.current.send(undefined, undefined, outcome));
+    expect(options.queueSend).toHaveBeenCalledWith(options.session, CHAT_KEY, 'Write the report', expect.any(String), 'queue', undefined, undefined, undefined, outcome);
+    expect(vi.mocked(options.queueSend).mock.calls[0][3]).not.toBe('old');
+  });
+  it('carries explicit criteria into a new chat without changing ordinary chat call arguments', () => {
+    const outcome = { criteria: [{ kind: 'response_text' as const, id: 'result', contains: 'Ready' }] };
+    const { result, options } = setup({ draft: 'Write the report', routeSessionId: null, session: null });
+    act(() => result.current.send(undefined, undefined, outcome));
+    expect(options.startChat).toHaveBeenCalledWith('Write the report', undefined, undefined, outcome);
+  });
   it('restores a revised preview edit as a restricted literal draft with a fresh request key', async () => {
     vi.spyOn(daemon, 'reviseSession').mockResolvedValue({ session: sessionFixture('revision'), retryPrompt: 'Rewrite this', retryDocumentEditContext: editContext, attachmentsOmitted: false, notice: 'Review first.' });
     const { result, options } = setup({ draft: '/retry' });

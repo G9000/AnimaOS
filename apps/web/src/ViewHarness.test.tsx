@@ -1470,6 +1470,10 @@ describe('ViewHarness workspace controller', () => {
 
   it('sends in Plan mode only while Plan is chosen', async () => {
     const user = userEvent.setup();
+    localStorage.setItem(
+      'anima.appearance',
+      JSON.stringify({ advancedInput: true }),
+    );
     vi.spyOn(daemon, 'health').mockResolvedValue({ status: 'ok' });
     vi.spyOn(daemon, 'listAgents').mockResolvedValue({
       agents: [snapshot('agent-a', 'Alpha', 10)],
@@ -1857,9 +1861,10 @@ describe('ViewHarness workspace controller', () => {
     const send = vi.mocked(daemon.startRun).mockReturnValue(run.promise);
     render(<ViewHarness />);
     await openChat();
-    const input = await screen.findByPlaceholderText('Message Nova…');
+    const input = await readyComposer('Message Nova…');
     await user.type(input, 'Original request');
     await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     await user.type(input, 'New thought');
     await act(async () => {
       run.reject(new Error('Connection lost'));
@@ -2416,11 +2421,12 @@ it('returns a message the daemon refused to the recovery panel without retrying'
   render(<ViewHarness />);
   await openChat();
   await user.type(
-    await screen.findByPlaceholderText('Message Nova…'),
+    await readyComposer('Message Nova…'),
     'One more thing',
   );
   await user.click(screen.getByRole('button', { name: 'Send' }));
 
+  expect(startRun).toHaveBeenCalledTimes(1);
   expect(
     await screen.findByText(
       'This companion already has 8 queued messages; wait for one to start',
@@ -2490,8 +2496,9 @@ it('sends a /skill message from the composer with its skill', async () => {
   );
   const input = screen.getByPlaceholderText('Message Nova…');
   await user.type(input, '/no');
+  const commands = await screen.findByRole('listbox', { name: 'Commands' });
   expect(
-    await screen.findByRole('option', { name: /\/notes/ }),
+    within(commands).getByRole('option', { name: /\/notes/ }),
   ).toBeVisible();
   await user.type(input, 'tes plan the week{Enter}');
 

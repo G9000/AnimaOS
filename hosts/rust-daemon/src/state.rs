@@ -1787,6 +1787,7 @@ pub(crate) struct DaemonState {
     pub(crate) document_edit_store: Option<crate::document_edits::DocumentEditStore>,
     pub(crate) document_edit_worker: crate::document_edits::DocumentEditWorker,
     pub(crate) document_edit_service: Option<crate::document_edits::WeakDocumentEditService>,
+    pub(crate) document_inspections: crate::document_inspections::InspectionRuntime,
     pub(crate) projects: crate::projects::ProjectRegistry,
     pub(crate) project_knowledge: crate::projects::knowledge::KnowledgeService,
     pub(crate) project_access: crate::projects::ProjectAccessRegistry,
@@ -1871,6 +1872,9 @@ pub(crate) struct DaemonState {
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
     pub(crate) skill_evaluations: crate::skills::evaluation::EvaluationRegistry,
     pub(crate) skill_evaluation_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) task_regressions: crate::task_regressions::RegressionRegistry,
+    pub(crate) task_regression_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) task_regression_cancels: std::collections::HashMap<String, anima_core::CancelSignal>,
     /// Skill records, drafts, and the last scan (spec §8).
     pub(crate) skills: crate::skills::SkillRegistry,
     /// Automation fires the history store does not hold yet (spec §9.1).
@@ -1942,6 +1946,7 @@ pub(crate) struct ControlPlanePersistRequest {
     order: Arc<ControlPlanePersistOrder>,
     action_candidate: Option<String>,
     turn_candidate: Option<String>,
+    outcome_candidate: Option<String>,
     mcp_candidate: bool,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     bundle_candidate: bool,
@@ -1968,6 +1973,7 @@ struct ControlPlaneAcknowledged {
     /// Acknowledged progress patches are merged only into an existing matching
     /// attempt. They never resurrect removed runs or restore execution authority.
     run_turns: HashMap<String, crate::runs::turn::RunTurn>,
+    run_outcomes: HashMap<String, anima_core::outcomes::RunOutcome>,
     mcp_connections: Option<Vec<crate::mcp::McpConnectionRecord>>,
     mcp_removed_grants: Option<(String, Vec<String>)>,
     mcp_grants: HashMap<String, AcknowledgedMcpGrants>,
@@ -2026,6 +2032,17 @@ pub(crate) struct TestControlPlaneSaveGate {
 }
 
 impl ControlPlanePersistRequest {
+    pub(crate) fn with_run_outcome(
+        mut self,
+        run_id: &str,
+        outcome: anima_core::outcomes::RunOutcome,
+    ) -> Option<Self> {
+        let record = self.snapshot.runs.iter_mut().find(|run| run.id == run_id)?;
+        record.outcome = Some(outcome);
+        record.mirrored = false;
+        self.outcome_candidate = Some(run_id.to_string());
+        Some(self)
+    }
     pub(crate) fn store_config(&self) -> Option<ControlPlaneStoreConfig> {
         self.config.clone()
     }
@@ -2211,6 +2228,18 @@ impl ControlPlanePersistRequest {
         // Merge acknowledged actions under the same persistence ordering,
         // preserving all unrelated run fields and never inserting rows.
         for record in &mut self.snapshot.runs {
+            if self.outcome_candidate.as_deref() != Some(record.id.as_str()) {
+                if let Some(outcome) = acknowledged.run_outcomes.get(&record.id) {
+                    if record
+                        .outcome
+                        .as_ref()
+                        .is_some_and(|current| current.revision < outcome.revision)
+                    {
+                        record.outcome = Some(outcome.clone());
+                        record.mirrored = false;
+                    }
+                }
+            }
             if self.turn_candidate.as_deref() != Some(record.id.as_str()) {
                 if let Some(turn) = acknowledged.run_turns.get(&record.id) {
                     record.merge_acknowledged_turn(turn);
@@ -2410,6 +2439,22 @@ impl ControlPlanePersistRequest {
             save_result
         };
         if let Err(error) = save_result {
+            if self.outcome_candidate.is_some()
+                && crate::control_plane_store::is_durability_uncertain(&error)
+            {
+                acknowledged.revision = self.revision;
+                acknowledged.run_outcomes = self
+                    .snapshot
+                    .runs
+                    .iter()
+                    .filter_map(|record| {
+                        record
+                            .outcome
+                            .clone()
+                            .map(|outcome| (record.id.clone(), outcome))
+                    })
+                    .collect();
+            }
             if self.document_edit_candidate.is_some()
                 && crate::control_plane_store::is_durability_uncertain(&error)
             {
@@ -2477,6 +2522,17 @@ impl ControlPlanePersistRequest {
             .runs
             .iter()
             .filter_map(|record| record.turn.clone().map(|turn| (record.id.clone(), turn)))
+            .collect();
+        acknowledged.run_outcomes = self
+            .snapshot
+            .runs
+            .iter()
+            .filter_map(|record| {
+                record
+                    .outcome
+                    .clone()
+                    .map(|outcome| (record.id.clone(), outcome))
+            })
             .collect();
         Ok(())
     }
@@ -2613,6 +2669,7 @@ impl DaemonState {
             document_edits: crate::document_edits::DocumentEditRegistry::default(),
             document_edit_store: None,
             document_edit_service: None,
+            document_inspections: Default::default(),
             document_edit_worker: crate::document_edits::DocumentEditWorker::new(
                 crate::attachments::documents::worker::shared_physical_slot(),
             ),
@@ -2687,6 +2744,9 @@ impl DaemonState {
             skill_ledger: Vec::new(),
             skill_evaluations: crate::skills::evaluation::EvaluationRegistry::default(),
             skill_evaluation_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            task_regressions: crate::task_regressions::RegressionRegistry::default(),
+            task_regression_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            task_regression_cancels: std::collections::HashMap::new(),
             skills: crate::skills::SkillRegistry::default(),
             schedule_fires: crate::schedules::FireLog::default(),
             pricing_overrides: Vec::new(),
@@ -2824,6 +2884,7 @@ impl DaemonState {
             order: Arc::clone(&self.control_plane_persist_order),
             action_candidate: None,
             turn_candidate: None,
+            outcome_candidate: None,
             mcp_candidate: false,
             mcp_removed_grants: None,
             bundle_candidate: false,
@@ -3027,6 +3088,7 @@ impl DaemonState {
         snapshot.agent_autonomy = self.autonomy.snapshot(&self.live_agent_ids());
         snapshot.skill_ledger = self.skill_ledger.clone();
         snapshot.skill_evaluations = self.skill_evaluations.clone();
+        snapshot.task_regressions = self.task_regressions.clone();
         snapshot.pending_usage = self.history.pending_usage();
         snapshot.helper_worktree_repos = self.helper_worktree_repos.clone();
         let skills = self.skills.snapshot();
@@ -3091,6 +3153,7 @@ impl DaemonState {
             .try_lock()
             .map_err(|_| "Control plane cannot be restored during a pending save")?;
         self.workspace_document_authority.revoke_all();
+        self.document_inspections.revoke_all();
         self.execution_budgets = snapshot.execution_budgets.clone();
         self.execution_budget_candidate_snapshot = None;
         self.execution_budget_failures.clear();
@@ -3370,6 +3433,13 @@ impl DaemonState {
         self.skill_evaluations = snapshot.skill_evaluations.clone();
         self.skill_evaluations
             .interrupt_active(anima_core::primitives::now_millis());
+        self.task_regressions = snapshot.task_regressions.clone();
+        self.task_regressions
+            .interrupt_active(anima_core::primitives::now_millis());
+        for cancel in self.task_regression_cancels.values() {
+            cancel.cancel();
+        }
+        self.task_regression_cancels.clear();
         self.helper_worktree_repos = snapshot.helper_worktree_repos.clone();
         // A deleted session's approvals never reach the history store.
         let sessions = &self.sessions;
@@ -3602,6 +3672,7 @@ impl DaemonState {
         )?;
         crate::skills::SkillRegistry::validate(&snapshot.skills, &snapshot.skill_drafts)?;
         snapshot.skill_evaluations.validate()?;
+        snapshot.task_regressions.validate()?;
         crate::history::HistoryService::validate_pending_usage(&snapshot.pending_usage)?;
         crate::community_bundles::validate_snapshot(snapshot)?;
         for draft in &snapshot.skill_drafts {
@@ -4293,6 +4364,10 @@ impl DaemonState {
             runtime.replace_config(config);
             self.workspace_document_authority
                 .update(agent_id, runtime.config().allows_tool("read_document"));
+            self.document_inspections.authority.update(
+                agent_id,
+                runtime.config().allows_tool("inspect_office_document"),
+            );
             if before != after {
                 if let Some(manager) = &self.mcp_manager {
                     manager.note_agent_permissions_changed(agent_id);
@@ -4325,6 +4400,10 @@ impl DaemonState {
         let snapshot = runtime.snapshot();
         self.workspace_document_authority
             .update(agent_id, snapshot.state.config.allows_tool("read_document"));
+        self.document_inspections.authority.update(
+            agent_id,
+            snapshot.state.config.allows_tool("inspect_office_document"),
+        );
         if before != mcp_permissions(&snapshot.state.config) {
             if let Some(manager) = &self.mcp_manager {
                 manager.note_agent_permissions_changed(agent_id);
@@ -4389,6 +4468,7 @@ impl DaemonState {
             self.resolve_restored_agent_tools(&snapshot.state.id, snapshot.state.config.tools)?;
         let agent_id = snapshot.state.id.clone();
         self.workspace_document_authority.revoke(&agent_id);
+        self.document_inspections.revoke(&agent_id);
         let mut runtime = AgentRuntime::from_snapshot(snapshot, self.profile_model_adapter());
         self.wire_runtime(&mut runtime);
         if runtime.state().status == AgentStatus::Running {
@@ -4441,6 +4521,7 @@ impl DaemonState {
 
     pub(crate) fn remove_agent(&mut self, agent_id: &str) {
         self.workspace_document_authority.revoke(agent_id);
+        self.document_inspections.revoke(agent_id);
         self.browser_permission_epochs.remove(agent_id);
         if let Some(manager) = &self.mcp_manager {
             manager.retire_agent(agent_id);

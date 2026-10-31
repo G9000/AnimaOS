@@ -70,6 +70,20 @@ impl Drop for SaveWork {
 }
 
 impl RunActionJournal {
+    pub(crate) fn outcome_write_witness(
+        &self,
+        call: &ToolCall,
+    ) -> Result<Option<crate::outcomes::OutcomeWriteWitness>, String> {
+        let state = self
+            .state
+            .upgrade()
+            .ok_or("Outcome action owner unavailable")?;
+        let guard = state
+            .try_read()
+            .map_err(|_| "Outcome repair authority busy")?;
+        self.check_owner(&guard, true)?;
+        crate::outcomes::write_witness(&guard, &self.run, call)
+    }
     pub(crate) async fn check_preview_tool(
         &self,
         call: &ToolCall,
@@ -257,6 +271,9 @@ impl RunActionJournal {
             .try_read_owned()
             .map_err(|_| "Checkpoint authority is busy; no file effect was admitted")?;
         self.check_owner(&guard, true)?;
+        if let Some(witness) = crate::outcomes::write_witness(&guard, &self.run, call)? {
+            crate::outcomes::validate_write_witness(&guard, &self.run, call, &witness)?;
+        }
         // A worktree helper's checkpoints follow its own checkout; every
         // other run must still match the global workspace exactly.
         let expected_workspace = guard

@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use anima_core::execution_limits::{
-    ExecutionBindingHint, ExecutionContext, ExecutionLimits, ExecutionScope, SystemBudgetClock,
+    ExecutionBindingHint, ExecutionContext, ExecutionLimits, ExecutionPermit, ExecutionScope,
+    SystemBudgetClock,
 };
 use anima_core::CancelSignal;
 use futures::FutureExt;
@@ -107,12 +108,22 @@ impl HostExecutionBudgets {
                             old == new
                         }
                         (
+                            SettlementOutcome::Artifact {
+                                artifact_bytes: old,
+                            },
+                            SettlementOutcome::Artifact {
+                                artifact_bytes: new,
+                            },
+                        ) => old == new,
+                        (
                             SettlementOutcome::ProvenNeverSent,
                             SettlementOutcome::ProvenNeverSent,
                         ) => true,
                         (
                             SettlementOutcome::Unknown { .. },
-                            SettlementOutcome::Unknown { .. } | SettlementOutcome::Known(_),
+                            SettlementOutcome::Unknown { .. }
+                            | SettlementOutcome::Known(_)
+                            | SettlementOutcome::Artifact { .. },
                         ) => true,
                         _ => false,
                     };
@@ -472,6 +483,124 @@ pub(crate) async fn standalone_context_with_limits(
     })
     .await
     .map_err(|error| format!("Execution admission worker failed: {error}"))?
+}
+
+pub(crate) struct RetainedChildAdmission {
+    pub(crate) context: ExecutionContext,
+    pub(crate) dispatch: ExecutionPermit,
+}
+
+/// Binds one explicit child identity to its parent's retained accounting. The
+/// caller must revalidate `dispatch` immediately before dispatch and settle it
+/// with the actual outcome and physical retirement. A binding is never replayed.
+pub(crate) async fn retained_child_context(
+    state: &SharedDaemonState,
+    transactions: Arc<Mutex<()>>,
+    parent: &ExecutionContext,
+    child_id: String,
+    cancel: CancelSignal,
+) -> Result<RetainedChildAdmission, String> {
+    let state = Arc::clone(state);
+    let parent = parent.clone();
+    // The worker retains admission and its storage acknowledgement even when
+    // the waiting caller drops. An undelivered permit keeps its conservative
+    // unknown settlement through the existing permit Drop path.
+    tokio::spawn(async move {
+        parent.check_live()?;
+        if cancel.is_cancelled() {
+            return Err(cancel.run_error().into());
+        }
+        // ExecutionContext has only two cancellation slots. Refuse a third
+        // ancestor rather than silently discarding an existing stop signal.
+        if parent.secondary_cancel.is_some() {
+            return Err("Retained child cancellation ancestry exceeds the supported bound".into());
+        }
+        parent.check_authority().await?;
+        let transaction = transactions.clone().lock_owned().await;
+        parent.check_live()?;
+        if cancel.is_cancelled() {
+            return Err(cancel.run_error().into());
+        }
+        let owner = {
+            let guard = state.read().await;
+            guard
+                .ensure_profile_owned()
+                .map_err(|error| error.to_string())?;
+            guard.profile_owner()
+        };
+        if let Some(owner) = owner {
+            owner
+                .verify_owned()
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let (candidate, request) = {
+            let mut guard = state.write().await;
+            guard
+                .ensure_profile_owned()
+                .map_err(|error| error.to_string())?;
+            parent.check_live()?;
+            if cancel.is_cancelled() {
+                return Err(cancel.run_error().into());
+            }
+            let registry = &guard.execution_budgets;
+            if registry.run_scopes.get(&parent.run_id) != Some(&parent.scope_id) {
+                return Err("Retained child parent has no matching durable scope".into());
+            }
+            let scope = registry
+                .scopes
+                .get(&parent.scope_id)
+                .ok_or("Retained child parent scope is unavailable")?;
+            if scope.deadline_at_ms != parent.deadline_at_ms {
+                return Err(
+                    "Retained child parent deadline changed; explicit reattachment required".into(),
+                );
+            }
+            if registry.run_scopes.contains_key(&child_id) {
+                return Err("Retained child identity already admitted; replay refused".into());
+            }
+            if let Some(failure) = guard.execution_budget_failures.get(&parent.scope_id) {
+                if let Some(reason) = failure
+                    .lock()
+                    .map_err(|_| "Shared execution failure state is unavailable")?
+                    .clone()
+                {
+                    return Err(reason);
+                }
+            }
+            // Budget-only operations need no synthetic run. When the identity
+            // names a real run, its owner/session must match the actual parent.
+            let parent_run = guard.runs.get(&parent.run_id);
+            if let Some(child) = guard.runs.get(&child_id) {
+                let parent_run = parent_run.ok_or("Retained child run parent is unavailable")?;
+                if child.agent_id != parent_run.agent_id
+                    || child.session_id != parent_run.session_id
+                {
+                    return Err(
+                        "Retained child run owner or session disagrees with its parent".into(),
+                    );
+                }
+            }
+            let now_ms = anima_core::primitives::now_millis();
+            let mut candidate = registry.prepare_binding(&child_id, &[&parent.run_id], now_ms)?;
+            refresh_owner_limits(&guard, &mut candidate, parent_run)?;
+            candidate.registry.scopes[&parent.scope_id].allowance(now_ms)?;
+            (candidate, guard.control_plane_persist_request())
+        };
+        save_admission(&state, candidate, request)
+            .await
+            .map_err(|error| error.to_string())?;
+        drop(transaction);
+        let mut context = context_for_run(&state, transactions, &child_id, cancel).await?;
+        context.secondary_cancel = Some(parent.cancel.clone());
+        // Reserve through the canonical port only after releasing its shared
+        // transaction. This debit covers orchestration; child work also draws
+        // on exactly the same remaining model/tool/token allowance.
+        let dispatch = context.reserve_tool("retained-child-dispatch").await?;
+        Ok(RetainedChildAdmission { context, dispatch })
+    })
+    .await
+    .map_err(|error| format!("Retained child admission worker failed: {error}"))?
 }
 
 pub(crate) fn tighten_candidate(

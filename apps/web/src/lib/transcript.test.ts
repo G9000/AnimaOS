@@ -29,6 +29,17 @@ it('never treats a host-generated recovery prompt as owner-authored resend input
   expect(isOwnerWritten(child)).toBe(false);
 });
 
+it('places opt-in criteria evidence next to its linked reply and leaves ordinary replies quiet', () => {
+  const outcome = { definition: { criteria: [{ kind: 'response_text' as const, id: 'result', contains: 'Ready' }] }, revision: 1, rootRunId: 'checked', taskSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), modelSha256: 'c'.repeat(64), workspaceSha256: 'd'.repeat(64), iterations: [], consumedCorrections: 0, status: 'criteria_met' as const, repairPaths: [] };
+  const run = runFixture('checked', { status: 'completed', replyMessageId: 'reply', outcome });
+  const reply = message('reply', 'Assistant', 'Ready', { runId: run.id });
+  const ordinary = runFixture('ordinary', { status: 'completed', replyMessageId: 'ordinary-reply' });
+  const items = buildTranscript({ messages: [reply, message('ordinary-reply', 'Assistant', 'Hello', { runId: ordinary.id })], runs: [emptyLiveRun(run), emptyLiveRun(ordinary)] });
+  const check = items.findIndex((item) => item.kind === 'outcome-check');
+  expect(check).toBe(items.findIndex((item) => item.kind === 'message' && item.message.id === 'reply') + 1);
+  expect(items.filter((item) => item.kind === 'outcome-check')).toHaveLength(1);
+});
+
 it('places completed action receipts after the linked assistant reply', () => {
   const run = runFixture('receipt-run', {
     status: 'completed',

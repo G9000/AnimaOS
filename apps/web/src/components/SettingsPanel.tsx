@@ -25,6 +25,7 @@ import { ProfileVoice } from './ProfileVoice';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
+import { TaskRegressionPanel } from './task-regressions/TaskRegressionPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
 import {
@@ -989,6 +990,7 @@ export function SettingsPanel({
               />
             </div>
           </section>
+          <TaskRegressionPanel agentId={agent.id} disabled={controlsDisabled} hasUnsavedChanges={dirty} />
           {!shows('model') && (
             <section
               className="settings-group"
