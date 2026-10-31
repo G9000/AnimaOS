@@ -18,71 +18,10 @@ const saved = {
   maxChars: 16000,
 };
 
+const document = () => screen.getByLabelText('Personality document');
+
 describe('PersonalityEditor', () => {
-  it('keeps recognized nested sections independent during sequential edits', async () => {
-    const content =
-      '## Communication\nBe clear.\n### Examples\nExplain simply.\n\n## Boundaries\nAsk.';
-    const save = vi.fn(
-      async (_: string, input: { content: string; revision: string }) => ({
-        ...saved,
-        ...input,
-        revision: 'r2',
-      }),
-    );
-    render(
-      <PersonalityEditor initialScreen="editor"
-        agentId="one"
-        loadPersonality={async () => ({ ...saved, content })}
-        savePersonality={save}
-      />,
-    );
-    const communication = await screen.findByLabelText('Communication');
-    expect(communication).toHaveValue('Be clear.');
-    fireEvent.change(communication, {
-      target: { value: 'Be clear and direct.' },
-    });
-    fireEvent.change(screen.getByLabelText('Example replies'), {
-      target: { value: 'Use my new example.' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save personality' }));
-    await waitFor(() =>
-      expect(save).toHaveBeenCalledWith('one', {
-        revision: 'r1',
-        content: content
-          .replace('Be clear.', 'Be clear and direct.')
-          .replace('Explain simply.', 'Use my new example.'),
-      }),
-    );
-  });
-  it('keeps typed spaces and newlines without accumulating document separators', async () => {
-    const save = vi.fn(
-      async (_: string, input: { content: string; revision: string }) => ({
-        ...saved,
-        ...input,
-        revision: 'r2',
-      }),
-    );
-    const user = userEvent.setup();
-    render(
-      <PersonalityEditor initialScreen="editor"
-        agentId="one"
-        loadPersonality={async () => saved}
-        savePersonality={save}
-      />,
-    );
-    const field = await screen.findByLabelText('Personality and temperament');
-    await user.type(field, '\nCurious and adventurous.');
-    expect(field).toHaveValue('Curious.\nCurious and adventurous.');
-    await user.click(screen.getByRole('button', { name: 'Save personality' }));
-    expect(save).toHaveBeenCalledWith('one', {
-      revision: 'r1',
-      content: saved.content.replace(
-        'Curious.',
-        'Curious.\nCurious and adventurous.',
-      ),
-    });
-  });
-  it('loads the active source, edits guided fields, and saves the same document', async () => {
+  it('loads the active source as one markdown document and saves it as written', async () => {
     const save = vi.fn(
       async (_: string, input: { content: string; revision: string }) => ({
         ...saved,
@@ -98,12 +37,14 @@ describe('PersonalityEditor', () => {
       />,
     );
     expect(screen.getByRole('status')).toHaveTextContent('Loading personality');
-    expect(
-      await screen.findByLabelText('Personality and temperament'),
-    ).toHaveValue('Curious.');
+    expect(await screen.findByLabelText('Personality document')).toHaveValue(
+      saved.content,
+    );
     expect(screen.getByText('Workspace personality')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('Personality and temperament'), {
-      target: { value: 'Curious and adventurous.' },
+    // No Guided mode: there is one editor, not tabs.
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    fireEvent.change(document(), {
+      target: { value: saved.content.replace('Curious.', 'Curious and adventurous.') },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save personality' }));
     await waitFor(() =>
@@ -115,30 +56,29 @@ describe('PersonalityEditor', () => {
     expect(await screen.findByText(/Personality saved/)).toBeVisible();
   });
 
-  it('preserves raw text and unknown sections when switching views', async () => {
+  it('keeps typed spaces, newlines and unknown sections exactly', async () => {
+    const save = vi.fn(
+      async (_: string, input: { content: string; revision: string }) => ({
+        ...saved,
+        ...input,
+        revision: 'r2',
+      }),
+    );
+    const user = userEvent.setup();
     render(
       <PersonalityEditor initialScreen="editor"
         agentId="one"
         loadPersonality={async () => saved}
-        savePersonality={vi.fn()}
+        savePersonality={save}
       />,
     );
-    await screen.findByLabelText('Personality and temperament');
-    fireEvent.click(screen.getByRole('tab', { name: 'Markdown' }));
-    const raw = screen.getByLabelText('Personality document');
-    fireEvent.change(raw, {
-      target: {
-        value: saved.content + '\n\n## Boundaries\nAsk before purchases.',
-      },
+    const field = await screen.findByLabelText('Personality document');
+    await user.type(field, '\n\n## Boundaries\nAsk before purchases.  ');
+    await user.click(screen.getByRole('button', { name: 'Save personality' }));
+    expect(save).toHaveBeenCalledWith('one', {
+      revision: 'r1',
+      content: saved.content + '\n\n## Boundaries\nAsk before purchases.  ',
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Guided' }));
-    expect(screen.getByLabelText('Boundaries')).toHaveValue(
-      'Ask before purchases.',
-    );
-    fireEvent.click(screen.getByRole('tab', { name: 'Markdown' }));
-    expect(screen.getByLabelText('Personality document')).toHaveValue(
-      saved.content + '\n\n## Boundaries\nAsk before purchases.',
-    );
   });
 
   it('keeps a failed draft and blocks stale saves until explicit reload', async () => {
@@ -155,28 +95,21 @@ describe('PersonalityEditor', () => {
         savePersonality={save}
       />,
     );
-    fireEvent.change(
-      await screen.findByLabelText('Personality and temperament'),
-      { target: { value: 'My unsaved draft.' } },
-    );
+    fireEvent.change(await screen.findByLabelText('Personality document'), {
+      target: { value: 'My unsaved draft.' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save personality' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Personality changed elsewhere.',
     );
-    expect(screen.getByLabelText('Personality and temperament')).toHaveValue(
-      'My unsaved draft.',
-    );
+    expect(document()).toHaveValue('My unsaved draft.');
     expect(
       screen.getByRole('button', { name: 'Save personality' }),
     ).toBeDisabled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Reload saved personality' }),
     );
-    await waitFor(() =>
-      expect(screen.getByLabelText('Personality and temperament')).toHaveValue(
-        'Curious.',
-      ),
-    );
+    await waitFor(() => expect(document()).toHaveValue(saved.content));
   });
 
   it('keeps the draft on a transient save failure and allows retry', async () => {
@@ -190,16 +123,14 @@ describe('PersonalityEditor', () => {
         savePersonality={save}
       />,
     );
-    fireEvent.change(await screen.findByLabelText('Goals and priorities'), {
+    fireEvent.change(await screen.findByLabelText('Personality document'), {
       target: { value: 'Find a useful opportunity.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save personality' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Disk unavailable',
     );
-    expect(screen.getByLabelText('Goals and priorities')).toHaveValue(
-      'Find a useful opportunity.',
-    );
+    expect(document()).toHaveValue('Find a useful opportunity.');
     expect(
       screen.getByRole('button', { name: 'Save personality' }),
     ).toBeEnabled();
@@ -229,13 +160,11 @@ describe('PersonalityEditor', () => {
         savePersonality={vi.fn()}
       />,
     );
-    expect(
-      await screen.findByLabelText('Personality and temperament'),
-    ).toHaveValue('Thoughtful.');
-    await act(async () => resolveOld(saved));
-    expect(screen.getByLabelText('Personality and temperament')).toHaveValue(
-      'Thoughtful.',
+    expect(await screen.findByLabelText('Personality document')).toHaveValue(
+      '## Personality\nThoughtful.',
     );
+    await act(async () => resolveOld(saved));
+    expect(document()).toHaveValue('## Personality\nThoughtful.');
   });
 
   it('offers retry after a failed load and refuses empty or oversized documents', async () => {
@@ -256,17 +185,12 @@ describe('PersonalityEditor', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Retry loading personality' }),
     );
-    await screen.findByLabelText('Personality and temperament');
-    fireEvent.click(screen.getByRole('tab', { name: 'Markdown' }));
-    fireEvent.change(screen.getByLabelText('Personality document'), {
-      target: { value: '' },
-    });
+    await screen.findByLabelText('Personality document');
+    fireEvent.change(document(), { target: { value: '' } });
     expect(
       screen.getByRole('button', { name: 'Save personality' }),
     ).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Personality document'), {
-      target: { value: 'A'.repeat(21) },
-    });
+    fireEvent.change(document(), { target: { value: 'A'.repeat(21) } });
     expect(
       screen.getByRole('button', { name: 'Save personality' }),
     ).toBeDisabled();

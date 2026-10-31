@@ -1683,7 +1683,7 @@ describe('ViewHarness workspace controller', () => {
       ).findByText('Nova Prime'),
     ).toBeVisible();
 
-    // SOUL.md opens its own editor; its guided fields live there.
+    // SOUL.md opens its own editor: one markdown document.
     const savePersonality = vi
       .spyOn(daemon, 'saveAgentPersonality')
       .mockImplementation(async (_id, input) => ({
@@ -1694,12 +1694,11 @@ describe('ViewHarness workspace controller', () => {
         maxChars: 16000,
       }));
     await user.click(screen.getByRole('button', { name: /^SOUL\.md/ }));
-    await user.click(await screen.findByRole('tab', { name: 'Guided' }));
-    const communication = await screen.findByRole('textbox', {
-      name: 'Communication',
+    const soul = await screen.findByRole('textbox', {
+      name: 'Personality document',
     });
-    await user.clear(communication);
-    await user.type(communication, 'Be concise');
+    await user.clear(soul);
+    await user.type(soul, '## Communication{Enter}Be concise');
     await user.click(screen.getByRole('button', { name: 'Save personality' }));
     expect(savePersonality).toHaveBeenCalledWith('agent-main', {
       content: '## Communication\nBe concise',

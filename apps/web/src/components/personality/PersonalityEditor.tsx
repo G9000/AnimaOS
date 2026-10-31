@@ -6,10 +6,8 @@ import {
 } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
 import {
-  PERSONALITY_SECTIONS,
   personalitySection,
   updatePersonalitySection,
-  type PersonalitySectionId,
 } from '../../lib/personality-document';
 import './personality.css';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
@@ -30,20 +28,12 @@ const SOURCE_LABELS = {
   workspace_soul: 'Workspace personality',
   profile_soul: 'Agent personality file',
 };
-type GuidedFields = Record<PersonalitySectionId, string>;
 type PersonalityPreset = 'quiet' | 'balanced' | 'driven';
 const PRESETS: Record<PersonalityPreset, string> = {
   quiet: 'Wait for the owner to ask before suggesting more work. Keep answers short.',
   balanced: 'Suggest a useful next step when it helps, and keep answers concise.',
   driven: 'Take the lead on clearly useful next steps and briefly explain your reasoning, while staying within granted permissions.',
 };
-const guidedFields = (document: string): GuidedFields =>
-  Object.fromEntries(
-    PERSONALITY_SECTIONS.map((section) => [
-      section.id,
-      personalitySection(document, section.id),
-    ]),
-  ) as GuidedFields;
 
 export function PersonalityEditor({
   agentId,
@@ -65,9 +55,6 @@ export function PersonalityEditor({
   const id = useId();
   const [saved, setSaved] = useState<AgentPersonality | null>(null);
   const [draft, setDraft] = useState('');
-  const [fields, setFields] = useState<GuidedFields>(() => guidedFields(''));
-  const guideBase = useRef('');
-  const [view, setView] = useState<'guided' | 'markdown'>('guided');
   const [screen, setScreen] = useState<'profile' | 'editor'>(initialScreen);
   const [versions, setVersions] = useState<AgentPersonality[]>([]);
   const lineNumbers = useRef<HTMLPreElement>(null);
@@ -121,8 +108,6 @@ export function PersonalityEditor({
         if (counter.value !== current) return;
         setSaved(result);
         setDraft(result.content);
-        guideBase.current = result.content;
-        setFields(guidedFields(result.content));
         setLoading(false);
       },
       (caught) => {
@@ -163,8 +148,6 @@ export function PersonalityEditor({
       setSaved(result);
       setVersions((current) => [saved, ...current].slice(0, 8));
       setDraft(result.content);
-      guideBase.current = result.content;
-      setFields(guidedFields(result.content));
       setNotice('Personality saved. New turns will use these instructions.');
     } catch (caught) {
       if (counter.value !== current) return;
@@ -182,27 +165,6 @@ export function PersonalityEditor({
     }
   };
 
-  const changeField = (sectionId: PersonalitySectionId, value: string) => {
-    const next = { ...fields, [sectionId]: value };
-    setFields(next);
-    // Reapply edits to the source template so formatting separators cannot grow
-    // on every keystroke. Field state retains trailing spaces and Enter presses.
-    let document = guideBase.current;
-    for (const section of PERSONALITY_SECTIONS) {
-      if (
-        next[section.id] !== personalitySection(guideBase.current, section.id)
-      ) {
-        document = updatePersonalitySection(
-          document,
-          section.id,
-          next[section.id],
-        );
-      }
-    }
-    setDraft(document);
-    setNotice('');
-  };
-
   const currentPreset = ((): PersonalityPreset | null => {
     for (const preset of Object.keys(PRESETS) as PersonalityPreset[]) {
       if (personalitySection(draft, 'communication').trim() === PRESETS[preset])
@@ -213,8 +175,6 @@ export function PersonalityEditor({
   const choosePreset = (preset: PersonalityPreset) => {
     const next = updatePersonalitySection(draft, 'communication', PRESETS[preset]);
     setDraft(next);
-    guideBase.current = next;
-    setFields(guidedFields(next));
     setNotice('');
   };
   const tryPersonality = async () => {
@@ -338,8 +298,8 @@ export function PersonalityEditor({
               ))}
             </fieldset>
             <div className="personality-profile-actions">
-              <button type="button" className="personality-soul-link" onClick={() => { setView('markdown'); setScreen('editor'); }}>
-                <span><strong>SOUL.md</strong><small>The personality file {agentId} reads before every reply</small></span>
+              <button type="button" className="personality-soul-link" onClick={() => setScreen('editor')}>
+                <span><strong>SOUL.md</strong><small>The personality file this agent reads before every reply</small></span>
                 <span>Edit</span>
               </button>
               {dirty && (
@@ -380,7 +340,7 @@ export function PersonalityEditor({
         )}
       </div>
       <p className="settings-group-help">
-        What {agentId} reads before every reply. Changes apply from the next
+        What this agent reads before every reply. Changes apply from the next
         message; a turn already in progress keeps its current personality.
         {saved?.source === 'workspace_soul' &&
           ' This personality is shared by agents using this workspace file.'}
@@ -404,18 +364,21 @@ export function PersonalityEditor({
       {saved && (
         <>
           <div className="personality-file-bar">
-            <span>
+            <span className="personality-file-name">
               <strong>{saved.path ?? 'SOUL.md'}</strong>
-              <small>MARKDOWN · UTF-8 · {draft.split('\n').length} LINES</small>
+              <small>
+                Markdown · {draft.split('\n').length} lines
+              </small>
             </span>
-            <button type="button" className="personality-secondary" disabled={busy} onClick={() => choosePreset('balanced')}>
+            <button type="button" className="ui-button is-quiet" disabled={busy} onClick={() => choosePreset('balanced')}>
               Reset to Balanced
             </button>
-            <label className="personality-import">
-              Import…
+            <label className="ui-button personality-import">
+              Import file
               <input
                 type="file"
                 accept=".md,.markdown,.txt,text/markdown,text/plain"
+                className="sr-only"
                 disabled={busy}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -423,8 +386,6 @@ export function PersonalityEditor({
                   if (!file) return;
                   void file.text().then((content) => {
                     setDraft(content);
-                    guideBase.current = content;
-                    setFields(guidedFields(content));
                     setNotice('');
                   }).catch(() => setError('Could not read that file.'));
                 }}
@@ -433,103 +394,30 @@ export function PersonalityEditor({
           </div>
           <div className="personality-editor-layout">
             <div className="personality-editor-main">
-              <div
-                className="personality-tabs"
-                role="tablist"
-                aria-label="Personality editing mode"
-              >
-                {(['guided', 'markdown'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="tab"
-                    id={`${id}-${mode}-tab`}
-                    aria-controls={`${id}-${mode}-panel`}
-                    aria-selected={view === mode}
-                    tabIndex={view === mode ? 0 : -1}
+              <label className="personality-document">
+                <span className="sr-only">Personality document</span>
+                <span className="personality-markdown-editor">
+                  <pre ref={lineNumbers} aria-hidden="true">
+                    {Array.from({ length: draft.split('\n').length }, (_, index) => index + 1).join('\n')}
+                  </pre>
+                  <textarea
+                    className="field"
+                    aria-label="Personality document"
+                    rows={22}
+                    value={draft}
                     disabled={busy}
-                    onClick={() => setView(mode)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                        event.preventDefault();
-                        const next = mode === 'guided' ? 'markdown' : 'guided';
-                        setView(next);
-                        document.getElementById(`${id}-${next}-tab`)?.focus();
-                      }
+                    onScroll={(event) => {
+                      if (lineNumbers.current)
+                        lineNumbers.current.scrollTop = event.currentTarget.scrollTop;
                     }}
-                  >
-                    {mode === 'guided' ? 'Guided' : 'Markdown'}
-                  </button>
-                ))}
-              </div>
-              <div
-                role="tabpanel"
-                id={`${id}-${view}-panel`}
-                aria-labelledby={`${id}-${view}-tab`}
-              >
-                {view === 'guided' ? (
-                  <div className="personality-fields">
-                    {PERSONALITY_SECTIONS.map((section) => (
-                      <div
-                        key={section.id}
-                        className={`personality-field personality-field--${section.id}`}
-                      >
-                        <label htmlFor={`${id}-${section.id}`}>
-                          {section.title}
-                        </label>
-                        <p id={`${id}-${section.id}-hint`}>{section.hint}</p>
-                        <textarea
-                          id={`${id}-${section.id}`}
-                          aria-describedby={`${id}-${section.id}-hint`}
-                          className="field"
-                          rows={
-                            section.id === 'identity' || section.id === 'examples'
-                              ? 3
-                              : 2
-                          }
-                          value={fields[section.id]}
-                          disabled={busy}
-                          onChange={(event) =>
-                            changeField(section.id, event.target.value)
-                          }
-                        />
-                      </div>
-                    ))}
-                    <p className="personality-preservation">
-                      Your existing text and any other sections stay in the
-                      document. Open Markdown to edit the whole personality.
-                    </p>
-                  </div>
-                ) : (
-                  <label className="personality-document">
-                    Personality document
-                    <span className="personality-markdown-editor">
-                      <pre ref={lineNumbers} aria-hidden="true">
-                        {Array.from({ length: draft.split('\n').length }, (_, index) => index + 1).join('\n')}
-                      </pre>
-                      <textarea
-                        className="field"
-                        aria-label="Personality document"
-                        rows={18}
-                        value={draft}
-                        disabled={busy}
-                        onScroll={(event) => {
-                          if (lineNumbers.current)
-                            lineNumbers.current.scrollTop = event.currentTarget.scrollTop;
-                        }}
-                        onChange={(event) => {
-                          const content = event.target.value;
-                          setDraft(content);
-                          guideBase.current = content;
-                          setFields(guidedFields(content));
-                          setNotice('');
-                        }}
-                        spellCheck={false}
-                      />
-                    </span>
-                  </label>
-                )}
-              </div>
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      setNotice('');
+                    }}
+                    spellCheck={false}
+                  />
+                </span>
+              </label>
               <div className="personality-actions">
                 <span
                   className={
@@ -610,12 +498,12 @@ export function PersonalityEditor({
               </section>
               <section className="personality-versions" aria-labelledby={`${id}-versions`}>
                 <h4 id={`${id}-versions`}>Versions</h4>
-                <button type="button" disabled={!dirty || !saved} onClick={() => { setDraft(saved.content); setFields(guidedFields(saved.content)); guideBase.current = saved.content; }}>
+                <button type="button" disabled={!dirty || !saved} onClick={() => { setDraft(saved.content); }}>
                   <span><strong>Saved version</strong><small>Current source</small></span>
                   <span>Restore</span>
                 </button>
                 {versions.map((version, index) => (
-                  <button key={`${version.revision}:${index}`} type="button" onClick={() => { setDraft(version.content); setFields(guidedFields(version.content)); guideBase.current = version.content; setNotice(''); }}>
+                  <button key={`${version.revision}:${index}`} type="button" onClick={() => { setDraft(version.content); setNotice(''); }}>
                     <span><strong>Edited by you</strong><small>Saved earlier in this session</small></span>
                     <span>Restore</span>
                   </button>
