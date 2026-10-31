@@ -25,7 +25,6 @@ import { ProfileVoice } from './ProfileVoice';
 import { ChatGptConnection } from './ChatGptConnection';
 import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
-import { AgentFilesPanel } from './AgentFilesPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
 import { FallbackModels } from './models/FallbackModels';
 import {
@@ -874,10 +873,6 @@ export function SettingsPanel({
               initialScreen="editor"
               onBackToProfile={() => setPersonalityEditing(false)}
             />
-            <details className="settings-advanced settings-profile-files">
-              <summary>Instruction files</summary>
-              <AgentFilesPanel agentId={agent.id} />
-            </details>
           </div>
         ) : (
         <>

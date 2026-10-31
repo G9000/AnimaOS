@@ -47,6 +47,8 @@ import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
 import { HeaderContextLine } from './HeaderContextLine';
 import { AppearancePage } from './AppearancePage';
+import { AgentFilesPanel } from './AgentFilesPanel';
+import { SettingsSection } from './settings/SettingsKit';
 import { NotificationsPage } from './NotificationsPage';
 import { useChatBackground } from '../lib/chat-background';
 import {
@@ -805,24 +807,32 @@ export function WorkspaceShell({
                           }}
                         />
                       ) : page === 'profile' ? (
-                        <>
-                          {profile}
-                          <details className="settings-workspace-identity">
-                            <summary>Workspace identity</summary>
-                            <AgentPresence
-                              agent={mainAgent}
-                              connection={connection}
-                              companyName={companyName}
-                              placement="sidebar"
-                              hasAvatar={hasAvatar}
-                              onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
-                            />
-                          </details>
-                        </>
+                        profile
                       ) : page === 'model' ? (
                         model
                       ) : page === 'appearance' ? (
-                        <AppearancePage />
+                        <div className="sk-page settings-appearance-page">
+                          <AppearancePage />
+                          {/* The workspace's own name and picture, shown in
+                              the sidebar: how it looks, so it lives here. */}
+                          <SettingsSection
+                            id="workspace-identity"
+                            className="settings-workspace-identity"
+                            title="Workspace name & picture"
+                            description="How this workspace shows in the sidebar. Click the picture to change it."
+                          >
+                            <div className="sk-card workspace-identity-card">
+                              <AgentPresence
+                                agent={mainAgent}
+                                connection={connection}
+                                companyName={companyName}
+                                placement="sidebar"
+                                hasAvatar={hasAvatar}
+                                onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
+                              />
+                            </div>
+                          </SettingsSection>
+                        </div>
                       ) : page === 'notifications' ? (
                         <NotificationsPage />
                       ) : page === 'runtime' ? (
@@ -840,7 +850,12 @@ export function WorkspaceShell({
                       ) : page === 'logs' ? (
                         logs
                       ) : page === 'health' ? (
-                        health
+                        <div className="sk-page settings-health-page">
+                          {health}
+                          <div className="settings-form">
+                            <AgentFilesPanel agentId={settingsAgent.id} />
+                          </div>
+                        </div>
                       ) : page === 'connectors' ? (
                         connectorContent
                       ) : page === 'files' ? (

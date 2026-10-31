@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DaemonHttpError, type AgentFilesPreview } from '@animaos/sdk';
 import { AgentFilesPanel } from './AgentFilesPanel';
@@ -21,8 +27,8 @@ function preview(
 
 describe('AgentFilesPanel', () => {
   it.each([
-    ['workspace_soul', 'Workspace SOUL.md'],
-    ['profile_soul', 'Agent profile SOUL.md'],
+    ['workspace_soul', 'SOUL.md in the workspace'],
+    ['profile_soul', 'This agent’s own SOUL.md'],
   ] as const)(
     'labels %s identity and shows only closed exclusion metadata',
     async (identitySource, label) => {
@@ -49,10 +55,9 @@ describe('AgentFilesPanel', () => {
           }
         />,
       );
+      expect(await screen.findByText(label)).toBeInTheDocument();
       expect(
-        await screen.findByText(
-          new RegExp(`Identity: ${label.replace('.', '\\.')}`),
-        ),
+        screen.getByText('Blocked: suspicious instructions'),
       ).toBeInTheDocument();
       expect(screen.getByText('Reason: threat_detected')).toBeInTheDocument();
       expect(
@@ -73,11 +78,11 @@ describe('AgentFilesPanel', () => {
     );
     expect(screen.getByRole('status')).toHaveTextContent('Loading');
     expect(
-      await screen.findByText(/Identity: Legacy identity/),
+      await screen.findByText('Saved in settings (no SOUL.md file)'),
     ).toBeInTheDocument();
     expect(screen.getByText(/Current preview · Captured/)).toBeInTheDocument();
     expect(
-      screen.getByText(/active run keeps its accepted snapshot/),
+      screen.getByText(/keeps its accepted snapshot/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE/)).not.toBeInTheDocument();
   });
@@ -117,8 +122,9 @@ describe('AgentFilesPanel', () => {
         }
       />,
     );
-    expect(await screen.findByText('AGENTS.md')).toBeInTheDocument();
-    expect(screen.getByText(/Project instructions: Anima/)).toBeInTheDocument();
+    const files = await screen.findByRole('list', { name: 'Files found' });
+    expect(within(files).getByText('AGENTS.md')).toBeInTheDocument();
+    expect(screen.getByText('Anima')).toBeInTheDocument();
     expect(screen.getByText(/higher-priority source/)).toBeInTheDocument();
     expect(
       screen.getByText(/40 admitted characters · truncated/),
@@ -166,7 +172,7 @@ describe('AgentFilesPanel', () => {
       expect(screen.queryByText(/PRIVATE/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
       expect(
-        await screen.findByText(/Identity: Legacy identity/),
+        await screen.findByText('Saved in settings (no SOUL.md file)'),
       ).toBeInTheDocument();
       expect(load).toHaveBeenCalledTimes(2);
     },

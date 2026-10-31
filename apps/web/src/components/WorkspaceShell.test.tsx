@@ -740,7 +740,7 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('Approvals page')).toBeVisible();
   });
 
-  it('keeps workspace avatar controls in Profile while the sidebar follows the design', async () => {
+  it('keeps workspace avatar controls in Appearance while the sidebar follows the design', async () => {
     const user = userEvent.setup();
     const onChangeWorkspaceAvatar = vi.fn().mockResolvedValue(undefined);
     localStorage.clear();
@@ -762,14 +762,17 @@ describe('WorkspaceShell', () => {
     });
     render(
       <Shell
-        initialRoute={{ kind: 'page', page: 'profile' }}
+        initialRoute={{ kind: 'page', page: 'appearance' }}
         workspaceState={configuredWorkspace(true)}
         onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
       />,
     );
     const sidebar = screen.getByRole('complementary');
     expect(within(sidebar).queryByText('Northwind Research')).toBeNull();
-    await user.click(screen.getByText('Workspace identity', { exact: true }));
+    // Appearance shows the workspace's name and picture, ready to change.
+    expect(
+      screen.getByRole('region', { name: 'Workspace name & picture' }),
+    ).toBeVisible();
     expect(screen.getByText('Northwind Research')).toBeVisible();
     await waitFor(() =>
       expect(

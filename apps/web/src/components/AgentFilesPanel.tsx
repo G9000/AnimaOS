@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
-import { DaemonHttpError, type AgentFilesPreview } from '@animaos/sdk';
+import {
+  DaemonHttpError,
+  type AgentFileManifestEntry,
+  type AgentFilesPreview,
+} from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
-import { SectionTitle } from './ui-bits';
 import { useResetOnChange } from '../hooks/useResetOnChange';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from './settings/SettingsKit';
 
 type PreviewLoader = (
   id: string,
@@ -20,6 +29,40 @@ const PROJECT_SOURCE_LABELS = {
   cursor: 'Cursor rules',
 };
 
+/** Where the personality comes from, in plain words. */
+const IDENTITY_LABELS: Record<AgentFilesPreview['identitySource'], string> = {
+  legacy: 'Saved in settings (no SOUL.md file)',
+  workspace_soul: 'SOUL.md in the workspace',
+  profile_soul: 'This agent’s own SOUL.md',
+};
+
+const STATE_LABELS: Record<AgentFileManifestEntry['state'], string> = {
+  loaded: 'Used',
+  truncated: 'Used, cut short',
+  shadowed: 'Not used: a higher-priority source was selected',
+  duplicate: 'Not used: same as another file',
+  empty: 'Not used: empty',
+  missing: 'Not found',
+  unreadable: 'Not used: could not be read',
+  invalid_utf8: 'Not used: not UTF-8 text',
+  linked: 'Not used: a link, not a file',
+  non_regular: 'Not used: not a regular file',
+  oversized: 'Not used: too large',
+  blocked: 'Blocked: suspicious instructions',
+  budget_excluded: 'Not used: over the size budget',
+  timed_out: 'Not used: took too long to read',
+  cancelled: 'Not used: reading was cancelled',
+};
+
+const used = (entry: AgentFileManifestEntry) =>
+  entry.state === 'loaded' || entry.state === 'truncated';
+
+/**
+ * Project rule files (AGENTS.md, CLAUDE.md, Cursor rules) the agent reads
+ * from its workspace, as a current preview. They are edited in the folder;
+ * new runs read the current files, while an active run keeps its accepted
+ * snapshot, including after compaction.
+ */
 export function AgentFilesPanel({
   agentId,
   loadPreview = daemon.agentFilesPreview,
@@ -59,112 +102,151 @@ export function AgentFilesPanel({
       controller.abort();
     };
   }, [agentId, attempt, loadPreview]);
-
   const visible =
     state.agentId === agentId ? state : { status: 'loading' as const };
+  const refresh = () => setAttempt((value) => value + 1);
   return (
-    <section className="space-y-2.5" aria-label="Agent files">
-      <SectionTitle>Agent files</SectionTitle>
-      <p className="text-sm leading-relaxed text-ink-3">
-        Current preview of instruction files. New runs read current files; an
-        active run keeps its accepted snapshot, including after compaction.
-      </p>
+    <SettingsSection
+      id="agent-files"
+      className="agent-files"
+      title="Project rules it reads"
+      description="AGENTS.md, CLAUDE.md or Cursor rules in the workspace folder are added to its instructions. Edit them in the folder; new replies read the current files, while a reply in progress keeps its accepted snapshot."
+      action={
+        visible.status === 'ready' && (
+          <button type="button" className="ui-button is-quiet" onClick={refresh}>
+            Refresh
+          </button>
+        )
+      }
+    >
       {visible.status === 'loading' && (
-        <p role="status">Loading agent files…</p>
+        <SettingsCard>
+          <p role="status" className="sk-empty">
+            Loading project rules…
+          </p>
+        </SettingsCard>
       )}
       {visible.status === 'unavailable' && (
-        <p role="status">Agent file preview is unavailable for this agent.</p>
+        <SettingsCard>
+          <p role="status" className="sk-empty">
+            The rules preview is unavailable for this agent.
+          </p>
+        </SettingsCard>
       )}
       {visible.status === 'error' && (
-        <div role="alert">
-          <p>Could not load the agent file preview.</p>
-          <button
-            className="text-sm underline"
-            onClick={() => setAttempt((value) => value + 1)}
-          >
+        <div role="alert" className="agent-files-error">
+          <p>Could not load the rules preview.</p>
+          <button type="button" className="ui-button" onClick={refresh}>
             Retry preview
           </button>
         </div>
       )}
-      {visible.status === 'ready' && (
-        <>
-          <PreviewDetails preview={visible.preview} />
-          <button
-            className="text-sm underline"
-            onClick={() => setAttempt((value) => value + 1)}
-          >
-            Refresh preview
-          </button>
-        </>
-      )}
-    </section>
+      {visible.status === 'ready' && <PreviewDetails preview={visible.preview} />}
+    </SettingsSection>
   );
 }
 
 function PreviewDetails({ preview }: { preview: AgentFilesPreview }) {
   if (preview.availability !== 'available') {
     return (
-      <p role="status">
-        {preview.availability === 'unavailable_workspace'
-          ? 'Configure a workspace to preview agent files.'
-          : 'Agent settings changed during the preview. Refresh to try again.'}
-      </p>
+      <SettingsCard>
+        <p role="status" className="sk-empty">
+          {preview.availability === 'unavailable_workspace'
+            ? 'Configure a workspace to preview project rules.'
+            : 'Agent settings changed during the preview. Refresh to try again.'}
+        </p>
+      </SettingsCard>
     );
   }
+  // Files it looked for but did not find stay in the technical details.
+  const found = preview.entries.filter((entry) => entry.state !== 'missing');
   return (
-    <div className="space-y-3 text-xs text-ink-3">
-      <p>
-        Current preview · Captured{' '}
-        {new Date(preview.capturedAtMs).toLocaleString()}
-      </p>
-      <p>
-        Identity:{' '}
-        {
-          {
-            legacy: 'Legacy identity',
-            workspace_soul: 'Workspace SOUL.md',
-            profile_soul: 'Agent profile SOUL.md',
-          }[preview.identitySource]
-        }{' '}
-        · Project instructions:{' '}
-        {preview.projectSourceKind
-          ? PROJECT_SOURCE_LABELS[preview.projectSourceKind]
-          : 'none'}
-      </p>
-      <p>{preview.estimatedTokens} estimated tokens</p>
-      <p className="break-all font-mono">
-        Snapshot digest: {preview.snapshotDigest}
-      </p>
-      {preview.entries.length === 0 && (
-        <p>No instruction files found. Legacy identity remains in use.</p>
-      )}
-      <ul className="space-y-2">
-        {preview.entries.map((entry, index) => (
-          <li
-            key={`${entry.relativePath}-${index}`}
-            className="rounded-lg border border-line p-3"
-          >
-            <p className="break-all font-mono">{entry.relativePath}</p>
-            <p>
-              {entry.state}
-              {entry.state === 'shadowed'
-                ? ' · a higher-priority source was selected'
-                : ''}
-            </p>
-            <p>
-              {entry.rawByteCount} bytes · {entry.admittedCharCount} admitted
-              characters{entry.truncated ? ' · truncated' : ''}
-            </p>
-            {entry.digest && (
-              <p className="break-all font-mono">Digest: {entry.digest}</p>
-            )}
-            {entry.reasonCode && <p>Reason: {entry.reasonCode}</p>}
-            {entry.threatIds.length > 0 && (
-              <p>Threat IDs: {entry.threatIds.join(', ')}</p>
-            )}
+    <>
+      <SettingsCard>
+        <SettingsRow
+          title="Personality"
+          control={
+            <span className="sk-meta">
+              {IDENTITY_LABELS[preview.identitySource]}
+            </span>
+          }
+        />
+        <SettingsRow
+          title="Project rules"
+          control={
+            <span className="sk-meta">
+              {preview.projectSourceKind
+                ? PROJECT_SOURCE_LABELS[preview.projectSourceKind]
+                : 'None found'}
+            </span>
+          }
+        />
+        <SettingsRow
+          title="Added to every reply"
+          control={
+            <span className="sk-meta">
+              About {preview.estimatedTokens.toLocaleString()} tokens
+            </span>
+          }
+        />
+      </SettingsCard>
+      <SettingsCard as="ul" label="Files found">
+        {found.length === 0 ? (
+          <li>
+            <SettingsEmpty>No rule files found in the workspace.</SettingsEmpty>
           </li>
-        ))}
-      </ul>
-    </div>
+        ) : (
+          found.map((entry, index) => (
+            <SettingsRow
+              as="li"
+              key={`${entry.relativePath}-${index}`}
+              className="agent-file"
+              title={<code className="agent-file-path">{entry.relativePath}</code>}
+              description={
+                used(entry)
+                  ? `${entry.admittedCharCount.toLocaleString()} characters`
+                  : undefined
+              }
+              control={
+                <span
+                  className={`sk-badge${entry.state === 'blocked' ? ' is-danger' : used(entry) ? ' is-ok' : ''}`}
+                >
+                  {STATE_LABELS[entry.state] ?? entry.state}
+                </span>
+              }
+            />
+          ))
+        )}
+      </SettingsCard>
+      <details className="sk-disclosure agent-files-technical">
+        <summary>Technical details</summary>
+        <div className="agent-files-technical-body">
+          <p>
+            Current preview · Captured{' '}
+            {new Date(preview.capturedAtMs).toLocaleString()}
+          </p>
+          <p className="agent-files-mono">
+            Snapshot digest: {preview.snapshotDigest}
+          </p>
+          {preview.entries.map((entry, index) => (
+            <div key={`${entry.relativePath}-${index}`}>
+              <p className="agent-files-mono">{entry.relativePath}</p>
+              <p>
+                {entry.state} · {entry.rawByteCount} bytes ·{' '}
+                {entry.admittedCharCount} admitted characters
+                {entry.truncated ? ' · truncated' : ''}
+              </p>
+              {entry.digest && (
+                <p className="agent-files-mono">Digest: {entry.digest}</p>
+              )}
+              {entry.reasonCode && <p>Reason: {entry.reasonCode}</p>}
+              {entry.threatIds.length > 0 && (
+                <p>Threat IDs: {entry.threatIds.join(', ')}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    </>
   );
 }

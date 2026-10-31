@@ -1335,9 +1335,9 @@ describe('ViewHarness workspace controller', () => {
     });
 
     render(<ViewHarness />);
-    // The workspace identity lives in the agent's Profile settings.
+    // The workspace's name and picture live in Appearance.
     await openSettings(user);
-    await user.click(screen.getByText('Workspace identity', { exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Appearance' }));
 
     const input = await screen.findByLabelText('Workspace avatar image file');
     const file = new File(['avatar'], 'avatar.png', { type: 'image/png' });

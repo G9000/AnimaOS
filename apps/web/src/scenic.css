@@ -3647,30 +3647,6 @@ button.scenic-thread[aria-expanded='true'] {
   font-size: 13px;
   color: var(--color-ink-3);
 }
-.settings-workspace-identity {
-  margin: 0 40px 32px;
-  padding-top: 20px;
-  border-top: 1px solid rgb(255 255 255 / 0.07);
-}
-.settings-workspace-identity summary {
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-}
-.settings-workspace-identity .studio-presence {
-  display: flex;
-  align-items: center;
-  margin: 12px 0 0;
-  padding: 0;
-  gap: 12px;
-  border: 0;
-  background: transparent;
-}
-@media (max-width: 900px) {
-  .settings-workspace-identity {
-    margin-inline: 24px;
-  }
-}
 
 /* A plan or an approval that is waiting on you (or running) is the live item:
  * pink edge, square handles on its corners. */
@@ -9101,14 +9077,6 @@ details.settings-item > :not(summary) {
   min-width: 0;
 }
 
-.settings-profile-files {
-  width: 100%;
-}
-
-.settings-profile-files > summary {
-  cursor: pointer;
-}
-
 .settings-profile .profile-keycap {
   border-radius: 999px;
   padding: 5px 9px;
@@ -9338,10 +9306,6 @@ details.settings-item > :not(summary) {
 
 .settings-window .runtime-page {
   width: 100%;
-}
-
-.settings-window[data-page='profile'] .settings-workspace-identity {
-  margin-top: 32px;
 }
 
 @media (max-width: 767px) {
