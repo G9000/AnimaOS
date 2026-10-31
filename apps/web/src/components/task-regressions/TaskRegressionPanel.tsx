@@ -103,19 +103,30 @@ function TaskRegressionEntry({
   const panelId = useId();
   return (
     <section className="settings-group" aria-label="Saved task comparisons">
-      <button
-        type="button"
-        className={ghostBtnCls}
-        disabled={disabled}
-        aria-expanded={expanded}
-        aria-controls={panelId}
-        onClick={() => {
-          setOpened(true);
-          setExpanded((value) => !value);
-        }}
-      >
-        Compare on saved tasks
-      </button>
+      <div className="settings-list">
+        <button
+          type="button"
+          className="settings-item"
+          disabled={disabled}
+          aria-label="Compare on saved tasks"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => {
+            setOpened(true);
+            setExpanded((value) => !value);
+          }}
+        >
+          <span className="settings-item-text">
+            <strong>Compare on saved tasks</strong>
+            <small>
+              Check a change against tasks it has already done well
+            </small>
+          </span>
+          <span className="settings-item-action profile-row-open">
+            {expanded ? 'Close' : 'Open'}
+          </span>
+        </button>
+      </div>
       {opened && (
         <div id={panelId} className="mt-4" hidden={!expanded}>
           <TaskRegressionForm

@@ -181,8 +181,11 @@ export function AppearancePage() {
       <section className="settings-group appearance-display-section">
         <h2 className="settings-group-title">Display</h2>
         <fieldset className="settings-fieldset appearance-display-group">
-          <legend>Text size</legend>
-          <p className="settings-group-help">Chat and settings text</p>
+          <legend className="sr-only">Text size</legend>
+          <span className="appearance-display-text" aria-hidden="true">
+            <strong>Text size</strong>
+            <small>Chat and settings text</small>
+          </span>
           <div className="appearance-segmented-options">
             {APPEARANCE_TEXT_SIZES.map((size) => (
               <label key={size}>
@@ -199,8 +202,11 @@ export function AppearancePage() {
           </div>
         </fieldset>
         <fieldset className="settings-fieldset appearance-display-group">
-          <legend>Density</legend>
-          <p className="settings-group-help">Space between messages and rows</p>
+          <legend className="sr-only">Density</legend>
+          <span className="appearance-display-text" aria-hidden="true">
+            <strong>Density</strong>
+            <small>Space between messages and rows</small>
+          </span>
           <div className="appearance-segmented-options">
             {APPEARANCE_DENSITIES.map((density) => (
               <label key={density}>

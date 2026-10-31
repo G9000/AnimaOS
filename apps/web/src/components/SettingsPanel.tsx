@@ -988,6 +988,24 @@ export function SettingsPanel({
                 disabled={controlsDisabled}
                 compactProfile
               />
+              <button
+                type="button"
+                className="settings-item profile-soul-open"
+                onClick={() => setPersonalityEditing(true)}
+              >
+                <span className="settings-item-icon" aria-hidden="true">
+                  <PenIcon name="file-text-fill" size={16} />
+                </span>
+                <span className="settings-item-text">
+                  <strong>SOUL.md</strong>
+                  <small>
+                    The personality file {agent.name} reads before every reply
+                  </small>
+                </span>
+                <span className="settings-item-action profile-row-open">
+                  Edit
+                </span>
+              </button>
             </div>
           </section>
           <TaskRegressionPanel agentId={agent.id} disabled={controlsDisabled} hasUnsavedChanges={dirty} />
@@ -1042,8 +1060,7 @@ export function SettingsPanel({
                       if (controlsDisabled || dirty) event.preventDefault();
                     }}
                   >
-                    <PenIcon name="caret-down-fill" size={10} />
-                    Change
+                    <span className="profile-row-open">Change</span>
                   </a>
                 </div>
                 <ProfileVoice
@@ -1142,25 +1159,9 @@ export function SettingsPanel({
             aria-labelledby="settings-advanced-title"
           >
             <h3 id="settings-advanced-title" className="settings-group-title">
-              Advanced
+              Danger zone
             </h3>
             <div className="settings-list">
-              <button
-                type="button"
-                className="settings-item profile-soul-open"
-                onClick={() => setPersonalityEditing(true)}
-              >
-                <span className="settings-item-icon" aria-hidden="true">
-                  <PenIcon name="file-text-fill" size={16} />
-                </span>
-                <span className="settings-item-text">
-                  <strong>SOUL.md</strong>
-                  <small>
-                    The personality file {agent.name} reads before every reply
-                  </small>
-                </span>
-                <span className="settings-item-action">Edit</span>
-              </button>
               {dangerActions.map((action) => (
                 <section
                   key={action.id}

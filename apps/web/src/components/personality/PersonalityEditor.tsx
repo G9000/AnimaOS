@@ -58,6 +58,8 @@ export function PersonalityEditor({
   const [screen, setScreen] = useState<'profile' | 'editor'>(initialScreen);
   const [versions, setVersions] = useState<AgentPersonality[]>([]);
   const lineNumbers = useRef<HTMLPreElement>(null);
+  const [mode, setMode] = useState<'write' | 'preview'>('write');
+  const [testing, setTesting] = useState(false);
   const [testPrompt, setTestPrompt] = useState('');
   const [previewResult, setPreviewResult] = useState<{
     content: string;
@@ -315,16 +317,17 @@ export function PersonalityEditor({
     );
   }
 
+  const lineCount = draft.split('\n').length;
   return (
     <section
-      className="settings-group personality-editor personality-detail-editor"
+      className="soul-editor"
       aria-labelledby={`${id}-title`}
       aria-busy={loading || saving}
     >
-      <div className="personality-heading">
+      <div className="soul-toolbar">
         <button
           type="button"
-          className="personality-back"
+          className="soul-back"
           onClick={() => {
             if (onBackToProfile) onBackToProfile();
             else setScreen('profile');
@@ -332,16 +335,54 @@ export function PersonalityEditor({
         >
           <span aria-hidden="true">←</span> Profile
         </button>
-        <h3 id={`${id}-title`} className="settings-group-title">SOUL.md</h3>
+        <h3 id={`${id}-title`} className="soul-title">
+          {saved?.path ?? 'SOUL.md'}
+        </h3>
         {saved && (
-          <span className="personality-source">
-            {SOURCE_LABELS[saved.source]}
+          <span className="soul-state">
+            {dirty ? 'Unsaved changes' : SOURCE_LABELS[saved.source]}
           </span>
         )}
+        {saved && (
+          <div className="soul-toolbar-actions">
+            <div className="sk-segmented" role="group" aria-label="View">
+              <button
+                type="button"
+                aria-pressed={mode === 'write'}
+                onClick={() => setMode('write')}
+              >
+                Write
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === 'preview'}
+                onClick={() => setMode('preview')}
+              >
+                Preview
+              </button>
+            </div>
+            <button
+              type="button"
+              className="ui-button"
+              aria-expanded={testing}
+              onClick={() => setTesting((value) => !value)}
+            >
+              Test it
+            </button>
+            <button
+              type="button"
+              className="ui-button is-primary"
+              disabled={busy || !dirty || !valid || conflict}
+              onClick={() => void save()}
+            >
+              {saving ? 'Saving personality…' : 'Save personality'}
+            </button>
+          </div>
+        )}
       </div>
-      <p className="settings-group-help">
+      <p className="soul-help">
         What this agent reads before every reply. Changes apply from the next
-        message; a turn already in progress keeps its current personality.
+        message; a reply already in progress keeps its current personality.
         {saved?.source === 'workspace_soul' &&
           ' This personality is shared by agents using this workspace file.'}
       </p>
@@ -354,7 +395,7 @@ export function PersonalityEditor({
       {!loading && !saved && (
         <button
           type="button"
-          className="personality-secondary"
+          className="ui-button"
           disabled={disabled}
           onClick={() => setAttempt((value) => value + 1)}
         >
@@ -363,154 +404,6 @@ export function PersonalityEditor({
       )}
       {saved && (
         <>
-          <div className="personality-file-bar">
-            <span className="personality-file-name">
-              <strong>{saved.path ?? 'SOUL.md'}</strong>
-              <small>
-                Markdown · {draft.split('\n').length} lines
-              </small>
-            </span>
-            <button type="button" className="ui-button is-quiet" disabled={busy} onClick={() => choosePreset('balanced')}>
-              Reset to Balanced
-            </button>
-            <label className="ui-button personality-import">
-              Import file
-              <input
-                type="file"
-                accept=".md,.markdown,.txt,text/markdown,text/plain"
-                className="sr-only"
-                disabled={busy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (!file) return;
-                  void file.text().then((content) => {
-                    setDraft(content);
-                    setNotice('');
-                  }).catch(() => setError('Could not read that file.'));
-                }}
-              />
-            </label>
-          </div>
-          <div className="personality-editor-layout">
-            <div className="personality-editor-main">
-              <label className="personality-document">
-                <span className="sr-only">Personality document</span>
-                <span className="personality-markdown-editor">
-                  <pre ref={lineNumbers} aria-hidden="true">
-                    {Array.from({ length: draft.split('\n').length }, (_, index) => index + 1).join('\n')}
-                  </pre>
-                  <textarea
-                    className="field"
-                    aria-label="Personality document"
-                    rows={22}
-                    value={draft}
-                    disabled={busy}
-                    onScroll={(event) => {
-                      if (lineNumbers.current)
-                        lineNumbers.current.scrollTop = event.currentTarget.scrollTop;
-                    }}
-                    onChange={(event) => {
-                      setDraft(event.target.value);
-                      setNotice('');
-                    }}
-                    spellCheck={false}
-                  />
-                </span>
-              </label>
-              <div className="personality-actions">
-                <span
-                  className={
-                    used > saved.maxChars
-                      ? 'personality-error'
-                      : 'personality-count'
-                  }
-                >
-                  {used.toLocaleString()} / {saved.maxChars.toLocaleString()}{' '}
-                  characters
-                </span>
-                <button
-                  type="button"
-                  className="personality-save"
-                  disabled={busy || !dirty || !valid || conflict}
-                  onClick={() => void save()}
-                >
-                  {saving ? 'Saving personality…' : 'Save personality'}
-                </button>
-              </div>
-            </div>
-            <aside className="personality-editor-aside">
-              <section className="personality-preview" aria-labelledby={`${id}-preview`}>
-                <div className="personality-preview-head">
-                  <h4 id={`${id}-preview`}>Preview</h4>
-                  <span>Uses unsaved version</span>
-                </div>
-                <article aria-label="Personality preview" className="personality-rendered-preview">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
-                </article>
-              </section>
-              <section className="personality-try-it" aria-labelledby={`${id}-try-it`}>
-                <div className="personality-preview-head">
-                  <h4 id={`${id}-try-it`}>Try it</h4>
-                  <span>Uses unsaved version · response only</span>
-                </div>
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void tryPersonality();
-                  }}
-                >
-                  <label className="sr-only" htmlFor={`${id}-try-prompt`}>
-                    Ask something to test this personality
-                  </label>
-                  <textarea
-                    id={`${id}-try-prompt`}
-                    className="field"
-                    rows={2}
-                    maxLength={2000}
-                    placeholder="Ask something to test…"
-                    value={testPrompt}
-                    onChange={(event) => setTestPrompt(event.target.value)}
-                    disabled={busy || previewLoading}
-                  />
-                  <button
-                    type="submit"
-                    className="personality-secondary"
-                    disabled={busy || previewLoading || !testPrompt.trim()}
-                  >
-                    {previewLoading ? 'Trying…' : 'Try it'}
-                  </button>
-                </form>
-                {previewError && (
-                  <p role="alert" className="personality-error">
-                    {previewError}
-                  </p>
-                )}
-                {previewResult?.content === draft &&
-                  previewResult.prompt === testPrompt.trim() && (
-                    <div className="personality-try-result" aria-live="polite">
-                      <strong>{agentId}</strong>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {previewResult.text}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-              </section>
-              <section className="personality-versions" aria-labelledby={`${id}-versions`}>
-                <h4 id={`${id}-versions`}>Versions</h4>
-                <button type="button" disabled={!dirty || !saved} onClick={() => { setDraft(saved.content); }}>
-                  <span><strong>Saved version</strong><small>Current source</small></span>
-                  <span>Restore</span>
-                </button>
-                {versions.map((version, index) => (
-                  <button key={`${version.revision}:${index}`} type="button" onClick={() => { setDraft(version.content); setNotice(''); }}>
-                    <span><strong>Edited by you</strong><small>Saved earlier in this session</small></span>
-                    <span>Restore</span>
-                  </button>
-                ))}
-              </section>
-            </aside>
-          </div>
           {conflict && (
             <div className="personality-conflict">
               <p>
@@ -519,7 +412,7 @@ export function PersonalityEditor({
               </p>
               <button
                 type="button"
-                className="personality-secondary"
+                className="ui-button"
                 disabled={busy}
                 onClick={() => setAttempt((value) => value + 1)}
               >
@@ -532,11 +425,152 @@ export function PersonalityEditor({
               {notice}
             </p>
           )}
-          {saved.path && (
-            <p className="personality-file">
-              Saved in <code>{saved.path}</code>
-            </p>
-          )}
+          <div className="soul-body">
+            {mode === 'write' ? (
+              <label className="personality-document">
+                <span className="sr-only">Personality document</span>
+                <span className="personality-markdown-editor">
+                  <pre ref={lineNumbers} aria-hidden="true">
+                    {Array.from({ length: lineCount }, (_, index) => index + 1).join('\n')}
+                  </pre>
+                  <textarea
+                    className="field"
+                    aria-label="Personality document"
+                    rows={22}
+                    value={draft}
+                    disabled={busy}
+                    onScroll={(event) => {
+                      if (lineNumbers.current)
+                        lineNumbers.current.scrollTop =
+                          event.currentTarget.scrollTop;
+                    }}
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      setNotice('');
+                    }}
+                    spellCheck={false}
+                  />
+                </span>
+              </label>
+            ) : (
+              <article
+                aria-label="Personality preview"
+                className="soul-preview chat-md"
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
+              </article>
+            )}
+            {testing && (
+              <aside className="soul-test" aria-labelledby={`${id}-try-it`}>
+                <h4 id={`${id}-try-it`}>Test it</h4>
+                <p>Uses this draft, saved or not. Only the reply is shown.</p>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void tryPersonality();
+                  }}
+                >
+                  <label className="sr-only" htmlFor={`${id}-try-prompt`}>
+                    Ask something to test this personality
+                  </label>
+                  <textarea
+                    id={`${id}-try-prompt`}
+                    className="field"
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Ask something to test…"
+                    value={testPrompt}
+                    onChange={(event) => setTestPrompt(event.target.value)}
+                    disabled={busy || previewLoading}
+                  />
+                  <button
+                    type="submit"
+                    className="ui-button"
+                    disabled={busy || previewLoading || !testPrompt.trim()}
+                  >
+                    {previewLoading ? 'Trying…' : 'Try it'}
+                  </button>
+                </form>
+                {previewError && (
+                  <p role="alert" className="personality-error">
+                    {previewError}
+                  </p>
+                )}
+                {previewResult?.content === draft &&
+                  previewResult.prompt === testPrompt.trim() && (
+                    <div className="soul-test-result chat-md" aria-live="polite">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {previewResult.text}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+              </aside>
+            )}
+          </div>
+          <div className="soul-footer">
+            <span
+              className={used > saved.maxChars ? 'personality-error' : undefined}
+            >
+              Markdown · {lineCount} lines · {used.toLocaleString()} /{' '}
+              {saved.maxChars.toLocaleString()} characters
+            </span>
+            <span className="soul-footer-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => choosePreset('balanced')}
+              >
+                Reset to Balanced
+              </button>
+              <label className="personality-import">
+                Import file
+                <input
+                  type="file"
+                  accept=".md,.markdown,.txt,text/markdown,text/plain"
+                  className="sr-only"
+                  disabled={busy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    void file
+                      .text()
+                      .then((content) => {
+                        setDraft(content);
+                        setNotice('');
+                      })
+                      .catch(() => setError('Could not read that file.'));
+                  }}
+                />
+              </label>
+              <details className="soul-versions">
+                <summary>Versions</summary>
+                <div className="soul-versions-menu">
+                  <button
+                    type="button"
+                    disabled={!dirty}
+                    onClick={() => setDraft(saved.content)}
+                  >
+                    <strong>Saved version</strong>
+                    <small>Current source</small>
+                  </button>
+                  {versions.map((version, index) => (
+                    <button
+                      key={`${version.revision}:${index}`}
+                      type="button"
+                      onClick={() => {
+                        setDraft(version.content);
+                        setNotice('');
+                      }}
+                    >
+                      <strong>Edited by you</strong>
+                      <small>Saved earlier in this session</small>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            </span>
+          </div>
         </>
       )}
     </section>
