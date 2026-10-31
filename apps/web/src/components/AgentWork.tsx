@@ -13,6 +13,12 @@ import {
   type TelegramConnector,
 } from '../lib/daemon-api';
 import { primaryBtnCls } from './ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from './settings/SettingsKit';
 import { describeTrigger } from '../lib/automations';
 import { useLatest } from '../hooks/useLatest';
 import { useRenderScope } from '../hooks/useRenderScope';
@@ -310,9 +316,16 @@ export function AgentTasksView({
     });
   };
   return (
-    <section className="space-y-5" aria-label={`${name}'s tasks`}>
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="sub-page-title">Tasks for {name}</h3>
+    <section className="agent-work" aria-label={`${name}'s tasks`}>
+      <header className="agent-work-head">
+        <div className="agent-work-head-text">
+          <h3 className="sub-page-title">Tasks for {name}</h3>
+          <p className="sk-section-desc">
+            This is {name}’s own task list. Their todo tools read and update
+            this same list. Add a proactive schedule separately to have them
+            check it automatically.
+          </p>
+        </div>
         <button
           type="button"
           disabled={!online || busy}
@@ -323,31 +336,32 @@ export function AgentTasksView({
         >
           Refresh tasks
         </button>
-      </div>
-      <p className="text-sm leading-relaxed text-ink-3">
-        This is {name}’s own task list. Their todo tools read and update this
-        same list. Add a proactive schedule separately to have them check it
-        automatically.
-      </p>
+      </header>
       {error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="agent-work-alert">
           {error}
         </p>
       )}
       {running && (
-        <p role="status" className="text-sm text-ink-3">
+        <p role="status" className="agent-work-note">
           {name} is working. You can draft tasks here; wait for the run to
           finish before saving.
         </p>
       )}
       {!online && (
-        <p role="status">Offline. Reconnect to refresh and edit tasks.</p>
+        <p role="status" className="agent-work-note">
+          Offline. Reconnect to refresh and edit tasks.
+        </p>
       )}
-      {online && !loaded && !error && <p role="status">Loading tasks…</p>}
+      {online && !loaded && !error && (
+        <p role="status" className="agent-work-note">
+          Loading tasks…
+        </p>
+      )}
       {review && (
         <button
           type="button"
-          className="text-sm underline"
+          className="ui-button agent-work-discard"
           disabled={busy}
           onClick={discard}
         >
@@ -356,153 +370,170 @@ export function AgentTasksView({
       )}
       {snapshot && (
         <>
-          <form
-            className="space-y-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              edit((previous) => {
-                if (!previous.content.trim()) return previous;
-                return {
-                  ...previous,
-                  tasks: [
-                    ...previous.tasks,
-                    {
-                      ...(previous.tasks.some(
-                        (task) => task.id !== undefined,
-                      ) ||
-                      previous.snapshot?.tasks.some(
-                        (task) => task.id !== undefined,
-                      )
-                        ? { id: crypto.randomUUID() }
-                        : {}),
-                      content: previous.content.trim(),
-                      activeForm: previous.content.trim(),
-                      status: 'pending',
-                    },
-                  ],
-                  content: '',
-                };
-              });
-            }}
-          >
-            <textarea
-              className="field"
-              aria-label="New agent task"
-              placeholder="What should this agent work on? Include the details they need."
-              value={content}
-              disabled={!editable}
-              onChange={(event) => {
-                const value = event.target.value;
-                edit((previous) => ({ ...previous, content: value }));
+          <SettingsSection title="Add a task">
+            <form
+              className="agent-work-add"
+              onSubmit={(event) => {
+                event.preventDefault();
+                edit((previous) => {
+                  if (!previous.content.trim()) return previous;
+                  return {
+                    ...previous,
+                    tasks: [
+                      ...previous.tasks,
+                      {
+                        ...(previous.tasks.some(
+                          (task) => task.id !== undefined,
+                        ) ||
+                        previous.snapshot?.tasks.some(
+                          (task) => task.id !== undefined,
+                        )
+                          ? { id: crypto.randomUUID() }
+                          : {}),
+                        content: previous.content.trim(),
+                        activeForm: previous.content.trim(),
+                        status: 'pending',
+                      },
+                    ],
+                    content: '',
+                  };
+                });
               }}
-              rows={3}
-            />
-            <button
-              className="rounded-lg border border-line px-4 py-2 text-sm"
-              disabled={!editable || !content.trim()}
-            >
-              Add task
-            </button>
-          </form>
-          {!tasks.length && (
-            <p className="rounded-xl border border-line p-5 text-sm text-ink-3">
-              No tasks yet for {name}.
-            </p>
-          )}
-          {tasks.map((task, index) => (
-            <article
-              className="space-y-3 rounded-xl border border-line p-4"
-              key={index}
             >
               <textarea
-                aria-label={`Task ${index + 1}`}
                 className="field"
-                rows={2}
+                aria-label="New agent task"
+                placeholder="What should this agent work on? Include the details they need."
+                value={content}
                 disabled={!editable}
-                value={task.content}
                 onChange={(event) => {
                   const value = event.target.value;
-                  edit((previous) => ({
-                    ...previous,
-                    tasks: previous.tasks.map((item, i) =>
-                      i === index
-                        ? {
-                            ...item,
-                            content: value,
-                            activeForm: value,
-                          }
-                        : item,
-                    ),
-                  }));
+                  edit((previous) => ({ ...previous, content: value }));
                 }}
+                rows={3}
               />
-              <div className="flex items-center justify-between gap-3">
-                <select
-                  aria-label={`Task ${index + 1} status`}
-                  className="field w-auto text-sm"
-                  value={task.status}
-                  disabled={!editable}
-                  onChange={(event) => {
-                    const value = event.target.value as AgentTask['status'];
-                    edit((previous) => ({
-                      ...previous,
-                      tasks: previous.tasks.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              status: value,
-                            }
-                          : item,
-                      ),
-                    }));
-                  }}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="in_progress">In progress</option>
-                  <option value="completed">Completed</option>
-                  {task.status === 'cancelled' && (
-                    <option value="cancelled" disabled>
-                      Cancelled
-                    </option>
-                  )}
-                </select>
-                <button
-                  type="button"
-                  aria-label={`Remove task ${index + 1}`}
-                  className="text-xs text-danger"
-                  disabled={!editable}
-                  onClick={() =>
-                    edit((previous) => ({
-                      ...previous,
-                      tasks: previous.tasks.filter((_, i) => i !== index),
-                    }))
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            </article>
-          ))}
-          <button
-            type="button"
-            className={`${primaryBtnCls} w-full`}
-            disabled={
-              !editable ||
-              review ||
-              running ||
-              !dirty ||
-              tasks.some((task) => !task.content.trim())
+              <button
+                className="ui-button"
+                disabled={!editable || !content.trim()}
+              >
+                Add task
+              </button>
+            </form>
+          </SettingsSection>
+          <SettingsSection
+            title="Task list"
+            description={
+              tasks.length
+                ? `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`
+                : undefined
             }
-            onClick={() => void save()}
           >
-            {busy ? 'Saving tasks…' : dirty ? 'Save tasks' : 'Tasks saved'}
-          </button>
-          {draft && (
-            <p className="text-xs text-ink-3">
-              Unsaved changes. Refresh keeps this draft until you choose to
-              discard it.
-            </p>
-          )}
+            {!tasks.length ? (
+              <SettingsCard>
+                <SettingsEmpty>No tasks yet for {name}.</SettingsEmpty>
+              </SettingsCard>
+            ) : (
+              <SettingsCard as="ol" className="agent-task-list">
+                {tasks.map((task, index) => (
+                  <li className="agent-task" key={index}>
+                    <span className="agent-task-number" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <textarea
+                      aria-label={`Task ${index + 1}`}
+                      className="field agent-task-text"
+                      rows={2}
+                      disabled={!editable}
+                      value={task.content}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        edit((previous) => ({
+                          ...previous,
+                          tasks: previous.tasks.map((item, i) =>
+                            i === index
+                              ? {
+                                  ...item,
+                                  content: value,
+                                  activeForm: value,
+                                }
+                              : item,
+                          ),
+                        }));
+                      }}
+                    />
+                    <div className="agent-task-controls">
+                      <select
+                        aria-label={`Task ${index + 1} status`}
+                        className="field"
+                        value={task.status}
+                        disabled={!editable}
+                        onChange={(event) => {
+                          const value = event.target
+                            .value as AgentTask['status'];
+                          edit((previous) => ({
+                            ...previous,
+                            tasks: previous.tasks.map((item, i) =>
+                              i === index
+                                ? {
+                                    ...item,
+                                    status: value,
+                                  }
+                                : item,
+                            ),
+                          }));
+                        }}
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="completed">Completed</option>
+                        {task.status === 'cancelled' && (
+                          <option value="cancelled" disabled>
+                            Cancelled
+                          </option>
+                        )}
+                      </select>
+                      <button
+                        type="button"
+                        aria-label={`Remove task ${index + 1}`}
+                        className="ui-button is-quiet agent-work-remove"
+                        disabled={!editable}
+                        onClick={() =>
+                          edit((previous) => ({
+                            ...previous,
+                            tasks: previous.tasks.filter((_, i) => i !== index),
+                          }))
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </SettingsCard>
+            )}
+          </SettingsSection>
+          <div className="agent-work-save">
+            {draft && (
+              <p className="agent-work-note">
+                Unsaved changes. Refresh keeps this draft until you choose to
+                discard it.
+              </p>
+            )}
+            <button
+              type="button"
+              className={primaryBtnCls}
+              disabled={
+                !editable ||
+                review ||
+                running ||
+                !dirty ||
+                tasks.some((task) => !task.content.trim())
+              }
+              onClick={() => void save()}
+            >
+              {busy ? 'Saving tasks…' : dirty ? 'Save tasks' : 'Tasks saved'}
+            </button>
+          </div>
         </>
       )}
     </section>
@@ -587,9 +618,16 @@ export function AgentProactiveView({
     }
   };
   return (
-    <section className="space-y-5" aria-label={`${name}'s proactive settings`}>
-      <div className="flex items-center justify-between">
-        <h3 className="sub-page-title">Proactive work for {name}</h3>
+    <section className="agent-work" aria-label={`${name}'s proactive settings`}>
+      <header className="agent-work-head">
+        <div className="agent-work-head-text">
+          <h3 className="sub-page-title">Proactive work for {name}</h3>
+          <p className="sk-section-desc">
+            Choose when {name} wakes up and what they should do. Schedules
+            belong only to this agent and run while the daemon is active, even
+            with the UI closed. Their existing tool permissions still apply.
+          </p>
+        </div>
         <button
           type="button"
           disabled={busy}
@@ -598,197 +636,232 @@ export function AgentProactiveView({
         >
           Refresh schedules
         </button>
-      </div>
-      <p className="text-sm leading-relaxed text-ink-3">
-        Choose when {name} wakes up and what they should do. Schedules belong
-        only to this agent and run while the daemon is active, even with the UI
-        closed. Their existing tool permissions still apply.
-      </p>
+      </header>
       {error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="agent-work-alert">
           {error}
         </p>
       )}
-      {schedules === null && !error && <p role="status">Loading schedules…</p>}
-      {schedules?.length === 0 && (
-        <p className="rounded-xl border border-line p-4 text-sm text-ink-3">
-          Proactive work is off. No schedules configured for {name}.
-        </p>
-      )}
-      {schedules?.map((schedule) => (
-        <article
-          key={schedule.id}
-          className="space-y-3 rounded-xl border border-line p-4"
+      <SettingsSection title="Schedules">
+        {schedules === null && !error && (
+          <SettingsCard>
+            <SettingsEmpty>
+              <span role="status">Loading schedules…</span>
+            </SettingsEmpty>
+          </SettingsCard>
+        )}
+        {schedules?.length === 0 && (
+          <SettingsCard>
+            <SettingsEmpty>
+              Proactive work is off. No schedules configured for {name}.
+            </SettingsEmpty>
+          </SettingsCard>
+        )}
+        {schedules && schedules.length > 0 && (
+          <SettingsCard as="ul">
+            {schedules.map((schedule) => (
+              <SettingsRow
+                as="li"
+                key={schedule.id}
+                title={
+                  <span className="agent-schedule-prompt">
+                    {schedule.prompt}
+                  </span>
+                }
+                description={
+                  <>
+                    {schedule.enabled
+                      ? schedule.trigger.type === 'event'
+                        ? 'Waiting for event'
+                        : `Next run: ${new Date(schedule.nextDueAtMs).toLocaleString()}`
+                      : 'Paused'}{' '}
+                    · {describeTrigger(schedule.trigger)}
+                    {schedule.lastOutcome && (
+                      <span className="agent-schedule-outcome">
+                        Last result:{' '}
+                        {schedule.lastOutcome.status === 'silent'
+                          ? 'No update needed'
+                          : schedule.lastOutcome.status === 'spoke'
+                            ? 'Posted an update'
+                            : schedule.lastOutcome.status === 'stopped'
+                              ? 'Stopped by owner'
+                              : 'Run failed'}
+                        {schedule.lastOutcome.errorCode
+                          ? ` (${schedule.lastOutcome.errorCode})`
+                          : ''}
+                      </span>
+                    )}
+                  </>
+                }
+                control={
+                  <>
+                    <button
+                      type="button"
+                      className="ui-button is-quiet"
+                      disabled={busy}
+                      onClick={() =>
+                        void mutate(() =>
+                          daemon.updateSchedule(agentId, schedule.id, {
+                            enabled: !schedule.enabled,
+                          }),
+                        )
+                      }
+                    >
+                      {schedule.enabled ? 'Pause' : 'Resume'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-button is-quiet agent-work-remove"
+                      disabled={busy}
+                      onClick={() =>
+                        void mutate(() =>
+                          daemon.deleteSchedule(agentId, schedule.id),
+                        )
+                      }
+                    >
+                      Remove schedule
+                    </button>
+                  </>
+                }
+              />
+            ))}
+          </SettingsCard>
+        )}
+      </SettingsSection>
+      <SettingsSection
+        title="New schedule"
+        description={`${
+          target === 'telegram'
+            ? 'Updates are sent to your approved Telegram chat.'
+            : 'Updates appear in this agent’s own check-in session.'
+        } Scheduled runs use your configured model.`}
+      >
+        <form
+          className="agent-work-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (
+              !prompt.trim() ||
+              !Number.isInteger(minutes) ||
+              minutes < 1 ||
+              telegramUnavailable
+            )
+              return;
+            void mutate(
+              () =>
+                daemon.createSchedule(agentId, {
+                  prompt: prompt.trim(),
+                  trigger: { type: 'interval', intervalMs: minutes * 60000 },
+                  target:
+                    target === 'telegram' && telegram
+                      ? { type: 'connector', connectorId: telegram.id }
+                      : { type: 'workspace' },
+                  enabled: true,
+                }),
+              true,
+            );
+          }}
         >
-          <p className="whitespace-pre-wrap break-words text-sm">
-            {schedule.prompt}
-          </p>
-          <p className="text-xs text-ink-3">
-            {schedule.enabled
-              ? schedule.trigger.type === 'event'
-                ? 'Waiting for event'
-                : `Next run: ${new Date(schedule.nextDueAtMs).toLocaleString()}`
-              : 'Paused'}{' '}
-            · {describeTrigger(schedule.trigger)}
-          </p>
-          {schedule.lastOutcome && (
-            <p className="text-xs text-ink-3">
-              Last result:{' '}
-              {schedule.lastOutcome.status === 'silent'
-                ? 'No update needed'
-                : schedule.lastOutcome.status === 'spoke'
-                  ? 'Posted an update'
-                  : schedule.lastOutcome.status === 'stopped'
-                    ? 'Stopped by owner'
-                    : 'Run failed'}
-              {schedule.lastOutcome.errorCode
-                ? ` (${schedule.lastOutcome.errorCode})`
-                : ''}
-            </p>
-          )}
-          <div className="flex gap-4">
-            <button
-              type="button"
-              className="text-sm underline"
+          <div className="agent-work-field">
+            <div className="agent-work-field-head">
+              <span className="sk-row-title">What should they do?</span>
+              <button
+                type="button"
+                className="ui-button is-quiet"
+                disabled={busy}
+                onClick={() =>
+                  setPrompt(
+                    'Read your own task list. Work on the next clear, pending task within your existing permissions and agreed scope. Update task progress with todo_write. Ask before consequential external actions. Report meaningful progress or blockers; otherwise return CHECKIN_OK.',
+                  )
+                }
+              >
+                Use my task list
+              </button>
+            </div>
+            <textarea
+              aria-label="Proactive instructions"
+              rows={5}
+              className="field"
+              value={prompt}
               disabled={busy}
-              onClick={() =>
-                void mutate(() =>
-                  daemon.updateSchedule(agentId, schedule.id, {
-                    enabled: !schedule.enabled,
-                  }),
-                )
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Describe the goal, what to check, and when to report back."
+            />
+          </div>
+          <SettingsCard>
+            <SettingsRow
+              title="How often"
+              control={
+                <label className="agent-work-every">
+                  Every{' '}
+                  <input
+                    aria-label="Proactive interval minutes"
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="field"
+                    value={minutes}
+                    disabled={busy}
+                    onChange={(event) => setMinutes(Number(event.target.value))}
+                  />{' '}
+                  minutes
+                </label>
+              }
+            />
+            <SettingsRow
+              title="Deliver to"
+              description={
+                connectors === 'failed' ? (
+                  <span id={telegramHintId} className="agent-work-error">
+                    Connectors could not be loaded, so Telegram delivery is
+                    unavailable. Refresh schedules to try again.
+                  </span>
+                ) : connectors === 'loaded' && telegram === null ? (
+                  <span id={telegramHintId}>
+                    Approve a Telegram chat in Connectors to deliver check-ins
+                    there.
+                  </span>
+                ) : undefined
+              }
+              control={
+                <select
+                  aria-label="Deliver to"
+                  aria-describedby={
+                    telegram === null && connectors !== 'loading'
+                      ? telegramHintId
+                      : undefined
+                  }
+                  className="field"
+                  value={target}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setTarget(event.target.value as 'workspace' | 'telegram')
+                  }
+                >
+                  <option value="workspace">Workspace</option>
+                  <option value="telegram" disabled={telegram === null}>
+                    Telegram
+                  </option>
+                </select>
+              }
+            />
+          </SettingsCard>
+          <div className="agent-work-save">
+            <button
+              className={primaryBtnCls}
+              disabled={
+                busy ||
+                !prompt.trim() ||
+                !Number.isInteger(minutes) ||
+                minutes < 1 ||
+                telegramUnavailable
               }
             >
-              {schedule.enabled ? 'Pause' : 'Resume'}
-            </button>
-            <button
-              type="button"
-              className="text-sm text-danger"
-              disabled={busy}
-              onClick={() =>
-                void mutate(() => daemon.deleteSchedule(agentId, schedule.id))
-              }
-            >
-              Remove schedule
+              {busy ? 'Saving…' : 'Enable schedule'}
             </button>
           </div>
-        </article>
-      ))}
-      <form
-        className="space-y-4 border-t border-line pt-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (
-            !prompt.trim() ||
-            !Number.isInteger(minutes) ||
-            minutes < 1 ||
-            telegramUnavailable
-          )
-            return;
-          void mutate(
-            () =>
-              daemon.createSchedule(agentId, {
-                prompt: prompt.trim(),
-                trigger: { type: 'interval', intervalMs: minutes * 60000 },
-                target:
-                  target === 'telegram' && telegram
-                    ? { type: 'connector', connectorId: telegram.id }
-                    : { type: 'workspace' },
-                enabled: true,
-              }),
-            true,
-          );
-        }}
-      >
-        <label className="block text-sm">
-          What should they do?
-          <textarea
-            aria-label="Proactive instructions"
-            rows={5}
-            className="field mt-2"
-            value={prompt}
-            disabled={busy}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Describe the goal, what to check, and when to report back."
-          />
-        </label>
-        <button
-          type="button"
-          className="text-xs underline"
-          disabled={busy}
-          onClick={() =>
-            setPrompt(
-              'Read your own task list. Work on the next clear, pending task within your existing permissions and agreed scope. Update task progress with todo_write. Ask before consequential external actions. Report meaningful progress or blockers; otherwise return CHECKIN_OK.',
-            )
-          }
-        >
-          Use my task list
-        </button>
-        <label className="flex items-center gap-3 text-sm">
-          Every{' '}
-          <input
-            aria-label="Proactive interval minutes"
-            type="number"
-            min={1}
-            step={1}
-            className="field w-24"
-            value={minutes}
-            disabled={busy}
-            onChange={(event) => setMinutes(Number(event.target.value))}
-          />{' '}
-          minutes
-        </label>
-        <label className="flex flex-wrap items-center gap-3 text-sm">
-          Deliver to
-          <select
-            aria-label="Deliver to"
-            aria-describedby={
-              telegram === null && connectors !== 'loading'
-                ? telegramHintId
-                : undefined
-            }
-            className="field w-auto"
-            value={target}
-            disabled={busy}
-            onChange={(event) =>
-              setTarget(event.target.value as 'workspace' | 'telegram')
-            }
-          >
-            <option value="workspace">Workspace</option>
-            <option value="telegram" disabled={telegram === null}>
-              Telegram
-            </option>
-          </select>
-        </label>
-        {connectors === 'failed' ? (
-          <p id={telegramHintId} className="text-xs text-danger">
-            Connectors could not be loaded, so Telegram delivery is unavailable.
-            Refresh schedules to try again.
-          </p>
-        ) : connectors === 'loaded' && telegram === null ? (
-          <p id={telegramHintId} className="text-xs text-ink-3">
-            Approve a Telegram chat in Connectors to deliver check-ins there.
-          </p>
-        ) : null}
-        <p className="text-xs text-ink-3">
-          {target === 'telegram'
-            ? 'Updates are sent to your approved Telegram chat.'
-            : 'Updates appear in this agent’s own check-in session.'}{' '}
-          Scheduled runs use your configured model.
-        </p>
-        <button
-          className={`${primaryBtnCls} w-full`}
-          disabled={
-            busy ||
-            !prompt.trim() ||
-            !Number.isInteger(minutes) ||
-            minutes < 1 ||
-            telegramUnavailable
-          }
-        >
-          {busy ? 'Saving…' : 'Enable schedule'}
-        </button>
-      </form>
+        </form>
+      </SettingsSection>
     </section>
   );
 }

@@ -1873,3 +1873,176 @@ button.back-button:disabled {
   letter-spacing: -0.01em;
   color: var(--color-ink);
 }
+
+/* ── Work: an agent's tasks and proactive schedules ── */
+.agent-work {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.agent-work-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.agent-work-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-work-head-text .sk-section-desc {
+  font-size: 13px;
+}
+
+.agent-work-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.agent-work-alert,
+.agent-work-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-danger);
+}
+
+.agent-work-discard {
+  align-self: flex-start;
+}
+
+.agent-work-add {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.agent-work-add > textarea {
+  width: 100%;
+}
+
+.agent-task-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-task {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sk-hairline);
+}
+
+.agent-task:last-child {
+  border-bottom: 0;
+}
+
+.agent-task-number {
+  padding-top: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.agent-task-text {
+  min-height: 0;
+  resize: vertical;
+}
+
+.agent-task-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-task-controls > select {
+  width: auto;
+  height: 30px;
+  font-size: 12.5px;
+}
+
+.ui-button.agent-work-remove {
+  color: var(--color-ink-3);
+}
+
+.ui-button.agent-work-remove:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+.agent-work-save {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.agent-schedule-prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
+}
+
+.agent-schedule-outcome {
+  display: block;
+}
+
+.agent-work-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 10px;
+}
+
+.agent-work-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-work-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-work-every {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+}
+
+.agent-work-every > input {
+  width: 72px;
+  height: 30px;
+}
+
+.agent-work .sk-row-control > select {
+  width: auto;
+  height: 30px;
+}
+
+@media (max-width: 560px) {
+  .agent-task {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .agent-task-controls {
+    grid-column: 2;
+  }
+}
