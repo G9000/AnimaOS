@@ -333,7 +333,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
 }) {
   return (
     <div
-      className="min-w-0 break-words text-sm leading-6 text-ink"
+      className="chat-md min-w-0 break-words text-sm leading-6 text-ink"
       data-testid="markdown-message"
     >
       <ReactMarkdown

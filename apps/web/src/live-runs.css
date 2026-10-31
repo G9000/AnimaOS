@@ -543,3 +543,119 @@
   color: var(--color-danger);
   font-size: 12px;
 }
+
+/* ── Markdown in replies (MarkdownMessage) ──
+ * Calm rhythm: headings with room above, lists with hanging indents, and
+ * task lists as real checklists whose text wraps under itself, not under
+ * the box. */
+.chat-md > :first-child {
+  margin-top: 0;
+}
+
+.chat-md :is(h1, h2, h3) {
+  margin-top: 1.1em;
+  margin-bottom: 0.3em;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+
+.chat-md h1 {
+  font-size: 16px;
+}
+
+.chat-md h2 {
+  font-size: 15px;
+}
+
+.chat-md h3 {
+  font-size: 14px;
+}
+
+.chat-md p + p {
+  margin-top: 0.7em;
+}
+
+.chat-md :is(ul, ol) {
+  margin-top: 0.5em;
+}
+
+.chat-md :is(ul, ol) > li + li {
+  margin-top: 0.3em;
+}
+
+.chat-md ul:not(.contains-task-list) > li::marker {
+  color: var(--color-ink-3);
+}
+
+.chat-md ol > li::marker {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-3);
+}
+
+/* Checklists: a round-cornered box on the first line, text beside it. */
+.chat-md .contains-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 0.6em;
+  padding: 4px 0;
+}
+
+.chat-md .contains-task-list > li + li {
+  margin-top: 0;
+}
+
+.chat-md li.task-list-item {
+  position: relative;
+  padding: 5px 8px 5px 30px;
+  border-radius: var(--control-radius, 4px);
+  list-style: none;
+}
+
+.chat-md li.task-list-item:hover {
+  background: rgb(236 230 218 / 0.035);
+}
+
+.chat-md li.task-list-item > input[type='checkbox'] {
+  position: absolute;
+  top: 9px;
+  left: 8px;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  appearance: none;
+  border: 1.5px solid rgb(236 230 218 / 0.3);
+  border-radius: 4px;
+  background: transparent;
+  opacity: 1;
+  cursor: default;
+}
+
+.chat-md li.task-list-item > input[type='checkbox']:checked {
+  border-color: var(--color-accent);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / 12px no-repeat,
+    var(--color-accent);
+}
+
+.chat-md li.task-list-item:has(> input:checked) {
+  color: var(--color-ink-3);
+}
+
+.chat-md li.task-list-item:has(> input:checked) :is(strong, b) {
+  color: inherit;
+}
+
+/* Nested lists under a task stay indented with the text. */
+.chat-md li.task-list-item > :is(ul, ol) {
+  margin-top: 0.3em;
+}
+
+:root[data-appearance-theme='light'] .chat-md li.task-list-item > input[type='checkbox'] {
+  border-color: rgb(26 26 24 / 0.3);
+}
+
+:root[data-appearance-theme='light'] .chat-md li.task-list-item:hover {
+  background: rgb(26 26 24 / 0.035);
+}
