@@ -1470,7 +1470,7 @@
   }
 
   .settings-window .settings-form:not(.approvals-page .settings-form):not(:has(.settings-profile-editor-view)):not(.settings-model-page),
-  .settings-window .approvals-page,
+  .settings-window .approvals-page[data-section='overview'],
   .settings-window .skills-page {
     display: block;
     columns: 400px 3;
@@ -1882,4 +1882,89 @@
 
 :root[data-appearance-theme='light'] .settings-window .sk-choice:hover {
   background: rgb(26 26 24 / 0.04);
+}
+
+
+/* Permissions sub-pages (When it checks with you, Coding app keys): one
+ * column, a quiet back link. */
+.settings-window .approvals-page:not([data-section='overview']) {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 820px;
+}
+
+.settings-window .approvals-back {
+  align-self: flex-start;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.settings-window .approvals-back:hover {
+  color: var(--color-ink);
+}
+
+.autonomy-custom {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding-left: 32px;
+  opacity: 0.55;
+}
+
+.autonomy-custom[data-selected] {
+  opacity: 1;
+}
+
+.autonomy-guidance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.autonomy-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.autonomy-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sk-hairline);
+}
+
+.autonomy-list-row code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-ink);
+}
+
+.autonomy-add {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.autonomy-add > .field {
+  flex: 1;
+  height: 32px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.autonomy-asks {
+  font-size: 12px;
+  color: var(--color-accent);
 }

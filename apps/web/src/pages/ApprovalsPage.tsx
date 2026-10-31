@@ -99,8 +99,8 @@ function ClassRules({
           <span className="sk-row-title">{POLICY_ROW_ACTIONS[klass]}</span>
           {rules.length > 0 && (
             <span className="sk-row-desc">
-              {rules.length}{' '}
-              {rules.length === 1 ? 'exception' : 'exceptions'} always allowed
+              {rules.length} {rules.length === 1 ? 'exception' : 'exceptions'}{' '}
+              always allowed
             </span>
           )}
         </div>
@@ -160,65 +160,64 @@ function ClassRules({
         </ul>
       )}
       {tool && matcherKind && adding && (
-          <form
-            className="approvals-add-rule"
-            aria-label={`Add a rule for ${label}`}
-            onSubmit={(event) => void add(event)}
+        <form
+          className="approvals-add-rule"
+          aria-label={`Add a rule for ${label}`}
+          onSubmit={(event) => void add(event)}
+        >
+          <select
+            aria-label="Tool"
+            className="field"
+            value={tool.name}
+            onChange={(event) => setToolName(event.target.value)}
           >
-            <select
-              aria-label="Tool"
+            {tools.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Match by"
+            className="field"
+            value={matcherKind}
+            onChange={(event) =>
+              setKind(event.target.value as ApprovalMatcherKind)
+            }
+          >
+            {tool.matcherKinds.map((item) => (
+              <option key={item} value={item}>
+                {MATCHER_KIND_LABELS[item]}
+              </option>
+            ))}
+          </select>
+          {matcherKind !== 'any' && (
+            <input
+              aria-label="Match value"
               className="field"
-              value={tool.name}
-              onChange={(event) => setToolName(event.target.value)}
-            >
-              {tools.map((item) => (
-                <option key={item.name} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Match by"
-              className="field"
-              value={matcherKind}
-              onChange={(event) =>
-                setKind(event.target.value as ApprovalMatcherKind)
-              }
-            >
-              {tool.matcherKinds.map((item) => (
-                <option key={item} value={item}>
-                  {MATCHER_KIND_LABELS[item]}
-                </option>
-              ))}
-            </select>
-            {matcherKind !== 'any' && (
-              <input
-                aria-label="Match value"
-                className="field"
-                value={value}
-                maxLength={MAX_MATCHER_VALUE_CHARS}
-                onChange={(event) => setValue(event.target.value)}
-              />
-            )}
-            <button
-              type="submit"
-              className="ui-button"
-              disabled={matcherKind !== 'any' && !value.trim()}
-            >
-              Add rule
-            </button>
-            {broad && (
-              <p className="approval-card-warning">
-                A rule this broad lets your companion run almost anything,
-                including changing its own approval settings.
-              </p>
-            )}
-          </form>
+              value={value}
+              maxLength={MAX_MATCHER_VALUE_CHARS}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          )}
+          <button
+            type="submit"
+            className="ui-button"
+            disabled={matcherKind !== 'any' && !value.trim()}
+          >
+            Add rule
+          </button>
+          {broad && (
+            <p className="approval-card-warning">
+              A rule this broad lets your companion run almost anything,
+              including changing its own approval settings.
+            </p>
+          )}
+        </form>
       )}
     </div>
   );
 }
-
 
 export interface ApprovalsPageProps {
   agentId: string;
@@ -248,7 +247,9 @@ export function ApprovalsPage({
   access = null,
   policyRevision = 0,
 }: ApprovalsPageProps) {
-  const [section, setSection] = useState<'overview' | 'autonomy' | 'coding'>('overview');
+  const [section, setSection] = useState<'overview' | 'autonomy' | 'coding'>(
+    'overview',
+  );
   const [historyShown, setHistoryShown] = useState(HISTORY_PAGE);
   // An autonomy preset rewrites the class rules, and a class rule may turn
   // the autonomy Custom: each side reads the other again after a change.
@@ -280,7 +281,7 @@ export function ApprovalsPage({
   };
 
   return (
-    <div className="approvals-page">
+    <div className="approvals-page" data-section={section}>
       {view.error && (
         <p className="approvals-error" role="alert">
           {view.error}
@@ -389,7 +390,9 @@ export function ApprovalsPage({
             <SettingsCard as="ul" className="approvals-decided">
               {view.decided.length === 0 ? (
                 <li>
-                  <SettingsEmpty>No decisions in the last 30 days.</SettingsEmpty>
+                  <SettingsEmpty>
+                    No decisions in the last 30 days.
+                  </SettingsEmpty>
                 </li>
               ) : (
                 view.decided.slice(0, historyShown).map((approval) => (

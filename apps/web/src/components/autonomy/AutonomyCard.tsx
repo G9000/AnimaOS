@@ -10,6 +10,12 @@ import {
   type AutonomyPatch,
 } from '../../lib/daemon-api';
 import { Switch } from '../ui-bits';
+import {
+  SettingsCard,
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+} from '../settings/SettingsKit';
 
 type PresetMode = 'free' | 'strict';
 
@@ -149,120 +155,129 @@ export function AutonomyCard({
   };
 
   return (
-    <section
-      className="approvals-section autonomy"
-      aria-labelledby="approvals-autonomy"
-    >
-      <h2 id="approvals-autonomy">When it checks with you</h2>
-      <p className="approvals-help">
-        How much anima asks before it acts. Everything it does shows up in Work,
-        and you can stop it any time.
-      </p>
-      {error && (
-        <p className="approvals-error" role="alert">
-          {error}
-        </p>
-      )}
-      {autonomy === null ? (
-        !error && <p className="approvals-empty">Reading autonomy…</p>
-      ) : (
-        <>
+    <div className="sk-page autonomy">
+      <SettingsSection
+        id="approvals-autonomy"
+        title="When it checks with you"
+        description="How much anima asks before it acts. Everything it does shows up in Work, and you can stop it any time."
+      >
+        {error && (
+          <p className="approvals-error" role="alert">
+            {error}
+          </p>
+        )}
+        {autonomy === null ? (
+          !error && (
+            <SettingsCard>
+              <SettingsEmpty>Reading autonomy…</SettingsEmpty>
+            </SettingsCard>
+          )
+        ) : (
           <div
-            className="autonomy-modes"
+            className="sk-card autonomy-modes"
             role="radiogroup"
             aria-label="How much it asks"
           >
             {MODES.map((mode) => (
               <label
                 key={mode.value}
-                className="autonomy-mode"
-                data-selected={autonomy.mode === mode.value || undefined}
+                className={`sk-row sk-choice${autonomy.mode === mode.value ? ' is-selected' : ''}`}
               >
-                <input
-                  type="radio"
-                  name={`autonomy-${agentId}`}
-                  value={mode.value}
-                  checked={autonomy.mode === mode.value}
-                  disabled={saving}
-                  onChange={() => void save({ mode: mode.value })}
-                />
-                <span className="autonomy-mode-title">
-                  {mode.label}
+                <div className="sk-row-main">
+                  <input
+                    type="radio"
+                    name={`autonomy-${agentId}`}
+                    value={mode.value}
+                    checked={autonomy.mode === mode.value}
+                    disabled={saving}
+                    onChange={() => void save({ mode: mode.value })}
+                  />
+                  <span className="sk-row-text">
+                    <span className="sk-row-title">{mode.label}</span>
+                    <span className="sk-row-desc">{mode.summary}</span>
+                  </span>
                   {mode.value === 'free' && (
-                    <span className="autonomy-tag">Recommended</span>
+                    <span className="sk-badge is-accent">Recommended</span>
                   )}
-                </span>
-                <span className="autonomy-mode-summary">{mode.summary}</span>
+                </div>
               </label>
             ))}
             <div
-              className="autonomy-mode autonomy-mode-custom"
+              className="sk-row autonomy-custom"
               data-selected={autonomy.mode === 'custom' || undefined}
               aria-current={autonomy.mode === 'custom' || undefined}
             >
-              <span className="autonomy-mode-title">Custom</span>
-              <span className="autonomy-mode-summary">
-                Appears when you've set your own rules. Pick one of the others
-                to reset.
+              <span className="sk-row-title">Custom</span>
+              <span className="sk-row-desc">
+                Appears when you've set your own rules. Pick one of the above to
+                reset.
               </span>
             </div>
           </div>
+        )}
+      </SettingsSection>
 
-          <div className="autonomy-smart">
-            <div>
-              <p className="autonomy-smart-title">Smart check</p>
-              <p className="approvals-help">
-                Let anima's model approve risky commands it judges safe (an
-                extra model call each time).
-              </p>
-            </div>
-            <Switch
-              checked={autonomy.smartCheck}
-              disabled={saving}
-              label="Smart check"
-              onChange={(on) => void save({ smartCheck: on })}
-            />
-          </div>
+      {autonomy && (
+        <>
+          <SettingsSection
+            id="autonomy-smart"
+            title="Smart check"
+            description="Let anima's model approve risky commands it judges safe. Each one costs an extra model call."
+          >
+            <SettingsCard>
+              <SettingsRow
+                title="Use the smart check"
+                control={
+                  <Switch
+                    checked={autonomy.smartCheck}
+                    disabled={saving}
+                    label="Smart check"
+                    onChange={(on) => void save({ smartCheck: on })}
+                  />
+                }
+              >
+                {autonomy.smartCheck && (
+                  <div className="autonomy-guidance">
+                    <label className="sk-row-desc" htmlFor={guidanceId}>
+                      Guidance for the smart check
+                    </label>
+                    <textarea
+                      id={guidanceId}
+                      className="field"
+                      value={guidance}
+                      rows={3}
+                      maxLength={MAX_SMART_POLICY_CHARS}
+                      disabled={saving}
+                      placeholder="Deleting build folders is fine. Never approve anything that touches production."
+                      onChange={(event) => setGuidance(event.target.value)}
+                      onBlur={() => {
+                        if (guidance.trim() !== savedGuidance)
+                          void save({ smartPolicy: guidance });
+                      }}
+                    />
+                  </div>
+                )}
+              </SettingsRow>
+            </SettingsCard>
+          </SettingsSection>
 
-          {autonomy.smartCheck && (
-            <div className="autonomy-guidance">
-              <label className="autonomy-smart-title" htmlFor={guidanceId}>
-                Guidance for the smart check
-              </label>
-              <textarea
-                id={guidanceId}
-                value={guidance}
-                rows={3}
-                maxLength={MAX_SMART_POLICY_CHARS}
-                disabled={saving}
-                placeholder="e.g. Deleting build folders is fine. Never approve anything that touches production."
-                onChange={(event) => setGuidance(event.target.value)}
-                onBlur={() => {
-                  if (guidance.trim() !== savedGuidance)
-                    void save({ smartPolicy: guidance });
-                }}
-              />
-            </div>
-          )}
-
-          <div className="autonomy-floor">
-            <div className="autonomy-floor-column">
-              <h3 id="autonomy-blocked">Always blocked</h3>
-              <p className="approvals-help">
-                Commands matching these never run, in any mode. Use * and ? as
-                wildcards.
-              </p>
+          <SettingsSection
+            id="autonomy-blocked"
+            title="Always blocked"
+            description={`Commands matching these never run, in any mode. Use * and ? as wildcards; up to ${MAX_DENY_PATTERNS}. Deleting system folders, formatting disks and similar are always blocked too.`}
+          >
+            <SettingsCard>
               {autonomy.denyPatterns.length > 0 && (
                 <ul
                   className="autonomy-list"
                   aria-labelledby="autonomy-blocked"
                 >
                   {autonomy.denyPatterns.map((pattern) => (
-                    <li key={pattern}>
+                    <li key={pattern} className="autonomy-list-row">
                       <code>{pattern}</code>
                       <button
                         type="button"
-                        className="studio-tool-button"
+                        className="ui-button is-quiet"
                         aria-label={`Unblock ${pattern}`}
                         disabled={saving}
                         onClick={() => removePattern(pattern)}
@@ -279,9 +294,10 @@ export function AutonomyCard({
                 onSubmit={(event) => void addPattern(event)}
               >
                 <input
+                  className="field"
                   aria-label="Command to block"
                   value={draft}
-                  placeholder="e.g. npm publish*"
+                  placeholder="npm publish*"
                   maxLength={MAX_DENY_PATTERN_CHARS + 1}
                   aria-invalid={problem ? true : undefined}
                   onChange={(event) => {
@@ -289,44 +305,36 @@ export function AutonomyCard({
                     setProblem(null);
                   }}
                 />
-                <button
-                  type="submit"
-                  className="studio-tool-button"
-                  disabled={saving}
-                >
+                <button type="submit" className="ui-button" disabled={saving}>
                   Add
                 </button>
               </form>
-              {problem && (
-                <p className="approvals-error" role="alert">
-                  {problem}
-                </p>
-              )}
-              <p className="approvals-help">
-                Up to {MAX_DENY_PATTERNS}. Deleting system folders, formatting
-                disks and similar are always blocked too.
+            </SettingsCard>
+            {problem && (
+              <p className="approvals-error" role="alert">
+                {problem}
               </p>
-            </div>
-            <div className="autonomy-floor-column">
-              <h3 id="autonomy-always-asks">Always asks, in any mode</h3>
-              <p className="approvals-help">
-                Never skipped. You can relax one at a time.
-              </p>
-              <ul
-                className="autonomy-list"
-                aria-labelledby="autonomy-always-asks"
-              >
-                {ALWAYS_ASKS.map((item) => (
-                  <li key={item}>
-                    <span>{item}</span>
-                    <span className="autonomy-asks">Asks</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+            )}
+          </SettingsSection>
+
+          <SettingsSection
+            id="autonomy-always-asks"
+            title="Always asks, in any mode"
+            description="Never skipped. You can relax one at a time."
+          >
+            <SettingsCard as="ul" label="Always asks, in any mode">
+              {ALWAYS_ASKS.map((item) => (
+                <SettingsRow
+                  as="li"
+                  key={item}
+                  title={item}
+                  control={<span className="autonomy-asks">Asks</span>}
+                />
+              ))}
+            </SettingsCard>
+          </SettingsSection>
         </>
       )}
-    </section>
+    </div>
   );
 }

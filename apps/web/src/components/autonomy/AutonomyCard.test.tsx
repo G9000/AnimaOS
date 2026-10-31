@@ -79,7 +79,7 @@ describe('AutonomyCard', () => {
     expect(smart).toHaveAttribute('aria-checked', 'false');
     expect(
       screen.getByText(
-        "Let anima's model approve risky commands it judges safe (an extra model call each time).",
+        "Let anima's model approve risky commands it judges safe. Each one costs an extra model call.",
       ),
     ).toBeVisible();
     await user.click(smart);
