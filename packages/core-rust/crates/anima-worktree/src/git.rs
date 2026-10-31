@@ -33,8 +33,8 @@ fn cli_argument(argument: &OsStr) -> OsString {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
         use std::path::{Component, Prefix};
 
-        match Path::new(argument).components().next() {
-            Some(Component::Prefix(prefix)) => match prefix.kind() {
+        if let Some(Component::Prefix(prefix)) = Path::new(argument).components().next() {
+            match prefix.kind() {
                 Prefix::VerbatimDisk(_) => {
                     return OsString::from_wide(
                         &argument.encode_wide().skip(4).collect::<Vec<_>>(),
@@ -48,8 +48,7 @@ fn cli_argument(argument: &OsStr) -> OsString {
                     return native;
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
     argument.to_os_string()

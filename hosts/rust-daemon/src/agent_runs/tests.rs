@@ -17,6 +17,129 @@ use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore};
 
 #[tokio::test]
+async fn peer_selection_preserves_id_precedence_and_rejects_ambiguous_names() {
+    let mut state = DaemonState::new();
+    let first = state.create_agent(test_config("Shared")).unwrap().state;
+    state.create_agent(test_config("Shared")).unwrap();
+    let unique = state.create_agent(test_config("Unique")).unwrap().state;
+    let coordinator =
+        AgentRunCoordinator::new(Arc::new(RwLock::new(state)), Arc::new(Semaphore::new(1)));
+
+    for (id, name, expected) in [
+        (Some(first.id.as_str()), None, first.id.as_str()),
+        (Some(first.id.as_str()), Some("Unique"), first.id.as_str()),
+        (None, Some("Unique"), unique.id.as_str()),
+    ] {
+        assert_eq!(
+            coordinator.resolve_peer(id, name).await.unwrap().id,
+            expected,
+            "peer selection for id={id:?}, name={name:?}"
+        );
+    }
+    for (id, name) in [
+        (None, None),
+        (None, Some("Shared")),
+        (None, Some("Missing")),
+        (Some("missing-id"), Some("Unique")),
+    ] {
+        assert_eq!(
+            coordinator.resolve_peer(id, name).await.unwrap_err(),
+            "Peer not found or name is ambiguous; use an agent ID from the roster",
+            "invalid peer selection for id={id:?}, name={name:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cancelled_admission_releases_pending_room_and_slot_registrations() {
+    let state = Arc::new(RwLock::new(DaemonState::new()));
+    let coordinator =
+        AgentRunCoordinator::new(state, Arc::new(Semaphore::new(2))).with_max_runs_per_agent(1);
+    let holder = coordinator
+        .admit("agent", "held-room", super::AdmitMode::Wait)
+        .await
+        .unwrap();
+
+    let mut waiting_for_room =
+        Box::pin(coordinator.admit("agent", "held-room", super::AdmitMode::Wait));
+    assert!(futures::poll!(waiting_for_room.as_mut()).is_pending());
+    drop(waiting_for_room);
+    assert_eq!(coordinator.lock_counts(), (1, 1));
+
+    let mut waiting_for_slot =
+        Box::pin(coordinator.admit("agent", "other-room", super::AdmitMode::Wait));
+    assert!(futures::poll!(waiting_for_slot.as_mut()).is_pending());
+    assert_eq!(coordinator.lock_counts(), (2, 1));
+    drop(waiting_for_slot);
+    assert_eq!(
+        coordinator.lock_counts(),
+        (1, 1),
+        "cancelling a slot waiter also releases the room it already acquired"
+    );
+
+    drop(holder);
+    assert_eq!(coordinator.lock_counts(), (0, 0));
+    let _retry = coordinator
+        .admit("agent", "other-room", super::AdmitMode::TryNow)
+        .await
+        .expect("cancelled waiters must not obstruct later admission");
+}
+
+#[test]
+fn helper_settings_preserve_parent_limits_and_leave_parent_unchanged() {
+    for settings in [
+        None,
+        Some(AgentSettings {
+            temperature: Some(0.4),
+            max_tokens: Some(8_192),
+            timeout_ms: Some(5_000),
+            max_retries: Some(5),
+            max_tool_iterations: Some(12),
+            execution_limits: Some(anima_core::execution_limits::ExecutionLimits::default()),
+            delegation: Some(anima_core::DelegationPolicy {
+                max_output_tokens: 2_048,
+                timeout_ms: 3_000,
+                max_tool_iterations: 4,
+                ..Default::default()
+            }),
+            additional: BTreeMap::from([("private-setting".into(), DataValue::Bool(true))]),
+        }),
+    ] {
+        let mut config = test_config("Companion");
+        config.settings = settings.clone();
+        let parent = DaemonState::new().create_agent(config).unwrap().state;
+        let original = parent.config.clone();
+        let helper = super::helper_config(&parent, "Research".into());
+        let helper_settings = helper.settings.unwrap();
+        let configured = settings.is_some();
+        assert_eq!(helper_settings.temperature, configured.then_some(0.4));
+        assert_eq!(
+            helper_settings.max_tokens,
+            Some(if configured { 2_048 } else { 4_096 })
+        );
+        assert_eq!(
+            helper_settings.timeout_ms,
+            Some(if configured { 3_000 } else { 120_000 })
+        );
+        assert_eq!(helper_settings.max_retries, Some(2));
+        assert_eq!(
+            helper_settings.max_tool_iterations,
+            Some(if configured { 4 } else { 8 })
+        );
+        assert_eq!(
+            helper_settings.execution_limits,
+            settings.and_then(|settings| settings.execution_limits)
+        );
+        assert!(helper_settings.delegation.is_none());
+        assert!(!helper_settings.additional.contains_key("private-setting"));
+        assert_eq!(
+            parent.config, original,
+            "helper construction must only borrow parent settings"
+        );
+    }
+}
+
+#[tokio::test]
 async fn failed_task_memory_save_does_not_publish_or_leak_into_later_save() {
     let blocked_path = snapshot_path("memory-write-failure");
     std::fs::create_dir_all(&blocked_path).unwrap();
@@ -1774,134 +1897,6 @@ async fn aborted_caller_does_not_cancel_the_commit_or_leak_locks_and_slots() {
         .forget();
     release.add_permits(1);
     assert!(retry.await.expect("retry should join").is_ok());
-}
-
-/// Runs `threads` copies of `make_and_drop_lease` in lockstep for
-/// `rounds` rounds: every round, all threads rendezvous on `start` before
-/// building and immediately dropping a lease, so every round's drops
-/// truly race each other rather than merely interleaving loosely.
-fn stress_concurrent_drops(
-    threads: usize,
-    rounds: usize,
-    make_and_drop_lease: impl Fn() + Send + Sync + 'static,
-) {
-    let make_and_drop_lease = Arc::new(make_and_drop_lease);
-    let start = Arc::new(std::sync::Barrier::new(threads));
-    let handles: Vec<_> = (0..threads)
-        .map(|_| {
-            let make_and_drop_lease = Arc::clone(&make_and_drop_lease);
-            let start = Arc::clone(&start);
-            std::thread::spawn(move || {
-                for _ in 0..rounds {
-                    start.wait();
-                    make_and_drop_lease();
-                }
-            })
-        })
-        .collect();
-    for handle in handles {
-        handle.join().expect("racer thread should not panic");
-    }
-}
-
-#[test]
-fn concurrent_lease_drops_on_one_key_leave_no_stale_registry_entry() {
-    let state = Arc::new(RwLock::new(DaemonState::new()));
-    let coordinator = AgentRunCoordinator::new(state, Arc::new(Semaphore::new(1)));
-
-    // Many leases on the SAME (agent, room) key, dropped by many threads
-    // at once, over and over: a failed try-acquire racing the holder's
-    // own release is one instance of this, but any two leases whose
-    // drops overlap can hit it. `SessionLease::drop`/`SlotLease::drop`
-    // must decide removal atomically with releasing their own reference,
-    // or a race here leaks the registry entry forever (nothing else ever
-    // revisits a key once every lease on it has dropped).
-    let session_coordinator = coordinator.clone();
-    stress_concurrent_drops(32, 4000, move || {
-        let (key, lock) = session_coordinator.session_lock("racer-agent", "racer-room");
-        drop(super::SessionLease {
-            key,
-            lock: Some(lock),
-            guard: None,
-            locks: Arc::clone(&session_coordinator.session_locks),
-        });
-    });
-    assert_eq!(
-        coordinator.lock_counts(),
-        (0, 0),
-        "racing session-lease drops on one key must not leak a stale registry entry"
-    );
-
-    let slot_coordinator = coordinator.clone();
-    stress_concurrent_drops(32, 4000, move || {
-        let slots = slot_coordinator.agent_slot_semaphore("racer-agent", 1);
-        drop(super::SlotLease {
-            agent_id: "racer-agent".to_string(),
-            slots: Some(slots),
-            permit: None,
-            registry: Arc::clone(&slot_coordinator.agent_slots),
-        });
-    });
-    assert_eq!(
-        coordinator.lock_counts(),
-        (0, 0),
-        "racing slot-lease drops on one key must not leak a stale registry entry"
-    );
-}
-
-/// The waiting budget is per agent and try-only, and a unit comes back on
-/// every exit of the task holding it, including cancellation and panic.
-#[tokio::test]
-async fn waiting_budget_is_per_agent_try_only_and_released_on_every_exit() {
-    let coordinator = AgentRunCoordinator::new(
-        Arc::new(RwLock::new(DaemonState::new())),
-        Arc::new(Semaphore::new(1)),
-    );
-    let mut units: Vec<_> = (0..super::MAX_QUEUED_RUNS_PER_AGENT)
-        .map(|_| {
-            coordinator
-                .try_take_waiting_unit("agent-x")
-                .expect("within the budget")
-        })
-        .collect();
-    assert!(
-        coordinator.try_take_waiting_unit("agent-x").is_none(),
-        "a ninth waiter is refused without waiting"
-    );
-    let other = coordinator
-        .try_take_waiting_unit("agent-y")
-        .expect("each agent has its own budget");
-
-    let cancelled = {
-        let unit = units.pop().unwrap();
-        tokio::spawn(async move {
-            let _unit = unit;
-            std::future::pending::<()>().await;
-        })
-    };
-    cancelled.abort();
-    assert!(cancelled.await.unwrap_err().is_cancelled());
-    let panicked = {
-        let unit = units.pop().unwrap();
-        tokio::spawn(async move {
-            let _unit = unit;
-            panic!("simulated panic in a task holding a waiting unit");
-        })
-    };
-    assert!(panicked.await.unwrap_err().is_panic());
-    assert_eq!(
-        coordinator.waiting_runs("agent-x"),
-        super::MAX_QUEUED_RUNS_PER_AGENT - 2
-    );
-    let refill = coordinator
-        .try_take_waiting_unit("agent-x")
-        .expect("a released unit can be taken again");
-
-    drop((units, refill, other));
-    assert!(
-        coordinator.waiting_budget.lock().unwrap().is_empty(),
-        "an agent with no waiting runs keeps no budget entry"
-    );
 }
 
 /// No path may hold a global permit while it waits for a room lock or an

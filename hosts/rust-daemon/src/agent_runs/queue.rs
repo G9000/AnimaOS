@@ -1616,7 +1616,7 @@ impl AgentRunCoordinator {
             }
             if let Some(room) = room {
                 // Same session, same room; any other lease goes back first.
-                if next.start.room_id.as_deref() == Some(room.key.1.as_str()) {
+                if next.start.room_id.as_deref() == Some(room.room_id()) {
                     self.hand_room(&next.run_id, room);
                 }
             }

@@ -642,7 +642,8 @@ impl AgentRunCoordinator {
                 if guard.runs.has_active_assignment(&helper.state.id) {
                     return None;
                 }
-                self.try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
+                self.admission
+                    .try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
                     .map(|slot| (helper.clone(), slot))
             });
             let (helper, baseline, slot) = if let Some((helper, slot)) = available {
@@ -663,6 +664,7 @@ impl AgentRunCoordinator {
                 }
                 let helper = guard.create_agent(config)?;
                 let slot = self
+                    .admission
                     .try_slot_lease(&helper.state.id, HELPER_MAX_RUNS)
                     .expect("new helper has a free slot");
                 (helper, None, slot)
