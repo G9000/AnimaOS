@@ -1011,24 +1011,12 @@
   border-bottom: 1px solid var(--sk-hairline);
 }
 
-.soul-back {
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: 12.5px;
-  color: var(--color-ink-3);
-  cursor: pointer;
-}
-
-.soul-back:hover {
-  color: var(--color-ink);
-}
-
 .soul-title {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--color-ink);
 }
 
@@ -1745,29 +1733,6 @@
   gap: 20px;
 }
 
-.settings-window .approvals-back {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  gap: 4px;
-  width: auto;
-  height: 28px;
-  margin-bottom: 4px;
-  padding: 0 10px 0 6px;
-  border: 1px solid var(--control-line);
-  border-radius: var(--control-radius);
-  background: transparent;
-  font-size: 12.5px;
-  color: var(--color-ink-2);
-  cursor: pointer;
-}
-
-.settings-window .approvals-back:hover {
-  border-color: var(--control-line-hover, var(--control-line));
-  background: rgb(236 230 218 / 0.04);
-  color: var(--color-ink);
-}
-
 /* On a sub-page the first section is the page's subject: it reads as the
  * heading, the sections under it as its parts. */
 .settings-window
@@ -1862,4 +1827,49 @@
   font-family: inherit;
   font-size: 12.5px;
   color: var(--color-ink-3);
+}
+
+/* ── Sub-pages: the way back and the page's own heading ──
+ * The back button is named for where it goes; the heading under it is the
+ * sub-page's subject, a step above its sections. */
+button.back-button {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  height: 28px;
+  min-height: 0;
+  margin: 0 0 4px;
+  padding: 0 10px 0 6px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+
+button.back-button:hover:not(:disabled) {
+  border-color: var(--control-line-hover, var(--control-line));
+  background: rgb(236 230 218 / 0.04);
+  color: var(--color-ink);
+}
+
+button.back-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.sub-page-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
 }

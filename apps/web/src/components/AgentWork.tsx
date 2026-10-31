@@ -312,11 +312,11 @@ export function AgentTasksView({
   return (
     <section className="space-y-5" aria-label={`${name}'s tasks`}>
       <div className="flex items-center justify-between gap-3">
-        <h4 className="font-semibold">Tasks for {name}</h4>
+        <h3 className="sub-page-title">Tasks for {name}</h3>
         <button
           type="button"
           disabled={!online || busy}
-          className="text-xs underline"
+          className="ui-button is-quiet"
           onClick={() => {
             if (isCurrent(context) && !pendingRef.current) void load(true);
           }}
@@ -589,11 +589,11 @@ export function AgentProactiveView({
   return (
     <section className="space-y-5" aria-label={`${name}'s proactive settings`}>
       <div className="flex items-center justify-between">
-        <h4 className="font-semibold">Proactive work for {name}</h4>
+        <h3 className="sub-page-title">Proactive work for {name}</h3>
         <button
           type="button"
           disabled={busy}
-          className="text-xs underline"
+          className="ui-button is-quiet"
           onClick={() => setReload((value) => value + 1)}
         >
           Refresh schedules

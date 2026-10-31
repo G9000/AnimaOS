@@ -9,8 +9,6 @@
 .project-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid rgb(236 230 218 / 0.1); }
 .project-heading-title { min-width: 0; }
 .project-eyebrow { margin: 0 !important; font-family: var(--font-mono); font-size: 10px !important; letter-spacing: 0.14em; text-transform: uppercase; color: var(--control-muted); }
-.project-home .project-back { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 0; border: 0; background: none; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--control-muted); }
-.project-home .project-back:hover:not(:disabled) { border: 0; background: none; color: var(--color-ink); }
 .project-home .project-working-as { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 12px; color: var(--control-muted); white-space: nowrap; }
 .project-working-as .field { width: auto; min-width: 140px; }
 .project-lede { max-width: 60ch; color: var(--control-muted); margin: 16px 0 28px !important; }

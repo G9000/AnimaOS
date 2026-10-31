@@ -43,6 +43,41 @@ export function Switch({
   );
 }
 
+/** The way back from a sub-page: a small bordered button with a chevron,
+ * named for where it goes. */
+export function BackButton({
+  children,
+  onClick,
+  disabled,
+  className,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={className ? `back-button ${className}` : 'back-button'}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <path
+          d="M10 3.5 5.5 8l4.5 4.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="sr-only">Back to</span> {children}
+    </button>
+  );
+}
+
 export function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <h4 className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-3">

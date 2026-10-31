@@ -183,11 +183,11 @@ it('keeps the editor open during a save and retains a failed draft', async () =>
   });
   fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save tasks' }));
-  expect(screen.getByRole('button', { name: /Back to tasks/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Back to Tasks' })).toBeDisabled();
   rejectSave(new Error('Save failed'));
   expect(await screen.findByRole('alert')).toHaveTextContent('Save failed');
   expect(screen.getByLabelText('Task 1')).toHaveValue('Draft task');
-  expect(screen.getByRole('button', { name: /Back to tasks/ })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Back to Tasks' })).toBeEnabled();
 });
 
 it('aggregates notes, filters by owner, and opens the owning chat without refetching on status polls', async () => {

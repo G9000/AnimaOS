@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { AgentJob } from '@animaos/sdk';
 import { daemon } from '../lib/daemon-api';
 import { AgentRunsView } from './AgentRuns';
+import { BackButton } from './ui-bits';
 import { currentJobReview } from '../lib/job-output';
 
 type Agent = { id: string; name: string };
@@ -319,12 +320,7 @@ export function WorkspaceOperations({
           {selection ? (
             <>
               <div className="operator-detail-toolbar">
-                <button
-                  className="operator-button"
-                  onClick={() => setSelection(null)}
-                >
-                  Back to queue
-                </button>
+                <BackButton onClick={() => setSelection(null)}>Queue</BackButton>
                 <span>{selectedAgent?.name ?? 'Agent unavailable'}</span>
                 {selectedAgent && (
                   <button

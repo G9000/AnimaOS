@@ -3,6 +3,7 @@ import type { Project, ProjectSummary, ProjectLinkTarget } from '@animaos/sdk';
 import { useProjects } from '../../hooks/useProjects';
 import { daemon } from '../../lib/daemon-api';
 import type { Navigate } from '../../lib/hash-route';
+import { BackButton } from '../ui-bits';
 import { ProjectSourcePicker } from './ProjectSourcePicker';
 import { ProjectKnowledge } from './ProjectKnowledge';
 import { ProjectFolderGrant } from './ProjectFolderGrant';
@@ -75,8 +76,7 @@ export function ProjectHome({ agentId, agents, projectId, onSelectAgent, navigat
   return <section className="project-home" aria-label="Projects">
     <header className="project-heading">
       <div className="project-heading-title">
-        {projectId ? <button className="project-back" onClick={() => navigate({ kind: 'project', projectId: null })}>
-          <span aria-hidden="true">←</span>Projects</button>
+        {projectId ? <BackButton onClick={() => navigate({ kind: 'project', projectId: null })}>Projects</BackButton>
           : <p className="project-eyebrow">Shared work</p>}
         <h1>{project?.title ?? (projectId ? 'Project' : 'Projects')}</h1>
       </div>

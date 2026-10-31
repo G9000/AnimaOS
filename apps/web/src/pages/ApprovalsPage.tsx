@@ -18,6 +18,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from '../components/settings/SettingsKit';
+import { BackButton } from '../components/ui-bits';
 import { useApprovals, type ApprovalsView } from '../hooks/useApprovals';
 import {
   CLASS_LABELS,
@@ -440,23 +441,12 @@ export function ApprovalsPage({
         </>
       ) : (
         <>
-          <button
-            type="button"
+          <BackButton
             className="approvals-back"
             onClick={() => setSection('overview')}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path
-                d="M10 3.5 5.5 8l4.5 4.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
             Permissions
-          </button>
+          </BackButton>
           {section === 'autonomy' ? (
             <AutonomyCard
               agentId={agentId}

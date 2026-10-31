@@ -7,6 +7,7 @@ import { AgentRunsView } from './AgentRuns';
 import { WorkspaceGoals } from './WorkspaceGoals';
 import { WorkspaceWorkflows } from './WorkspaceWorkflows';
 import { AgentAvatar } from './AgentAvatar';
+import { BackButton } from './ui-bits';
 import { AgentProactiveView, AgentTasksView } from './AgentWork';
 import { useLatest } from '../hooks/useLatest';
 import { useRenderScope } from '../hooks/useRenderScope';
@@ -251,20 +252,15 @@ export function WorkspaceHub({
         <h2 className="sr-only">Work</h2>
         {managed && section !== 'Notes' ? (
           <div className="space-y-6">
-            <button
-              type="button"
-              className="text-sm underline disabled:opacity-50"
+            <BackButton
               disabled={saving}
               onClick={() => {
                 setManagedId(null);
                 setRevision((value) => value + 1);
               }}
             >
-              ← Back to {section.toLowerCase()}
-            </button>
-            <h3 className="text-lg font-semibold">
-              {managed.name} · {section}
-            </h3>
+              {section}
+            </BackButton>
             {section === 'Tasks' ? (
               <AgentTasksView
                 key={managed.id}

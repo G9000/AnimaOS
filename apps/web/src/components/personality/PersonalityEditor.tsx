@@ -12,6 +12,7 @@ import {
 import './personality.css';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 import { PenIcon } from '../PenIcon';
+import { BackButton } from '../ui-bits';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -324,17 +325,15 @@ export function PersonalityEditor({
       aria-labelledby={`${id}-title`}
       aria-busy={loading || saving}
     >
+      <BackButton
+        onClick={() => {
+          if (onBackToProfile) onBackToProfile();
+          else setScreen('profile');
+        }}
+      >
+        Profile
+      </BackButton>
       <div className="soul-toolbar">
-        <button
-          type="button"
-          className="soul-back"
-          onClick={() => {
-            if (onBackToProfile) onBackToProfile();
-            else setScreen('profile');
-          }}
-        >
-          <span aria-hidden="true">←</span> Profile
-        </button>
         <h3 id={`${id}-title`} className="soul-title">
           {saved?.path ?? 'SOUL.md'}
         </h3>
