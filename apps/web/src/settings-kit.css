@@ -1453,128 +1453,13 @@
 }
 
 
-/* Settings content uses the room it has, up to a width where a row's label
- * and its control still read as one line. */
+/* Settings read as one column at a comfortable width: a row's label and
+ * its control stay one glance apart. */
 :root {
-  --settings-content-max: 1200px;
+  --settings-content-max: 860px;
 }
 
-/* ── Wide screens: settings flow into columns ──
- * Sections pour down one column and on into the next (2 columns from a
- * roomy window, 3 on very wide ones). A row never splits; a long list may
- * continue in the next column. Editors, alerts and the save row span the
- * whole width. */
-@media (min-width: 1280px) {
-  :root {
-    --settings-content-max: none;
-  }
-
-  .settings-window .settings-form:not(.approvals-page .settings-form):not(:has(.settings-profile-editor-view)):not(.settings-model-page),
-  .settings-window .approvals-page[data-section='overview'],
-  .settings-window .skills-page {
-    display: block;
-    columns: 400px 3;
-    column-gap: 56px;
-    column-fill: balance;
-  }
-
-  :is(
-      .settings-window .settings-form:not(.approvals-page .settings-form),
-      .settings-window .approvals-page,
-      .settings-window .skills-page
-    )
-    > * {
-    margin: 0 0 28px;
-  }
-
-  .settings-window :is(.sk-row, .settings-item, .settings-access-option, .skills-table tr, .memory-item, .key-provider, .fallback-row) {
-    break-inside: avoid;
-  }
-
-  /* A section stays in one column, so a group is read together… */
-  .settings-window :is(.sk-section, .settings-group, .sk-fieldset > *) {
-    break-inside: avoid;
-  }
-
-  /* …except one long list that is the whole page (built-in tools). */
-  .settings-window .sk-section:has(.settings-tool-groups),
-  .settings-window .sk-fieldset > .settings-tool-groups {
-    break-inside: auto;
-  }
-
-  .settings-window :is(.sk-section-head, .settings-group-title, .sk-section-title) {
-    break-after: avoid;
-  }
-
-  /* Whole-width pieces: messages, the save row, and anything that needs
-   * the room to work in. */
-  :is(
-      .settings-window .settings-form,
-      .settings-window .approvals-page,
-      .settings-window .skills-page
-    )
-    > :is(
-      .settings-save,
-      [role='alert'],
-      [role='status'],
-      .skills-error,
-      .approvals-error,
-      .approvals-notice,
-      .approvals-pending-details,
-      .skill-editor,
-      .skill-review
-    ) {
-    column-span: all;
-  }
-
-  /* An open model change, a skill editor or a route keeps its own width. */
-  .settings-window .settings-model-more[open],
-  .settings-window .helper-route {
-    break-inside: avoid;
-  }
-}
-
-/* ── Wide screens: each section is its own panel ──
- * In columns, a section's label and description could float on their own.
- * A soft panel holds the label, its description and its rows together, so
- * each column reads as a stack of groups. */
-@media (min-width: 1280px) {
-  :is(
-      .settings-window .settings-form:not(.approvals-page .settings-form):not(:has(.settings-profile-editor-view)),
-      .settings-window .approvals-page,
-      .settings-window .skills-page
-    )
-    :is(.sk-section, .settings-group):not(:is(.sk-section, .settings-group) *),
-  .settings-window .approvals-page > .approvals-history-details {
-    padding: 16px 18px 6px;
-    border: 1px solid var(--sk-hairline);
-    border-radius: 4px;
-    background: rgb(236 230 218 / 0.025);
-    /* A panel that continues into the next column keeps its frame there. */
-    -webkit-box-decoration-break: clone;
-    box-decoration-break: clone;
-  }
-
-  :root[data-appearance-theme='light']
-    :is(.settings-window .settings-form, .settings-window .approvals-page, .settings-window .skills-page)
-    :is(.sk-section, .settings-group):not(:is(.sk-section, .settings-group) *) {
-    background: rgb(26 26 24 / 0.02);
-  }
-
-  /* Inside a panel the rows need no frame of their own: the first row sits
-   * under the description, the last one under the panel's edge. */
-  :is(.settings-window .settings-form, .settings-window .approvals-page, .settings-window .skills-page)
-    :is(.sk-section, .settings-group)
-    :is(.sk-card, .settings-list, .memory-list) {
-    border-bottom: 0;
-  }
-
-  .settings-window .approvals-page > .approvals-history-details {
-    padding-bottom: 14px;
-  }
-}
-
-/* A section's actions move under its description when the column is too
+/* A section's actions move under its description when the page is too
  * narrow for both. */
 .sk-section-head {
   flex-wrap: wrap;
@@ -1584,45 +1469,12 @@
   flex: 1 1 260px;
 }
 
-
-/* ── Model: two set columns rather than free-flowing sections ── */
 .settings-model-columns,
 .settings-model-column {
   display: flex;
   flex-direction: column;
   gap: 28px;
   min-width: 0;
-}
-
-@media (min-width: 1280px) {
-  .settings-model-columns {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    gap: 28px 32px;
-  }
-
-  .settings-window .settings-model-page
-    :is(.sk-section, .settings-group):not(:is(.sk-section, .settings-group) *) {
-    padding: 16px 18px 6px;
-    border: 1px solid var(--sk-hairline);
-    border-radius: 4px;
-    background: rgb(236 230 218 / 0.025);
-  }
-
-  .settings-window .settings-model-page :is(.sk-section, .settings-group) .sk-card {
-    border-bottom: 0;
-  }
-
-  /* Helpers and Routes are one fieldset: keep them as two panels with the
-   * column's own rhythm. */
-  .settings-window .settings-model-page .sk-fieldset > * + * {
-    margin-top: 28px;
-  }
-
-  .settings-window .settings-model-page .sk-fieldset > .model-actions {
-    margin-top: 12px;
-  }
 }
 
 /* A fieldset's hidden legend is not a section: the first one sits flush. */
@@ -1885,13 +1737,12 @@
 }
 
 
-/* Permissions sub-pages (When it checks with you, Coding app keys): one
- * column, a quiet back link. */
+/* Permissions sub-pages (When it checks with you, Coding app keys): a
+ * quiet back link. */
 .settings-window .approvals-page:not([data-section='overview']) {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 820px;
 }
 
 .settings-window .approvals-back {
