@@ -76,7 +76,7 @@ pub(crate) fn initialize_owned_directory(path: &Path) -> Result<(), String> {
     verify_private_directory(parent_path, &parent, true)
 }
 
-fn verify_private_directory(
+pub(crate) fn verify_private_directory(
     path: &Path,
     held: &WorkspaceBytes,
     parent: bool,
@@ -223,6 +223,40 @@ pub(crate) struct DocumentEditStore {
 }
 
 impl DocumentEditStore {
+    /// Creates or verifies the one private inspection child without accepting arbitrary directories.
+    pub(crate) fn inspection_directory(&self) -> Result<PathBuf, String> {
+        let root = self.canonical_root()?;
+        let path = root.join("inspections");
+        initialize_owned_directory(&path)?;
+        Ok(path)
+    }
+    fn inspection_entry(&self, name: &std::ffi::OsStr) -> Result<bool, String> {
+        if name != std::ffi::OsStr::new("inspections") {
+            return Ok(false);
+        }
+        let path = self.root.canonical_root.join(name);
+        reject_reparse_directory(&path)?;
+        let held = WorkspaceBytes::open(&path)
+            .map_err(|_| "Document inspection directory is unavailable")?;
+        verify_private_directory(&path, &held, false)?;
+        use cap_fs_ext::MetadataExt;
+        let named = self
+            .root
+            .held_directory()
+            .and_then(|directory| directory.symlink_metadata(name))
+            .map_err(|_| "Document inspection directory is unavailable")?;
+        let captured = held
+            .held_directory()
+            .and_then(|directory| directory.dir_metadata())
+            .map_err(|_| "Document inspection directory is unavailable")?;
+        if !named.is_dir()
+            || crate::tools::workspace_bytes::linked(&named)
+            || (named.dev(), named.ino()) != (captured.dev(), captured.ino())
+        {
+            return Err("Document inspection directory custody changed".into());
+        }
+        Ok(true)
+    }
     pub(crate) fn ensure_readback_capacity(&self) -> Result<(), String> {
         if self.readback_proof_ids()?.len() >= MAX_READBACK_PROOFS {
             Err("Document proof capacity is full".into())
@@ -276,6 +310,9 @@ impl DocumentEditStore {
             .map_err(|_| "Document storage is unavailable")?
         {
             let entry = entry.map_err(|_| "Document storage is unavailable")?;
+            if self.inspection_entry(&entry.file_name())? {
+                continue;
+            }
             count += 1;
             if count >= MAX_FILES {
                 return Err("Document staging capacity is full".into());
@@ -387,6 +424,9 @@ impl DocumentEditStore {
                 return Err("Document storage entry limit exceeded".into());
             }
             let entry = entry.map_err(|_| "Document storage is unavailable")?;
+            if self.inspection_entry(&entry.file_name())? {
+                continue;
+            }
             let name = entry
                 .file_name()
                 .to_str()
@@ -428,6 +468,9 @@ impl DocumentEditStore {
                 return Err("Document storage entry limit exceeded".into());
             }
             let entry = entry.map_err(|_| "Document storage is unavailable")?;
+            if self.inspection_entry(&entry.file_name())? {
+                continue;
+            }
             let name = entry.file_name();
             let name = name.to_str().ok_or("Document storage entry is invalid")?;
             if let Some(id) = name
@@ -549,6 +592,9 @@ impl DocumentEditStore {
             .map_err(|_| "Document storage is unavailable")?
         {
             let entry = entry.map_err(|_| "Document storage is unavailable")?;
+            if self.inspection_entry(&entry.file_name())? {
+                continue;
+            }
             count += 1;
             if count > MAX_FILES {
                 return Err("Document staging capacity is full".into());

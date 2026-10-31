@@ -214,6 +214,14 @@ pub struct ExecutionContext {
 }
 
 impl ExecutionContext {
+    /// Remaining time on the existing admitted clock; never starts a new budget.
+    pub fn remaining_wall_time_ms(&self) -> Result<u64, String> {
+        self.check_live()?;
+        self.deadline_at_ms
+            .checked_sub(self.clock.now_ms())
+            .filter(|remaining| *remaining > 0)
+            .ok_or_else(|| "Shared execution deadline reached".into())
+    }
     pub fn binding_hint(&self) -> super::ExecutionBindingHint {
         super::ExecutionBindingHint {
             scope_id: self.scope_id.clone(),
@@ -330,6 +338,27 @@ impl ExecutionContext {
     pub async fn reserve_tool(&self, logical_id: &str) -> Result<ExecutionPermit, String> {
         self.reserve_tool_with_id(logical_id, &uuid::Uuid::new_v4().to_string())
             .await
+    }
+
+    /// Reserve a finite artifact ceiling and one native capability attempt on
+    /// this same scope. Only physical retirement can reduce its byte ceiling.
+    pub async fn reserve_native_artifact(
+        &self,
+        logical_id: &str,
+        max_artifact_bytes: u64,
+    ) -> Result<ExecutionPermit, String> {
+        self.reserve(
+            ReservationRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                run_id: self.run_id.clone(),
+                logical_call_id: logical_id.into(),
+                operation: ExecutionOperation::NativeArtifact { max_artifact_bytes },
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            self.cancel.clone(),
+        )
+        .await
     }
 
     /// Stable physical-attempt identity for durable effect reconciliation. Exact

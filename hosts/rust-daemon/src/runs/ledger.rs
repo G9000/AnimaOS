@@ -232,6 +232,8 @@ pub(crate) struct SteeredKey {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) outcome: Option<anima_core::outcomes::RunOutcome>,
     pub(crate) id: String,
     pub(crate) agent_id: String,
     pub(crate) session_id: String,
@@ -347,6 +349,7 @@ impl RunRecord {
     pub(crate) fn running(start: RunStart, now_ms: u64) -> Self {
         Self {
             id: format!("run_{}", uuid::Uuid::new_v4()),
+            outcome: None,
             agent_id: start.agent_id,
             session_id: start.session_id,
             source: start.source,
@@ -549,9 +552,51 @@ impl RunRecord {
             .count()
     }
 
+    fn has_historical_owner_outcome_reply(&self, digest: &str) -> bool {
+        let Some(outcome) = &self.outcome else {
+            return false;
+        };
+        if self.status != RunStatus::Failed
+            || self.stop.is_some()
+            || self.reply_message_id.is_none()
+            || outcome.root_run_id != self.id
+            || outcome.definition.acceptance
+                != anima_core::outcomes::OutcomeAcceptance::OwnerRequired
+            || !matches!(
+                outcome.status,
+                anima_core::outcomes::OutcomeStatus::AwaitingOwner
+                    | anima_core::outcomes::OutcomeStatus::Accepted
+                    | anima_core::outcomes::OutcomeStatus::NeedsReview
+                    | anima_core::outcomes::OutcomeStatus::Stopped
+            )
+            || outcome.validate().is_err()
+            || outcome.task_sha256 != crate::outcomes::task_hash(self)
+            || outcome.report_sha256.is_none()
+            || outcome.terminal_reply_sha256.as_deref() != Some(digest)
+        {
+            return false;
+        }
+        outcome.iterations.last().is_some_and(|latest| {
+            latest.reply_sha256 == digest
+                && !latest.observations.is_empty()
+                && latest.observations.iter().all(|observation| {
+                    observation.verdict == anima_core::outcomes::OutcomeVerdict::Met
+                })
+        })
+    }
+
     /// Finished, and holding no steer a restart still has to hand on.
     fn is_prunable(&self) -> bool {
-        self.status.is_terminal() && self.pending_steers.is_empty()
+        self.status.is_terminal()
+            && self.pending_steers.is_empty()
+            && self.outcome.as_ref().is_none_or(|outcome| {
+                matches!(
+                    outcome.status,
+                    anima_core::outcomes::OutcomeStatus::CriteriaMet
+                        | anima_core::outcomes::OutcomeStatus::Accepted
+                        | anima_core::outcomes::OutcomeStatus::Stopped
+                )
+            })
     }
 
     /// A run of this record's session for each steer it still holds, never
@@ -606,6 +651,9 @@ impl RunRecord {
             Some(RunError::new(code, message)),
             now_ms,
         );
+        if let Some(outcome) = &mut self.outcome {
+            let _ = outcome.hold(anima_core::outcomes::OutcomeStatus::NeedsReview);
+        }
     }
 }
 
@@ -1058,6 +1106,22 @@ impl RunLedger {
     }
 
     pub(crate) fn validate(records: &[RunRecord]) -> Result<(), String> {
+        for record in records {
+            if let Some(outcome) = &record.outcome {
+                if !matches!(record.source, RunSource::Web | RunSource::Api)
+                    || record.parent_run_id.is_some()
+                    || record.recovery_of.is_some()
+                    || record.async_helper.is_some()
+                    || record.system_followup == Some(true)
+                {
+                    return Err("Outcome is outside supported original owner-chat scope".into());
+                }
+                outcome.validate().map_err(|error| error.to_string())?;
+                if outcome.root_run_id != record.id {
+                    return Err("Outcome has a foreign root run".into());
+                }
+            }
+        }
         let mut ids = HashSet::new();
         for record in records {
             super::turn::validate(record)?;
@@ -1177,7 +1241,8 @@ impl RunLedger {
                 ));
             }
             if record.reply_sha256.as_ref().is_some_and(|digest| {
-                record.status != RunStatus::Completed
+                (record.status != RunStatus::Completed
+                    && !record.has_historical_owner_outcome_reply(digest))
                     || record.reply_message_id.is_none()
                     || !super::delegation_origin::valid_digest(digest)
             }) {
@@ -1218,6 +1283,24 @@ impl RunLedger {
                 ledger.insert(steer);
             }
             record.recover_after_restart(now_ms);
+            if let Some(outcome) = &mut record.outcome {
+                if matches!(
+                    outcome.status,
+                    anima_core::outcomes::OutcomeStatus::CriteriaMet
+                        | anima_core::outcomes::OutcomeStatus::AwaitingOwner
+                        | anima_core::outcomes::OutcomeStatus::Accepted
+                ) {
+                    if outcome
+                        .hold(anima_core::outcomes::OutcomeStatus::NeedsReview)
+                        .is_err()
+                    {
+                        outcome.status = anima_core::outcomes::OutcomeStatus::NeedsReview;
+                        outcome.accepted_report_sha256 = None;
+                        outcome.repair_paths.clear();
+                    }
+                    record.mirrored = false;
+                }
+            }
             if let Some(helper) = &mut record.async_helper {
                 if helper.completion.is_unresolved() {
                     // History still holds the previous disposition. Preserve

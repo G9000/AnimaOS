@@ -16,6 +16,7 @@ import {
   type UploadedAttachment,
   validPreviewEditContext,
   type PreviewEditContext,
+  type OutcomeDefinition,
 } from '@animaos/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
@@ -42,6 +43,8 @@ import { useAppearancePreferences } from '../../lib/appearance-preferences';
 import type { AttachmentDraft } from '../../lib/attachments';
 import type { KnownRunAttachments } from '../../lib/run-attachments';
 import { BrowserTaskControls } from './BrowserTaskControls';
+import { EMPTY_OUTCOME_DRAFT, OutcomeControls, outcomeDefinitionFromDraft } from './OutcomeControls';
+import { describeOutcomeCriterion } from './OutcomeStatus';
 import type { NativeVoiceScope } from '../voice/NativeTranscription';
 import { NativeSpeech } from '../voice/NativeSpeech';
 import { SessionSkillDrafts } from '../learning/SessionSkillDrafts';
@@ -70,9 +73,10 @@ export interface SessionComposerState {
   sending: boolean;
   disabled: boolean;
   offline: boolean;
-  onSend: (text?: string, documentEditContext?: PreviewEditContext) => void;
+  onSend: (text?: string, documentEditContext?: PreviewEditContext, outcome?: OutcomeDefinition) => void;
   /** A recovered or revised edit remains visible until it is sent or discarded. */
   documentEditContext?: PreviewEditContext;
+  outcome?: OutcomeDefinition;
   onClearDocumentEditContext?: () => void;
   error: string | null;
   onDismissError: () => void;
@@ -470,6 +474,12 @@ export function SessionView({
     refreshKey: `${messages.length}:${runs.length}`,
     resetKey: session?.clearGeneration,
   });
+  const [outcomeDraft, setOutcomeDraft] = useState({ ...EMPTY_OUTCOME_DRAFT });
+  const [outcomeError, setOutcomeError] = useState<string | null>(null);
+  useResetOnChange([session?.agentId, sessionId, session?.clearGeneration], () => {
+    setOutcomeDraft({ ...EMPTY_OUTCOME_DRAFT });
+    setOutcomeError(null);
+  });
   const sendWithSideQuestion = (override?: string) => {
     const text = override ?? composer.draft;
     if (selectedEditContext && override === undefined) {
@@ -492,7 +502,14 @@ export function SessionView({
       composer.setDraft('');
       return;
     }
-    composer.onSend(override);
+    const check = advancedInput && (session?.kind === 'chat' || !session)
+      ? outcomeDefinitionFromDraft(outcomeDraft) : {};
+    if (check.error) { setOutcomeError(check.error); return; }
+    setOutcomeError(null);
+    if (check.definition) {
+      composer.onSend(override, undefined, check.definition);
+      setOutcomeDraft({ ...EMPTY_OUTCOME_DRAFT });
+    } else composer.onSend(override);
   };
   const voiceKey =
     composer.conversationKey ??
@@ -537,11 +554,12 @@ export function SessionView({
   const transcriptActions = useMemo<TranscriptActions>(
     () => ({
       ...actions,
+      outcomeReviewEnabled: !composer.offline && !missing,
       onSaveToMemory: save,
       savedToMemory: savedState,
       secondOpinions,
     }),
-    [actions, save, savedState, secondOpinions],
+    [actions, save, savedState, secondOpinions, composer.offline, missing],
   );
   const conversation = useMemo(
     () => ({ ...agent, id: session?.agentId ?? agent.id, messages }),
@@ -871,6 +889,9 @@ export function SessionView({
           model={advancedInput ? composer.model : undefined}
           tools={
             <>
+              {composer.outcome && <details className="mb-2 rounded-xl border border-line bg-panel p-3 text-xs text-ink-2"><summary>Recovered success criteria</summary><ul className="list-disc pl-4">{composer.outcome.criteria.map((criterion) => <li key={criterion.id}>{describeOutcomeCriterion(criterion)}</li>)}</ul><p>Resending includes these original criteria and limits. New success criteria replace them.</p></details>}
+              {advancedInput && (session?.kind === 'chat' || !session) && !selectedEditContext && <OutcomeControls value={outcomeDraft} onChange={(value) => { setOutcomeDraft(value); setOutcomeError(null); }} disabled={composer.disabled || composer.offline || composer.sending} />}
+              {advancedInput && outcomeError && <p role="alert" className="mb-2 text-xs text-danger">{outcomeError}</p>}
               {session?.kind === 'chat' &&
                 /^\s*\/btw\s+\S/.test(composer.draft) && (
                   <button

@@ -207,7 +207,7 @@ fn idle() -> Value {
         "chatRuns": 0, "queuedRuns": 0, "swarmRuns": 0, "helperRuns": 0,
         "jobs": 0, "backgroundProcesses": 0, "appSessions": 0, "acpSessions": 0,
         "memoryReviews": 0,
-        "skillEvaluations": 0, "doctorRepairs": 0, "standingIntentChanges": 0, "executionJobs": 0, "mcpOperations": 0,
+        "skillEvaluations": 0, "taskRegressions": 0, "doctorRepairs": 0, "standingIntentChanges": 0, "executionJobs": 0, "mcpOperations": 0,
         "browserProfileLogins": 0,
     })
 }

@@ -186,6 +186,17 @@ async fn recover_document_edits(
     state: &SharedDaemonState,
     coordinator: &AgentRunCoordinator,
 ) -> io::Result<Option<crate::document_edits::DocumentEditService>> {
+    let engine = match crate::document_inspections::worker::EngineConfig::from_environment() {
+        Ok(engine) => engine,
+        Err(_) => {
+            tracing::warn!(
+                "document inspection is unavailable because its operator configuration is invalid"
+            );
+            None
+        }
+    };
+    state.write().await.document_inspections.worker =
+        crate::document_inspections::worker::DocumentInspectionWorker::with_engine_config(engine);
     if state.read().await.document_edit_store.is_none() {
         return Ok(None);
     }

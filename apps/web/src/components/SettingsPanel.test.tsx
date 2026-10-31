@@ -60,6 +60,11 @@ it('renders the active personality editor instead of editing an inactive legacy 
   ).not.toBeInTheDocument();
 });
 
+it('offers an idle task comparison entry in the existing agent profile', () => {
+  renderPanel(agent(), { sections: ['profile'] });
+  expect(screen.getByRole('button', { name: 'Compare on saved tasks' })).toHaveAttribute('aria-expanded', 'false');
+});
+
 const providers: DaemonProvider[] = [
   {
     id: 'openai',

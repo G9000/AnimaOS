@@ -19,6 +19,9 @@ export function rustDaemonTestEnvironment(
   source: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const isolated = { ...source };
+  // Large debug async test frames exceed Rust's 2 MiB spawned-thread default
+  // on Windows. Bound this harness at 8 MiB without changing production threads.
+  isolated.RUST_MIN_STACK ??= String(8 * 1024 * 1024);
   for (const key of Object.keys(isolated)) {
     if (ownerOverrides.has(key.toUpperCase())) delete isolated[key];
   }

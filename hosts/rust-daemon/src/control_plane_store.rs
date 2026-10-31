@@ -315,6 +315,8 @@ pub(crate) struct ControlPlaneSnapshot {
     pub(crate) skill_ledger: Vec<crate::skills::ledger::SkillLedgerEntry>,
     #[serde(default)]
     pub(crate) skill_evaluations: crate::skills::evaluation::EvaluationRegistry,
+    #[serde(default)]
+    pub(crate) task_regressions: crate::task_regressions::RegressionRegistry,
     /// Secondary-call usage remains in durable custody until history upsert and
     /// the exact pending-row acknowledgement have both settled.
     #[serde(default)]
@@ -875,6 +877,7 @@ impl ControlPlaneSnapshot {
             agent_autonomy: vec![],
             skill_ledger: vec![],
             skill_evaluations: crate::skills::evaluation::EvaluationRegistry::default(),
+            task_regressions: crate::task_regressions::RegressionRegistry::default(),
             pending_usage: Vec::new(),
             helper_worktree_repos: vec![],
             skills: vec![],

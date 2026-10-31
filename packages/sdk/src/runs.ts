@@ -1,6 +1,7 @@
 import type { DaemonClient } from './client.js';
 import type { BrowserSelection } from './browser.js';
 import type { PreviewEditContext } from './preview-context.js';
+import type { OutcomeDefinition, RunOutcome } from './outcomes.js';
 
 export type RunStatus =
   | 'queued'
@@ -174,6 +175,8 @@ export interface Run {
   helperCompletion?: HelperCompletionOrigin;
   /** Absent on runs created before durable turn binding was introduced. */
   turn?: TurnSummary;
+  /** Absent for ordinary chats. Recorded evidence, separate from runtime status. */
+  outcome?: RunOutcome | null;
 }
 
 /** `queue` waits behind the session's earlier messages; `steer` joins its
@@ -192,6 +195,8 @@ export interface StartRunInput {
   browserSelection?: BrowserSelection;
   /** Exact selected preview data. Restricts this owner run to reviewed document edits. */
   documentEditContext?: PreviewEditContext;
+  /** Explicit public success criteria for this new run; unavailable for steers. */
+  outcome?: OutcomeDefinition;
   /** The sender's IANA time zone; the daemon keeps it as the owner's, so
    *  "7 p.m." means their evening in every channel. */
   timeZone?: string;

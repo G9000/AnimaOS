@@ -1,5 +1,7 @@
 # Learning and context quality
 
+For isolated tasks that use tools and change real fixture files, use [complete-task regression comparisons](task-regressions.md). Those owner reports are separate from the response-only skill promotion gate described below.
+
 The Rust daemon can evaluate a proposed skill before promotion, save a small continuity checkpoint during compaction, omit selected old tool output from model requests, and check whether completion evidence covers the changed file versions. Approval, tool grants and exact Undo remain separate controls.
 
 ## Evaluate before promotion

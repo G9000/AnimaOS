@@ -473,6 +473,14 @@ pub(crate) struct AgentRunCoordinator {
 }
 
 impl AgentRunCoordinator {
+    pub(crate) async fn check_outcome_tool(
+        &self,
+        run: &crate::runs::RunLink,
+        root: Option<&std::path::Path>,
+        call: &anima_core::ToolCall,
+    ) -> Result<(), String> {
+        crate::outcomes::check_tool(&self.state, run, root, call).await
+    }
     pub(crate) async fn resolve_peer(
         &self,
         id: Option<&str>,
@@ -1694,7 +1702,7 @@ impl AgentRunCoordinator {
         self.run_locked_inner(request, ticket, commit, rollback, accepted, None, None)
             .await
     }
-    async fn enforce_monthly_spend_limit(&self) -> Result<(), ApiError> {
+    pub(crate) async fn enforce_monthly_spend_limit(&self) -> Result<(), ApiError> {
         let (limit, store, zone) = {
             let guard = self.state.read().await;
             (
@@ -2610,6 +2618,32 @@ impl AgentRunCoordinator {
         if let Some(review) = &completion_review {
             runtime.register_evaluator(Arc::new(review.clone()));
         }
+        let outcome_review = self
+            .state
+            .read()
+            .await
+            .runs
+            .get(&run_id)
+            .and_then(|record| record.outcome.as_ref())
+            .map(|_| {
+                crate::outcomes::HostOutcomeReview::new(
+                    self.state.clone(),
+                    self.control_plane_transactions(),
+                    crate::runs::RunLink {
+                        run_id: run_id.clone(),
+                        agent_id: agent_id.clone(),
+                        session_id: session_id.clone(),
+                    },
+                    crate::tools::ctx_workspace_root(&tool_context)
+                        .map(std::path::Path::to_path_buf),
+                    original_config.clone(),
+                    crate::document_inspections::DocumentInspectionService::new(self.state.clone()),
+                )
+            });
+        if let Some(review) = &outcome_review {
+            runtime.register_provider(Arc::new(review.clone()));
+            runtime.register_evaluator(Arc::new(review.clone()));
+        }
         // Spec §8.3: the skills index and a `/skill` message's instructions.
         self.apply_skills(&mut runtime, &content, &run_id, &session_id)
             .await;
@@ -2804,7 +2838,7 @@ impl AgentRunCoordinator {
         ownership::verify(&self.state)
             .await
             .map_err(ApiError::service_unavailable)?;
-        let result = if let Some(error) = action_journal.failure() {
+        let mut result = if let Some(error) = action_journal.failure() {
             let owner_stopped = self
                 .state
                 .read()
@@ -2820,6 +2854,9 @@ impl AgentRunCoordinator {
         } else {
             result
         };
+        if let Some(review) = &outcome_review {
+            review.finalize(&runtime, &mut result).await;
+        }
         // An async worktree assignment is inspected once its execution ends;
         // the report is saved with the terminal commit below, before any
         // completion can be admitted.
@@ -2913,7 +2950,38 @@ impl AgentRunCoordinator {
                     .is_some_and(|record| record.stop.is_some()))
                 && live_run.control().cancel.is_cancelled()
                 && result.error.as_deref() == Some(anima_core::RUN_STOPPED_ERROR);
-            let outcome = RunOutcome::new(&change_set, result.clone()).with_stop(stopped);
+            let mut outcome = RunOutcome::new(&change_set, result.clone()).with_stop(stopped);
+            let review_reply = guard
+                .runs
+                .get(&run_id)
+                .and_then(|record| record.outcome.as_ref())
+                .is_some_and(|criteria| {
+                    matches!(
+                        criteria.status,
+                        anima_core::outcomes::OutcomeStatus::CriteriaMet
+                            | anima_core::outcomes::OutcomeStatus::AwaitingOwner
+                            | anima_core::outcomes::OutcomeStatus::Accepted
+                    ) && criteria.validate().is_ok()
+                        && result.data.as_ref().is_some_and(|content| {
+                            criteria.terminal_reply_sha256.as_deref()
+                                == Some(crate::outcomes::digest(content.text.as_bytes()).as_str())
+                        })
+                });
+            if !stopped && review_reply {
+                outcome.reply_message_id = change_set
+                    .delta
+                    .messages
+                    .last()
+                    .filter(|message| {
+                        message.role == anima_core::MessageRole::Assistant
+                            && message.room_id == change_set.session_id
+                            && result
+                                .data
+                                .as_ref()
+                                .is_some_and(|content| content.text == message.content.text)
+                    })
+                    .map(|message| message.id.clone());
+            }
             if let Some(report) = worktree_report.take() {
                 if let Some(worktree) = guard
                     .runs

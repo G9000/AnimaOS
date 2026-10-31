@@ -1,5 +1,8 @@
 //! Shared admission accounting. A saved reservation is not a tool approval.
 mod context;
+#[cfg(test)]
+#[path = "execution_limits/native_artifact_tests.rs"]
+mod native_artifact_tests;
 pub use context::{
     ExecutionAllowance, ExecutionBudgetAuthority, ExecutionBudgetPort, ExecutionContext,
     ExecutionPermit, ExecutionStreamSink, InMemoryExecutionBudget, ModelCallContext,
@@ -78,10 +81,18 @@ impl ExecutionLimits {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ExecutionOperation {
     ModelAttempt,
     Tool,
+    /// One bounded native capability dispatch on this same admitted scope.
+    NativeArtifact {
+        max_artifact_bytes: u64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,12 +111,20 @@ impl ReservationRequest {
         for id in [&self.id, &self.run_id, &self.logical_call_id] {
             validate_id(id)?;
         }
-        if (self.operation == ExecutionOperation::Tool
+        if (!matches!(self.operation, ExecutionOperation::ModelAttempt)
             && (self.input_tokens != 0 || self.output_tokens != 0))
             || (self.operation == ExecutionOperation::ModelAttempt
                 && (self.input_tokens == 0 || self.output_tokens == 0))
         {
             return Err("Invalid execution token reservation".into());
+        }
+        if matches!(
+            self.operation,
+            ExecutionOperation::NativeArtifact {
+                max_artifact_bytes: 0
+            }
+        ) {
+            return Err("Native artifact reservation requires a positive finite byte bound".into());
         }
         self.input_tokens
             .checked_add(self.output_tokens)
@@ -115,10 +134,21 @@ impl ReservationRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum SettlementOutcome {
     Known(TokenUsage),
-    Unknown { observed: Option<TokenUsage> },
+    /// Actual native artifact bytes, including known overruns. Unretired
+    /// observations retain at least the reservation ceiling.
+    Artifact {
+        artifact_bytes: u64,
+    },
+    Unknown {
+        observed: Option<TokenUsage>,
+    },
     ProvenNeverSent,
 }
 
@@ -156,6 +186,7 @@ pub struct ExecutionConsumption {
     pub charged_input_tokens: u64,
     pub charged_output_tokens: u64,
     pub charged_total_tokens: u64,
+    pub charged_artifact_bytes: u64,
     pub model_attempts: u64,
     pub logical_model_calls: u64,
     pub tool_calls: u64,
@@ -233,14 +264,45 @@ impl ExecutionScope {
                 {
                     return Err("A tool reservation cannot settle model usage".into());
                 }
-            }
-            if reservation.request.operation == ExecutionOperation::Tool
-                && reservation
+                if !matches!(
+                    reservation.request.operation,
+                    ExecutionOperation::ModelAttempt
+                ) && settlement
                     .observed_usage
                     .as_ref()
                     .is_some_and(|usage| usage != &TokenUsage::default())
+                {
+                    return Err("A native or tool settlement cannot observe model usage".into());
+                }
+                match (&reservation.request.operation, &settlement.outcome) {
+                    (ExecutionOperation::NativeArtifact { .. }, SettlementOutcome::Known(_)) => {
+                        return Err("Native artifact reservations cannot settle model usage".into())
+                    }
+                    (
+                        ExecutionOperation::NativeArtifact { .. },
+                        SettlementOutcome::Unknown { observed },
+                    ) if observed
+                        .as_ref()
+                        .is_some_and(|usage| usage != &TokenUsage::default()) =>
+                    {
+                        return Err("Native artifact reservations cannot observe model usage".into())
+                    }
+                    (
+                        ExecutionOperation::ModelAttempt | ExecutionOperation::Tool,
+                        SettlementOutcome::Artifact { .. },
+                    ) => return Err("Artifact usage requires a native artifact reservation".into()),
+                    _ => {}
+                }
+            }
+            if !matches!(
+                reservation.request.operation,
+                ExecutionOperation::ModelAttempt
+            ) && reservation
+                .observed_usage
+                .as_ref()
+                .is_some_and(|usage| usage != &TokenUsage::default())
             {
-                return Err("A tool reservation cannot observe model usage".into());
+                return Err("A native or tool reservation cannot observe model usage".into());
             }
         }
         Ok(())
@@ -292,7 +354,7 @@ impl ExecutionScope {
         let observed = match &settlement.outcome {
             SettlementOutcome::Known(usage) => Some(usage),
             SettlementOutcome::Unknown { observed } => observed.as_ref(),
-            SettlementOutcome::ProvenNeverSent => None,
+            SettlementOutcome::ProvenNeverSent | SettlementOutcome::Artifact { .. } => None,
         };
         let observed = merge_observed(settlement.observed_usage.as_ref(), observed);
         let observed_usage = merge_observed(existing.observed_usage.as_ref(), observed.as_ref());
@@ -306,9 +368,23 @@ impl ExecutionScope {
                 ) => {
                     *new = merge_observed(old.as_ref(), new.as_ref());
                 }
-                (SettlementOutcome::Unknown { .. }, SettlementOutcome::Known(_)) => {}
+                (
+                    SettlementOutcome::Unknown { .. },
+                    SettlementOutcome::Known(_) | SettlementOutcome::Artifact { .. },
+                ) => {}
                 (SettlementOutcome::Known(old), SettlementOutcome::Known(new)) if old == new => {}
-                (SettlementOutcome::Known(_), SettlementOutcome::Unknown { .. }) => {
+                (
+                    SettlementOutcome::Artifact {
+                        artifact_bytes: old,
+                    },
+                    SettlementOutcome::Artifact {
+                        artifact_bytes: new,
+                    },
+                ) if old == new => {}
+                (
+                    SettlementOutcome::Known(_) | SettlementOutcome::Artifact { .. },
+                    SettlementOutcome::Unknown { .. },
+                ) => {
                     settlement.outcome = previous.outcome.clone();
                 }
                 (SettlementOutcome::ProvenNeverSent, SettlementOutcome::ProvenNeverSent) => {}
@@ -358,9 +434,31 @@ impl ExecutionScope {
                     usage.model_attempts += 1;
                     logical.insert(&request.logical_call_id);
                 }
-                ExecutionOperation::Tool => {
+                ExecutionOperation::Tool | ExecutionOperation::NativeArtifact { .. } => {
                     usage.tool_calls += 1;
                 }
+            }
+            if let ExecutionOperation::NativeArtifact { max_artifact_bytes } = request.operation {
+                let bytes = match reservation.settlement.as_ref() {
+                    Some(ReservationSettlement {
+                        outcome: SettlementOutcome::Artifact { artifact_bytes },
+                        physical_retired,
+                        ..
+                    }) => {
+                        if *physical_retired {
+                            *artifact_bytes
+                        } else {
+                            (*artifact_bytes).max(max_artifact_bytes)
+                        }
+                    }
+                    Some(ReservationSettlement {
+                        outcome: SettlementOutcome::ProvenNeverSent,
+                        physical_retired: true,
+                        ..
+                    }) => 0,
+                    _ => max_artifact_bytes,
+                };
+                add(&mut usage.charged_artifact_bytes, bytes)?;
             }
             let reserved_total = request
                 .input_tokens
@@ -368,7 +466,9 @@ impl ExecutionScope {
                 .ok_or("Execution usage overflow")?;
             let (mut input, mut output, mut total) =
                 match reservation.settlement.as_ref().map(|s| &s.outcome) {
-                    Some(SettlementOutcome::ProvenNeverSent) => (0, 0, 0),
+                    Some(
+                        SettlementOutcome::ProvenNeverSent | SettlementOutcome::Artifact { .. },
+                    ) => (0, 0, 0),
                     Some(SettlementOutcome::Known(known)) => {
                         let (input, output, total) = normalized_tokens(known)?;
                         add(&mut usage.known.input_tokens, input)?;
@@ -459,6 +559,7 @@ impl ExecutionScope {
             output_tokens: usage.charged_output_tokens,
             total_tokens: usage.charged_total_tokens,
             concurrent_runs: usage.inflight_operations,
+            artifact_bytes: usage.charged_artifact_bytes,
             ..Usage::default()
         };
         if self

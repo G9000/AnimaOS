@@ -17,6 +17,7 @@ use crate::runs::{RunLedger, RunRecord, RunSource, RunStatus, RunSteer, RunStopR
 
 pub(super) fn message(agent_id: &str, key: &str, text: &str, mode: SessionRunMode) -> AcceptRun {
     AcceptRun {
+        outcome: None,
         document_edit_context: None,
         attachment_ids: Vec::new(),
         agent_id: agent_id.into(),

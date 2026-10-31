@@ -167,6 +167,16 @@ describe('AnimaAppCard', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
   });
 
+  it('includes task comparisons in the drain total and names the remaining comparisons', async () => {
+    const client = mockClient(draining({ taskRegressions: 2, jobs: 1 }));
+    await renderCard(client);
+
+    expect(screen.getByText('Waiting for 3 tasks to finish')).toBeVisible();
+    expect(screen.getByText('Task comparisons: 2')).toBeVisible();
+    expect(screen.getByText('Jobs: 1')).toBeVisible();
+    expect(client.action).not.toHaveBeenCalled();
+  });
+
   it('names what happens after the drain', async () => {
     await renderCard(mockClient(draining({ jobs: 1 })));
 

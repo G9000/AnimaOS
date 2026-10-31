@@ -8,6 +8,40 @@ fn private_root(directory: &test_support::PrivateTestDirectory) -> std::path::Pa
 }
 
 #[test]
+fn document_edit_store_accepts_only_its_verified_inspection_child() {
+    let directory = test_support::private_directory();
+    let root = private_root(&directory);
+    let store = DocumentEditStore::open_existing(&root).unwrap();
+    assert_eq!(
+        store.inspection_directory().unwrap(),
+        root.join("inspections").canonicalize().unwrap()
+    );
+    let staged = store.stage(b"candidate").unwrap();
+    let hash = staged.hash().to_string();
+    drop(staged);
+    assert_eq!(store.candidate_hashes().unwrap(), vec![hash.clone()]);
+    assert!(store.readback_proof_ids().unwrap().is_empty());
+    assert_eq!(store.load(&hash, 9).unwrap(), b"candidate");
+    std::fs::create_dir(root.join("unknown")).unwrap();
+    assert!(store.candidate_hashes().is_err());
+    assert!(store.readback_proof_ids().is_err());
+    assert!(store.stage(b"another").is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn document_edit_store_rejects_a_link_in_place_of_inspections() {
+    let directory = test_support::private_directory();
+    let root = private_root(&directory);
+    let target = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(target.path(), root.join("inspections")).unwrap();
+    let store = DocumentEditStore::open_existing(&root).unwrap();
+    assert!(store.inspection_directory().is_err());
+    assert!(store.candidate_hashes().is_err());
+    assert!(store.stage(b"candidate").is_err());
+}
+
+#[test]
 fn document_edit_store_private_initialization_does_not_reset_an_insecure_existing_root() {
     let directory = test_support::private_directory();
     let root = private_root(&directory);

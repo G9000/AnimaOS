@@ -167,6 +167,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "fastembed",
+ "flate2",
  "futures",
  "hex",
  "hmac 0.13.0",
@@ -176,6 +177,7 @@ dependencies = [
  "meval",
  "png",
  "process-wrap",
+ "rawzip",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -241,11 +243,16 @@ version = "0.1.0"
 dependencies = [
  "anima-document-content",
  "anima-service-adapters",
+ "flate2",
  "pdf-extract",
  "png",
+ "quick-xml 0.41.0",
+ "rawzip",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "tempfile",
+ "win-custody",
  "windows 0.62.2",
 ]
 

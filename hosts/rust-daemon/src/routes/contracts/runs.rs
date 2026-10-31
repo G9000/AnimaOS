@@ -141,6 +141,9 @@ pub(crate) struct TurnSummaryResponse {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<serde_json::Value>)]
+    pub(crate) outcome: Option<anima_core::outcomes::RunOutcome>,
     pub(crate) id: String,
     pub(crate) agent_id: String,
     pub(crate) session_id: String,
@@ -189,6 +192,7 @@ pub(crate) struct RunResponse {
 impl From<&RunRecord> for RunResponse {
     fn from(record: &RunRecord) -> Self {
         Self {
+            outcome: record.outcome.clone(),
             id: record.id.clone(),
             agent_id: record.agent_id.clone(),
             session_id: record.session_id.clone(),

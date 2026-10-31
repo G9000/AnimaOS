@@ -70,9 +70,10 @@ export function RunOutcomeCard({
   /** Already sent again from this page: its button is used up. */
   resent?: boolean;
 }) {
-  // Only a message the owner wrote is theirs to send again.
-  const sendAgain = isOwnerWritten(run) ? onSendAgain : undefined;
+  // Outcome tasks use their own report controls; a new run cannot continue them.
+  const sendAgain = !run.outcome && isOwnerWritten(run) ? onSendAgain : undefined;
   const recovery =
+    !run.outcome &&
     onSendAgain &&
     (sendAgain || run.recoveryOf) &&
     run.recoveryAttempt !== undefined &&
@@ -99,6 +100,7 @@ export function RunOutcomeCard({
             : 'This reply failed.'}
         </p>
         {actionReceipts(run)}
+        {run.outcome && <p>Use this run’s success criteria report to review its evidence and available actions.</p>}
         {recovery}
         {sendAgain && !recovery && (
           <button
@@ -122,6 +124,7 @@ export function RunOutcomeCard({
         </p>
       )}
       {actionReceipts(run)}
+      {run.outcome && <p>Use this run’s success criteria report to review its evidence and available actions.</p>}
       {recovery}
       {sendAgain && !recovery && (
         <button

@@ -7,6 +7,7 @@ import {
   type UploadedAttachment,
   type BrowserSelection,
   type PreviewEditContext,
+  type OutcomeDefinition,
   validPreviewEditContext,
 } from '@animaos/sdk';
 
@@ -49,6 +50,8 @@ export interface SessionSend {
   browserSelection?: BrowserSelection;
   /** Exact data restriction, retained across retry and recovery without adding grants. */
   documentEditContext?: PreviewEditContext;
+  /** An explicit per-message definition, frozen before the first admission attempt. */
+  outcome?: OutcomeDefinition;
   /** Plan mode when this message was sent; not restored after a reload. */
   plan?: boolean;
   /** Telegram errors are scrubbed of bot tokens before they are shown. */
@@ -105,9 +108,37 @@ export interface PersistedSend {
   attachments?: UploadedAttachment[];
   skill?: string;
   documentEditContext?: PreviewEditContext;
+  outcome?: OutcomeDefinition;
 }
 
 const PENDING_SENDS_STORAGE_KEY = 'animaos.pendingSends';
+
+/** Recovery preserves public criteria exactly; the daemon still owns full admission validation. */
+function persistedOutcome(value: unknown): value is OutcomeDefinition {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  if (!Array.isArray(item.criteria) || item.criteria.length === 0 || item.criteria.length > 16 ||
+    (item.maxCorrections !== undefined && (!Number.isInteger(item.maxCorrections) || Number(item.maxCorrections) < 0 || Number(item.maxCorrections) > 2)) ||
+    (item.acceptance !== undefined && item.acceptance !== 'report_only' && item.acceptance !== 'owner_required')) return false;
+  if (JSON.stringify(value).length > 65_536) return false;
+  const text = (field: unknown, limit: number) => typeof field === 'string' && field.length > 0 && field.length <= limit;
+  const sha = (field: unknown) => typeof field === 'string' && /^[a-f0-9]{64}$/i.test(field);
+  return item.criteria.every((raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return false;
+    const criterion = raw as Record<string, unknown>;
+    if (!text(criterion.id, 128)) return false;
+    switch (criterion.kind) {
+      case 'response_text': return text(criterion.contains, 8192);
+      case 'file_text': return text(criterion.path, 512) && text(criterion.contains, 8192);
+      case 'file_sha256': return text(criterion.path, 512) && sha(criterion.sha256);
+      case 'file_json': return text(criterion.path, 512) && typeof criterion.pointer === 'string' && criterion.pointer.length <= 512 && 'expected' in criterion;
+      case 'document': return text(criterion.path, 512) && ['complete_rendering', 'recalculated_without_errors'].includes(String(criterion.check));
+      case 'artifact_inspection': return sha(criterion.reportSha256) && sha(criterion.subjectSha256) && ['complete_rendering', 'recalculated_without_errors'].includes(String(criterion.locator));
+      case 'quality': return text(criterion.rubric, 8192);
+      default: return false;
+    }
+  });
+}
 
 function decodePersistedSend(value: unknown): PersistedSend | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -133,6 +164,12 @@ function decodePersistedSend(value: unknown): PersistedSend | null {
     conversation: item.conversation,
     createdAtMs: item.createdAtMs as number,
   };
+  if (item.outcome !== undefined) {
+    if (!persistedOutcome(item.outcome) || typeof item.agentId !== 'string' || !validAttachmentId(item.agentId) || typeof item.sessionId !== 'string' || !validAttachmentId(item.sessionId) || item.conversation !== `${item.agentId}\u0000session:${item.sessionId}`) return null;
+    base.outcome = item.outcome;
+    base.agentId = item.agentId;
+    base.sessionId = item.sessionId;
+  }
   if (item.documentEditContext !== undefined) {
     if (!validPreviewEditContext(item.documentEditContext) || typeof item.agentId !== 'string' || !validAttachmentId(item.agentId) || typeof item.sessionId !== 'string' || !validAttachmentId(item.sessionId) || item.conversation !== `${item.agentId}\u0000session:${item.sessionId}`) return null;
     base.documentEditContext = item.documentEditContext;
@@ -233,6 +270,7 @@ function toPersisted(send: SessionSend): PersistedSend {
     createdAtMs: send.createdAtMs,
     ...(send.skill ? { skill: send.skill } : {}),
     ...(send.documentEditContext ? { documentEditContext: send.documentEditContext, agentId: send.agentId, sessionId: send.sessionId } : {}),
+    ...(send.outcome ? { outcome: send.outcome, agentId: send.agentId, sessionId: send.sessionId } : {}),
     ...(send.attachmentIds?.length
       ? {
           agentId: send.agentId,
@@ -276,6 +314,10 @@ export class SendQueue {
 
   readonly send = (input: NewSessionSend): void => {
     if (this.sends.some((item) => item.key === input.key)) return;
+    if (input.outcome && (input.telegram || input.discord || input.mode !== 'queue')) {
+      this.callbacks.onFailed({ ...input, createdAtMs: Date.now(), failures: 0, steeringRunId: null }, new Error('Success criteria require a new web chat message.'));
+      return;
+    }
     if ((input.documentEditContext !== undefined && (!validPreviewEditContext(input.documentEditContext) || input.telegram || input.discord || input.mode !== 'queue' || input.skill || input.browserSelection || input.attachmentIds?.length || input.conversation !== `${input.agentId}\u0000session:${input.sessionId}`)) || (!input.documentEditContext && input.text.includes('BEGIN_PREVIEW_EDIT_CONTEXT'))) {
       this.callbacks.onFailed({ ...input, createdAtMs: Date.now(), failures: 0, steeringRunId: null }, new Error('This edit needs a current content selection in its original web chat. Select the content again.'));
       return;
@@ -291,6 +333,7 @@ export class SendQueue {
       ...this.sends,
       {
         ...input,
+        ...(input.outcome ? { outcome: JSON.parse(JSON.stringify(input.outcome)) as OutcomeDefinition } : {}),
         ...(input.documentEditContext ? { documentEditContext: JSON.parse(JSON.stringify(input.documentEditContext)) as PreviewEditContext } : {}),
         ...(input.browserSelection
           ? {
@@ -432,6 +475,7 @@ export class SendQueue {
             ? { browserSelection: send.browserSelection }
             : {}),
           ...(send.documentEditContext ? { documentEditContext: send.documentEditContext } : {}),
+          ...(send.outcome ? { outcome: send.outcome } : {}),
           timeZone: localTimeZone(),
         },
         send.key,

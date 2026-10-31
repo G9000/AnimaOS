@@ -102,7 +102,7 @@ impl TraceSettings {
             fixture_set_id,
         })
     }
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if [
             &self.provider,
             &self.model,
@@ -673,7 +673,7 @@ pub struct TraceComparison {
     pub candidate: VariantSummary,
 }
 
-fn add_metrics(to: &mut TraceMetrics, from: &TraceMetrics) {
+pub(crate) fn add_metrics(to: &mut TraceMetrics, from: &TraceMetrics) {
     to.model_calls += from.model_calls;
     to.tool_calls += from.tool_calls;
     to.tool_errors += from.tool_errors;
@@ -742,28 +742,7 @@ pub fn compare_traces(
             .iter()
             .find(|f| f.id == trace.fixture_id)
             .ok_or("unknown fixture")?;
-        if trial.observed_files.len() > MAX_FILES
-            || trial.observed_directories.len() > MAX_FILES
-            || trial
-                .observed_files
-                .keys()
-                .chain(trial.observed_directories.iter())
-                .any(|p| !safe_path(p))
-            || trial
-                .observed_files
-                .values()
-                .map(String::len)
-                .sum::<usize>()
-                > MAX_TRACE_BYTES
-        {
-            return Err("invalid recorded workspace observation".into());
-        }
-        let failures = oracle_failures(
-            fixture,
-            trace,
-            &trial.observed_files,
-            &trial.observed_directories,
-        );
+        let failures = regrade_observation(fixture, trial)?;
         if failures != trial.oracle_failures {
             return Err("serialized oracle verdict does not match observed evidence".into());
         }
@@ -771,4 +750,45 @@ pub fn compare_traces(
         add_metrics(&mut summary.metrics, &metrics);
     }
     Ok(report)
+}
+
+/// Recomputes raw oracle failures from validated, frozen recorded workspace observations.
+///
+/// The cached `oracle_failures` field is deliberately ignored. Comparators verify that cache
+/// separately; callers can use this pure function to grade observations after physical retirement.
+///
+/// # Errors
+/// Rejects invalid fixtures, incomplete traces, wrong fixture identities and unsafe or unbounded
+/// recorded workspace observations. This performs no I/O and grants no observation authority.
+pub fn regrade_observation(
+    fixture: &TaskFixture,
+    trial: &GradedTrace,
+) -> Result<Vec<String>, String> {
+    fixture.validate()?;
+    trial.trace.metrics()?;
+    if trial.trace.fixture_id != fixture.id {
+        return Err("trace belongs to a different fixture".into());
+    }
+    if trial.observed_files.len() > MAX_FILES
+        || trial.observed_directories.len() > MAX_FILES
+        || trial
+            .observed_files
+            .keys()
+            .chain(trial.observed_directories.iter())
+            .any(|path| !safe_path(path))
+        || trial
+            .observed_files
+            .values()
+            .map(String::len)
+            .sum::<usize>()
+            > MAX_TRACE_BYTES
+    {
+        return Err("invalid recorded workspace observation".into());
+    }
+    Ok(oracle_failures(
+        fixture,
+        &trial.trace,
+        &trial.observed_files,
+        &trial.observed_directories,
+    ))
 }

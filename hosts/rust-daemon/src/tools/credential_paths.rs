@@ -31,7 +31,7 @@ pub(super) fn sensitive(path: &Path) -> bool {
     })
 }
 
-pub(super) fn check_path(root: &Path, input: &str) -> Result<(), String> {
+pub(crate) fn check_path(root: &Path, input: &str) -> Result<(), String> {
     let path = Path::new(input);
     if sensitive(path) {
         return Err(REFUSED.into());

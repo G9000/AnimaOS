@@ -217,6 +217,91 @@ pub(crate) fn validate_active_lease(
     state.project_access.check_binding(binding, &run.agent_id)
 }
 
+pub(crate) fn validate_outcome_sources(
+    state: &DaemonState,
+    run: &RunRecord,
+) -> Result<(), ProjectError> {
+    validate_queued_witness(state, run)?;
+    let Some(manifest) = &run.project_context else {
+        return Ok(());
+    };
+    let project = state
+        .projects
+        .get(&manifest.project.project_id)
+        .ok_or(ProjectError::AccessUnavailable)?;
+    for source in manifest
+        .sources
+        .iter()
+        .filter(|source| source.state == ProjectSourceState::Ready)
+    {
+        let resource = project
+            .resources
+            .iter()
+            .find(|resource| resource.id == source.resource_id)
+            .ok_or(ProjectError::ScopeChanged)?;
+        validate_resource_access(state, project, resource)
+            .map_err(|_| ProjectError::AccessUnavailable)?;
+        match source.witness.as_ref() {
+            Some(ProjectSourceWitness::WorkspaceFile {
+                workspace_key,
+                path,
+                capture_sha256,
+                complete_source,
+            }) => {
+                let root = &state
+                    .workspace
+                    .as_ref()
+                    .ok_or(ProjectError::AccessUnavailable)?
+                    .root_path;
+                if !complete_source
+                    || crate::workspace_file_preview::workspace_key(root) != *workspace_key
+                {
+                    return Err(ProjectError::ScopeChanged);
+                }
+                let captured = crate::workspace_file_preview::capture(root, path, 1024 * 1024)
+                    .map_err(|_| ProjectError::AccessUnavailable)?;
+                if captured.capture_sha256 != *capture_sha256 || captured.truncated {
+                    return Err(ProjectError::ScopeChanged);
+                }
+            }
+            Some(ProjectSourceWitness::ChatExcerpt {
+                donor,
+                session_id,
+                source_state_sha256,
+                message_ids,
+                ..
+            }) => {
+                if source_stamp(state, &donor.agent_id, session_id, message_ids)?
+                    != *source_state_sha256
+                {
+                    return Err(ProjectError::ScopeChanged);
+                }
+            }
+            Some(ProjectSourceWitness::ChatResult {
+                donor,
+                session_id,
+                result_id,
+                result_revision,
+                ..
+            }) => {
+                if !state
+                    .sessions
+                    .get(&donor.agent_id, session_id)
+                    .is_some_and(|session| {
+                        session.chat_results.iter().any(|result| {
+                            result.id == *result_id && result.revision == *result_revision
+                        })
+                    })
+                {
+                    return Err(ProjectError::ScopeChanged);
+                }
+            }
+            _ => return Err(ProjectError::AccessUnavailable),
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn context_change_summary(state: &DaemonState, run: &RunRecord) -> ProjectContextChange {
     use ProjectChangeReason as R;
     let current = match capture_run_witness(state, &run.agent_id, &run.session_id) {

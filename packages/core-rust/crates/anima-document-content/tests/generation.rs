@@ -3,6 +3,7 @@ use anima_document_content::{
     GeneratedFormat, MAX_GENERATED_DOCUMENT_BYTES, MAX_GENERATED_SOURCE_BYTES,
 };
 use serde_json::{json, Value};
+use std::io::Read;
 
 fn spec(value: Value) -> DocumentSpec {
     serde_json::from_value(value).unwrap()
@@ -25,10 +26,18 @@ fn office_parts(bytes: &[u8]) -> std::collections::BTreeMap<String, String> {
     let mut parts = std::collections::BTreeMap::new();
     while let Some(entry) = entries.next_entry().unwrap() {
         let file = archive.get_entry(entry.wayfinder()).unwrap();
-        let body = file.data();
+        assert_eq!(
+            entry.compression_method(),
+            rawzip::CompressionMethod::DEFLATE
+        );
+        let decoder = flate2::read::DeflateDecoder::new(file.data());
+        let mut body = Vec::new();
+        file.verifying_reader(decoder)
+            .read_to_end(&mut body)
+            .unwrap();
         parts.insert(
             String::from_utf8(entry.file_path().as_bytes().to_vec()).unwrap(),
-            String::from_utf8(body.to_vec()).unwrap(),
+            String::from_utf8(body).unwrap(),
         );
     }
     parts

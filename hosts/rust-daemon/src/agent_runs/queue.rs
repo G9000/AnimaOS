@@ -177,6 +177,7 @@ pub(crate) enum SessionRunMode {
 /// A message to accept into a session.
 #[derive(Clone, Debug)]
 pub(crate) struct AcceptRun {
+    pub(crate) outcome: Option<anima_core::outcomes::OutcomeDefinition>,
     pub(crate) document_edit_context:
         Option<crate::document_edits::preview_context::PreviewEditContext>,
     pub(crate) agent_id: String,
@@ -526,6 +527,20 @@ impl AgentRunCoordinator {
     ) -> Result<AcceptedRun, ApiError> {
         let transaction = self.control_plane_transaction().await;
         let now_ms = now_millis();
+        if let Some(definition) = &request.outcome {
+            definition
+                .validate()
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            if request.mode != SessionRunMode::Queue
+                || !matches!(request.source, RunSource::Web | RunSource::Api)
+                || request.document_edit_context.is_some()
+                || browser.is_some()
+            {
+                return Err(ApiError::bad_request_static(
+                    "Outcomes require a dedicated ordinary owner task",
+                ));
+            }
+        }
         if let Some(admission) = &recovery {
             if let Some(answer) = admission.validate(&*self.state.read().await, &request)? {
                 return Ok(answer);
@@ -547,6 +562,17 @@ impl AgentRunCoordinator {
             {
                 return Err(ApiError::conflict(super::main_chat_clear::CLEAR_PENDING));
             }
+            if let Some(original) = guard.runs.find_by_idempotency_key(
+                &request.agent_id,
+                &request.idempotency_key,
+                now_ms.saturating_sub(IDEMPOTENCY_WINDOW_MS),
+            ) {
+                if original.outcome.as_ref().map(|outcome| &outcome.definition)
+                    != request.outcome.as_ref()
+                {
+                    return Err(ApiError::conflict(IDEMPOTENCY_KEY_REUSED));
+                }
+            }
             if let Some(answer) = replayed(
                 &guard,
                 &request.agent_id,
@@ -559,6 +585,33 @@ impl AgentRunCoordinator {
                 now_ms,
             ) {
                 return answer;
+            }
+            if request.outcome.is_some() {
+                if guard.control_plane_store.is_none() {
+                    return Err(ApiError::service_unavailable(
+                        "Outcome tasks require durable storage",
+                    ));
+                }
+                let active = guard
+                    .runs
+                    .snapshot_records(&guard.agents.keys().cloned().collect())
+                    .iter()
+                    .filter(|record| {
+                        record.outcome.as_ref().is_some_and(|outcome| {
+                            !matches!(
+                                outcome.status,
+                                anima_core::outcomes::OutcomeStatus::CriteriaMet
+                                    | anima_core::outcomes::OutcomeStatus::Accepted
+                                    | anima_core::outcomes::OutcomeStatus::Stopped
+                            )
+                        })
+                    })
+                    .count();
+                if active >= 16 {
+                    return Err(ApiError::conflict(
+                        "Outcome review capacity reached; resolve retained tasks first",
+                    ));
+                }
             }
             if let Some(answer) = steer_replay(&guard, &request, now_ms)? {
                 return Ok(answer);
@@ -837,6 +890,17 @@ impl AgentRunCoordinator {
             // This is the exact current scope reviewed at acceptance, including
             // recovery children. It is persisted before the run can be dispatched.
             record.project_witness = Some(project_witness);
+            if let Some(definition) = request.outcome.clone() {
+                crate::outcomes::attach(
+                    &mut record,
+                    definition,
+                    guard
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| std::path::Path::new(&workspace.root_path)),
+                )
+                .map_err(ApiError::bad_request)?;
+            }
             let previous_recovery_mirrored = recovery.as_ref().and_then(|admission| {
                 guard
                     .runs
@@ -1249,6 +1313,7 @@ impl AgentRunCoordinator {
             return Some(answer);
         }
         let request = AcceptRun {
+            outcome: None,
             agent_id: agent_id.into(),
             session_id: session_id.into(),
             text: text.into(),

@@ -160,6 +160,16 @@ impl AgentRunCoordinator {
             if self.revision_source(&guard, agent, session)?.room_id() != room {
                 return Err(ApiError::conflict("The source conversation changed"));
             }
+            if mode == "retry"
+                && guard
+                    .runs
+                    .for_session(agent, session)
+                    .into_iter()
+                    .max_by_key(|record| record.created_at_ms)
+                    .is_some_and(|record| record.outcome.is_some())
+            {
+                return Err(ApiError::conflict("Outcome tasks retain their original limits; inspect the existing report instead of retrying as a new task"));
+            }
             if super::main_chat_clear::clear_pending(&guard, agent, session)
                 || guard.runs.active_count_for_session(agent, session) > 0
             {

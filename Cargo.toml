@@ -56,6 +56,11 @@ incremental = false
 [profile.dev.package."*"]
 debug = false
 
+# Native inspection hashes the complete pinned engine and font files within
+# its existing deadline. Keep that hashing usable in local and test builds.
+[profile.dev.package."sha2:0.11.1"]
+opt-level = 3
+
 [profile.test]
 debug = "line-tables-only"
 incremental = false

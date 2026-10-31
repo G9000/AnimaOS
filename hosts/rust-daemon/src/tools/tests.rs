@@ -960,7 +960,11 @@ fn registry_defines_every_registered_tool_schema() {
         ("read_document_source", &["file_path"][..], &[][..]),
         ("generate_image", &["prompt"][..], &[][..]),
         ("edit_image", &["prompt"][..], &[][..]),
-        ("inspect_office_document", &["source"][..], &["cursor"][..]),
+        (
+            "inspect_office_document",
+            &["source"][..],
+            &["cursor", "verify_layout", "expected_sha256"][..],
+        ),
         (
             "propose_document_edit",
             &[

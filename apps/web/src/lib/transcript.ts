@@ -101,6 +101,7 @@ export type TranscriptItem =
       receipts: ActionReceipt[];
     }
   | { kind: 'outcome'; key: string; run: Run }
+  | { kind: 'outcome-check'; key: string; run: Run }
   | { kind: 'learning-review'; key: string; run: Run }
   | { kind: 'model-note'; key: string; text: string }
   | { kind: 'pending'; key: string; pending: PendingBubble }
@@ -110,6 +111,8 @@ type ToolsItem = Extract<TranscriptItem, { kind: 'tools' }>;
 
 /** What the owner can do from the transcript. */
 export interface TranscriptActions {
+  /** Owner outcome actions wait while the session is offline. */
+  outcomeReviewEnabled?: boolean;
   onCancelQueued?: (run: Run) => void;
   /** Stops a run in progress (a plan card's Stop). */
   onStopRun?: (run: Run) => void;
@@ -887,6 +890,7 @@ export function placeRuns(
           items: [note],
         });
       const itemsForRun: TranscriptItem[] = [];
+      if (run.outcome) itemsForRun.push({ kind: 'outcome-check', key: `outcome-check:${run.id}`, run });
       if (
         hasOutcome(run) &&
         !(run.status === 'cancelled' && stoppedRuns.has(run.id))
@@ -931,6 +935,7 @@ export function placeRuns(
       { kind: 'run', key: `run:${run.id}`, live },
       ...notes.map(({ note }) => note),
       ...(hasOutcome(run) ? [outcome] : []),
+      ...(run.outcome ? [{ kind: 'outcome-check' as const, key: `outcome-check:${run.id}`, run }] : []),
     ];
     const streamed = live.steps.length > 0 || live.tools.length > 0;
     if (!isTerminalRunStatus(run.status) || streamed) {
@@ -939,7 +944,7 @@ export function placeRuns(
     }
     const loaded =
       oldestLoaded === null || run.createdAtMs >= oldestLoaded || !olderHistory;
-    if (hasOutcome(run) && loaded)
+    if ((hasOutcome(run) || run.outcome) && loaded)
       inserts.push({
         after: anchorFor(run.createdAtMs),
         order,

@@ -47,6 +47,7 @@ import {
 } from '../lib/transcript';
 import { PendingMessage, RunActivity, ToolBlock } from './sessions/RunActivity';
 import { RunOutcomeCard } from './sessions/RunOutcomeCard';
+import { OutcomeStatus } from './sessions/OutcomeStatus';
 import { AutomationMessageCard } from './sessions/AutomationMessageCard';
 import { TaskReviewAction } from './learning/TaskReviewAction';
 import { TaskReviewProvider } from './learning/TaskReviewContext';
@@ -602,6 +603,8 @@ const TranscriptEntry = memo(function TranscriptEntry({
       );
     case 'learning-review':
       return <TaskReviewAction run={item.run} />;
+    case 'outcome-check':
+      return <OutcomeStatus run={item.run} enabled={actions?.outcomeReviewEnabled ?? true} />;
     case 'model-note':
       return <p className="model-note">{item.text}</p>;
     case 'pending':

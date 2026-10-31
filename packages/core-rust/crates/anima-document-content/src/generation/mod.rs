@@ -259,7 +259,16 @@ pub fn inspect_generated_document(
     }
     let generated = render_document(&envelope.document)?;
     if generated.bytes != bytes {
-        return Err(error("Document bytes do not match their generated source"));
+        let canonical_source = serde_json::to_vec(&SourceEnvelopeRef {
+            version: 1,
+            document: &envelope.document,
+        })
+        .map_err(|_| error("Invalid document source"))?;
+        if format == GeneratedFormat::Pdf
+            || office::render_legacy(&envelope.document, &canonical_source)? != bytes
+        {
+            return Err(error("Document bytes do not match their generated source"));
+        }
     }
     Ok(envelope.document)
 }
@@ -505,5 +514,31 @@ impl io::Write for Output {
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_legacy_office_previews_require_the_exact_generated_bytes() {
+        for value in [
+            serde_json::json!({"format":"docx","title":"Legacy","blocks":[{"type":"paragraph","text":"Original text"}]}),
+            serde_json::json!({"format":"xlsx","title":"Legacy","sheets":[{"name":"Sheet","columns":["Value"],"rows":[[7]]}]}),
+            serde_json::json!({"format":"pptx","title":"Legacy","slides":[{"title":"Original slide","blocks":[]}]}),
+        ] {
+            let document: DocumentSpec = serde_json::from_value(value).unwrap();
+            let source = serde_json::to_vec(&SourceEnvelopeRef {
+                version: 1,
+                document: &document,
+            })
+            .unwrap();
+            let mut legacy = office::render_legacy(&document, &source).unwrap();
+            assert_ne!(legacy, render_document(&document).unwrap().bytes);
+            assert!(inspect_generated_document(document.format, &legacy).is_ok());
+            legacy[40] ^= 1;
+            assert!(inspect_generated_document(document.format, &legacy).is_err());
+        }
     }
 }

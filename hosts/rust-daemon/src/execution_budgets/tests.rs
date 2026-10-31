@@ -54,6 +54,389 @@ async fn fixture(label: &str) -> (SharedDaemonState, Arc<Mutex<()>>, ControlPlan
     )
 }
 
+#[tokio::test]
+async fn host_budget_retained_child_keeps_scope_deadline_and_debits_dispatch_once() {
+    let (state, transactions, config) = fixture("retained-child").await;
+    let parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    let mut child = retained_child_context(
+        &state,
+        transactions.clone(),
+        &parent,
+        "retained-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(child.context.scope_id, parent.scope_id);
+    assert_eq!(child.context.deadline_at_ms, parent.deadline_at_ms);
+    assert_eq!(child.context.run_id, "retained-child");
+    child.dispatch.revalidate().await.unwrap();
+    let saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+    assert_eq!(saved.execution_budgets.scopes.len(), 1);
+    let scope = &saved.execution_budgets.scopes[&parent.scope_id];
+    assert_eq!(scope.consumption().unwrap().tool_calls, 1);
+    let dispatch = &scope.reservations[child.dispatch.reservation_id()];
+    assert_eq!(dispatch.request.operation, ExecutionOperation::Tool);
+    assert_eq!(dispatch.request.logical_call_id, "retained-child-dispatch");
+    assert_eq!(dispatch.request.run_id, child.context.run_id);
+    child
+        .dispatch
+        .finish_owned(
+            SettlementOutcome::Known(anima_core::TokenUsage::default()),
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    let saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+    assert_eq!(saved.execution_budgets.scopes.len(), 1);
+    assert_eq!(
+        saved.execution_budgets.scopes[&parent.scope_id]
+            .consumption()
+            .unwrap()
+            .tool_calls,
+        1,
+    );
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_and_parent_share_remaining_model_allowance() {
+    let (state, transactions, _) = fixture("retained-usage").await;
+    let mut limits = ExecutionLimits::default();
+    limits.max_model_attempts = 2;
+    limits.max_retries = 0;
+    let parent = standalone_context_with_limits(
+        &state,
+        transactions.clone(),
+        "retained-usage-root".into(),
+        CancelSignal::new(),
+        Some(limits),
+    )
+    .await
+    .unwrap();
+    let mut child = retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-usage-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    child
+        .dispatch
+        .finish_owned(SettlementOutcome::ProvenNeverSent, true)
+        .await
+        .unwrap();
+    for (context, id) in [(&parent, "parent-spent"), (&child.context, "child-spent")] {
+        context
+            .port
+            .reserve(&context.scope_id, request(id, &context.run_id))
+            .await
+            .unwrap();
+        context
+            .port
+            .submit_settlement(
+                &context.scope_id,
+                ReservationSettlement {
+                    reservation_id: id.into(),
+                    outcome: SettlementOutcome::Known(anima_core::TokenUsage {
+                        prompt_tokens: 100,
+                        completion_tokens: 50,
+                        total_tokens: 150,
+                        ..Default::default()
+                    }),
+                    physical_retired: true,
+                    observed_usage: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let scope = state.read().await.execution_budgets.scopes[&parent.scope_id].clone();
+    let usage = scope.consumption().unwrap();
+    assert_eq!(usage.model_attempts, 2);
+    assert_eq!(usage.charged_total_tokens, 300);
+    assert!(child
+        .context
+        .port
+        .reserve(
+            &child.context.scope_id,
+            request("no-reset", &child.context.run_id),
+        )
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_failed_admission_keeps_binding_and_refuses_replay() {
+    let (state, transactions, _) = fixture("retained-failed").await;
+    let parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-failed-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    let gate = state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(true);
+    gate.release.add_permits(1);
+    assert!(retained_child_context(
+        &state,
+        transactions.clone(),
+        &parent,
+        "retained-failed-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    let registry = state.read().await.execution_budgets.clone();
+    assert_eq!(
+        registry.run_scopes["retained-failed-child"],
+        parent.scope_id
+    );
+    assert_eq!(registry.scopes.len(), 1);
+    assert_eq!(
+        registry.scopes[&parent.scope_id].deadline_at_ms,
+        parent.deadline_at_ms,
+    );
+    assert!(retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-failed-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    assert_eq!(state.read().await.execution_budgets, registry);
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_dropped_caller_keeps_save_custody_and_binding() {
+    let (state, transactions, config) = fixture("retained-dropped").await;
+    let parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-dropped-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    let gate = state
+        .write()
+        .await
+        .install_test_control_plane_save_gate(false);
+    let caller = {
+        let state = state.clone();
+        let transactions = transactions.clone();
+        let parent = parent.clone();
+        tokio::spawn(async move {
+            retained_child_context(
+                &state,
+                transactions,
+                &parent,
+                "retained-dropped-child".into(),
+                CancelSignal::new(),
+            )
+            .await
+        })
+    };
+    gate.entered.acquire().await.unwrap().forget();
+    caller.abort();
+    assert!(
+        transactions.try_lock().is_err(),
+        "admission must retain the shared transaction through save acknowledgement",
+    );
+    gate.release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if state
+                .read()
+                .await
+                .execution_budgets
+                .run_scopes
+                .contains_key("retained-dropped-child")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("owned child admission did not retain its binding");
+    assert!(retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-dropped-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    let saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+    assert_eq!(
+        saved.execution_budgets.run_scopes["retained-dropped-child"],
+        parent.scope_id,
+    );
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_unknown_dispatch_cannot_reopen_identity() {
+    let (state, transactions, config) = fixture("retained-unknown").await;
+    let parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-unknown-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    let mut child = retained_child_context(
+        &state,
+        transactions.clone(),
+        &parent,
+        "retained-unknown-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    child
+        .dispatch
+        .finish_owned(SettlementOutcome::Unknown { observed: None }, false)
+        .await
+        .unwrap();
+    assert!(retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-unknown-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    let saved = load_control_plane_snapshot(&config).await.unwrap().unwrap();
+    let usage = saved.execution_budgets.scopes[&parent.scope_id]
+        .consumption()
+        .unwrap();
+    assert_eq!(usage.tool_calls, 1);
+    assert_eq!(usage.inflight_operations, 1);
+    assert_eq!(saved.execution_budgets.scopes.len(), 1);
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_preserves_parent_and_caller_cancellation() {
+    for cancel_parent in [true, false] {
+        let (state, transactions, _) = fixture("retained-cancel").await;
+        let parent = standalone_context(
+            &state,
+            transactions.clone(),
+            "retained-cancel-root".into(),
+            CancelSignal::new(),
+        )
+        .await
+        .unwrap();
+        let cancel = CancelSignal::new();
+        let mut child = retained_child_context(
+            &state,
+            transactions,
+            &parent,
+            "retained-cancel-child".into(),
+            cancel.clone(),
+        )
+        .await
+        .unwrap();
+        if cancel_parent {
+            parent.cancel.cancel();
+        } else {
+            cancel.cancel();
+        }
+        assert!(child.context.check_live().is_err());
+        assert!(child.dispatch.revalidate().await.is_err());
+        child
+            .dispatch
+            .finish_owned(SettlementOutcome::ProvenNeverSent, true)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_refuses_unrepresentable_cancel_chain_without_reset() {
+    let (state, transactions, _) = fixture("retained-chain").await;
+    let mut parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-chain-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    parent.secondary_cancel = Some(CancelSignal::new());
+    let registry = state.read().await.execution_budgets.clone();
+    assert!(retained_child_context(
+        &state,
+        transactions,
+        &parent,
+        "retained-chain-child".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .is_err());
+    assert_eq!(state.read().await.execution_budgets, registry);
+}
+
+#[tokio::test]
+async fn host_budget_retained_child_refuses_changed_parent_binding_without_new_scope() {
+    let (state, transactions, _) = fixture("retained-mismatch").await;
+    let parent = standalone_context(
+        &state,
+        transactions.clone(),
+        "retained-mismatch-root".into(),
+        CancelSignal::new(),
+    )
+    .await
+    .unwrap();
+    let registry = state.read().await.execution_budgets.clone();
+    for mismatch in ["run", "scope", "deadline"] {
+        let mut changed = parent.clone();
+        match mismatch {
+            "run" => changed.run_id = "foreign-parent".into(),
+            "scope" => changed.scope_id = "foreign-scope".into(),
+            "deadline" => changed.deadline_at_ms -= 1,
+            _ => unreachable!("test enumerates parent binding fields"),
+        }
+        assert!(retained_child_context(
+            &state,
+            transactions.clone(),
+            &changed,
+            format!("retained-mismatch-child-{mismatch}"),
+            CancelSignal::new(),
+        )
+        .await
+        .is_err());
+        assert_eq!(state.read().await.execution_budgets, registry);
+    }
+}
+
 #[test]
 fn host_budget_root_helper_and_reviewed_recovery_keep_one_scope() {
     let root = record("root");

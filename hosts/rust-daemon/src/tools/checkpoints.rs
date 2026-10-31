@@ -78,9 +78,27 @@ impl ToolExecutionContext {
             {
                 hook();
             }
-            journal.checkpoint_mutation_authority(workspace, store, call, self.action_approved)
+            let authority = journal.checkpoint_mutation_authority(
+                workspace,
+                store,
+                call,
+                self.action_approved,
+            )?;
+            if let Some(witness) = &self.outcome_write {
+                crate::outcomes::validate_write_witness(&authority, run, call, witness)?;
+            }
+            Ok(authority)
         };
         let bound_transform = |source: Option<&[u8]>| {
+            if self
+                .outcome_write
+                .as_ref()
+                .is_some_and(|witness| !witness.matches(source))
+            {
+                return Err(
+                    "Outcome correction target changed before native checkpoint capture".into(),
+                );
+            }
             if self
                 .protected_write
                 .as_ref()

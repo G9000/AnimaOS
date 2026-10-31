@@ -122,6 +122,38 @@ describe('input controls', () => {
     renderView({ composer: composerWith(true) });
     expect(chip()).toHaveAccessibleName(/^Plan, mode/);
   });
+
+  it('offers explicit success criteria only through Advanced input and includes them with the next queued message', async () => {
+    const composer = { ...composerWith(false), draft: 'Prepare the report' };
+    const view = renderView({ session: sessionFixture('chat:outcome'), composer });
+    expect(screen.queryByText('Success criteria')).toBeNull();
+    act(() => saveAppearancePreferences({ advancedInput: true }));
+    view.rerender({});
+    fireEvent.click(screen.getByText('Success criteria'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Check this result' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Required text' }), { target: { value: 'All checks passed' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Require my acceptance' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(composer.onSend).toHaveBeenCalledWith(undefined, undefined, {
+      criteria: [{ id: 'result', kind: 'response_text', contains: 'All checks passed' }],
+      maxCorrections: 2, acceptance: 'owner_required',
+    });
+  });
+
+  it('blocks an enabled empty criterion and ignores it after Advanced input is switched off', () => {
+    saveAppearancePreferences({ advancedInput: true });
+    const composer = { ...composerWith(false), draft: 'Prepare the report' };
+    const view = renderView({ session: sessionFixture('chat:outcome'), composer });
+    fireEvent.click(screen.getByText('Success criteria'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Check this result' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(composer.onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter the text the result must contain.');
+    act(() => saveAppearancePreferences({ advancedInput: false }));
+    view.rerender({});
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(composer.onSend).toHaveBeenCalledWith(undefined);
+  });
 });
 
 describe('artifact conversation layout', () => {
