@@ -923,7 +923,7 @@
 
 .settings-window .settings-form,
 .settings-window .settings-window-head > div:first-child {
-  max-width: 820px;
+  max-width: var(--settings-content-max);
 }
 
 .settings-window .settings-form {
@@ -1389,7 +1389,7 @@
 
 .settings-window .approvals-page > * {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--settings-content-max);
 }
 
 .settings-window .approvals-page .settings-form {
@@ -1452,4 +1452,11 @@
 .settings-window .settings-form > .settings-save:empty,
 .settings-window .settings-form > .settings-save:not(:has(:not([data-idle]))) {
   display: none;
+}
+
+
+/* Settings content uses the room it has, up to a width where a row's label
+ * and its control still read as one line. */
+:root {
+  --settings-content-max: 1200px;
 }
