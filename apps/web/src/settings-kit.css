@@ -33,12 +33,12 @@
 
 .sk-section-title {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   text-transform: none;
-  color: var(--color-ink-3);
+  color: var(--color-ink);
 }
 
 .sk-section-desc {
@@ -708,12 +708,12 @@
 .settings-window .usage-breakdowns > summary,
 .settings-window [aria-labelledby='health-recent-logs'] h2 {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   text-transform: none;
-  color: var(--color-ink-3);
+  color: var(--color-ink);
 }
 
 .settings-window .settings-form .settings-group-help,
@@ -1631,4 +1631,35 @@
 .settings-window .sk-fieldset > legend + *,
 .settings-window .settings-form .sk-fieldset > legend + * {
   margin-top: 0;
+}
+
+/* Permissions: + beside a decision adds an exception (always allow
+ * something specific); the form opens under the row. */
+.approvals-add-exception {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.approvals-add-exception:hover,
+.approvals-add-exception[aria-expanded='true'] {
+  border-color: var(--control-line-hover, var(--control-line));
+  color: var(--color-ink);
+}
+
+.settings-window .approvals-class > .approvals-add-rule {
+  margin-top: 6px;
+}
+
+.approvals-history-more {
+  align-self: flex-start;
 }

@@ -48,12 +48,8 @@ const POLICY_ROW_ACTIONS: Record<PolicyClass, string> = {
   delegate: 'Ask other agents',
 };
 
-const POLICY_ROW_WHERE: Record<PolicyClass, string> = {
-  write: 'Any path',
-  exec: 'Anywhere',
-  network: 'Any site',
-  delegate: 'Any agent',
-};
+/** Recent decisions show this many at a time. */
+const HISTORY_PAGE = 5;
 
 function ClassRules({
   klass,
@@ -70,6 +66,7 @@ function ClassRules({
   const [toolName, setToolName] = useState('');
   const [kind, setKind] = useState<ApprovalMatcherKind | null>(null);
   const [value, setValue] = useState('');
+  const [adding, setAdding] = useState(false);
   const tool = tools.find((item) => item.name === toolName) ?? tools[0];
   const matcherKind =
     tool && kind && tool.matcherKinds.includes(kind)
@@ -100,13 +97,26 @@ function ClassRules({
       <div className="sk-row-main">
         <div className="sk-row-text">
           <span className="sk-row-title">{POLICY_ROW_ACTIONS[klass]}</span>
-          <span className="sk-row-desc">
-            {POLICY_ROW_WHERE[klass]}
-            {rules.length > 0 &&
-              ` · ${rules.length} ${rules.length === 1 ? 'rule' : 'rules'}`}
-          </span>
+          {rules.length > 0 && (
+            <span className="sk-row-desc">
+              {rules.length}{' '}
+              {rules.length === 1 ? 'exception' : 'exceptions'} always allowed
+            </span>
+          )}
         </div>
         <div className="sk-row-control">
+          {tool && matcherKind && (
+            <button
+              type="button"
+              className="approvals-add-exception"
+              aria-label={`Add an exception for ${label}`}
+              title="Always allow something specific"
+              aria-expanded={adding}
+              onClick={() => setAdding((open) => !open)}
+            >
+              {adding ? '−' : '+'}
+            </button>
+          )}
           <div
             className="sk-segmented"
             role="group"
@@ -149,11 +159,7 @@ function ClassRules({
           })}
         </ul>
       )}
-      {tool && matcherKind && (
-        <details className="sk-disclosure approvals-add-rule-details">
-          <summary>
-            Add rule<span className="sr-only"> for {label}</span>
-          </summary>
+      {tool && matcherKind && adding && (
           <form
             className="approvals-add-rule"
             aria-label={`Add a rule for ${label}`}
@@ -208,7 +214,6 @@ function ClassRules({
               </p>
             )}
           </form>
-        </details>
       )}
     </div>
   );
@@ -244,6 +249,7 @@ export function ApprovalsPage({
   policyRevision = 0,
 }: ApprovalsPageProps) {
   const [section, setSection] = useState<'overview' | 'autonomy' | 'coding'>('overview');
+  const [historyShown, setHistoryShown] = useState(HISTORY_PAGE);
   // An autonomy preset rewrites the class rules, and a class rule may turn
   // the autonomy Custom: each side reads the other again after a change.
   const [presetRevision, setPresetRevision] = useState(0);
@@ -331,8 +337,8 @@ export function ApprovalsPage({
           {access}
           <SettingsSection
             id="approvals-rules"
-            title="Rules"
-            description={`When one of these runs, ${agentName} follows the rule instead of asking every time.`}
+            title="What needs your OK"
+            description={`For each kind of action, ${agentName} goes ahead, asks you first, or is blocked. Use + to always allow something specific.`}
           >
             <SettingsCard className="approvals-rules">
               {POLICY_CLASSES.map((klass) => (
@@ -342,8 +348,8 @@ export function ApprovalsPage({
           </SettingsSection>
           <SettingsSection
             id="approvals-more"
-            title="More"
-            description="How often it checks with you, and keys for coding apps."
+            title="More permission settings"
+            description="How often it checks in, and keys for the coding apps it runs."
           >
             <SettingsCard className="approvals-shortcuts">
               <button
@@ -374,15 +380,19 @@ export function ApprovalsPage({
               </button>
             </SettingsCard>
           </SettingsSection>
-          <details className="sk-disclosure approvals-history-details">
-            <summary>Decision history</summary>
+          <SettingsSection
+            id="approvals-history"
+            className="approvals-history"
+            title="Recent decisions"
+            description="What you allowed or blocked in the last 30 days, so you can check what it was given."
+          >
             <SettingsCard as="ul" className="approvals-decided">
               {view.decided.length === 0 ? (
                 <li>
                   <SettingsEmpty>No decisions in the last 30 days.</SettingsEmpty>
                 </li>
               ) : (
-                view.decided.map((approval) => (
+                view.decided.slice(0, historyShown).map((approval) => (
                   <SettingsRow
                     as="li"
                     key={approval.id}
@@ -410,16 +420,20 @@ export function ApprovalsPage({
                 ))
               )}
             </SettingsCard>
-            {view.hasMoreDecided && (
+            {(view.decided.length > historyShown || view.hasMoreDecided) && (
               <button
                 type="button"
-                className="ui-button"
-                onClick={view.loadMoreDecided}
+                className="ui-button is-quiet approvals-history-more"
+                onClick={() => {
+                  if (view.decided.length > historyShown)
+                    setHistoryShown((shown) => shown + HISTORY_PAGE);
+                  else view.loadMoreDecided();
+                }}
               >
                 Show older
               </button>
             )}
-          </details>
+          </SettingsSection>
         </>
       ) : (
         <>

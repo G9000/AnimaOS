@@ -14,12 +14,6 @@ import { approvalFixture } from '../test/live';
 import { sessionFixture } from '../test/sessions';
 import { ApprovalsPage } from './ApprovalsPage';
 
-/** The Add rule link under one kind of action ("Add rule for …" to
- *  screen readers). */
-const addRuleFor =
-  (label: string) => (_: string, element: Element | null) =>
-    element?.tagName === 'SUMMARY' &&
-    element.textContent === `Add rule for ${label}`;
 
 const gitRule: ApprovalRule = {
   id: 'rule_1',
@@ -243,8 +237,8 @@ describe('ApprovalsPage', () => {
     );
     renderPage();
 
-    await user.click(screen.getByText('Decision history'));
-    const decided = screen.getByText('Decision history').closest('details')!;
+    // Recent decisions are on the page, not folded away.
+    const decided = screen.getByRole('region', { name: 'Recent decisions' });
     expect(await within(decided).findByText('Always allowed')).toBeVisible();
     await user.click(
       within(decided).getByRole('button', { name: 'Show older' }),
@@ -353,11 +347,15 @@ describe('ApprovalsPage', () => {
     });
     await waitFor(() => expect(block).toHaveAttribute('aria-pressed', 'true'));
 
-    const rules = screen.getByRole('region', { name: 'Rules' });
+    const rules = screen.getByRole('region', { name: 'What needs your OK' });
     expect(
       within(rules).getByText('bash commands starting with “git status”'),
     ).toBeVisible();
-    await user.click(within(rules).getByText(addRuleFor('Runs commands')));
+    await user.click(
+      within(rules).getByRole('button', {
+        name: 'Add an exception for Runs commands',
+      }),
+    );
     const form = within(rules).getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
@@ -410,7 +408,11 @@ describe('ApprovalsPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByText(addRuleFor('Runs commands')));
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Add an exception for Runs commands',
+      }),
+    );
     const form = screen.getByRole('form', {
       name: 'Add a rule for Runs commands',
     });
