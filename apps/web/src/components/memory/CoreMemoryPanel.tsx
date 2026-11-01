@@ -32,15 +32,19 @@ type Messages = Partial<Record<CoreMemoryBlockName, string>>;
 export function CoreMemoryPanel({
   agentId,
   epoch,
+  onChange,
 }: {
   agentId: string;
   epoch: number;
+  /** Both blocks whenever they load or an edit lands. */
+  onChange?: (memory: CoreMemory) => void;
 }) {
   const [memory, setMemory] = useState<CoreMemory | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Messages>({});
   const [warnings, setWarnings] = useState<Messages>({});
   const currentAgent = useLatest(agentId);
+  const changed = useLatest(onChange);
   const currentRequest = useRef(0);
   useResetOnChange([agentId, epoch], () => {
     setMemory(null);
@@ -53,8 +57,10 @@ export function CoreMemoryPanel({
     const controller = new AbortController();
     daemon.coreMemory(agentId, { signal: controller.signal }).then(
       (next) => {
-        if (currentRequest.current === request && !controller.signal.aborted)
+        if (currentRequest.current === request && !controller.signal.aborted) {
           setMemory(next);
+          changed.current?.(next);
+        }
       },
       (cause: unknown) => {
         if (currentRequest.current === request && !controller.signal.aborted)
@@ -64,7 +70,7 @@ export function CoreMemoryPanel({
     return () => {
       controller.abort();
     };
-  }, [agentId, epoch]);
+  }, [agentId, epoch, changed]);
 
   /** Runs one edit; true when the daemon took it. A result for another agent
    *  (the owner switched while it was in flight) is dropped. */
@@ -78,6 +84,7 @@ export function CoreMemoryPanel({
       const result = await work();
       if (currentAgent.current !== requestAgent) return false;
       setMemory({ user: result.user, notes: result.notes });
+      changed.current?.({ user: result.user, notes: result.notes });
       setWarnings((existing) => ({
         ...existing,
         [block]: warningNotice(result.warnings),

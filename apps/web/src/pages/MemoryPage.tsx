@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { MemoryType } from '@animaos/sdk';
 
 import { EntityList, entityKey } from '../components/memory/EntityList';
@@ -8,10 +8,13 @@ import { MemoryList } from '../components/memory/MemoryList';
 import { MemorySearchStatus } from '../components/memory/MemorySearchStatus';
 import { CoreMemoryPanel } from '../components/memory/CoreMemoryPanel';
 import { useMemory } from '../hooks/useMemory';
+import { useResetOnChange } from '../hooks/useResetOnChange';
+import { daemon } from '../lib/daemon-api';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
 import {
   ENTITIES_EMPTY,
   FACTS_EMPTY,
+  FACTS_EMPTY_BESIDE_CORE,
   MEMORY_EMPTY,
   MEMORY_SEARCH_EMPTY,
   MEMORY_SORT_LABELS,
@@ -69,7 +72,23 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
   const [typeFilter, setTypeFilter] = useState<MemoryType | 'all'>('all');
   const [pickedSort, setPickedSort] = useState<MemorySort | null>(null);
   const [removingEntity, setRemovingEntity] = useState<string | null>(null);
+  // Entries in the always-on "About you" block. They count toward the tab
+  // beside the saved facts; the panel keeps this current after edits.
+  const [aboutEntries, setAboutEntries] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  useResetOnChange([agentId, epoch], () => setAboutEntries(0));
+  useEffect(() => {
+    if (!online) return;
+    const controller = new AbortController();
+    daemon.coreMemory(agentId, { signal: controller.signal }).then(
+      (memory) => {
+        if (!controller.signal.aborted)
+          setAboutEntries(memory.user.entries.length);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, [agentId, epoch, online]);
 
   const searching = view.query !== '';
   const sort: MemorySort = searching
@@ -161,7 +180,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
                 {item.id === 'memories'
                   ? view.memories.length
                   : item.id === 'about'
-                    ? view.facts.length
+                    ? view.facts.length + aboutEntries
                     : view.entities.length}
               </span>
             )}
@@ -263,7 +282,11 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             <h3 ref={headingRef} tabIndex={-1}>
               About you
             </h3>
-            <CoreMemoryPanel agentId={agentId} epoch={epoch} />
+            <CoreMemoryPanel
+              agentId={agentId}
+              epoch={epoch}
+              onChange={(memory) => setAboutEntries(memory.user.entries.length)}
+            />
             <label className="memory-meta">
               <input
                 type="checkbox"
@@ -275,7 +298,9 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
               Show replaced facts
             </label>
             {view.facts.length === 0 ? (
-              <p className="memory-empty">{FACTS_EMPTY}</p>
+              <p className="memory-empty">
+                {aboutEntries > 0 ? FACTS_EMPTY_BESIDE_CORE : FACTS_EMPTY}
+              </p>
             ) : (
               <>
                 {groups.preferences.length > 0 && (

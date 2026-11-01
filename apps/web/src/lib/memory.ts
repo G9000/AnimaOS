@@ -159,6 +159,8 @@ export const MEMORY_EMPTY =
 export const MEMORY_SEARCH_EMPTY = 'No memories match that search.';
 export const FACTS_EMPTY =
   'Nothing about you is saved yet. Tell your companion what matters to you.';
+/** Shown under a filled "About you" block when no separate facts exist. */
+export const FACTS_EMPTY_BESIDE_CORE = 'Nothing else about you is saved yet.';
 export const ENTITIES_EMPTY = 'No people or things yet.';
 export const MEMORY_GONE = 'That memory is already gone.';
 export const FACT_GONE = 'That fact is already gone.';

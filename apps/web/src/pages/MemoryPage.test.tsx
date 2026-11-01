@@ -18,6 +18,7 @@ import {
   DELETE_MEMORY_PROMPT,
   ENTITIES_EMPTY,
   FACTS_EMPTY,
+  FACTS_EMPTY_BESIDE_CORE,
   FACT_EDIT_HINT,
   MEMORY_EMPTY,
   MEMORY_GONE,
@@ -930,6 +931,25 @@ describe('MemoryPage: About you', () => {
   it('shows the empty state', async () => {
     await openAbout();
     expect(await screen.findByText(FACTS_EMPTY)).toBeVisible();
+  });
+
+  it('counts About you entries on the tab and drops the empty claim', async () => {
+    vi.mocked(daemon.coreMemory).mockResolvedValue({
+      user: {
+        used: 14,
+        limit: 1500,
+        entries: [{ id: 'c1', content: 'Prefers metric', flagged: [] }],
+      },
+      notes: { used: 0, limit: 2500, entries: [] },
+    });
+    await openAbout();
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'About you' })).toHaveTextContent(
+        'About you1',
+      ),
+    );
+    expect(await screen.findByText(FACTS_EMPTY_BESIDE_CORE)).toBeVisible();
+    expect(screen.queryByText(FACTS_EMPTY)).toBeNull();
   });
 
   it('groups preferences apart and edits a fact by replacing it', async () => {
