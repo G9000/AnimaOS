@@ -181,6 +181,7 @@ fn supporting_files(
             match (fields.get("path"), fields.get("content")) {
                 (Some(DataValue::String(path)), Some(DataValue::String(content))) => {
                     Ok(crate::skills::SkillSupportingFile {
+                        encoding: Default::default(),
                         path: path.clone(),
                         content: content.clone(),
                     })

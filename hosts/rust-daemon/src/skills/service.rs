@@ -194,6 +194,7 @@ pub(crate) struct SkillService {
     pub(super) state: SharedDaemonState,
     pub(super) transactions: Arc<Mutex<()>>,
     pub(super) evaluation_admission: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    pub(super) owner_import: Option<super::github::OwnerImportScope>,
 }
 
 impl SkillService {
@@ -202,6 +203,7 @@ impl SkillService {
             state,
             transactions,
             evaluation_admission: None,
+            owner_import: None,
         }
     }
 
@@ -325,6 +327,9 @@ impl SkillService {
         guard
             .ensure_profile_owned()
             .map_err(|error| SkillError::Unavailable(error.to_string()))?;
+        if let Some(scope) = &self.owner_import {
+            scope.check(&guard, root)?;
+        }
         if let Some(gate) = evaluation.as_ref() {
             super::evaluation_service::check_promotion(&guard, root, gate)?;
         }
@@ -1128,12 +1133,21 @@ async fn load_record_file(
             .files
             .iter()
             .find(|f| f.path == path)
-            .map(|f| format!("Reviewed supporting file: {path}\n\n{}", f.content))
+            .map(|f| {
+                let size = f.decoded_len().unwrap_or_default();
+                if f.encoding == anima_core::skill_packages::SkillFileEncoding::Base64 {
+                    format!("Reviewed binary asset: {path} ({size} bytes). Original bytes are preserved in the installed package; binary data is not included in model context.")
+                } else if f.content.len() > 128 * 1024 {
+                    format!("Reviewed text file: {path} ({size} bytes). Too large for model context; use the approved package runtime to process it.")
+                } else {
+                    format!("Reviewed supporting file: {path}\n\n{}", f.content)
+                }
+            })
             .ok_or_else(|| "No reviewed supporting file has this path".to_string())?
     } else if package.files.is_empty() {
         file.body
     } else {
-        format!("{}\n\nSupporting files (reviewed; use load_skill with name and filePath to read one):\n{}\nScripts remain inert and require existing execution permissions to run.",file.body,package.files.iter().map(|f|format!("- {} ({} bytes)",f.path,f.content.len())).collect::<Vec<_>>().join("\n"))
+        format!("{}\n\nSupporting files (reviewed; use load_skill with name and filePath to read one):\n{}\nApproved package hash: {}\nUse manage_skill_runtime status, prepare, then run for Python setup and execution. Preparation and execution require separate owner approval. The package snapshot is the runtime's skill directory; do not substitute a Markdown helper for its scripts. Other runtimes require currently permitted execution tools.",file.body,package.files.iter().map(|f|format!("- {} ({} bytes{})",f.path,f.decoded_len().unwrap_or_default(),if f.encoding == anima_core::skill_packages::SkillFileEncoding::Base64 {", binary"}else{""})).collect::<Vec<_>>().join("\n"),record.approved_hash)
     };
     Ok(LoadedSkill {
         slug: record.slug,
@@ -1272,10 +1286,12 @@ mod tests {
         let mut input = content("notes");
         input.files = Some(vec![
             super::super::SkillSupportingFile {
+                encoding: Default::default(),
                 path: "templates/note.md".into(),
                 content: "Reviewed template".into(),
             },
             super::super::SkillSupportingFile {
+                encoding: Default::default(),
                 path: "scripts/example.py".into(),
                 content: "print('inert')".into(),
             },
@@ -1356,6 +1372,7 @@ mod tests {
             .set_control_plane_store(Some(broken_store()));
         let mut next = content("notes");
         next.files = Some(vec![super::super::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Uncommitted template".into(),
         }]);
@@ -1386,6 +1403,7 @@ mod tests {
         let skills = service(&state);
         let mut original = content("notes");
         original.files = Some(vec![crate::skills::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Reviewed template".into(),
         }]);
@@ -1466,6 +1484,7 @@ mod tests {
 
         let mut explicit = content("notes");
         explicit.files = Some(vec![crate::skills::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Explicit owner replacement".into(),
         }]);

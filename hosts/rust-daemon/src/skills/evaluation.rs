@@ -419,6 +419,7 @@ mod tests {
             .unwrap();
         let approval = DraftApproval {
             files: Some(vec![super::super::SkillSupportingFile {
+                encoding: Default::default(),
                 path: "references/answer.txt".into(),
                 content: "CANDIDATE_WORD".into(),
             }]),

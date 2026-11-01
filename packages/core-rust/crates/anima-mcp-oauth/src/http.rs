@@ -15,6 +15,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 #[derive(Clone, Copy)]
 pub(super) struct NetworkPolicy {
     allow_loopback: bool,
+    pinned_metricool: bool,
 }
 pub(super) fn literal_loopback(url: &Url) -> bool {
     matches!(url.host(),Some(Host::Ipv4(ip)) if ip.is_loopback())
@@ -57,9 +58,11 @@ fn public_address(ip: IpAddr) -> bool {
 }
 impl NetworkPolicy {
     pub(super) fn for_resource(resource: &str) -> Result<Self, OAuthError> {
+        let pinned_metricool = resource == super::provider::RESOURCE;
         let resource = Url::parse(resource).map_err(|_| OAuthError::InvalidConfiguration)?;
         let policy = Self {
             allow_loopback: loopback_host(&resource),
+            pinned_metricool,
         };
         policy.validate_url(&resource)?;
         Ok(policy)
@@ -191,9 +194,12 @@ impl RestrictedHttp {
         }
         let url =
             Url::parse(&parts.uri.to_string()).map_err(|_| OAuthError::InvalidConfiguration)?;
+        if self.policy.pinned_metricool {
+            super::provider::validate_http_request(&parts.method, &url)?;
+        }
         let client = self.builder(&url).await?;
         let mut response = client
-            .request(parts.method, url)
+            .request(parts.method, url.clone())
             .headers(parts.headers)
             .body(body.to_vec())
             .send()
@@ -223,6 +229,9 @@ impl RestrictedHttp {
                 return Err(OAuthError::InvalidConfiguration);
             }
             body.extend_from_slice(&chunk);
+        }
+        if self.policy.pinned_metricool && response.status().is_success() {
+            super::provider::validate_resource_document(&url, &body)?;
         }
         builder
             .body(body.to_vec())

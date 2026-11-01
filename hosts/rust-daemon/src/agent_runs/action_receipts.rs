@@ -348,6 +348,76 @@ impl RunActionJournal {
         Ok(guard)
     }
 
+    /// Package runtime authority is bound to a live direct owner and exact package.
+    pub(crate) async fn skill_runtime_authority(
+        &self,
+        call: &ToolCall,
+        approved: bool,
+        workspace: &std::path::Path,
+        slug: &str,
+        hash: &str,
+    ) -> Result<(), String> {
+        self.check_liveness()?;
+        let shared = self
+            .state
+            .upgrade()
+            .ok_or("Skill runtime owner unavailable")?;
+        super::ownership::verify(&shared).await?;
+        {
+            let guard = shared.read().await;
+            self.check_owner(&guard, true)?;
+            super::chat_controls::validate_owner_chat(&guard, &self.run)?;
+            if call.name != crate::tools::skill_runtime::NAME
+                || (crate::tools::skill_runtime::requires_exact_approval(call) && !approved)
+            {
+                return Err("Skill runtime requires exact owner approval".into());
+            }
+            if guard.workspace.as_ref().map(|w| w.root_path.as_path()) != Some(workspace)
+                || !crate::community_bundles::runnable_skill(&guard, slug)
+                || guard
+                    .skills
+                    .get(slug)
+                    .is_none_or(|s| !s.enabled || s.approved_hash != hash)
+            {
+                return Err("Skill package authority changed".into());
+            }
+            let run = guard
+                .runs
+                .get(&self.run.run_id)
+                .ok_or("Skill runtime run unavailable")?;
+            if run.status != RunStatus::Running
+                || !run.action_receipts.iter().any(|r| {
+                    r.tool_call_id == call.id
+                        && r.name == call.name
+                        && r.status == ActionStatus::Started
+                })
+            {
+                return Err("Skill runtime native action intent is unavailable".into());
+            }
+            let current = guard
+                .get_agent(&self.run.agent_id)
+                .ok_or("Skill runtime owner unavailable")?
+                .state;
+            if guard.approval_policy_verdict(&current, &self.run.session_id, call)
+                == crate::approvals::Verdict::Deny
+            {
+                return Err("Skill runtime permission was revoked".into());
+            }
+        }
+        let workspace = workspace.to_path_buf();
+        let slug = slug.to_string();
+        let expected = hash.to_string();
+        let package = crate::skills::service::blocking(move || {
+            crate::skills::package::read_package(&workspace, &slug)
+        })
+        .await
+        .map_err(|e| e.message())??;
+        if package.is_none_or(|p| p.hash() != expected) {
+            return Err("Approved skill package changed or is missing".into());
+        }
+        self.check_liveness()
+    }
+
     /// Recheck current execution authority at the actual selected transport boundary.
     pub(crate) async fn execution_authority(
         &self,
@@ -664,6 +734,10 @@ impl RunActionJournal {
                     }
                     let arguments = if call.name == crate::tools::mcp_management::NAME {
                         crate::tools::mcp_management::arguments_preview(&call)
+                    } else if call.name == crate::tools::github_skill::NAME {
+                        crate::tools::github_skill::arguments_preview(&call)
+                    } else if call.name == crate::tools::skill_runtime::NAME {
+                        crate::tools::skill_runtime::arguments_preview(&call)
                     } else {
                         crate::routes::data_value_to_json(&DataValue::Object(call.args.clone()))
                             .to_string()

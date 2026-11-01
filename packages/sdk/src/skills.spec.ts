@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   createDaemonClient,
   MAX_SKILL_BODY_BYTES,
+  MAX_SKILL_SUPPORTING_FILES,
+  MAX_SKILL_SUPPORTING_FILE_BYTES,
+  MAX_SKILL_PACKAGE_BYTES,
   SKILL_SLUG_PATTERN,
   type Skill,
   type SkillDraft,
+  type SkillSupportingFile,
 } from './index.js';
 
 function transport(respond: (url: string, init?: RequestInit) => Response) {
@@ -62,13 +66,41 @@ describe('skills client', () => {
       description: 'Take notes',
       body: 'Use template',
       files,
-    } as never);
+    });
     await skills.approveDraft('skd_1', {
       body: 'Reviewed body',
       files,
-    } as never);
+    });
     expect(JSON.parse(String(requests[0].init?.body)).files).toEqual(files);
     expect(JSON.parse(String(requests[1].init?.body)).files).toEqual(files);
+  });
+
+  it('round trips full package text and binary assets through reads, saves, approvals and imports', async () => {
+    const files: SkillSupportingFile[] = [
+      { path: 'requirements.txt', content: 'httpx==0.28.1\n' },
+      { path: '.skillignore', content: 'tests/\n' },
+      { path: 'assets/image.png', content: 'AAH+/w==', encoding: 'base64' },
+      ...Array.from({ length: 40 }, (_, index) => ({ path: `engine/lib/module-${index}.py`, content: `value = ${index}\n` })),
+    ];
+    const imported = { ...draft, files, source: 'import' as const };
+    const file = { hash: 'b'.repeat(64), name: skill.name, description: skill.description, body: 'Use the engine', problem: null, files };
+    const { skills, requests } = transport((url, init) => {
+      if (url.startsWith('/api/skill-drafts?')) return Response.json({ drafts: [imported] });
+      if (url.endsWith('/import')) return Response.json({ draft: imported });
+      if (!init?.method) return Response.json({ skill, file });
+      return Response.json({ skill, draft: imported });
+    });
+    expect((await skills.get('notes')).file?.files).toEqual(files);
+    expect((await skills.drafts({ status: 'pending' }))[0].files).toEqual(files);
+    await skills.save('notes', { name: 'Notes', description: 'Take notes', body: 'Use the engine', files });
+    await skills.approveDraft('skd_1', { files });
+    const result = await skills.importFile(new Blob(['---\nname: Notes\ndescription: Take notes\n---\nUse the engine']), { files });
+    expect(result.files).toEqual(files);
+    expect(JSON.parse(String(requests[2].init?.body)).files).toEqual(files);
+    expect(JSON.parse(String(requests[3].init?.body)).files).toEqual(files);
+    const multipart = requests[4].init?.body;
+    expect(multipart).toBeInstanceOf(FormData);
+    expect(JSON.parse(String((multipart as FormData).get('files')))).toEqual(files);
   });
 
   it('lists, reads, saves, toggles, removes, and approves skills', async () => {
@@ -181,6 +213,9 @@ describe('skills client', () => {
 
   it('exports the daemon limits', () => {
     expect(MAX_SKILL_BODY_BYTES).toBe(32 * 1024);
+    expect(MAX_SKILL_SUPPORTING_FILES).toBe(256);
+    expect(MAX_SKILL_SUPPORTING_FILE_BYTES).toBe(8 * 1024 * 1024);
+    expect(MAX_SKILL_PACKAGE_BYTES).toBe(32 * 1024 * 1024);
     expect(SKILL_SLUG_PATTERN.test('weekly-review')).toBe(true);
     expect(SKILL_SLUG_PATTERN.test('-x')).toBe(false);
   });

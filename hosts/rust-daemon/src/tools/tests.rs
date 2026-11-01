@@ -810,6 +810,16 @@ fn registry_defines_every_registered_tool_schema() {
                 "granted",
             ][..],
         ),
+        (
+            "import_github_skill",
+            &["repository"][..],
+            &["revision", "path", "slug"][..],
+        ),
+        (
+            "manage_skill_runtime",
+            &["action", "slug", "hash"][..],
+            &["entrypoint", "args", "requirements", "timeoutMs"][..],
+        ),
         ("execution_targets", &[][..], &[][..]),
         ("execution_status", &["executionId"][..], &[][..]),
         (

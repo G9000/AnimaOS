@@ -35,6 +35,99 @@ pub(super) fn call(name: &str, args: &[(&str, &str)]) -> ToolCall {
     }
 }
 
+#[tokio::test]
+async fn github_import_is_visible_with_discovery_and_redacts_invalid_source_receipts() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call(
+            "import_github_skill",
+            &[("repository", "x/y"), ("token", "synthetic-secret")],
+        )]),
+        Step::Text(vec!["Need a public source."]),
+    ]);
+    let (coordinator, agent) = super::test_support::coordinator_with(model.clone()).await;
+    {
+        let mut state = coordinator.state.write().await;
+        let mut config = state.agents[&agent].config().clone();
+        config
+            .settings
+            .get_or_insert_with(Default::default)
+            .additional
+            .insert("toolDiscovery".into(), DataValue::Bool(true));
+        state.restore_agent_config(&agent, config);
+    }
+    let result = coordinator
+        .run(chat_request(
+            &agent,
+            "chat:github-discovery",
+            "Install this GitHub skill",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(result.result.status, "success");
+    assert!(model.configs()[0].allows_tool("import_github_skill"));
+    assert!(model.configs()[0].allows_tool("manage_skill_runtime"));
+    let state = coordinator.state.read().await;
+    assert!(state.skills.pending_drafts().is_empty());
+    for run in state.runs.for_session(&agent, "chat:github-discovery") {
+        for receipt in &run.action_receipts {
+            assert!(!receipt.arguments_preview.contains("synthetic-secret"));
+        }
+    }
+    assert!(model
+        .requests()
+        .iter()
+        .flat_map(|request| &request.messages)
+        .any(|message| message.role == anima_core::MessageRole::Tool
+            && message.content.text.contains("public GitHub")));
+}
+
+#[tokio::test]
+async fn skill_runtime_requires_exact_owner_approval_even_in_free_before_any_effect() {
+    let hash = "a".repeat(64);
+    for action in ["prepare", "run"] {
+        let mut input = call(
+            "manage_skill_runtime",
+            &[("action", action), ("slug", "sample"), ("hash", &hash)],
+        );
+        if action == "run" {
+            input.args.insert(
+                "entrypoint".into(),
+                DataValue::String("scripts/check.py".into()),
+            );
+        }
+        let model = ScriptedModel::new(vec![
+            Step::Tools(vec![input]),
+            Step::Text(vec!["Waiting for setup approval."]),
+        ]);
+        let (coordinator, agent) = super::test_support::coordinator_with(model).await;
+        let coordinator = coordinator.with_approval_timeouts(patient());
+        coordinator.state.write().await.start_free(&agent);
+        let running = {
+            let c = coordinator.clone();
+            let agent = agent.clone();
+            tokio::spawn(async move {
+                c.run(chat_request(
+                    &agent,
+                    "chat:runtime-approval",
+                    "Set up and test this skill",
+                ))
+                .await
+            })
+        };
+        let pending = pending_approvals(&coordinator, 1).await.remove(0);
+        assert_eq!(pending.tool, "manage_skill_runtime");
+        coordinator
+            .decide_approval(&pending.id, decision(ApprovalDecisionKind::Deny, 1))
+            .await
+            .unwrap();
+        running.await.unwrap().unwrap();
+        assert!(tool_results(&coordinator, &agent)
+            .await
+            .iter()
+            .any(|text| text.contains(crate::approvals::DENIED_BY_OWNER)));
+    }
+}
+
 /// A coordinator whose one companion may use `tools`, over a workspace.
 pub(super) async fn skilled(
     model: Arc<ScriptedModel>,
@@ -69,6 +162,25 @@ fn propose_steps() -> Vec<Step> {
         )]),
         Step::Text(vec!["proposed"]),
     ]
+}
+
+#[tokio::test]
+async fn owner_setup_context_researches_before_declaring_an_integration_unavailable() {
+    let model = ScriptedModel::new(vec![Step::Text(vec!["I will inspect the setup docs."])]);
+    let (coordinator, agent_id, _) = skilled(model.clone(), &[], "setup-research").await;
+    coordinator
+        .run(chat_request(
+            &agent_id,
+            "chat:setup-research",
+            "Find the GitHub skill and install it; connect Metricool too",
+        ))
+        .await
+        .unwrap();
+    let system = &model.requests()[0].system;
+    assert!(system.contains("[integration_setup]"), "{system}");
+    assert!(system.contains("web_search") && system.contains("web_fetch"));
+    assert!(system.contains("README") && system.contains("import_github_skill"));
+    assert!(system.contains("untrusted") && system.contains("propose_skill"));
 }
 
 #[tokio::test]
@@ -703,6 +815,7 @@ async fn skill_learning_refines_used_package_then_fresh_session_loads_exact_revi
     for free in [false, true] {
         let base = crate::skills::compose_skill_file("Notes", "About Notes", "Do Notes.");
         let support = vec![crate::skills::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.txt".into(),
             content: "Preserved reviewed template".into(),
         }];
@@ -888,6 +1001,7 @@ async fn omitted_skill_files_preserve_approved_packages_and_support_normal_new_s
         if scenario == 3 {
             let mut approved = content("Notes");
             approved.files = Some(vec![crate::skills::SkillSupportingFile {
+                encoding: Default::default(),
                 path: "references/check.md".into(),
                 content: "Owner's approved reference".into(),
             }]);
@@ -946,6 +1060,7 @@ async fn free_skill_lifecycle_removes_and_restores_the_complete_package() {
     let mut initial = content("Notes");
     initial.enabled = Some(false);
     initial.files = Some(vec![crate::skills::SkillSupportingFile {
+        encoding: Default::default(),
         path: "templates/note.md".into(),
         content: "Hello {audience}".into(),
     }]);

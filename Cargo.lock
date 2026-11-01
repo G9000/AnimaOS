@@ -126,6 +126,7 @@ name = "anima-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "futures-timer",
  "hex",
@@ -188,6 +189,7 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "serde_yaml",
+ "sha1",
  "sha2 0.11.1",
  "sqlx",
  "sse-stream",

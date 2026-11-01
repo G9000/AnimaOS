@@ -11,6 +11,27 @@ use crate::skills::runtime::{index_text, requested_skill, requested_text, SkillC
 use crate::skills::SkillService;
 
 impl AgentRunCoordinator {
+    pub(crate) async fn skill_runtime_paths(
+        &self,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+        let guard = self.state.read().await;
+        let workspace = guard
+            .workspace
+            .as_ref()
+            .map(|w| w.root_path.clone())
+            .ok_or("Skills need a configured workspace")?;
+        let file = guard
+            .control_plane_store
+            .as_ref()
+            .and_then(|s| s.file_path())
+            .ok_or("Skill runtimes need durable local profile storage")?;
+        let mut name = file
+            .file_name()
+            .ok_or("Skill runtime storage is unavailable")?
+            .to_os_string();
+        name.push(".skill-runtimes");
+        Ok((workspace, file.with_file_name(name)))
+    }
     /// The workspace's skills, changed under this coordinator's
     /// control-plane transaction.
     pub(crate) fn skills(&self) -> SkillService {
@@ -32,6 +53,14 @@ impl AgentRunCoordinator {
             runtime.register_provider(Arc::new(SkillContextProvider::learn(guidance.into())));
         }
         let skills = self.skills();
+        let mcp_setup = runtime.config().allows_tool("manage_mcp");
+        let github_setup = runtime.config().allows_tool("import_github_skill");
+        if mcp_setup || github_setup {
+            runtime.register_provider(Arc::new(SkillContextProvider::integration_setup(
+                mcp_setup,
+                github_setup,
+            )));
+        }
         // An agent without `load_skill` could not load a listed skill.
         if runtime.config().allows_tool("load_skill") {
             if let Some(text) = index_text(&skills.index().await) {

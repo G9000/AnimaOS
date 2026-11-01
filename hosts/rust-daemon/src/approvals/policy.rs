@@ -93,6 +93,7 @@ const WRITE_TOOLS: &[&str] = &[
     "memory_remove",
     "memory_consolidate",
     "propose_skill",
+    "import_github_skill",
     "remove_skill",
     "undo_skill",
     "save_workflow_template",
@@ -112,6 +113,7 @@ const WRITE_TOOLS: &[&str] = &[
     "acp_edit",
 ];
 const EXEC_TOOLS: &[&str] = &[
+    "manage_skill_runtime",
     "manage_mcp",
     "create_workflow",
     "run_workflow_template",

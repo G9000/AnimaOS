@@ -24,6 +24,7 @@ mod execution;
 mod execution_policy_tests;
 mod filesystem;
 pub(crate) mod generated_documents;
+pub(crate) mod github_skill;
 mod helper_batch;
 mod images;
 mod mail;
@@ -37,6 +38,7 @@ mod memory;
 mod microsoft_files;
 mod output_safety;
 pub(crate) mod process;
+pub(crate) mod skill_runtime;
 mod skills;
 mod standing_intents;
 mod team;
@@ -743,6 +745,26 @@ impl ToolExecutionContext {
                 return TaskResult::error(error, 0);
             }
         }
+        if tool_call.name == github_skill::NAME {
+            if let Err(error) = github_skill::preflight(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+        }
+        if tool_call.name == skill_runtime::NAME {
+            if let Err(error) = skill_runtime::preflight(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+            if self.approvals.is_none()
+                || self.action_journal.is_none()
+                || !self.standing_owner_turn
+                || self.has_upstream_tool_origin()
+            {
+                return TaskResult::error(
+                    "Skill runtime requires a direct owner run with approvals and native receipts",
+                    0,
+                );
+            }
+        }
         if tool_call.name == "execute_code" {
             let arguments =
                 crate::routes::data_value_to_json(&DataValue::Object(tool_call.args.clone()))
@@ -813,6 +835,17 @@ impl ToolExecutionContext {
         }
         if protected.is_some() && self.approvals.is_none() {
             return TaskResult::error(crate::agent_files::write_policy::REFUSED, 0);
+        }
+        let mcp_process_approval = if tool_call.name == mcp_management::NAME {
+            match mcp_management::local_process_approval(&self, &agent, &tool_call).await {
+                Ok(value) => value,
+                Err(error) => return TaskResult::error(error, 0),
+            }
+        } else {
+            None
+        };
+        if mcp_process_approval.is_some() && self.approvals.is_none() {
+            return TaskResult::error("Starting a local MCP process requires owner approval", 0);
         }
         let image_witness = if crate::images::is_tool(&tool_call.name) {
             let (Some(coordinator), Some(run), Some(gate), Some(journal), Some(_)) = (
@@ -911,6 +944,10 @@ impl ToolExecutionContext {
                         };
                 }
                 outcome
+            } else if let Some(approval) = &mcp_process_approval {
+                gate.check_exact(&agent, &tool_call, approval).await
+            } else if skill_runtime::requires_exact_approval(&tool_call) {
+                gate.check_exact(&agent, &tool_call, &tool_call).await
             } else {
                 match &protected {
                     Some(target) => {
@@ -1370,6 +1407,8 @@ impl ToolRegistry {
         chat_results::register(&mut registry);
         images::register(&mut registry);
         mcp_management::register(&mut registry);
+        github_skill::register(&mut registry);
+        skill_runtime::register(&mut registry);
         registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));

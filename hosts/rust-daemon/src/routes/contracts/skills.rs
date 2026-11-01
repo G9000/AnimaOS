@@ -10,6 +10,8 @@ use crate::skills::{DraftSource, DraftView, ScannedFile, SkillDraft, SkillRecord
 pub(crate) struct SkillSupportingFileSchema {
     pub(crate) path: String,
     pub(crate) content: String,
+    /// Omitted for UTF-8 text; binary assets use base64.
+    pub(crate) encoding: Option<String>,
 }
 
 /// A registered skill (spec §8.1).
@@ -124,6 +126,7 @@ pub(crate) struct SkillDraftResponse {
     pub(crate) source: String,
     pub(crate) proposed_by: Option<ProposedByResponse>,
     pub(crate) learning_source: Option<crate::learning::LearningSkillSource>,
+    pub(crate) github_source: Option<crate::skills::github::GitHubSkillSource>,
     /// The skill's approved hash when the draft was made; `null` for a new slug.
     pub(crate) base_hash: Option<String>,
     /// The skill's approved hash now; `null` when it has no record.
@@ -160,6 +163,7 @@ impl From<&DraftView> for SkillDraftResponse {
                 run_id: by.run_id.clone(),
             }),
             learning_source: draft.learning_source.clone(),
+            github_source: draft.github_source.clone(),
             base_hash: draft.base_hash.clone(),
             current_hash: view.current_hash.clone(),
             stale: draft.is_pending()

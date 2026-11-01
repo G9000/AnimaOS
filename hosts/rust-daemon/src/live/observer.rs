@@ -229,6 +229,10 @@ impl RunObserver for RunEvents {
             RunFrame::ToolStarted { step_id, tool_call } => {
                 let arguments = if tool_call.name == crate::tools::mcp_management::NAME {
                     crate::tools::mcp_management::arguments_preview(&tool_call)
+                } else if tool_call.name == crate::tools::github_skill::NAME {
+                    crate::tools::github_skill::arguments_preview(&tool_call)
+                } else if tool_call.name == crate::tools::skill_runtime::NAME {
+                    crate::tools::skill_runtime::arguments_preview(&tool_call)
                 } else {
                     data_value_to_json(&DataValue::Object(tool_call.args.clone())).to_string()
                 };

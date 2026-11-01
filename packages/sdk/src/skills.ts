@@ -8,14 +8,16 @@ import type {
 /** What the owner can rely on (spec §8.1): only `active` skills load. */
 export type SkillStatus = 'active' | 'changed' | 'missing' | 'invalid';
 
-/** Inert UTF-8 text, reviewed and pinned with SKILL.md. */
+/** Inert package bytes, reviewed and pinned with SKILL.md. */
 export interface SkillSupportingFile {
   path: string;
   content: string;
+  /** Omitted for UTF-8 text. Binary media uses canonical base64. */
+  encoding?: 'utf8' | 'base64';
 }
-export const MAX_SKILL_SUPPORTING_FILES = 32;
-export const MAX_SKILL_SUPPORTING_FILE_BYTES = 64 * 1024;
-export const MAX_SKILL_PACKAGE_BYTES = 512 * 1024;
+export const MAX_SKILL_SUPPORTING_FILES = 256;
+export const MAX_SKILL_SUPPORTING_FILE_BYTES = 8 * 1024 * 1024;
+export const MAX_SKILL_PACKAGE_BYTES = 32 * 1024 * 1024;
 
 /** A registered skill, pinned to the hash the owner approved. */
 export interface Skill {
@@ -55,10 +57,25 @@ export interface SkillDraftProposer {
   runId: string;
 }
 
+export interface GitHubSkillSource {
+  /** Exact original instruction file, retained for literal owner review. */
+  originalSkillText?: string | null;
+  repository: string;
+  commit: string;
+  path: string;
+  sourceUrl: string;
+  /** Hash of the original retrieved package, before canonical skill formatting. */
+  packageHash: string;
+  /** Repository metadata excluded from the runnable skill package. */
+  ignoredPaths: string[];
+}
+
 /** A draft waiting for the owner, or decided (spec §8.2). Untrusted: the
  *  model or a file wrote it, so show it as text, never as markup. */
 export interface SkillDraft {
   files?: SkillSupportingFile[];
+  /** An immutable public GitHub source for an imported package. */
+  githubSource?: GitHubSkillSource | null;
   /** `skd_<uuid>`, or `file:<slug>` for a SKILL.md without a record. */
   id: string;
   slug: string;

@@ -210,6 +210,7 @@ mod tests {
         let (_, skills, by, root) = fixture(AutonomyMode::Free).await;
         let mut initial = content("Notes");
         initial.files = Some(vec![SkillSupportingFile {
+            encoding: Default::default(),
             path: "references/guide.md".into(),
             content: "Reviewed".into(),
         }]);
@@ -249,6 +250,7 @@ mod tests {
         let mut initial = content("Notes");
         initial.enabled = Some(false);
         initial.files = Some(vec![SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Exact template".into(),
         }]);

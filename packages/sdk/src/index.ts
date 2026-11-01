@@ -320,6 +320,7 @@ export {
 } from './skills.js';
 export type {
   ApprovedSkillDraft,
+  GitHubSkillSource,
   Skill,
   SkillDetail,
   SkillDraft,

@@ -140,7 +140,24 @@ impl DrainController {
             standing_intent_changes: u32::from(
                 guard.standing_intent_slots.available_permits() == 0,
             ),
-            execution_jobs: count(guard.execution.in_flight_count()),
+            execution_jobs: count(
+                guard.execution.in_flight_count()
+                    + crate::skills::python_runtime::active_count()
+                    + guard
+                        .control_plane_store
+                        .as_ref()
+                        .and_then(|s| s.file_path())
+                        .map_or(0, |file| {
+                            let Some(name) = file.file_name() else {
+                                return 1;
+                            };
+                            let mut name = name.to_os_string();
+                            name.push(".skill-runtimes");
+                            crate::skills::python_runtime::persisted_marker_count(
+                                &file.with_file_name(name),
+                            )
+                        }),
+            ),
             mcp_operations: count(
                 guard
                     .mcp_manager

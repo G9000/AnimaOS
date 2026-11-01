@@ -31,7 +31,9 @@ use crate::skills::{
 /// Bodies the skill routes read, or the daemon-wide limit when larger: a
 /// 32 KiB body can take six bytes a character once JSON-escaped, and the
 /// body check must answer, not the body limit (as M3's run route).
-pub(super) const MAX_SKILL_REQUEST_BYTES: usize = 3 * 1024 * 1024 + 16 * 1024;
+// JSON can escape every UTF-8 text byte as six bytes. Binary media uses base64.
+pub(super) const MAX_SKILL_REQUEST_BYTES: usize =
+    anima_core::skill_packages::MAX_SKILL_PACKAGE_BYTES * 6 + 256 * 1024;
 
 pub(super) fn skill_error(error: SkillError) -> Response {
     rejected(match error {

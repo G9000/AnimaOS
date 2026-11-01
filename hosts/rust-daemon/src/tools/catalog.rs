@@ -102,6 +102,8 @@ impl RunToolCatalog {
                             | "compact_chat"
                             | "export_chat"
                             | "manage_mcp"
+                            | "import_github_skill"
+                            | "manage_skill_runtime"
                             | "show_result"
                             | "list_results"
                     ) =>
@@ -599,6 +601,8 @@ impl ModelToolSelector for RunToolCatalog {
             "compact_chat",
             "export_chat",
             "manage_mcp",
+            "import_github_skill",
+            "manage_skill_runtime",
             "show_result",
             "list_results",
         ] {

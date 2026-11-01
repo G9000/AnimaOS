@@ -759,6 +759,8 @@ mod tests {
                 "send_message",
                 "broadcast_message",
                 "rename_chat",
+                "import_github_skill",
+                "manage_skill_runtime",
                 "compact_chat",
                 "export_chat",
                 "show_result",

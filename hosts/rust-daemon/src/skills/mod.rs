@@ -10,9 +10,11 @@ mod evaluation_runner;
 mod evaluation_service;
 pub(crate) mod experience;
 pub(crate) mod file;
+pub(crate) mod github;
 pub(crate) mod ledger;
 mod lifecycle;
 pub(crate) mod package;
+pub(crate) mod python_runtime;
 pub(crate) mod registry;
 pub(crate) mod runtime;
 pub(crate) mod scanner;
@@ -427,6 +429,8 @@ pub(crate) struct SkillDraft {
     pub(crate) learning_source: Option<crate::learning::LearningSkillSource>,
     #[serde(default)]
     pub(crate) bundle_source: Option<crate::community_bundles::ManagedDraftSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) github_source: Option<github::GitHubSkillSource>,
     /// The skill's approved hash when the draft was made (`None`: a new slug).
     #[serde(default)]
     pub(crate) base_hash: Option<String>,
@@ -463,6 +467,7 @@ impl SkillDraft {
             proposed_by,
             learning_source: None,
             bundle_source: None,
+            github_source: None,
             base_hash,
             file_hash: None,
             created_at_ms: now_ms,

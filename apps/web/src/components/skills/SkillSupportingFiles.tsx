@@ -1,7 +1,13 @@
 import type { SkillSupportingFile } from '@animaos/sdk';
 import { revealInvisible } from '../../lib/skills';
 
-/** Safe review: HTML, SVG and scripts remain literal visible text. */
+export function supportingFileBytes(file: SkillSupportingFile): number {
+  return file.encoding === 'base64'
+    ? Math.max(0, Math.floor(file.content.length * 3 / 4) - (file.content.endsWith('==') ? 2 : file.content.endsWith('=') ? 1 : 0))
+    : new TextEncoder().encode(file.content).length;
+}
+
+/** Scripts stay literal text; binary content is never embedded or executed. */
 export function SkillSupportingFiles({
   files = [],
 }: {
@@ -15,12 +21,17 @@ export function SkillSupportingFiles({
         require separate execution permission.
       </p>
       {files.map((file) => (
-        <div key={file.path}>
-          <strong>{revealInvisible(file.path).text}</strong>
-          <pre className="skill-body" aria-label={`File preview: ${file.path}`}>
-            {revealInvisible(file.content).text}
-          </pre>
-        </div>
+        <details key={file.path}>
+          <summary>{revealInvisible(file.path).text} ({supportingFileBytes(file).toLocaleString()} bytes{file.encoding === 'base64' ? ', binary asset' : ''})</summary>
+          {file.encoding === 'base64' ? (
+            <p>Binary asset preserved in the package. Its bytes are covered by approval.</p>
+          ) : (
+            <pre className="skill-body" aria-label={`File preview: ${file.path}`}>
+              {revealInvisible(file.content.slice(0, 128 * 1024)).text}
+              {file.content.length > 128 * 1024 ? '\nPreview limited to 128 KiB. The complete file is preserved.' : ''}
+            </pre>
+          )}
+        </details>
       ))}
     </section>
   );

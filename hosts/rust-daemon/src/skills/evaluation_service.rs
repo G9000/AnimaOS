@@ -186,7 +186,7 @@ impl SkillService {
             super::validate_body(body).map_err(SkillError::invalid)?;
             (
                 SkillPackage {
-                    bytes: compose_skill_file(&draft.name, &draft.description, body).into_bytes(),
+                    bytes: super::github::approved_bytes(&draft, body)?,
                     files: approval
                         .files
                         .clone()

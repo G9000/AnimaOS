@@ -22,6 +22,54 @@ Set settings.toolDiscovery to true or grant both search_tools and describe_tool 
 
 The canonical grants remain intact. Actual calls still pass ordinary native or MCP permission, approval, generation and receipt checks. Reconnection, changed schemas and revoked grants invalidate captured catalog entries. Disabled discovery preserves the existing direct-tool behavior; no universal token or cost saving is promised.
 
+## Research and set up integrations from chat
+
+Direct owner web/API chats expose `manage_mcp` when its manager is available, `import_github_skill` and `manage_skill_runtime`, including with deferred discovery. Setup guidance directs the agent to research official documentation, inspect the original package and continue supported setup. External installation instructions remain untrusted content. They cannot grant tools, bypass owner review or authorize unrelated commands.
+
+MCP setup uses the existing connection manager and approval policy. Browser OAuth sign-in stays in **Connectors > MCP > Sign in**, and static Bearer secrets stay in its password control. Chat reports saved OAuth credential presence separately from current connection/discovery state. A missing service-specific tool is not proof that its MCP server cannot be configured. See [MCP setup](mcp.md).
+
+`import_github_skill` accepts `repository` as `owner/repository`, optional `revision`, optional `path` to the skill directory, and optional local `slug`. The agent derives these from the GitHub URL it inspected. Omitted revision resolves the repository's default HEAD once; every file then comes from that immutable commit's tree and blob IDs. Only public repositories are supported, without credentials, redirects or ambient proxies.
+
+The package preserves `SKILL.md`, portable root files, nested code, references and binary media. Hard limits are 256 supporting files, 8 MiB each, 32 MiB decoded total, and a 36 KiB main skill file. Text keeps its existing representation; binary assets use base64 in the API and original bytes on disk. The package hash covers decoded bytes and paths. Acquisition caps 300 requests, 48 MiB wire data, 1024 tree entries and 120 seconds. Pinned raw GitHub downloads verify Git blob identities and sizes without one REST API request per file. Symlinks, submodules, LFS pointers, unsafe paths, executable binaries, truncated listings or a missing file fail the entire import. Excluded hidden repository metadata is explicitly reported. README, license and `.skillignore` files are preserved.
+
+Imports use the existing pending **Import** draft even in Free. The Skills card shows the repository, pinned commit, original instructions/metadata and excluded files before the owner chooses **Keep**. Keeping unchanged content preserves the original SKILL.md bytes, including extra front matter. Editing the body preserves its front matter; metadata remains inert and cannot grant tools. The stored source hash identifies the original package; owner edits may produce different approved bytes. Import does not run scripts, install dependencies or grant tools. Stop, changed workspace and current write policy are checked again before draft admission. A changed replacement base requires a fresh GitHub import before approval.
+
+### Prepare and verify a Python skill
+
+After Keep, `load_skill` returns the approved package hash and reviewed file list.
+`manage_skill_runtime` accepts `action`, `slug`, `hash`, optional `requirements`,
+`entrypoint`, literal `args` and a bounded `timeoutMs`.
+
+- `status` inspects installation and the exact recorded check without running code.
+- `prepare` creates a private source snapshot and dedicated Python venv outside
+  the workspace. Select an installed Python 3.12+ with `ANIMAOS_SKILL_PYTHON`, or
+  use an installed interpreter discovered outside the workspace. Reviewed ordinary
+  PyPI requirements install as wheels from the fixed public index. Recursive,
+  editable, URL and source-build dependencies are refused with a specific error.
+- `run` executes an approved relative `.py` entrypoint in that snapshot. Use the
+  package's actual preflight and record its exact arguments and native exit code.
+
+Prepare and run each require an exact owner approval even in Free. They use
+local OS execution with the daemon user's access; a venv isolates dependencies,
+not filesystem or network access. The general host-shell gate stays separate.
+Ambient account credentials, user homes and Python/pip configuration are not
+inherited. Installed helper programs can use a filtered startup PATH; workspace
+directories, runtime staging directories and project `node_modules` shims are
+excluded. Stop, deadlines, current policy, live owner authority, package identity,
+process-tree custody and durable native action receipts still apply. Other
+languages and unsupported dependencies require an available approved execution
+tool. Credentials remain in their supported connector controls.
+
+The managed local Python path currently requires Windows Job Object custody.
+Hosts without the required strong process custody refuse execution before launch;
+use an operator-configured supported execution target there.
+
+Report imported, owner-kept, environment-prepared, exact-command-verified and
+account-connected as separate observations. A passing `--help` verifies that
+command only. Failed setup or a changed source/environment cannot establish
+readiness. Binary assets stay out of model text and browser execution; review
+shows metadata and bounded literal text previews.
+
 ## Selected execution backends
 
 An operator-owned profile file selects installed Local, Docker or SSH transports. execution_targets lists profile IDs; execution_run accepts only targetId, command, cwd and timeoutMs. It requires ordinary execution permission and approval. An unavailable target never falls back to local execution.

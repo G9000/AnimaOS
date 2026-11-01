@@ -309,6 +309,12 @@ impl McpManager {
                 _=>{ self.oauth_failed(&id, &attempt_id); return Err(McpServiceError::Unavailable); }
             }
         };
+        // The adapter may derive an issuer-specific route after discovery,
+        // before client registration. Listen only on that exact registered URI.
+        let callback_path = reqwest::Url::parse(session.redirect_uri())
+            .map_err(|_| McpServiceError::Unavailable)?
+            .path()
+            .to_owned();
         if !self.oauth_current(&id, &attempt_id)
             || self.record(&agent, &id, Some(expected)).await.is_err()
         {

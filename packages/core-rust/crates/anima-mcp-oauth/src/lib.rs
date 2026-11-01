@@ -4,6 +4,7 @@
 //! vault persistence, cancellation and tool permissions. Refreshed credentials
 //! must be durably saved before their access token is used.
 mod http;
+mod provider;
 mod store;
 
 use http::{NetworkPolicy, RestrictedHttp};
@@ -102,9 +103,9 @@ impl OAuthSession {
         if client_id.is_some_and(|id| !bounded_text(id, 2048)) {
             return Err(OAuthError::InvalidConfiguration);
         }
-        let resource = Url::parse(resource)
-            .map_err(|_| OAuthError::InvalidConfiguration)?
-            .to_string();
+        // Compatibility is keyed by the original requested endpoint, never by
+        // URL case/default-port normalization that could widen provider pins.
+        let resource = resource.to_owned();
         let http = Arc::new(RestrictedHttp::new(policy));
         let flow = async {
             let challenge = http.challenge(&resource).await?;
@@ -119,8 +120,9 @@ impl OAuthSession {
             if resolution.source != AuthorizationMetadataSource::ProtectedResourceMetadata {
                 return Err(OAuthError::InvalidConfiguration);
             }
-            validate_metadata(&resolution.metadata, policy)?;
+            validate_metadata(&resource, &resolution.metadata, policy)?;
             let metadata = minimal_metadata(resolution.metadata);
+            let redirect_uri = provider::prepare_redirect(&resource, &metadata, redirect_uri)?;
             manager.set_metadata(metadata.clone());
             let store = MemoryCredentials::default();
             manager.set_credential_store(store.clone());
@@ -130,7 +132,7 @@ impl OAuthSession {
                 let scopes = manager.select_initial_scopes(&[]).await;
                 let scope_refs: Vec<_> = scopes.iter().map(String::as_str).collect();
                 let config = manager
-                    .register_client("AnimaOS", redirect_uri, &scope_refs)
+                    .register_client("AnimaOS", &redirect_uri, &scope_refs)
                     .await
                     .map_err(static_error)?;
                 // Public native clients cannot depend on an issued client secret.
@@ -139,7 +141,7 @@ impl OAuthSession {
                 }
                 config.client_id
             };
-            let request = AuthorizationRequest::new(redirect_uri)
+            let request = AuthorizationRequest::new(&redirect_uri)
                 .with_preregistered_client(client_id)
                 .with_application_type("native")
                 .with_initial_scope_selection();
@@ -158,6 +160,7 @@ impl OAuthSession {
                 return Err(OAuthError::InvalidConfiguration);
             };
             validate_audience(&resource, audience)?;
+            provider::validate_binding(&resource, audience, &metadata, &redirect_uri)?;
             Ok(Self {
                 session,
                 resource,
@@ -175,15 +178,21 @@ impl OAuthSession {
     pub fn authorization_url(&self) -> &str {
         self.session.get_authorization_url()
     }
-    /// Validate the decoded RFC 9207 issuer on every callback, including denial
-    /// responses, before consuming the attempt or trusting callback parameters.
+    /// Exact registered callback for this attempt. Hosts must listen on this
+    /// path, including its stable issuer suffix for reviewed legacy providers.
+    pub fn redirect_uri(&self) -> &str {
+        &self.session.redirect_uri
+    }
+    /// Validate the decoded issuer on success and denial before consuming an
+    /// attempt. Missing values are allowed only by the reviewed provider policy
+    /// and its issuer-bound redirect when support was not advertised.
     pub fn validate_callback_issuer(&self, issuer: Option<&str>) -> Result<(), OAuthError> {
-        if issuer.is_none_or(|value| !bounded_text(value, 4096))
-            || issuer != self.metadata.issuer.as_deref()
-        {
-            return Err(OAuthError::Rejected);
-        }
-        Ok(())
+        provider::validate_callback(
+            &self.resource,
+            &self.metadata,
+            &self.session.redirect_uri,
+            issuer,
+        )
     }
     /// Consume this attempt, validate state/issuer and exchange its code once.
     pub async fn complete(
@@ -240,7 +249,7 @@ impl fmt::Debug for OAuthCredentials {
     }
 }
 impl OAuthCredentials {
-    /// Exact normalized MCP endpoint that owns these credentials.
+    /// Exact requested MCP endpoint that owns these credentials.
     pub fn resource(&self) -> &str {
         &self.resource
     }
@@ -277,7 +286,13 @@ impl OAuthCredentials {
         let policy = NetworkPolicy::for_resource(&self.resource)?;
         validate_redirect(&self.redirect_uri)?;
         validate_audience(&self.resource, &self.audience)?;
-        validate_metadata(&self.metadata, policy)?;
+        validate_metadata(&self.resource, &self.metadata, policy)?;
+        provider::validate_binding(
+            &self.resource,
+            &self.audience,
+            &self.metadata,
+            &self.redirect_uri,
+        )?;
         // Every version-1 grant is created with a receipt time. The SDK treats a
         // missing time as an old, non-expiring token, which must not turn a
         // truncated vault payload into timeless credentials.
@@ -435,18 +450,16 @@ fn validate_audience(resource: &str, audience: &str) -> Result<(), OAuthError> {
     Ok(())
 }
 fn validate_metadata(
+    resource: &str,
     metadata: &AuthorizationMetadata,
     policy: NetworkPolicy,
 ) -> Result<(), OAuthError> {
-    // A shared registered loopback callback cannot identify the issuer by its
-    // path. Require RFC 9207 before consent, preventing a malicious authorization
-    // server from routing the browser to another server and stealing its code
-    // plus PKCE verifier through the malicious token endpoint.
-    if metadata
-        .additional_fields
-        .get("authorization_response_iss_parameter_supported")
-        .and_then(serde_json::Value::as_bool)
-        != Some(true)
+    // Keep strict issuer identification for arbitrary discovered providers.
+    // A reviewed complete provider tuple additionally uses a distinct callback
+    // and restricted HTTP destinations; no metadata-only downgrade exists.
+    if (resource == provider::RESOURCE && !provider::known_metadata(resource, metadata))
+        || (!provider::issuer_advertised(metadata)?
+            && !provider::known_metadata(resource, metadata))
     {
         return Err(OAuthError::InvalidConfiguration);
     }

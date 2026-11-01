@@ -1,11 +1,11 @@
-//! Capability-relative package I/O. Text is never interpreted or executed.
+//! Capability-relative package I/O. Stored code and assets are never executed.
 use super::{
     MAX_SKILL_FILE_BYTES, SKILLS_FOLDER, SKILL_FILE_NAME, SKILL_FILE_NOT_REGULAR,
     SKILL_FILE_OUTSIDE, SKILL_FILE_TOO_LARGE,
 };
 use crate::tools::workspace_bytes::{linked, open_regular_file, WorkspaceBytes};
 use anima_core::skill_packages::{
-    validate_skill_package, validate_supporting_path, SkillSupportingFile,
+    validate_skill_package, validate_supporting_path, SkillSupportingFile, MAX_SKILL_PACKAGE_BYTES,
     MAX_SKILL_SUPPORTING_FILES, MAX_SKILL_SUPPORTING_FILE_BYTES,
 };
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
@@ -68,7 +68,7 @@ fn bytes(directory: &Dir, name: &str, max: usize) -> Result<Vec<u8>, String> {
         if name == SKILL_FILE_NAME {
             SKILL_FILE_TOO_LARGE
         } else {
-            "Supporting file must be at most 64 KiB"
+            "Supporting file must be at most 8 MiB"
         }
         .to_string()
     };
@@ -142,7 +142,8 @@ fn read_held_package(held: &WorkspaceBytes, slug: &str) -> Result<Option<SkillPa
     }
     let bytes = bytes(&folder, SKILL_FILE_NAME, MAX_SKILL_FILE_BYTES)?;
     let mut files = Vec::new();
-    walk(&folder, "", &mut files, &mut 0)?;
+    let mut total = bytes.len();
+    walk(&folder, "", &mut files, &mut 0, &mut total)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     validate_skill_package(&bytes, &files).map_err(str::to_string)?;
     Ok(Some(SkillPackage { bytes, files }))
@@ -152,10 +153,11 @@ fn walk(
     prefix: &str,
     files: &mut Vec<SkillSupportingFile>,
     examined: &mut usize,
+    total: &mut usize,
 ) -> Result<(), String> {
     for entry in directory.entries().map_err(|e| e.to_string())? {
         *examined += 1;
-        if *examined > 256 {
+        if *examined > 1024 {
             return Err("Skill package contains too many filesystem entries".into());
         }
         let name = entry
@@ -183,21 +185,26 @@ fn walk(
         if metadata.is_dir() {
             validate_supporting_path(&format!("{relative}/probe.txt")).map_err(str::to_string)?;
             let opened = child(directory, &name, false).map_err(|e| e.to_string())?;
-            walk(&opened, &relative, files, examined)?;
+            walk(&opened, &relative, files, examined, total)?;
         } else {
             validate_supporting_path(&relative).map_err(str::to_string)?;
             if !metadata.is_file() {
                 return Err("Supporting files must be regular files".into());
             }
             if files.len() >= MAX_SKILL_SUPPORTING_FILES {
-                return Err("Skill package supports at most 32 supporting files".into());
+                return Err("Skill package supports at most 256 supporting files".into());
+            }
+            if metadata.len() > MAX_SKILL_PACKAGE_BYTES.saturating_sub(*total) as u64 {
+                return Err("A complete skill package must be at most 32 MiB".into());
             }
             let content = bytes(directory, &name, MAX_SKILL_SUPPORTING_FILE_BYTES)?;
-            files.push(SkillSupportingFile {
-                path: relative,
-                content: String::from_utf8(content)
-                    .map_err(|_| "Supporting file is not UTF-8 text")?,
-            });
+            *total = total
+                .checked_add(content.len())
+                .ok_or("Skill package is too large")?;
+            if *total > MAX_SKILL_PACKAGE_BYTES {
+                return Err("A complete skill package must be at most 32 MiB".into());
+            }
+            files.push(SkillSupportingFile::from_bytes(relative, content).map_err(str::to_string)?);
         }
     }
     Ok(())
@@ -242,7 +249,11 @@ fn write_held_package(held: &WorkspaceBytes, slug: &str, package: &SkillPackage)
         for part in &parts[..parts.len() - 1] {
             parent = child(&parent, part, true)?;
         }
-        write_new(&parent, parts[parts.len() - 1], file.content.as_bytes())?;
+        write_new(
+            &parent,
+            parts[parts.len() - 1],
+            file.bytes().map_err(invalid)?.as_ref(),
+        )?;
         sync_dir(&parent)?;
     }
     sync_tree(&stage, &mut 0)?;
@@ -318,7 +329,7 @@ fn write_new(directory: &Dir, name: &str, content: &[u8]) -> io::Result<()> {
 fn check_tree(directory: &Dir, examined: &mut usize) -> io::Result<()> {
     for entry in directory.entries()? {
         *examined += 1;
-        if *examined > 256 {
+        if *examined > 1024 {
             return Err(invalid(
                 "Skill package contains too many filesystem entries",
             ));
@@ -342,7 +353,7 @@ fn check_tree(directory: &Dir, examined: &mut usize) -> io::Result<()> {
 fn sync_tree(directory: &Dir, examined: &mut usize) -> io::Result<()> {
     for entry in directory.entries()? {
         *examined += 1;
-        if *examined > 256 {
+        if *examined > 1024 {
             return Err(invalid(
                 "Skill package contains too many filesystem entries",
             ));
@@ -377,6 +388,44 @@ mod tests {
     use super::*;
     use crate::skills::test_support::{skill_text, temp_workspace, write_skill};
     use std::fs;
+
+    #[test]
+    fn full_package_roundtrip_preserves_root_files_many_modules_and_binary_assets() {
+        let root = temp_workspace("package-complete");
+        let mut files = (0..48)
+            .map(|index| {
+                SkillSupportingFile::from_bytes(
+                    format!("lib/module_{index}.py"),
+                    format!("VALUE = {index}\n").into_bytes(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        files.push(
+            SkillSupportingFile::from_bytes("requirements.txt".into(), b"httpx==0.28.1\n".to_vec())
+                .unwrap(),
+        );
+        let asset = vec![0x91; 2 * 1024 * 1024];
+        files.push(
+            SkillSupportingFile::from_bytes("assets/demo.png".into(), asset.clone()).unwrap(),
+        );
+        let package = SkillPackage {
+            bytes: skill_text("complete").into_bytes(),
+            files,
+        };
+        write_package(&root, "complete", &package).unwrap();
+        assert_eq!(
+            fs::read(root.join("skills/complete/assets/demo.png")).unwrap(),
+            asset
+        );
+        let restored = read_package(&root, "complete").unwrap().unwrap();
+        assert_eq!(restored.hash(), package.hash());
+        assert_eq!(restored.files.len(), 50);
+        assert_eq!(
+            fs::read_to_string(root.join("skills/complete/requirements.txt")).unwrap(),
+            "httpx==0.28.1\n"
+        );
+    }
     #[cfg(windows)]
     fn directory_link(link: &Path, target: &Path) -> bool {
         std::process::Command::new("cmd.exe")
@@ -404,6 +453,7 @@ mod tests {
         let new = SkillPackage {
             bytes: skill_text("new").into_bytes(),
             files: vec![SkillSupportingFile {
+                encoding: Default::default(),
                 path: "templates/note.md".into(),
                 content: "new".into(),
             }],
@@ -425,6 +475,7 @@ mod tests {
         let new = SkillPackage {
             bytes: skill_text("new").into_bytes(),
             files: vec![SkillSupportingFile {
+                encoding: Default::default(),
                 path: "../escape.md".into(),
                 content: "new".into(),
             }],
@@ -461,6 +512,7 @@ mod tests {
         let next = SkillPackage {
             bytes: skill_text("updated").into_bytes(),
             files: vec![SkillSupportingFile {
+                encoding: Default::default(),
                 path: "templates/note.md".into(),
                 content: "Held root template".into(),
             }],

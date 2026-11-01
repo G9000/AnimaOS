@@ -163,6 +163,8 @@ pub(crate) fn select(
                 | "compact_chat"
                 | "export_chat"
                 | "manage_mcp"
+                | "import_github_skill"
+                | "manage_skill_runtime"
                 | "show_result"
                 | "list_results"
         )
@@ -170,6 +172,8 @@ pub(crate) fn select(
     if scope.owner_chat {
         for name in [
             "rename_chat",
+            "import_github_skill",
+            "manage_skill_runtime",
             "compact_chat",
             "export_chat",
             "show_result",
@@ -278,6 +282,7 @@ impl super::AgentRunCoordinator {
                 id: "capabilities".into(), name: tool.name.clone(), args: Default::default(),
             });
             let approval = match verdict {
+                crate::approvals::Verdict::Allow if tool.name == "manage_skill_runtime" => "ask",
                 crate::approvals::Verdict::Allow => "allow",
                 crate::approvals::Verdict::Ask => "ask",
                 crate::approvals::Verdict::Deny => "deny",
@@ -317,6 +322,48 @@ impl super::AgentRunCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_import_is_an_owner_control_not_a_serialized_grant() {
+        let mut config = crate::agent_runs::test_support::companion_config("Mom");
+        let owner = select(
+            &config,
+            &[],
+            Scope {
+                owner_chat: true,
+                ..Scope::default()
+            },
+        );
+        let descriptor = owner
+            .iter()
+            .find(|tool| tool.name == "import_github_skill")
+            .expect("direct owner chats must offer the GitHub import capability")
+            .clone();
+        config.tools = Some(vec![descriptor]);
+        for scope in [
+            Scope::default(),
+            Scope {
+                delegated: true,
+                ..Scope::default()
+            },
+            Scope {
+                workflow_job: true,
+                ..Scope::default()
+            },
+            Scope {
+                peers: true,
+                ..Scope::default()
+            },
+            Scope {
+                reminder_verification: true,
+                ..Scope::default()
+            },
+        ] {
+            assert!(!select(&config, &[], scope)
+                .iter()
+                .any(|tool| tool.name == "import_github_skill"));
+        }
+    }
 
     #[test]
     fn history_schema_refresh_keeps_the_original_grants_and_updates_existing_agent_definitions() {

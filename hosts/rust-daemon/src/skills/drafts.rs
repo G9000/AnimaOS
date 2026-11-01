@@ -220,6 +220,38 @@ impl SkillService {
         slug: Option<String>,
         files: Vec<super::SkillSupportingFile>,
     ) -> Result<SkillDraft, SkillError> {
+        self.import_package_with_source(bytes, slug, files, None)
+            .await
+    }
+
+    pub(super) async fn import_package_from_github(
+        &self,
+        bytes: Vec<u8>,
+        slug: Option<String>,
+        files: Vec<super::SkillSupportingFile>,
+        source: super::github::GitHubSkillSource,
+    ) -> Result<SkillDraft, SkillError> {
+        if source.package_hash != anima_core::skill_packages::skill_package_hash(&bytes, &files) {
+            return Err(SkillError::invalid("GitHub source package hash mismatch"));
+        }
+        if source
+            .original_skill_text
+            .as_ref()
+            .is_some_and(|text| text.as_bytes() != bytes)
+        {
+            return Err(SkillError::invalid("GitHub original skill file mismatch"));
+        }
+        self.import_package_with_source(bytes, slug, files, Some(source))
+            .await
+    }
+
+    async fn import_package_with_source(
+        &self,
+        bytes: Vec<u8>,
+        slug: Option<String>,
+        files: Vec<super::SkillSupportingFile>,
+        source: Option<super::github::GitHubSkillSource>,
+    ) -> Result<SkillDraft, SkillError> {
         let file = parse_skill_file(&bytes).map_err(SkillError::invalid)?;
         anima_core::skill_packages::validate_skill_package(&bytes, &files)
             .map_err(SkillError::invalid)?;
@@ -234,6 +266,7 @@ impl SkillService {
                     let mut draft =
                         SkillDraft::new(&slug, file, DraftSource::Import, None, base_hash, now_ms);
                     draft.files = files;
+                    draft.github_source = source;
                     Ok(add_draft(skills, draft, now_ms))
                 })
                 .await
@@ -358,12 +391,10 @@ impl SkillService {
                 let guard = service.state.read().await;
                 crate::community_bundles::check_skill_edit(&guard, &draft.slug, true)?;
                 let canonical = anima_core::skill_packages::skill_package_hash(
-                    compose_skill_file(
-                        &draft.name,
-                        &draft.description,
+                    &super::github::approved_bytes(
+                        draft,
                         approval.body.as_deref().unwrap_or(&draft.body),
-                    )
-                    .as_bytes(),
+                    )?,
                     approval.files.as_deref().unwrap_or(&draft.files),
                 );
                 crate::community_bundles::check_draft(&guard, draft, Some(&canonical))?;
@@ -403,6 +434,28 @@ impl SkillService {
                 if current_hash != draft.base_hash || actual_hash != draft.base_hash {
                     return Err(SkillError::conflict(
                         "Skill base changed; review a fresh draft before replacing it",
+                    ));
+                }
+            }
+            if let Some(draft) = linked
+                .as_ref()
+                .filter(|draft| draft.is_pending() && draft.github_source.is_some())
+            {
+                let workspace = root.clone();
+                let slug = draft.slug.clone();
+                let package = blocking(move || super::package::read_package(&workspace, &slug))
+                    .await?
+                    .map_err(SkillError::Unavailable)?;
+                let guard = service.state.read().await;
+                let current = guard
+                    .skills
+                    .get(&draft.slug)
+                    .map(|record| record.approved_hash.clone());
+                if current != draft.base_hash
+                    || package.as_ref().map(|package| package.hash()) != draft.base_hash
+                {
+                    return Err(SkillError::conflict(
+                        "Skill base changed; review a fresh GitHub import before replacing it",
                     ));
                 }
             }
@@ -500,12 +553,10 @@ impl SkillService {
                     previous_content,
                     previous_content_hash: draft.base_hash.clone(),
                     content_hash: anima_core::skill_packages::skill_package_hash(
-                        compose_skill_file(
-                            &draft.name,
-                            &draft.description,
+                        &super::github::approved_bytes(
+                            draft,
                             approval.body.as_deref().unwrap_or(&draft.body),
-                        )
-                        .as_bytes(),
+                        )?,
                         approval.files.as_deref().unwrap_or(&draft.files),
                     ),
                     at: 0, // Filled with the approval timestamp under the same write guard.
@@ -528,21 +579,22 @@ impl SkillService {
             };
             let gate = linked
                 .as_ref()
-                .map(|draft| super::evaluation_service::EvaluationGate {
-                    draft_id: id.clone(),
-                    slug: draft.slug.clone(),
-                    source_hash,
-                    candidate_hash: anima_core::skill_packages::skill_package_hash(
-                        compose_skill_file(
-                            &draft.name,
-                            &draft.description,
-                            approval.body.as_deref().unwrap_or(&draft.body),
-                        )
-                        .as_bytes(),
-                        approval.files.as_deref().unwrap_or(&draft.files),
-                    ),
-                    evidence,
-                });
+                .map(|draft| {
+                    Ok::<_, SkillError>(super::evaluation_service::EvaluationGate {
+                        draft_id: id.clone(),
+                        slug: draft.slug.clone(),
+                        source_hash,
+                        candidate_hash: anima_core::skill_packages::skill_package_hash(
+                            &super::github::approved_bytes(
+                                draft,
+                                approval.body.as_deref().unwrap_or(&draft.body),
+                            )?,
+                            approval.files.as_deref().unwrap_or(&draft.files),
+                        ),
+                        evidence,
+                    })
+                })
+                .transpose()?;
             let (slug, draft) = service
                 .apply_with_history(
                     &root,
@@ -565,7 +617,8 @@ impl SkillService {
                         }
                         if (automatic
                             || previous_draft.proposed_by.is_some()
-                            || previous_draft.learning_source.is_some())
+                            || previous_draft.learning_source.is_some()
+                            || previous_draft.github_source.is_some())
                             && previous_draft.base_hash
                                 != skills
                                     .get(&previous_draft.slug)
@@ -585,8 +638,7 @@ impl SkillService {
                             description: previous_draft.description.clone(),
                             body: approval.body.unwrap_or_else(|| previous_draft.body.clone()),
                         };
-                        let bytes = compose_skill_file(&file.name, &file.description, &file.body)
-                            .into_bytes();
+                        let bytes = super::github::approved_bytes(&previous_draft, &file.body)?;
                         let files = approval
                             .files
                             .unwrap_or_else(|| previous_draft.files.clone());
@@ -903,6 +955,7 @@ mod tests {
         let skills = service(&state);
         let mut proposal = proposal("agent-1", "Packaged notes");
         proposal.files = vec![super::super::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Original proposed template".into(),
         }];
@@ -921,6 +974,7 @@ mod tests {
         let found = restored.drafts(false).await.unwrap();
         assert_eq!(found[0].draft.files, draft.files);
         let files = vec![super::super::SkillSupportingFile {
+            encoding: Default::default(),
             path: "templates/note.md".into(),
             content: "Owner reviewed edit".into(),
         }];
@@ -1433,6 +1487,7 @@ mod tests {
         let skills = service(&state);
         let mut first = content("Notes");
         first.files = Some(vec![super::super::SkillSupportingFile {
+            encoding: Default::default(),
             path: "references/check.md".into(),
             content: "Version one".into(),
         }]);
@@ -1441,6 +1496,7 @@ mod tests {
         inferred.files = first.files.unwrap();
         let mut next = content("Notes");
         next.files = Some(vec![super::super::SkillSupportingFile {
+            encoding: Default::default(),
             path: "references/check.md".into(),
             content: "Owner's newer version".into(),
         }]);

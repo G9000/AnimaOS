@@ -1,6 +1,70 @@
 use super::*;
 use crate::agent_runs::test_support::{chat_request, ScriptedModel, Step};
 
+#[cfg(windows)]
+#[tokio::test]
+async fn chat_local_mcp_process_requires_exact_owner_approval_in_free() {
+    use crate::agent_runs::test_support::{decision, patient, pending_approvals};
+    let f = Fixture::new(PolicyAction::Allow, false, false).await;
+    f.state.write().await.start_free(&f.agent.id);
+    let row = f
+        .manager
+        .create_stdio(
+            &f.agent.id,
+            "Local process".into(),
+            crate::mcp::McpStdioSpec {
+                executable: std::env::current_exe()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                args: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![management_call(
+            json!({"action":"connect","connection_id":row.record.id,"expected_version":row.record.version}),
+        )]),
+        Step::Text(vec!["Owner declined the local process."]),
+    ]);
+    f.state.write().await.model_adapter = model;
+    let coordinator = f.coordinator.clone().with_approval_timeouts(patient());
+    let running = {
+        let coordinator = coordinator.clone();
+        let agent = f.agent.id.clone();
+        tokio::spawn(async move {
+            coordinator
+                .run(chat_request(
+                    &agent,
+                    "chat:stdio-approval",
+                    "Connect this local MCP server",
+                ))
+                .await
+        })
+    };
+    let pending = pending_approvals(&coordinator, 1).await.remove(0);
+    assert_eq!(pending.tool, "manage_mcp");
+    coordinator
+        .decide_approval(
+            &pending.id,
+            decision(crate::approvals::ApprovalDecisionKind::Deny, 1),
+        )
+        .await
+        .unwrap();
+    running.await.unwrap().unwrap();
+    assert_eq!(f.factory.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        f.manager
+            .get(&f.agent.id, &row.record.id)
+            .await
+            .unwrap()
+            .state,
+        McpConnectionState::Disconnected
+    );
+    f.manager.shutdown().await;
+}
+
 #[tokio::test]
 async fn chat_mcp_setup_is_visible_before_a_server_is_configured() {
     let f = Fixture::new(PolicyAction::Allow, false, false).await;
@@ -101,6 +165,56 @@ async fn chat_mcp_setup_is_visible_with_tool_discovery_enabled() {
         .flat_map(|r| &r.messages)
         .any(|m| m.role == anima_core::MessageRole::Tool
             && m.content.text.contains("canConfigureMcp")));
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn chat_mcp_setup_reports_browser_sign_in_and_saved_oauth_without_credentials() {
+    let f = Fixture::new(PolicyAction::Allow, false, false).await;
+    let model = manage(&f, json!({"action":"list"})).await;
+    let output = model
+        .requests()
+        .iter()
+        .flat_map(|request| &request.messages)
+        .find(|message| {
+            message.role == anima_core::MessageRole::Tool
+                && message.content.text.contains("canConfigureMcp")
+        })
+        .map(|message| serde_json::from_str::<Value>(&message.content.text).unwrap())
+        .expect("the chat receives the MCP setup result");
+    assert_eq!(output["oauthSignIn"], "Connectors > MCP > Sign in");
+    assert_eq!(output["connections"][0]["accountSignInSaved"], false);
+    assert!(output["setupGuidance"]
+        .as_str()
+        .unwrap()
+        .contains("official setup documentation"));
+    {
+        let mut state = f.state.write().await;
+        state
+            .mcp_registry
+            .connections
+            .get_mut(&f.connection_id)
+            .unwrap()
+            .oauth_credential_ref = Some("synthetic-private-vault-reference".into());
+    }
+    let model = manage(&f, json!({"action":"list"})).await;
+    let result = model
+        .requests()
+        .iter()
+        .flat_map(|request| &request.messages)
+        .find(|message| {
+            message.role == anima_core::MessageRole::Tool
+                && message.content.text.contains("canConfigureMcp")
+        })
+        .map(|message| message.content.text.clone())
+        .unwrap();
+    let output: Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(output["connections"][0]["accountSignInSaved"], true);
+    assert!(!result.contains("synthetic-private-vault-reference"));
+    assert!(output["connections"][0]["authenticationNote"]
+        .as_str()
+        .unwrap()
+        .contains("does not prove"));
     f.manager.shutdown().await;
 }
 

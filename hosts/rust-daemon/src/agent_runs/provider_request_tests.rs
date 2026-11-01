@@ -39,6 +39,8 @@ const AUGMENTED: &[&str] = &[
     "broadcast_message",
     "delegate_to_agent",
     "rename_chat",
+    "import_github_skill",
+    "manage_skill_runtime",
     "compact_chat",
     "export_chat",
     "show_result",

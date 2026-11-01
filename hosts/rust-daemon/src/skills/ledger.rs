@@ -494,6 +494,7 @@ mod tests {
         ));
         let skills = service(&state);
         let files = vec![crate::skills::SkillSupportingFile {
+            encoding: Default::default(),
             path: "references/check.md".into(),
             content: "Check the output independently.".into(),
         }];
@@ -709,6 +710,7 @@ mod tests {
         ));
         let skills = service(&state);
         let files = vec![crate::skills::SkillSupportingFile {
+            encoding: Default::default(),
             path: "references/check.md".into(),
             content: "Keep the reviewed supporting file.".into(),
         }];

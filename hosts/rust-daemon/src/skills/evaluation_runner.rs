@@ -636,7 +636,15 @@ fn trial_request(
         system.push_str(&String::from_utf8_lossy(&package.bytes));
         let mut files: Vec<_> = package.files.iter().collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut remaining = 128 * 1024usize;
         for file in files {
+            if file.encoding == anima_core::skill_packages::SkillFileEncoding::Base64
+                || file.content.len() > remaining
+            {
+                system.push_str(&format!("\nSupporting file: {} ({} bytes; content omitted from response-only evaluation)\n", file.path, file.decoded_len().unwrap_or_default()));
+                continue;
+            }
+            remaining -= file.content.len();
             system.push_str(&format!(
                 "\nSupporting file: {}\n{}\n",
                 file.path, file.content

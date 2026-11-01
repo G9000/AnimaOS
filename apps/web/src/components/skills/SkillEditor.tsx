@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { SkillSupportingFile } from '@animaos/sdk';
-import { SkillSupportingFiles } from './SkillSupportingFiles';
+import { SkillSupportingFiles, supportingFileBytes } from './SkillSupportingFiles';
 
 import {
   invisibleNote,
@@ -160,7 +160,9 @@ export function SkillEditor({
                   }}
                 />
               </label>
-              <label className="skill-field">
+              {file.encoding === 'base64' ? (
+                <p>Binary asset ({supportingFileBytes(file).toLocaleString()} bytes). Its original bytes are preserved.</p>
+              ) : <label className="skill-field">
                 <span>File content {index + 1}</span>
                 <textarea
                   rows={6}
@@ -176,7 +178,7 @@ export function SkillEditor({
                     );
                   }}
                 />
-              </label>
+              </label>}
               <button
                 type="button"
                 className="studio-tool-button"
@@ -192,7 +194,7 @@ export function SkillEditor({
           <button
             type="button"
             className="studio-tool-button"
-            disabled={files.length >= 32}
+            disabled={files.length >= 256}
             onClick={() => {
               setFilesEdited(true);
               setFiles([...files, { path: '', content: '' }]);
@@ -235,32 +237,29 @@ function supportingFilesProblem(
   for (const file of files) {
     const parts = file.path.split('/');
     if (
-      parts.length < 2 ||
-      parts.length > 8 ||
+      parts.length < 1 ||
+      parts.length > 16 ||
       file.path.length > 240 ||
-      !['references', 'templates', 'scripts', 'examples', 'assets'].includes(
-        parts[0],
-      ) ||
       parts.some(
         (part) =>
           !part ||
-          part.startsWith('.') ||
+          (part.startsWith('.') && file.path !== '.skillignore') ||
           /[. ]$/.test(part) ||
           !/^[a-zA-Z0-9_.-]+$/.test(part) ||
           /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(part),
       )
     )
-      return 'Use a relative text file path such as templates/note.md.';
+      return 'Use a portable relative file path such as requirements.txt or templates/note.md.';
     if (seen.has(file.path.toLowerCase()))
       return 'Each supporting file needs a unique path.';
     seen.add(file.path.toLowerCase());
-    const bytes = new TextEncoder().encode(file.content).length;
-    if (bytes > 65536) return 'A supporting file must be at most 64 KiB.';
+    const bytes = supportingFileBytes(file);
+    if (bytes > 8 * 1024 * 1024) return 'A supporting file must be at most 8 MiB.';
     total += bytes;
   }
-  return files.length > 32
-    ? 'A package supports at most 32 supporting files.'
-    : total > 524288
-      ? 'A complete skill package must be at most 512 KiB.'
+  return files.length > 256
+    ? 'A package supports at most 256 supporting files.'
+    : total > 32 * 1024 * 1024
+      ? 'A complete skill package must be at most 32 MiB.'
       : null;
 }

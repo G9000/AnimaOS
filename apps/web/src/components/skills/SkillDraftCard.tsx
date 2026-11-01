@@ -90,6 +90,10 @@ export function SkillDraftCard({
     (diff ? revealInvisible(current ?? '').count : 0);
   const note = invisibleNote(hidden);
   const learningSource = draft.learningSource;
+  const githubSource = draft.githubSource;
+  const githubUrl = githubSource?.sourceUrl.startsWith('https://github.com/')
+    ? githubSource.sourceUrl
+    : null;
   const sourceChat = learningSource
     ? {
         agentId: learningSource.agentId,
@@ -117,6 +121,24 @@ export function SkillDraftCard({
           </button>
         )}
       </header>
+      {githubSource && (
+        <p className="skill-draft-warning" role="note">
+          Imported from{' '}
+          {githubUrl ? (
+            <a href={githubUrl} target="_blank" rel="noopener noreferrer">
+              {githubSource.repository}
+              {githubSource.path ? `/${githubSource.path}` : ''}
+            </a>
+          ) : (
+            githubSource.repository
+          )}{' '}
+          at commit <code>{githubSource.commit.slice(0, 12)}</code>. Imported
+          files remain inactive until you keep this skill.
+          {githubSource.ignoredPaths.length > 0 && (
+            <> Repository metadata excluded: {githubSource.ignoredPaths.join(', ')}.</>
+          )}
+        </p>
+      )}
       {learningSource && (
         <p className="skill-draft-warning" role="note">
           Created from unverified learning advice in review{' '}
@@ -124,6 +146,12 @@ export function SkillDraftCard({
           evidence {learningSource.evidenceDigest.slice(0, 12)}. Review and
           approve this draft separately.
         </p>
+      )}
+      {githubSource?.originalSkillText && (
+        <details>
+          <summary>Original package instructions and metadata</summary>
+          <pre className="skill-body">{revealInvisible(githubSource.originalSkillText).text}</pre>
+        </details>
       )}
       {description.text && (
         <p className="skill-draft-description">{description.text}</p>
