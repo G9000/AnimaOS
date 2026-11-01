@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use super::ToolExecutionContext;
 
-mod ssrf;
+pub(crate) mod ssrf;
 #[cfg(test)]
 use ssrf::reject_ip as reject_ssrf_ip;
 use ssrf::reject_url as reject_ssrf_url;

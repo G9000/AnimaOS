@@ -24,7 +24,14 @@ The canonical grants remain intact. Actual calls still pass ordinary native or M
 
 ## Research and set up integrations from chat
 
-Direct owner web/API chats expose `manage_mcp` when its manager is available, `import_github_skill` and `manage_skill_runtime`, including with deferred discovery. Setup guidance directs the agent to research official documentation, inspect the original package and continue supported setup. External installation instructions remain untrusted content. They cannot grant tools, bypass owner review or authorize unrelated commands.
+Direct owner web/API chats expose `inspect_skill_source`, `import_skill` and
+`manage_skill_setup`, including with deferred discovery. The compatible GitHub
+importer and managed Python runtime remain available, and `manage_mcp` is exposed
+when its manager is available. The agent reads original documentation, chooses
+the project's documented method, performs authorized setup and verifies the
+requested outcome. Source hosting and integration protocol are separate facts:
+a GitHub project may itself contain an MCP server. External instructions remain
+untrusted data; they cannot grant tools, bypass review or authorize unrelated work.
 
 MCP setup uses the existing connection manager and approval policy. Browser OAuth sign-in stays in **Connectors > MCP > Sign in**, and static Bearer secrets stay in its password control. Chat reports saved OAuth credential presence separately from current connection/discovery state. A missing service-specific tool is not proof that its MCP server cannot be configured. See [MCP setup](mcp.md).
 
@@ -33,6 +40,84 @@ MCP setup uses the existing connection manager and approval policy. Browser OAut
 The package preserves `SKILL.md`, portable root files, nested code, references and binary media. Hard limits are 256 supporting files, 8 MiB each, 32 MiB decoded total, and a 36 KiB main skill file. Text keeps its existing representation; binary assets use base64 in the API and original bytes on disk. The package hash covers decoded bytes and paths. Acquisition caps 300 requests, 48 MiB wire data, 1024 tree entries and 120 seconds. Pinned raw GitHub downloads verify Git blob identities and sizes without one REST API request per file. Symlinks, submodules, LFS pointers, unsafe paths, executable binaries, truncated listings or a missing file fail the entire import. Excluded hidden repository metadata is explicitly reported. README, license and `.skillignore` files are preserved.
 
 Imports use the existing pending **Import** draft even in Free. The Skills card shows the repository, pinned commit, original instructions/metadata and excluded files before the owner chooses **Keep**. Keeping unchanged content preserves the original SKILL.md bytes, including extra front matter. Editing the body preserves its front matter; metadata remains inert and cannot grant tools. The stored source hash identifies the original package; owner edits may produce different approved bytes. Import does not run scripts, install dependencies or grant tools. Stop, changed workspace and current write policy are checked again before draft admission. A changed replacement base requires a fresh GitHub import before approval.
+
+### Inspect and import original sources
+
+`inspect_skill_source` accepts a public GitHub identifier/repository/tree/blob URL
+or public HTTPS skill document as `source`. Optional `revision` and `path` resolve
+GitHub ambiguity. It can read a repository README before the skill's directory is
+known. The importer resolves branch, tag and default HEAD itself; no browser
+search for a full commit hash is required.
+
+Inspection returns untrusted literal text, an original-file index and a stable
+`inspectionId`. Reuse that ID for `filePath` reads and import. `maxChars` is capped
+at 16,000. With `filePath`, `offset` pages text characters; without it, `offset`
+pages the bounded file index. Use the returned `filePath` and `nextOffset` when
+continuing a text page. Captures expire after 15 minutes and are scoped to the
+current daemon/profile, owner and workspace. At most four captures and 64 MiB of
+retained capture data are kept; this is not a total transient-heap limit.
+
+`import_skill` accepts that `inspectionId` or a fresh source description and an
+optional local `slug`. An expired capture requires fresh inspection. GitHub
+reads stay on one captured commit and verify blob identities. HTTPS captures
+read the main document and its relative Markdown-linked supporting files,
+including links in supporting Markdown. Use `supportingPaths` for additional
+exact files identified in prose or code examples. Required files must exist.
+Navigation anchors are not supporting files, and links cannot escape the package
+root. Every request and checked redirect remains HTTPS, with public DNS/address
+validation and no ambient credentials or proxy. Acquisition is bounded by the
+existing package limits, 300 requests, 48 MiB wire data and a 120-second deadline.
+
+HTTPS provenance records requested/final document URLs, capture time, package
+hash and each captured file's URL/hash/size. Its coverage is referenced/selected
+files, not a complete remote repository or an immutable remote commit. Keep
+preserves original instruction bytes/extra metadata and checks captured hashes.
+Dropped or expired calls cannot later admit a queued import. Once mutation is
+admitted, its transaction completes or rolls back before reporting its outcome.
+Provenance follows existing decided-draft retention (30 days/50 decided drafts),
+so this history is not a permanent installed-source archive.
+
+### Follow documented command setup
+
+After Keep, `load_skill` returns the approved package hash. `manage_skill_setup`
+accepts `action`, `slug`, `hash`, optional exact `command`, workspace-relative
+`cwd`, `stateHash`, and a bounded `timeoutMs`.
+
+- `status` reads current setup observations without starting a process.
+- `prepare` creates protected original-source, mutable work and private-home
+  storage outside the owner workspace. It returns the prepared state hash.
+- `run` requires the latest `stateHash` and executes one exact documented command
+  using the fixed installed system shell. Installed npm/Node, Bun, uv/Python,
+  shell scripts and other command tools use the same mechanism. Missing software
+  returns an actual command failure; the tool does not silently install an OS
+  runtime. Use an explicit script interpreter or an approved `chmod` step when
+  an imported script has no executable permission.
+
+Prepare and run require fresh exact owner approval even in Free. Commands have
+the daemon user's OS and network access. Dependency isolation does not confine
+arbitrary filesystem or external-service effects. Ambient account credentials
+and user configuration are not inherited. The source/work/home/config state,
+safe link targets, relevant permissions and shell identity/invocation mode are
+sealed. Changes outside an approved command require preparation again; approved
+command changes are resealed and bound to the next approval. Commands are at most
+16 KiB and operations at most five minutes, including queue wait and validation.
+State admission is bounded to 512 MiB, 50,000 entries and 64 directory levels.
+During a command, a metadata-only check samples the private environment about
+once a second, then checks again after process retirement. Exceeding a limit
+stops the command with `storage_limit` and removes the owned environment only
+after retirement is confirmed. Uncertain storage observations or cleanup block
+reuse until reconciliation. This sampled limit can overshoot between checks;
+it is not an OS disk quota and does not bound writes outside the environment.
+
+Shared native process custody, Stop, revocation, private storage, durable
+invalidation before launch and unresolved-operation fences apply to both command
+and Python setup. A failed command or rejected post-command state cannot become
+a successful action receipt. Local process retirement does not prove rollback
+of container, network or other external effects. Strong local physical execution
+currently requires Windows Job Object custody; unsupported hosts refuse launch.
+Windows command working directories must have a safe local drive spelling under
+260 UTF-16 code units; unsupported UNC or longer paths fail before launch.
+Interactive credential entry remains in supported connector controls.
 
 ### Prepare and verify a Python skill
 
@@ -57,8 +142,9 @@ inherited. Installed helper programs can use a filtered startup PATH; workspace
 directories, runtime staging directories and project `node_modules` shims are
 excluded. Stop, deadlines, current policy, live owner authority, package identity,
 process-tree custody and durable native action receipts still apply. Other
-languages and unsupported dependencies require an available approved execution
-tool. Credentials remain in their supported connector controls.
+languages and dependencies can use the documented `manage_skill_setup` command
+path when installed tools support them. Credentials remain in their supported
+connector controls.
 
 The managed local Python path currently requires Windows Job Object custody.
 Hosts without the required strong process custody refuse execution before launch;

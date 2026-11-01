@@ -127,6 +127,7 @@ pub(crate) struct SkillDraftResponse {
     pub(crate) proposed_by: Option<ProposedByResponse>,
     pub(crate) learning_source: Option<crate::learning::LearningSkillSource>,
     pub(crate) github_source: Option<crate::skills::github::GitHubSkillSource>,
+    pub(crate) url_source: Option<crate::skills::source::UrlSkillSource>,
     /// The skill's approved hash when the draft was made; `null` for a new slug.
     pub(crate) base_hash: Option<String>,
     /// The skill's approved hash now; `null` when it has no record.
@@ -164,6 +165,7 @@ impl From<&DraftView> for SkillDraftResponse {
             }),
             learning_source: draft.learning_source.clone(),
             github_source: draft.github_source.clone(),
+            url_source: draft.url_source.clone(),
             base_hash: draft.base_hash.clone(),
             current_hash: view.current_hash.clone(),
             stale: draft.is_pending()
@@ -219,4 +221,43 @@ pub(crate) struct SkillRevertResponse {
     /// `null` when the skill was removed.
     pub(crate) skill: Option<SkillResponse>,
     pub(crate) removed: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_import_provenance_reaches_the_owner_review_response_unchanged() {
+        let original = "\u{feff}---\r\nname: Notes\r\ndescription: Capture notes\r\ncustom: retained\r\n---\r\nUse the original files.\r\n";
+        let mut draft = SkillDraft::new(
+            "notes",
+            crate::skills::SkillFile {
+                name: "Notes".into(),
+                description: "Capture notes".into(),
+                body: "Use the original files.".into(),
+            },
+            DraftSource::Import,
+            None,
+            None,
+            1,
+        );
+        draft.url_source = Some(crate::skills::source::UrlSkillSource {
+            requested_url: "https://example.com/notes/SKILL.md".into(),
+            source_url: "https://cdn.example.com/notes/SKILL.md".into(),
+            observed_at_ms: 1,
+            package_hash: "a".repeat(64),
+            original_skill_text: Some(original.into()),
+            coverage: "referenced_files".into(),
+            files: vec![],
+        });
+        let body = serde_json::to_value(SkillDraftResponse::of(&draft, None)).unwrap();
+        assert_eq!(body["urlSource"]["originalSkillText"], original);
+        assert_eq!(body["urlSource"]["coverage"], "referenced_files");
+        assert_eq!(
+            body["urlSource"]["sourceUrl"],
+            "https://cdn.example.com/notes/SKILL.md"
+        );
+        assert_eq!(body["status"], "pending");
+    }
 }

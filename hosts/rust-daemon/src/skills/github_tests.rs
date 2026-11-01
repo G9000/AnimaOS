@@ -119,6 +119,67 @@ fn github_blob_integrity_uses_git_object_framing() {
 }
 
 #[tokio::test]
+async fn github_inspection_reads_repository_readme_before_a_skill_path_is_known_and_pins_pages() {
+    let readme = b"# Original project\nUse skills/notes and its original setup script.\n".to_vec();
+    let request = GitHubSkillRequest {
+        repository: "example/skills".into(),
+        revision: None,
+        path: String::new(),
+        slug: None,
+    };
+    let api = FakeApi(Mutex::new(VecDeque::from([
+        (
+            path(&["commits", "HEAD"]),
+            false,
+            false,
+            json(serde_json::json!({"sha":COMMIT,"commit":{"tree":{"sha":ROOT}}})),
+        ),
+        (
+            path(&["git", "trees", ROOT]),
+            false,
+            false,
+            json(serde_json::json!({"truncated":false,"tree":[
+                entry("README.md","100644","blob",&git_blob_hash(&readme),readme.len()),
+                entry("skills","040000","tree",SUBTREE,0),
+                entry("unrelated file.txt","100644","blob",SUPPORT,20)
+            ]})),
+        ),
+        (
+            ["example", "skills", COMMIT, "README.md"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            true,
+            false,
+            readme.clone(),
+        ),
+        (
+            ["example", "skills", COMMIT, "README.md"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            true,
+            false,
+            b"Changed upstream bytes!".to_vec(),
+        ),
+    ])));
+    let inspection = inspect_directory(&request, &api).await.unwrap();
+    assert_eq!(inspection.request.revision.as_deref(), Some(COMMIT));
+    assert_eq!(inspection.commit, COMMIT);
+    assert_eq!(inspection.entries.len(), 3);
+    assert_eq!(
+        read_indexed_file(&inspection, "README.md", &api)
+            .await
+            .unwrap(),
+        readme
+    );
+    assert!(read_indexed_file(&inspection, "README.md", &api)
+        .await
+        .is_err());
+    assert!(api.0.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 #[ignore = "downloads the pinned public last30days package; run explicitly for network acceptance"]
 async fn github_live_last30days_acquisition_preserves_complete_pinned_package() {
     let request = GitHubSkillRequest {

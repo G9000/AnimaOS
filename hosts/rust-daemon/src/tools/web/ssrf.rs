@@ -12,7 +12,7 @@ use reqwest::{redirect, ClientBuilder, Url};
 
 const MAX_DNS_ADDRESSES: usize = 64;
 
-pub(super) fn client_builder() -> ClientBuilder {
+pub(crate) fn client_builder() -> ClientBuilder {
     reqwest::Client::builder()
         // A proxy may resolve the destination itself, bypassing this resolver.
         // No implicit environment or OS proxy is allowed on model-selected URLs.
@@ -31,7 +31,7 @@ pub(super) fn client_builder() -> ClientBuilder {
 
 /// Literal IPs bypass DNS inside reqwest, so check the initial URL and every
 /// redirect too. Named hosts are additionally checked by `PublicResolver`.
-pub(super) fn reject_url(url: &Url) -> Result<(), String> {
+pub(crate) fn reject_url(url: &Url) -> Result<(), String> {
     if !matches!(url.scheme(), "http" | "https") {
         return Err("web_fetch only supports http/https".into());
     }

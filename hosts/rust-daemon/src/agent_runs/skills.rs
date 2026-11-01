@@ -53,13 +53,8 @@ impl AgentRunCoordinator {
             runtime.register_provider(Arc::new(SkillContextProvider::learn(guidance.into())));
         }
         let skills = self.skills();
-        let mcp_setup = runtime.config().allows_tool("manage_mcp");
-        let github_setup = runtime.config().allows_tool("import_github_skill");
-        if mcp_setup || github_setup {
-            runtime.register_provider(Arc::new(SkillContextProvider::integration_setup(
-                mcp_setup,
-                github_setup,
-            )));
+        if let Some(setup) = SkillContextProvider::integration_setup(runtime.config()) {
+            runtime.register_provider(Arc::new(setup));
         }
         // An agent without `load_skill` could not load a listed skill.
         if runtime.config().allows_tool("load_skill") {

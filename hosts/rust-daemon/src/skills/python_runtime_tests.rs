@@ -132,6 +132,46 @@ fn helper_path_keeps_installed_tools_and_excludes_project_shims_and_duplicates()
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn shell_process_paths_use_normal_spellings_without_changing_filesystem_identity() {
+    use std::path::{Component, Prefix};
+    let private = crate::document_edits::store::test_support::private_directory();
+    let directory = private.path().join("normal directory with spaces");
+    std::fs::create_dir(&directory).unwrap();
+    let canonical = directory.canonicalize().unwrap();
+    let normal = shell_process_path(&canonical).unwrap();
+    assert!(
+        matches!(normal.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_)))
+    );
+    assert_eq!(
+        shell_path_identity(&canonical).unwrap(),
+        shell_path_identity(&normal).unwrap()
+    );
+    assert_eq!(normal.canonicalize().unwrap(), canonical);
+    assert_eq!(shell_current_directory(&canonical).unwrap(), normal);
+    let file = directory.join("fixture.cmd");
+    std::fs::write(&file, "@echo fixture").unwrap();
+    let normal_file = shell_process_path(&file.canonicalize().unwrap()).unwrap();
+    assert_eq!(
+        shell_path_identity(&file).unwrap(),
+        shell_path_identity(&normal_file).unwrap()
+    );
+    for name in [
+        "NUL",
+        "con.txt",
+        "COM1.log",
+        "LPT².txt",
+        "trailing.",
+        "trailing ",
+        "name:stream",
+        "wild?card",
+    ] {
+        assert!(!normal_windows_component(name), "{name}");
+    }
+    assert!(normal_windows_component("ordinary dependency-1.0"));
+}
+
 #[test]
 fn environment_seal_covers_dependency_bytes_and_python_configuration() {
     let temp = tempfile::tempdir().unwrap();
@@ -193,7 +233,41 @@ fn runtime_cleanup_failure_persists_marker_and_refuses_admission() {
         .unwrap()
         .lock()
         .unwrap()
-        .remove(&root.canonicalize().unwrap().join(name));
+        .remove(&operation_key(root).unwrap());
+    assert_eq!(persisted_marker_count(root), 0);
+}
+
+#[test]
+fn runtime_quarantine_survives_aliases_removed_marker_and_root_recreation() {
+    let private = crate::document_edits::store::test_support::private_directory();
+    let root = private.path();
+    let alias = root
+        .parent()
+        .unwrap()
+        .join(".")
+        .join(root.file_name().unwrap());
+    #[cfg(windows)]
+    let alias = PathBuf::from(alias.as_os_str().to_string_lossy().to_uppercase());
+    let logical_key = operation_key(root).unwrap();
+    assert_eq!(operation_key(&alias).unwrap(), logical_key);
+    assert!(Arc::ptr_eq(&lease(root).unwrap(), &lease(&alias).unwrap()));
+    let physical = PhysicalLease::admit(root, OPERATION_MARKER.into()).unwrap();
+    physical.settled.store(false, Ordering::Release);
+    drop(physical);
+    std::fs::remove_file(root.join(OPERATION_MARKER)).unwrap();
+    assert_eq!(persisted_marker_count(&alias), 1);
+    std::fs::remove_dir(root).unwrap();
+    assert_eq!(persisted_marker_count(&alias), 1);
+    crate::document_edits::store::initialize_owned_directory(root).unwrap();
+    assert_eq!(operation_key(&alias).unwrap(), logical_key);
+    assert_eq!(persisted_marker_count(&alias), 1);
+    assert!(PhysicalLease::admit(&alias, OPERATION_MARKER.into()).is_err());
+    QUARANTINED
+        .get()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .remove(&logical_key);
     assert_eq!(persisted_marker_count(root), 0);
 }
 

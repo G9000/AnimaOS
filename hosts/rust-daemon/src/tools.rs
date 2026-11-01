@@ -39,6 +39,8 @@ mod microsoft_files;
 mod output_safety;
 pub(crate) mod process;
 pub(crate) mod skill_runtime;
+pub(crate) mod skill_setup;
+pub(crate) mod skill_sources;
 mod skills;
 mod standing_intents;
 mod team;
@@ -47,7 +49,7 @@ mod tests;
 pub(crate) mod todo;
 mod tool_results;
 mod utility;
-mod web;
+pub(crate) mod web;
 pub(crate) mod web_search;
 mod workflow_templates;
 mod workflows;
@@ -765,6 +767,26 @@ impl ToolExecutionContext {
                 );
             }
         }
+        if tool_call.name == skill_setup::NAME {
+            if let Err(error) = skill_setup::preflight(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+            if self.approvals.is_none()
+                || self.action_journal.is_none()
+                || !self.standing_owner_turn
+                || self.has_upstream_tool_origin()
+            {
+                return TaskResult::error(
+                    "Skill setup requires a direct owner run with approvals and native receipts",
+                    0,
+                );
+            }
+        }
+        if skill_sources::is_source_tool(&tool_call.name) {
+            if let Err(error) = skill_sources::preflight(&tool_call) {
+                return TaskResult::error(error, 0);
+            }
+        }
         if tool_call.name == "execute_code" {
             let arguments =
                 crate::routes::data_value_to_json(&DataValue::Object(tool_call.args.clone()))
@@ -1409,6 +1431,8 @@ impl ToolRegistry {
         mcp_management::register(&mut registry);
         github_skill::register(&mut registry);
         skill_runtime::register(&mut registry);
+        skill_setup::register(&mut registry);
+        skill_sources::register(&mut registry);
         registry.register(tool_descriptor("clear_main_chat", "Clear/reset this main conversation only when the owner explicitly asks. Keeps the companion, settings and all saved memories. The host clears messages and conversation summaries after this turn settles. After a successful request, finish your reply immediately; do not call other tools or save conversation memories. A request is pending until the host applies it.", object_parameters(vec![])), main_chat_clear::execute);
         let mut code_parameters = object_parameters(vec![required_parameter("code", non_blank_string_parameter("Complete Python program; serialized arguments must fit the 16 KiB execution review")), optional_parameter("reset", boolean_parameter("Explicit state-reset request; one-shot execution is always fresh"))]);
         code_parameters.insert("additionalProperties".into(), DataValue::Bool(false));

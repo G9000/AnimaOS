@@ -70,12 +70,37 @@ export interface GitHubSkillSource {
   ignoredPaths: string[];
 }
 
+/** One captured file, identified by its retrieved bytes and final HTTPS URL. */
+export interface UrlSkillSourceFile {
+  path: string;
+  sourceUrl: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+/** An observed HTTPS document and its referenced or selected package files.
+ * This is a capture, not a complete repository or an immutable commit. */
+export interface UrlSkillSource {
+  requestedUrl: string;
+  /** Final document URL after redirects. */
+  sourceUrl: string;
+  observedAtMs: number;
+  /** Hash of the original retrieved package, before canonical formatting. */
+  packageHash: string;
+  /** Exact original instruction file, including metadata and formatting. */
+  originalSkillText?: string | null;
+  coverage: 'referenced_files';
+  files: UrlSkillSourceFile[];
+}
+
 /** A draft waiting for the owner, or decided (spec §8.2). Untrusted: the
  *  model or a file wrote it, so show it as text, never as markup. */
 export interface SkillDraft {
   files?: SkillSupportingFile[];
   /** An immutable public GitHub source for an imported package. */
   githubSource?: GitHubSkillSource | null;
+  /** Original HTTPS source capture retained for owner review. */
+  urlSource?: UrlSkillSource | null;
   /** `skd_<uuid>`, or `file:<slug>` for a SKILL.md without a record. */
   id: string;
   slug: string;

@@ -84,16 +84,29 @@ async fn github_import_is_visible_with_discovery_and_redacts_invalid_source_rece
 #[tokio::test]
 async fn skill_runtime_requires_exact_owner_approval_even_in_free_before_any_effect() {
     let hash = "a".repeat(64);
-    for action in ["prepare", "run"] {
+    for (tool, action) in [
+        ("manage_skill_runtime", "prepare"),
+        ("manage_skill_runtime", "run"),
+        ("manage_skill_setup", "prepare"),
+        ("manage_skill_setup", "run"),
+    ] {
         let mut input = call(
-            "manage_skill_runtime",
+            tool,
             &[("action", action), ("slug", "sample"), ("hash", &hash)],
         );
-        if action == "run" {
+        if action == "run" && tool == "manage_skill_runtime" {
             input.args.insert(
                 "entrypoint".into(),
                 DataValue::String("scripts/check.py".into()),
             );
+        } else if action == "run" {
+            input.args.insert(
+                "command".into(),
+                DataValue::String("node scripts/check.js".into()),
+            );
+            input
+                .args
+                .insert("stateHash".into(), DataValue::String("b".repeat(64)));
         }
         let model = ScriptedModel::new(vec![
             Step::Tools(vec![input]),
@@ -115,7 +128,7 @@ async fn skill_runtime_requires_exact_owner_approval_even_in_free_before_any_eff
             })
         };
         let pending = pending_approvals(&coordinator, 1).await.remove(0);
-        assert_eq!(pending.tool, "manage_skill_runtime");
+        assert_eq!(pending.tool, tool);
         coordinator
             .decide_approval(&pending.id, decision(ApprovalDecisionKind::Deny, 1))
             .await

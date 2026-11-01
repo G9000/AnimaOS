@@ -332,6 +332,8 @@ export type {
   SkillInput,
   SkillStatus,
   SkillSupportingFile,
+  UrlSkillSource,
+  UrlSkillSourceFile,
 } from './skills.js';
 export type {
   SkillEvaluationSuite,

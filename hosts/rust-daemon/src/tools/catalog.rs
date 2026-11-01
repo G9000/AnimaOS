@@ -104,6 +104,9 @@ impl RunToolCatalog {
                             | "manage_mcp"
                             | "import_github_skill"
                             | "manage_skill_runtime"
+                            | "inspect_skill_source"
+                            | "import_skill"
+                            | "manage_skill_setup"
                             | "show_result"
                             | "list_results"
                     ) =>
@@ -603,6 +606,9 @@ impl ModelToolSelector for RunToolCatalog {
             "manage_mcp",
             "import_github_skill",
             "manage_skill_runtime",
+            "inspect_skill_source",
+            "import_skill",
+            "manage_skill_setup",
             "show_result",
             "list_results",
         ] {

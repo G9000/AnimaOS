@@ -367,8 +367,10 @@ impl RunActionJournal {
             let guard = shared.read().await;
             self.check_owner(&guard, true)?;
             super::chat_controls::validate_owner_chat(&guard, &self.run)?;
-            if call.name != crate::tools::skill_runtime::NAME
-                || (crate::tools::skill_runtime::requires_exact_approval(call) && !approved)
+            if !matches!(
+                call.name.as_str(),
+                crate::tools::skill_runtime::NAME | crate::tools::skill_setup::NAME
+            ) || (crate::tools::skill_runtime::requires_exact_approval(call) && !approved)
             {
                 return Err("Skill runtime requires exact owner approval".into());
             }
@@ -738,6 +740,10 @@ impl RunActionJournal {
                         crate::tools::github_skill::arguments_preview(&call)
                     } else if call.name == crate::tools::skill_runtime::NAME {
                         crate::tools::skill_runtime::arguments_preview(&call)
+                    } else if call.name == crate::tools::skill_setup::NAME {
+                        crate::tools::skill_setup::arguments_preview(&call)
+                    } else if crate::tools::skill_sources::is_source_tool(&call.name) {
+                        crate::tools::skill_sources::arguments_preview(&call)
                     } else {
                         crate::routes::data_value_to_json(&DataValue::Object(call.args.clone()))
                             .to_string()

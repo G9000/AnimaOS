@@ -174,7 +174,7 @@ struct PublicGitHub {
 impl PublicGitHub {
     fn new() -> Result<Self, GitHubSkillError> {
         Ok(Self {
-            client: reqwest::Client::builder()
+            client: crate::tools::web::ssrf::client_builder()
                 .https_only(true)
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
@@ -269,10 +269,198 @@ struct TreeEntry {
     sha: String,
     size: Option<usize>,
 }
-struct RetrievedPackage {
-    bytes: Vec<u8>,
-    files: Vec<SkillSupportingFile>,
-    source: GitHubSkillSource,
+pub(super) struct RetrievedPackage {
+    pub(super) bytes: Vec<u8>,
+    pub(super) files: Vec<SkillSupportingFile>,
+    pub(super) source: GitHubSkillSource,
+}
+
+pub(super) async fn acquire_public(
+    request: &GitHubSkillRequest,
+) -> Result<RetrievedPackage, GitHubSkillError> {
+    acquire(request, &PublicGitHub::new()?).await
+}
+
+/// A bounded directory index pinned to the resolved commit. Unlike an import,
+/// inspection also works at a repository root containing only a README.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct InspectionEntry {
+    pub(super) path: String,
+    pub(super) kind: String,
+    pub(super) size_bytes: Option<usize>,
+    pub(super) git_blob_hash: String,
+}
+
+#[derive(Clone)]
+pub(super) struct GitHubInspection {
+    pub(super) request: GitHubSkillRequest,
+    pub(super) commit: String,
+    pub(super) entries: Vec<InspectionEntry>,
+    tree_sha: String,
+}
+
+pub(super) async fn inspect_public(
+    candidates: &[GitHubSkillRequest],
+) -> Result<Vec<GitHubInspection>, GitHubSkillError> {
+    let api = PublicGitHub::new()?;
+    tokio::time::timeout(ACQUISITION_TIME, async {
+        let mut resolved = Vec::new();
+        for request in candidates {
+            match inspect_directory(request, &api).await {
+                Ok(inspection) => {
+                    resolved.push(inspection);
+                    if resolved.len() == 2 {
+                        break;
+                    }
+                }
+                Err(GitHubSkillError::NotPublic) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(resolved)
+    })
+    .await
+    .map_err(|_| GitHubSkillError::Timeout)?
+}
+
+async fn inspect_directory(
+    request: &GitHubSkillRequest,
+    api: &impl GitHubApi,
+) -> Result<GitHubInspection, GitHubSkillError> {
+    request.validate()?;
+    let commit: Commit = serde_json::from_slice(
+        &api.read(request.api(
+            &["commits", request.revision.as_deref().unwrap_or("HEAD")],
+            false,
+            false,
+            MAX_METADATA_BYTES,
+        ))
+        .await?,
+    )
+    .map_err(|_| GitHubSkillError::Protocol)?;
+    if !object_id(&commit.sha) || !object_id(&commit.commit.tree.sha) {
+        return Err(GitHubSkillError::Protocol);
+    }
+    let mut sha = commit.commit.tree.sha;
+    for segment in request
+        .path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+    {
+        let parent = tree(request, api, &sha, false).await?;
+        let matches: Vec<_> = parent
+            .tree
+            .iter()
+            .filter(|entry| entry.path == segment)
+            .collect();
+        if matches.len() != 1 || matches[0].mode != "040000" || matches[0].kind != "tree" {
+            return Err(GitHubSkillError::NotPublic);
+        }
+        sha.clone_from(&matches[0].sha);
+    }
+    let entries = inspection_entries(tree(request, api, &sha, false).await?)?;
+    let mut pinned = request.clone();
+    pinned.revision = Some(commit.sha.clone());
+    Ok(GitHubInspection {
+        request: pinned,
+        commit: commit.sha,
+        entries,
+        tree_sha: sha,
+    })
+}
+
+fn inspection_entries(tree: Tree) -> Result<Vec<InspectionEntry>, GitHubSkillError> {
+    let mut entries = Vec::new();
+    let mut seen = BTreeSet::new();
+    for entry in tree.tree {
+        if entry.path.is_empty()
+            || entry.path.len() > 512
+            || entry.path.contains(['/', '\\'])
+            || matches!(entry.path.as_str(), "." | "..")
+            || entry.path.chars().any(char::is_control)
+            || !seen.insert(entry.path.to_ascii_lowercase())
+        {
+            return Err(GitHubSkillError::Protocol);
+        }
+        entries.push(InspectionEntry {
+            path: entry.path,
+            kind: entry.kind,
+            size_bytes: entry.size,
+            git_blob_hash: entry.sha,
+        });
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
+
+pub(super) async fn read_inspection_file(
+    inspection: &GitHubInspection,
+    path: &str,
+) -> Result<Vec<u8>, GitHubSkillError> {
+    if let Some((parent, leaf)) = path.rsplit_once('/') {
+        let api = PublicGitHub::new()?;
+        let mut sha = inspection.tree_sha.clone();
+        for segment in parent.split('/') {
+            if !source_segment(segment) {
+                return Err(GitHubSkillError::Invalid);
+            }
+            let parent_tree = tree(&inspection.request, &api, &sha, false).await?;
+            let matches: Vec<_> = parent_tree
+                .tree
+                .iter()
+                .filter(|entry| entry.path == segment)
+                .collect();
+            if matches.len() != 1 || matches[0].mode != "040000" || matches[0].kind != "tree" {
+                return Err(GitHubSkillError::NotPublic);
+            }
+            sha.clone_from(&matches[0].sha);
+        }
+        let mut nested = inspection.clone();
+        nested.request.path = if nested.request.path.is_empty() {
+            parent.to_string()
+        } else {
+            format!("{}/{parent}", nested.request.path)
+        };
+        nested.entries = inspection_entries(tree(&inspection.request, &api, &sha, false).await?)?;
+        nested.tree_sha = sha;
+        return read_indexed_file(&nested, leaf, &api).await;
+    }
+    read_indexed_file(inspection, path, &PublicGitHub::new()?).await
+}
+
+async fn read_indexed_file(
+    inspection: &GitHubInspection,
+    path: &str,
+    api: &impl GitHubApi,
+) -> Result<Vec<u8>, GitHubSkillError> {
+    // Inspections use the same exact-commit raw URL and Git blob verification
+    // as imports. A moving branch can never change a later page.
+    let entry = inspection
+        .entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .ok_or(GitHubSkillError::NotPublic)?;
+    if entry.kind != "blob"
+        || entry
+            .size_bytes
+            .is_none_or(|size| size > MAX_SKILL_SUPPORTING_FILE_BYTES)
+    {
+        return Err(GitHubSkillError::Limits);
+    }
+    let content = api
+        .read(
+            inspection
+                .request
+                .raw(&inspection.commit, path, MAX_SKILL_SUPPORTING_FILE_BYTES),
+        )
+        .await?;
+    if Some(content.len()) != entry.size_bytes
+        || git_blob_hash(&content) != entry.git_blob_hash.to_ascii_lowercase()
+    {
+        return Err(GitHubSkillError::Protocol);
+    }
+    Ok(content)
 }
 async fn tree(
     request: &GitHubSkillRequest,
@@ -471,10 +659,35 @@ fn git_blob_hash(bytes: &[u8]) -> String {
 /// Preserve the imported manifest at approval. Unknown upstream front matter
 /// stays data: it neither grants tools nor changes the execution policy.
 pub(super) fn approved_bytes(draft: &super::SkillDraft, body: &str) -> Result<Vec<u8>, SkillError> {
-    let Some(source) = draft.github_source.as_ref() else {
+    if draft.github_source.is_some() && draft.url_source.is_some() {
+        return Err(SkillError::invalid(
+            "A skill draft cannot have two remote sources",
+        ));
+    }
+    if let Some(source) = &draft.url_source {
+        source.validate_draft(draft)?;
+    }
+    let original_and_hash = draft
+        .github_source
+        .as_ref()
+        .map(|source| {
+            (
+                source.original_skill_text.as_deref(),
+                source.package_hash.as_str(),
+            )
+        })
+        .or_else(|| {
+            draft.url_source.as_ref().map(|source| {
+                (
+                    source.original_skill_text.as_deref(),
+                    source.package_hash.as_str(),
+                )
+            })
+        });
+    let Some((original, package_hash)) = original_and_hash else {
         return Ok(super::compose_skill_file(&draft.name, &draft.description, body).into_bytes());
     };
-    let Some(original) = source.original_skill_text.as_deref() else {
+    let Some(original) = original else {
         // Old imported drafts did not retain the original file.
         return Ok(super::compose_skill_file(&draft.name, &draft.description, body).into_bytes());
     };
@@ -482,7 +695,7 @@ pub(super) fn approved_bytes(draft: &super::SkillDraft, body: &str) -> Result<Ve
     if parsed.name != draft.name
         || parsed.description != draft.description
         || parsed.body != draft.body
-        || skill_package_hash(original.as_bytes(), &draft.files) != source.package_hash
+        || skill_package_hash(original.as_bytes(), &draft.files) != package_hash
     {
         return Err(SkillError::invalid(
             "The original GitHub skill package no longer matches its reviewed draft",
@@ -514,6 +727,19 @@ pub(super) struct OwnerImportScope {
     approved: bool,
 }
 impl OwnerImportScope {
+    pub(super) fn new(
+        run: crate::runs::RunLink,
+        root: PathBuf,
+        call: anima_core::ToolCall,
+        approved: bool,
+    ) -> Self {
+        Self {
+            run,
+            root,
+            call,
+            approved,
+        }
+    }
     pub(super) fn check(
         &self,
         state: &crate::state::DaemonState,

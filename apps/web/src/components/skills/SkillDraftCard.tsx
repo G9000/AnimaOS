@@ -10,6 +10,7 @@ import { daemon } from '../../lib/daemon-api';
 import { lineDiff, type DiffLine } from '../../lib/skill-diff';
 import {
   SOURCE_LABELS,
+  hasControlCharacter,
   invisibleNote,
   revealInvisible,
 } from '../../lib/skills';
@@ -21,6 +22,45 @@ const DIFF_PREFIX: Record<DiffLine['kind'], string> = {
   added: '+ ',
   removed: '- ',
 };
+
+/** Source metadata is untrusted. Never expose credentials or URL parameters. */
+function safeSourceUrl(value: string): string | null {
+  if (
+    !/^https:\/\//i.test(value) ||
+    /[\s\\]/u.test(value) ||
+    hasControlCharacter(value)
+  ) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      value.slice(8).split(/[/?#]/u)[0].includes('@')
+    ) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function SourceUrl({ value }: { value: string }) {
+  const url = safeSourceUrl(value);
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer">{url}</a>
+  ) : (
+    <span>Source URL unavailable for safe linking.</span>
+  );
+}
+
+/** Reveal BOM/control formatting without interpreting the original as markup. */
+function originalInstructions(text: string): string {
+  return revealInvisible(text).text
+    .replace(/\r/g, '⟨CR⟩')
+    .replace(/\n/g, '⟨LF⟩\n');
+}
 
 /** A draft waiting for the owner (spec §15.4). Its text was written by the
  *  model, an import, or a file: it is shown only as text. */
@@ -91,8 +131,15 @@ export function SkillDraftCard({
   const note = invisibleNote(hidden);
   const learningSource = draft.learningSource;
   const githubSource = draft.githubSource;
-  const githubUrl = githubSource?.sourceUrl.startsWith('https://github.com/')
-    ? githubSource.sourceUrl
+  const urlSource = draft.urlSource;
+  const observed = urlSource ? new Date(urlSource.observedAtMs) : null;
+  const observedIso = observed && Number.isFinite(observed.getTime())
+    ? observed.toISOString()
+    : null;
+  const originalSkillText = urlSource?.originalSkillText ?? githubSource?.originalSkillText;
+  const safeGithubUrl = githubSource ? safeSourceUrl(githubSource.sourceUrl) : null;
+  const githubUrl = safeGithubUrl?.startsWith('https://github.com/')
+    ? safeGithubUrl
     : null;
   const sourceChat = learningSource
     ? {
@@ -139,6 +186,40 @@ export function SkillDraftCard({
           )}
         </p>
       )}
+      {urlSource && (
+        <>
+          <p className="skill-draft-warning" role="note">
+            Captured from <SourceUrl value={urlSource.sourceUrl} />. This
+            capture includes referenced or selected files and does not
+            represent a complete repository or an immutable commit. Imported
+            files remain inactive until you keep this skill.
+            {urlSource.requestedUrl !== urlSource.sourceUrl && (
+              <> Requested URL: <SourceUrl value={urlSource.requestedUrl} />;
+                redirected to a different source URL shown above.</>
+            )}
+          </p>
+          <details>
+            <summary>Captured source details</summary>
+            <p>
+              Observed:{' '}
+              {observedIso ? (
+                <time dateTime={observedIso}>{observedIso}</time>
+              ) : 'Observation time unavailable.'}
+            </p>
+            <p>Captured package SHA-256: <code>{urlSource.packageHash}</code></p>
+            <ul aria-label="Captured source files">
+              {urlSource.files.map((file) => (
+                <li key={file.path}>
+                  <code>{revealInvisible(file.path).text}</code>{' '}
+                  (<span>{file.sizeBytes.toLocaleString()} bytes</span>)
+                  <p>Source: <SourceUrl value={file.sourceUrl} /></p>
+                  <p>SHA-256: <code>{file.sha256}</code></p>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </>
+      )}
       {learningSource && (
         <p className="skill-draft-warning" role="note">
           Created from unverified learning advice in review{' '}
@@ -147,10 +228,11 @@ export function SkillDraftCard({
           approve this draft separately.
         </p>
       )}
-      {githubSource?.originalSkillText && (
+      {originalSkillText != null && (
         <details>
           <summary>Original package instructions and metadata</summary>
-          <pre className="skill-body">{revealInvisible(githubSource.originalSkillText).text}</pre>
+          <p>Formatting markers: ⟨CR⟩ is a carriage return; ⟨LF⟩ is a line feed.</p>
+          <pre className="skill-body" aria-label="Original package instructions">{originalInstructions(originalSkillText)}</pre>
         </details>
       )}
       {description.text && (

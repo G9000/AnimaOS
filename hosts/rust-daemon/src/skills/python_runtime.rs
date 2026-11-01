@@ -23,14 +23,74 @@ pub(crate) type RuntimeAuthority =
     Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 const MAX_OUTPUT: usize = 8192;
 const MAX_REQUIREMENTS: usize = 64 * 1024;
-const OPERATION_MARKER: &str = "operation.active";
+pub(super) const OPERATION_MARKER: &str = "operation.active";
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static QUARANTINED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 // Captured from the operator's daemon environment, never from a model request.
-static OPERATOR_TOOL_PATH: OnceLock<std::ffi::OsString> = OnceLock::new();
+pub(super) static OPERATOR_TOOL_PATH: OnceLock<std::ffi::OsString> = OnceLock::new();
 
 pub(crate) fn active_count() -> usize {
     ACTIVE.load(Ordering::Acquire)
+}
+
+/// One logical operation key serves queues, markers and retained quarantine.
+/// Remember observed aliases so deletion/recreation cannot erase an 8.3 fence.
+pub(super) fn operation_key(root: &Path) -> Result<PathBuf, String> {
+    static ALIASES: OnceLock<Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let mut ancestor = root.parent().ok_or("Runtime storage has no parent")?;
+    let mut missing = Vec::new();
+    let parent = loop {
+        match ancestor.canonicalize() {
+            Ok(mut existing) => {
+                for name in missing.iter().rev() {
+                    existing.push(name);
+                }
+                break existing;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(
+                    ancestor
+                        .file_name()
+                        .ok_or("Runtime storage parent is invalid")?
+                        .to_os_string(),
+                );
+                ancestor = ancestor
+                    .parent()
+                    .ok_or("Runtime storage parent is unavailable")?;
+            }
+            Err(_) => return Err("Runtime storage parent is unavailable".into()),
+        }
+    };
+    let spelling = parent.join(root.file_name().ok_or("Runtime storage name is invalid")?);
+    fn fold(path: PathBuf) -> PathBuf {
+        #[cfg(windows)]
+        {
+            PathBuf::from(path.as_os_str().to_string_lossy().to_lowercase())
+        }
+        #[cfg(not(windows))]
+        {
+            path
+        }
+    }
+    let spelling = fold(spelling);
+    let resolved = root.canonicalize().ok().map(fold);
+    let mut aliases = ALIASES
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Runtime storage aliases are unavailable")?;
+    let logical = if let Some(known) = aliases.get(&spelling) {
+        if resolved.as_ref().is_some_and(|current| current != known) {
+            return Err("Runtime storage alias changed; reconcile before continuing".into());
+        }
+        known.clone()
+    } else {
+        resolved.unwrap_or_else(|| spelling.clone())
+    };
+    aliases.insert(spelling, logical.clone());
+    aliases
+        .entry(logical.clone())
+        .or_insert_with(|| logical.clone());
+    Ok(logical.join(OPERATION_MARKER))
 }
 
 /// Read-only startup/drain recovery. An unresolved marker or an unreadable
@@ -38,19 +98,14 @@ pub(crate) fn active_count() -> usize {
 pub(crate) fn persisted_marker_count(root: &Path) -> usize {
     // In-memory quarantine also belongs to the exact profile. A failed marker
     // removal must remain visible even if the marker was removed externally.
-    let key = root
-        .parent()
-        .and_then(|parent| parent.canonicalize().ok())
-        .and_then(|parent| {
-            root.file_name()
-                .map(|name| parent.join(name).join(OPERATION_MARKER))
-        });
+    let key = match operation_key(root) {
+        Ok(key) => key,
+        Err(_) => return 1,
+    };
     if QUARANTINED
         .get_or_init(Default::default)
         .lock()
-        .map_or(true, |set| {
-            key.as_ref().is_some_and(|key| set.contains(key))
-        })
+        .map_or(true, |set| set.contains(&key))
     {
         return 1;
     }
@@ -170,7 +225,7 @@ pub(crate) struct RuntimeOutput {
     pub(crate) cleanup_confirmed: bool,
 }
 impl RuntimeOutput {
-    fn succeeded(&self) -> bool {
+    pub(super) fn succeeded(&self) -> bool {
         self.exit_code == Some(0) && self.stop.is_none() && self.cleanup_confirmed
     }
 }
@@ -193,9 +248,9 @@ struct Manifest {
     last_check: Option<RuntimeCheck>,
 }
 
-struct Active;
+pub(super) struct Active;
 impl Active {
-    fn enter() -> Self {
+    pub(super) fn enter() -> Self {
         ACTIVE.fetch_add(1, Ordering::AcqRel);
         Self
     }
@@ -205,7 +260,7 @@ impl Drop for Active {
         ACTIVE.fetch_sub(1, Ordering::AcqRel);
     }
 }
-struct CancelOnDrop(CancelSignal);
+pub(super) struct CancelOnDrop(pub(super) CancelSignal);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.cancel();
@@ -214,19 +269,26 @@ impl Drop for CancelOnDrop {
 
 /// The durable marker is removed only after physical retirement is proven. A
 /// crash or unknown cleanup blocks reuse and remains visible to drain/Doctor.
-struct PhysicalLease {
+pub(super) struct PhysicalLease {
     root: crate::tools::workspace_bytes::WorkspaceBytes,
     marker: String,
     key: PathBuf,
-    settled: AtomicBool,
+    pub(super) settled: AtomicBool,
 }
 impl PhysicalLease {
-    fn admit(root: &Path, marker: String) -> Result<Arc<Self>, String> {
+    pub(super) fn admit(root: &Path, marker: String) -> Result<Arc<Self>, String> {
         let held = private_handle(root)?;
-        let key = root
-            .canonicalize()
-            .map_err(|_| "Runtime storage is unavailable")?
-            .join(&marker);
+        if marker != OPERATION_MARKER {
+            return Err("Runtime operation marker is invalid".into());
+        }
+        let key = operation_key(root)?;
+        if QUARANTINED
+            .get_or_init(Default::default)
+            .lock()
+            .map_or(true, |set| set.contains(&key))
+        {
+            return Err("A previous runtime operation has unresolved physical custody. Reconcile it before another operation".into());
+        }
         if held
             .create_new_bytes_atomic(
                 &marker,
@@ -279,7 +341,8 @@ impl Drop for OwnedEnvironment {
     }
 }
 
-fn lease(path: &Path) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+pub(super) fn lease(path: &Path) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    let key = operation_key(path)?;
     type Locks = HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>;
     static LOCKS: OnceLock<Mutex<Locks>> = OnceLock::new();
     let mut locks = LOCKS
@@ -287,11 +350,11 @@ fn lease(path: &Path) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
         .lock()
         .map_err(|_| "Runtime admission is unavailable")?;
     locks.retain(|_, value| value.strong_count() > 0);
-    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
         return Ok(lock);
     }
     let lock = Arc::new(tokio::sync::Mutex::new(()));
-    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    locks.insert(key, Arc::downgrade(&lock));
     Ok(lock)
 }
 
@@ -388,7 +451,7 @@ async fn execute_owned(
     let root_handle = private_handle(&root)?;
     let marker = OPERATION_MARKER.to_string();
     if persisted_marker_count(&root) != 0 {
-        quarantine(&root.join(&marker));
+        quarantine(&operation_key(&root)?);
         return Err("A previous Python runtime operation has unresolved physical custody. Reconcile it before another operation".into());
     }
     let prior = read_manifest(&root_handle, &manifest_name)?;
@@ -644,7 +707,9 @@ fn failed_result(
         output: Some(output),
     }
 }
-fn private_handle(path: &Path) -> Result<crate::tools::workspace_bytes::WorkspaceBytes, String> {
+pub(super) fn private_handle(
+    path: &Path,
+) -> Result<crate::tools::workspace_bytes::WorkspaceBytes, String> {
     let held = crate::tools::workspace_bytes::WorkspaceBytes::open(path)
         .map_err(|_| "Runtime storage is unavailable")?;
     crate::document_edits::store::verify_private_directory(path, &held, false)?;
@@ -653,7 +718,7 @@ fn private_handle(path: &Path) -> Result<crate::tools::workspace_bytes::Workspac
 fn digest(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
-fn file_hash(path: &Path) -> Result<String, String> {
+pub(super) fn file_hash(path: &Path) -> Result<String, String> {
     use std::io::Read;
     let parent = path.parent().ok_or("Runtime executable has no parent")?;
     let held = crate::tools::workspace_bytes::WorkspaceBytes::open(parent)
@@ -685,7 +750,7 @@ fn file_hash(path: &Path) -> Result<String, String> {
     }
     Ok(digest(&bytes))
 }
-fn reject_linked_file(path: &Path) -> Result<(), String> {
+pub(super) fn reject_linked_file(path: &Path) -> Result<(), String> {
     let metadata =
         std::fs::symlink_metadata(path).map_err(|_| "Runtime executable is unavailable")?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -740,7 +805,7 @@ fn environment_python(environment: &Path) -> PathBuf {
     }
 }
 
-fn sanitized_helper_directories(
+pub(super) fn sanitized_helper_directories(
     path: &std::ffi::OsStr,
     workspace: &Path,
     runtime_root: &Path,
@@ -789,10 +854,10 @@ fn directory_key(path: &Path) -> std::ffi::OsString {
         path.into_os_string()
     }
 }
-fn directory_is_within(path: &Path, root: &Path) -> bool {
+pub(super) fn directory_is_within(path: &Path, root: &Path) -> bool {
     Path::new(&directory_key(path)).starts_with(Path::new(&directory_key(root)))
 }
-fn append_unique_directories(path: &mut Vec<PathBuf>, directories: &[PathBuf]) {
+pub(super) fn append_unique_directories(path: &mut Vec<PathBuf>, directories: &[PathBuf]) {
     let mut seen = HashSet::new();
     path.retain(|directory| seen.insert(directory_key(directory)));
     for directory in directories {
@@ -942,7 +1007,7 @@ fn valid_environment_name(name: &str) -> bool {
         && name.starts_with("r-")
         && name[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
-fn check_environment_capacity(
+pub(super) fn check_environment_capacity(
     root: &crate::tools::workspace_bytes::WorkspaceBytes,
 ) -> Result<(), String> {
     let directory = root
@@ -1130,17 +1195,213 @@ async fn launch(
     physical: &PhysicalLease,
     helper_dirs: &[PathBuf],
 ) -> Result<RuntimeOutput, String> {
+    launch_invocation(
+        executable,
+        ProcessInvocation::Arguments(args),
+        cwd,
+        home,
+        deadline,
+        cancel,
+        call,
+        authority,
+        physical,
+        helper_dirs,
+    )
+    .await
+}
+
+/// The executable is fixed by the runtime; only the exact shell program text varies.
+pub(super) enum ProcessInvocation {
+    Arguments(Vec<String>),
+    ShellCommand(String),
+}
+
+/// CMD and batch wrappers need normal Windows spellings, while custody retains
+/// canonical paths. Convert only round-trippable filesystem objects at launch.
+#[cfg(windows)]
+fn shell_process_path(path: &Path) -> Result<PathBuf, String> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::path::{Component, Prefix};
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| "Shell process path is unavailable")?;
+    let prefix = match canonical.components().next() {
+        Some(Component::Prefix(prefix)) => prefix,
+        _ => return Err("Shell process paths must be absolute Windows paths".into()),
+    };
+    let spelling = match prefix.kind() {
+        Prefix::VerbatimDisk(_) => PathBuf::from(std::ffi::OsString::from_wide(
+            &canonical
+                .as_os_str()
+                .encode_wide()
+                .skip(4)
+                .collect::<Vec<_>>(),
+        )),
+        Prefix::VerbatimUNC(_, _) => {
+            let mut normal = std::ffi::OsString::from(r"\\");
+            normal.push(std::ffi::OsString::from_wide(
+                &canonical
+                    .as_os_str()
+                    .encode_wide()
+                    .skip(8)
+                    .collect::<Vec<_>>(),
+            ));
+            PathBuf::from(normal)
+        }
+        Prefix::Disk(_) | Prefix::UNC(_, _) => canonical.clone(),
+        _ => return Err("Special Windows namespaces cannot be passed to the shell".into()),
+    };
+    for component in spelling.components() {
+        if let Component::Normal(name) = component {
+            let name = name
+                .to_str()
+                .ok_or("Shell process path is not representable")?;
+            if !normal_windows_component(name) {
+                return Err("Shell process path contains a special Windows filename".into());
+            }
+        }
+    }
+    let before = shell_path_identity(&canonical)?;
+    if shell_path_identity(&spelling)? != before
+        || spelling
+            .canonicalize()
+            .map_err(|_| "Shell process path is unavailable")?
+            != canonical
+    {
+        return Err("Shell process path changed identity during conversion".into());
+    }
+    Ok(spelling)
+}
+
+#[cfg(windows)]
+fn normal_windows_component(name: &str) -> bool {
+    if name.is_empty()
+        || name.ends_with(['.', ' '])
+        || name
+            .chars()
+            .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+    {
+        return false;
+    }
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ')
+        .to_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" | "CONIN$" | "CONOUT$"
+    ) && !["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(*prefix).is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
+}
+
+#[cfg(windows)]
+fn shell_path_identity(path: &Path) -> Result<(u64, u64), String> {
+    use cap_fs_ext::MetadataExt;
+    let metadata = if path.is_dir() {
+        crate::tools::workspace_bytes::WorkspaceBytes::open(path)
+            .and_then(|held| held.held_directory())
+            .and_then(|directory| directory.dir_metadata())
+            .map_err(|_| "Shell process directory is unavailable")?
+    } else {
+        let parent = path.parent().ok_or("Shell process file has no parent")?;
+        let held = crate::tools::workspace_bytes::WorkspaceBytes::open(parent)
+            .map_err(|_| "Shell process file parent is unavailable")?;
+        let directory = held
+            .held_directory()
+            .map_err(|_| "Shell process file parent is unavailable")?;
+        crate::tools::workspace_bytes::open_regular_file(
+            &directory,
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("Shell process filename is invalid")?,
+        )
+        .and_then(|file| file.metadata())
+        .map_err(|_| "Shell process file is unavailable")?
+    };
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn shell_current_directory(path: &Path) -> Result<PathBuf, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+    let spelling = shell_process_path(path)?;
+    if !matches!(spelling.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_)))
+        || spelling.as_os_str().encode_wide().count() >= 260
+    {
+        return Err("CMD needs a local working directory shorter than 260 characters; choose shorter private runtime storage".into());
+    }
+    Ok(spelling)
+}
+
+pub(super) async fn launch_invocation(
+    executable: &Path,
+    invocation: ProcessInvocation,
+    cwd: &Path,
+    home: &Path,
+    deadline: tokio::time::Instant,
+    cancel: &CancelSignal,
+    call: &CancelSignal,
+    authority: &RuntimeAuthority,
+    physical: &PhysicalLease,
+    helper_dirs: &[PathBuf],
+) -> Result<RuntimeOutput, String> {
     ensure_operation_live(deadline, cancel, call)?;
+    #[cfg(windows)]
+    let shell_mode = matches!(&invocation, ProcessInvocation::ShellCommand(_));
+    #[cfg(windows)]
+    let process_cwd = if shell_mode {
+        shell_current_directory(cwd)?
+    } else {
+        cwd.to_path_buf()
+    };
+    #[cfg(not(windows))]
+    let process_cwd = cwd.to_path_buf();
+    #[cfg(windows)]
+    let process_home = if shell_mode {
+        shell_process_path(home)?
+    } else {
+        home.to_path_buf()
+    };
+    #[cfg(not(windows))]
+    let process_home = home.to_path_buf();
+    let home = process_home.as_path();
+    let args = match &invocation {
+        ProcessInvocation::Arguments(args) => args.clone(),
+        #[cfg(not(windows))]
+        ProcessInvocation::ShellCommand(command) => vec!["-c".into(), command.clone()],
+        #[cfg(windows)]
+        ProcessInvocation::ShellCommand(_) => Vec::new(),
+    };
     let (mut custody, mut native) = Custody::prepare(executable, args);
+    #[cfg(windows)]
+    if let ProcessInvocation::ShellCommand(command) = &invocation {
+        // CMD has different quoting rules from the normal Windows argv parser.
+        // One raw argument preserves the exact approved command, including quotes.
+        native.raw_arg(format!("/d /e:on /v:off /s /c \"{command}\""));
+    }
     custody
         .require_strong()
         .map_err(|error| error.to_string())?;
     native
-        .current_dir(cwd)
+        .current_dir(&process_cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env_clear();
+    #[cfg(windows)]
+    if matches!(invocation, ProcessInvocation::ShellCommand(_)) {
+        native.env("COMSPEC", shell_process_path(executable)?);
+        native.env("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+    }
     // Keep OS discovery and sanitized installed helper directories only. Never
     // inherit provider keys, user homes, pip config or Python hooks.
     for name in ["SystemRoot", "WINDIR", "LANG", "LC_ALL"] {
@@ -1155,6 +1416,20 @@ async fn launch(
         .env("LOCALAPPDATA", home)
         .env("TEMP", home)
         .env("TMP", home)
+        .env("TMPDIR", home)
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("NPM_CONFIG_USERCONFIG", home.join(".npmrc"))
+        .env("NPM_CONFIG_GLOBALCONFIG", home.join(".npm-globalrc"))
+        .env("NPM_CONFIG_CACHE", home.join("cache/npm"))
+        .env("BUN_INSTALL_CACHE_DIR", home.join("cache/bun"))
+        .env("UV_CACHE_DIR", home.join("cache/uv"))
+        .env("CARGO_HOME", home.join("cargo"))
+        .env("GOPATH", home.join("go"))
+        .env("DOCKER_CONFIG", home.join(".docker"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", home.join(".gitconfig"))
         .env(
             "PIP_CONFIG_FILE",
             if cfg!(windows) { "nul" } else { "/dev/null" },
@@ -1172,6 +1447,13 @@ async fn launch(
     #[cfg(not(windows))]
     path.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
     append_unique_directories(&mut path, helper_dirs);
+    #[cfg(windows)]
+    if shell_mode {
+        path = path
+            .iter()
+            .map(|directory| shell_process_path(directory))
+            .collect::<Result<Vec<_>, _>>()?;
+    }
     native.env(
         "PATH",
         std::env::join_paths(path).map_err(|_| "Python runtime path is invalid")?,
@@ -1272,7 +1554,7 @@ async fn launch(
     })
 }
 
-fn ensure_operation_live(
+pub(super) fn ensure_operation_live(
     deadline: tokio::time::Instant,
     cancel: &CancelSignal,
     call: &CancelSignal,
@@ -1286,7 +1568,7 @@ fn ensure_operation_live(
     Ok(())
 }
 
-async fn require_authority(
+pub(super) async fn require_authority(
     authority: &RuntimeAuthority,
     deadline: tokio::time::Instant,
     cancel: &CancelSignal,

@@ -10,6 +10,8 @@ import {
   type Skill,
   type SkillDraft,
   type SkillSupportingFile,
+  type UrlSkillSource,
+  type UrlSkillSourceFile,
 } from './index.js';
 
 function transport(respond: (url: string, init?: RequestInit) => Response) {
@@ -54,6 +56,60 @@ const draft: SkillDraft = {
 };
 
 describe('skills client', () => {
+  it('round trips URL capture provenance and literal source text without resubmitting provenance on approval', async () => {
+    const capturedFile: UrlSkillSourceFile = {
+      path: 'references/guide.md',
+      sourceUrl: 'https://skills.example.org/research/references/guide.md',
+      sha256: 'c'.repeat(64),
+      sizeBytes: 45,
+    };
+    const urlSource: UrlSkillSource = {
+      requestedUrl: 'https://example.org/skills/research',
+      sourceUrl: 'https://skills.example.org/research/SKILL.md',
+      observedAtMs: 1793502245000,
+      packageHash: 'b'.repeat(64),
+      originalSkillText: '\uFEFF---\r\nname: Research\r\ncustom: retained\r\n---\r\nOriginal instructions\r\n',
+      coverage: 'referenced_files',
+      files: [capturedFile],
+    };
+    const imported: SkillDraft = { ...draft, source: 'import', urlSource };
+    const { skills, requests } = transport((url) => {
+      if (url.startsWith('/api/skill-drafts?')) return Response.json({ drafts: [imported] });
+      if (url.endsWith('/approve')) return Response.json({ skill, draft: { ...imported, status: 'approved' } });
+      return Response.json({ draft: { ...imported, status: 'rejected' } });
+    });
+
+    expect((await skills.drafts({ status: 'pending' }))[0].urlSource).toEqual(urlSource);
+    const approved = await skills.approveDraft(imported.id, { body: 'Reviewed instructions' });
+    expect(approved.draft.urlSource).toEqual(urlSource);
+    expect((await skills.rejectDraft(imported.id)).urlSource).toEqual(urlSource);
+    expect(JSON.parse(String(requests[1].init?.body))).toEqual({ body: 'Reviewed instructions' });
+    expect(requests[2].init?.body).toBeUndefined();
+  });
+
+  it('keeps legacy and GitHub draft responses compatible when URL capture metadata is absent', async () => {
+    const githubDraft: SkillDraft = {
+      ...draft,
+      id: 'skd_github',
+      source: 'import',
+      githubSource: {
+        repository: 'example/notes',
+        commit: '1'.repeat(40),
+        path: 'skills/notes',
+        sourceUrl: `https://github.com/example/notes/tree/${'1'.repeat(40)}/skills/notes`,
+        packageHash: 'a'.repeat(64),
+        ignoredPaths: ['.gitignore'],
+        originalSkillText: '---\r\nname: Notes\r\n---\r\nOriginal instructions\r\n',
+      },
+    };
+    const { skills } = transport(() => Response.json({ drafts: [draft, githubDraft] }));
+    const result = await skills.drafts({ status: 'pending' });
+    expect(result).toEqual([draft, githubDraft]);
+    expect(result[0].urlSource).toBeUndefined();
+    expect(result[1].urlSource).toBeUndefined();
+    expect(result[1].githubSource).toEqual(githubDraft.githubSource);
+  });
+
   it('preserves supporting files on saves and draft approvals', async () => {
     const { skills, requests } = transport(() =>
       Response.json({ skill, draft }),

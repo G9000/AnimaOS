@@ -148,6 +148,7 @@ fn file_draft(slug: &str, file: &ScannedFile) -> SkillDraft {
         learning_source: None,
         bundle_source: None,
         github_source: None,
+        url_source: None,
         base_hash: None,
         file_hash: file.hash.clone(),
         created_at_ms: millis(file.modified),
@@ -508,6 +509,17 @@ impl SkillRegistry {
         }
         let mut ids = HashSet::new();
         for draft in drafts {
+            if draft.github_source.is_some() && draft.url_source.is_some() {
+                return Err("a skill draft cannot have two remote sources".into());
+            }
+            if let Some(source) = &draft.url_source {
+                if draft.source != DraftSource::Import {
+                    return Err("URL source requires an import draft".into());
+                }
+                source
+                    .validate_draft(draft)
+                    .map_err(|error| error.message())?;
+            }
             anima_core::skill_packages::validate_skill_package(
                 super::compose_skill_file(&draft.name, &draft.description, &draft.body).as_bytes(),
                 &draft.files,

@@ -3,6 +3,7 @@
 //! one to the hash the owner approved, the drafts waiting for the owner, and
 //! what a run sees of them.
 
+pub(crate) mod command_runtime;
 pub(crate) mod disk;
 pub(crate) mod drafts;
 pub(crate) mod evaluation;
@@ -19,6 +20,7 @@ pub(crate) mod registry;
 pub(crate) mod runtime;
 pub(crate) mod scanner;
 pub(crate) mod service;
+pub(crate) mod source;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -431,6 +433,8 @@ pub(crate) struct SkillDraft {
     pub(crate) bundle_source: Option<crate::community_bundles::ManagedDraftSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) github_source: Option<github::GitHubSkillSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) url_source: Option<source::UrlSkillSource>,
     /// The skill's approved hash when the draft was made (`None`: a new slug).
     #[serde(default)]
     pub(crate) base_hash: Option<String>,
@@ -468,6 +472,7 @@ impl SkillDraft {
             learning_source: None,
             bundle_source: None,
             github_source: None,
+            url_source: None,
             base_hash,
             file_hash: None,
             created_at_ms: now_ms,

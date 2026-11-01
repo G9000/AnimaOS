@@ -820,6 +820,37 @@ fn registry_defines_every_registered_tool_schema() {
             &["action", "slug", "hash"][..],
             &["entrypoint", "args", "requirements", "timeoutMs"][..],
         ),
+        (
+            "inspect_skill_source",
+            &[][..],
+            &[
+                "source",
+                "inspectionId",
+                "revision",
+                "path",
+                "supportingPaths",
+                "filePath",
+                "offset",
+                "maxChars",
+            ][..],
+        ),
+        (
+            "import_skill",
+            &[][..],
+            &[
+                "source",
+                "inspectionId",
+                "revision",
+                "path",
+                "supportingPaths",
+                "slug",
+            ][..],
+        ),
+        (
+            "manage_skill_setup",
+            &["action", "slug", "hash"][..],
+            &["command", "cwd", "stateHash", "timeoutMs"][..],
+        ),
         ("execution_targets", &[][..], &[][..]),
         ("execution_status", &["executionId"][..], &[][..]),
         (

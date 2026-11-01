@@ -225,7 +225,7 @@ impl SkillService {
             .ok_or(SkillError::NoWorkspace)
     }
 
-    async fn profile_authority(
+    pub(super) async fn profile_authority(
         &self,
     ) -> Result<Option<crate::profile_owner::ProfileOwner>, SkillError> {
         let owner = self.state.read().await.profile_owner();
@@ -328,6 +328,13 @@ impl SkillService {
             .ensure_profile_owned()
             .map_err(|error| SkillError::Unavailable(error.to_string()))?;
         if let Some(scope) = &self.owner_import {
+            if self
+                .evaluation_admission
+                .as_ref()
+                .is_some_and(|admit| !admit())
+            {
+                return Err(SkillError::conflict("Source call is no longer admitted"));
+            }
             scope.check(&guard, root)?;
         }
         if let Some(gate) = evaluation.as_ref() {

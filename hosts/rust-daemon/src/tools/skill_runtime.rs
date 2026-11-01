@@ -1,6 +1,7 @@
 //! Owner-approved package execution, separate from the general host shell.
 use super::*;
-use crate::skills::python_runtime::{PythonRuntimeRequest, RuntimeAction};
+use crate::skills::command_runtime::CommandRuntimeRequest;
+use crate::skills::python_runtime::{PythonRuntimeRequest, RuntimeAction, RuntimeOutput};
 
 pub(crate) const NAME: &str = "manage_skill_runtime";
 
@@ -49,10 +50,37 @@ pub(crate) fn arguments_preview(call: &ToolCall) -> String {
     }
 }
 pub(crate) fn requires_exact_approval(call: &ToolCall) -> bool {
-    call.name == NAME && request(call).is_ok_and(|r| r.action != RuntimeAction::Status)
+    (call.name == NAME && request(call).is_ok_and(|r| r.action != RuntimeAction::Status))
+        || super::skill_setup::requires_exact_approval(call)
 }
 
-fn execute(
+enum PackageRuntimeRequest {
+    Python(PythonRuntimeRequest),
+    Commands(CommandRuntimeRequest),
+}
+
+impl PackageRuntimeRequest {
+    fn action(&self) -> RuntimeAction {
+        match self {
+            Self::Python(request) => request.action,
+            Self::Commands(request) => request.action,
+        }
+    }
+    fn slug(&self) -> &str {
+        match self {
+            Self::Python(request) => &request.slug,
+            Self::Commands(request) => &request.slug,
+        }
+    }
+    fn hash(&self) -> &str {
+        match self {
+            Self::Python(request) => &request.hash,
+            Self::Commands(request) => &request.hash,
+        }
+    }
+}
+
+pub(super) fn execute(
     context: ToolExecutionContext,
     agent: AgentState,
     user: Message,
@@ -67,11 +95,17 @@ fn execute(
         {
             return TaskResult::error("Skill setup requires a direct owner web/API chat", 0);
         }
-        let request = match request(&call) {
+        let request = match match call.name.as_str() {
+            NAME => request(&call).map(PackageRuntimeRequest::Python),
+            super::skill_setup::NAME => {
+                super::skill_setup::request(&call).map(PackageRuntimeRequest::Commands)
+            }
+            _ => Err("Unknown skill runtime tool".into()),
+        } {
             Ok(r) => r,
             Err(e) => return TaskResult::error(e, 0),
         };
-        if request.action != RuntimeAction::Status && !context.action_approved {
+        if request.action() != RuntimeAction::Status && !context.action_approved {
             return TaskResult::error(
                 "Skill preparation and execution require exact owner approval",
                 0,
@@ -99,8 +133,8 @@ fn execute(
             let journal = journal.clone();
             let call = call.clone();
             let workspace = workspace.clone();
-            let slug = request.slug.clone();
-            let hash = request.hash.clone();
+            let slug = request.slug().to_owned();
+            let hash = request.hash().to_owned();
             let approved = context.action_approved;
             Arc::new(move || {
                 let journal = journal.clone();
@@ -119,50 +153,54 @@ fn execute(
             return TaskResult::error(error, 0);
         }
         let root = workspace.clone();
-        let slug = request.slug.clone();
+        let slug = request.slug().to_owned();
         let package = match crate::skills::service::blocking(move || {
             crate::skills::package::read_package(&root, &slug)
         })
         .await
         {
-            Ok(Ok(Some(p))) if p.hash() == request.hash => p,
+            Ok(Ok(Some(p))) if p.hash() == request.hash() => p,
             _ => return TaskResult::error("Approved skill package changed or is missing", 0),
         };
         let custody_root = runtime_root.clone();
-        match crate::skills::python_runtime::execute(
-            runtime_root,
-            workspace,
-            package,
-            request,
-            cancel.clone(),
-            authority,
-        )
-        .await
-        {
-            Ok(result) => {
-                if result
-                    .output
+        let action = request.action();
+        let result = match request {
+            PackageRuntimeRequest::Python(request) => crate::skills::python_runtime::execute(
+                runtime_root,
+                workspace,
+                package,
+                request,
+                cancel.clone(),
+                authority,
+            )
+            .await
+            .map(|result| (serde_json::to_string(&result), result.status, result.output)),
+            PackageRuntimeRequest::Commands(request) => crate::skills::command_runtime::execute(
+                runtime_root,
+                workspace,
+                package,
+                request,
+                cancel.clone(),
+                authority,
+            )
+            .await
+            .map(|result| (serde_json::to_string(&result), result.status, result.output)),
+        };
+        match result {
+            Ok((text, status, output)) => {
+                if output
                     .as_ref()
                     .is_some_and(|output| !output.cleanup_confirmed)
                 {
                     journal.stop_for_unproven_effects("Skill runtime physical cleanup is unconfirmed; further effects were stopped");
                 }
-                let text = serde_json::to_string(&result).unwrap();
-                if result.output.as_ref().is_some_and(|output| {
-                    output.exit_code != Some(0)
-                        || output.stop.is_some()
-                        || !output.cleanup_confirmed
-                }) {
-                    TaskResult::error(text, 0)
-                } else {
-                    TaskResult::success(
-                        Content {
-                            text,
-                            ..Content::default()
-                        },
-                        0,
-                    )
-                }
+                let text = match text {
+                    Ok(text) => text,
+                    Err(_) => {
+                        return TaskResult::error("Skill runtime result could not be encoded", 0)
+                    }
+                };
+                result_task(action, &status, text, output.as_ref())
             }
             Err(error) => {
                 if error.contains("unresolved physical custody")
@@ -176,9 +214,90 @@ fn execute(
     })
 }
 
+fn result_task(
+    action: RuntimeAction,
+    status: &str,
+    text: String,
+    output: Option<&RuntimeOutput>,
+) -> TaskResult<Content> {
+    let accepted = match action {
+        RuntimeAction::Status => matches!(
+            status,
+            "installed" | "needs_prepare" | "environment_prepared" | "command_verified"
+        ),
+        RuntimeAction::Prepare => status == "environment_prepared",
+        RuntimeAction::Run => status == "command_verified" && output.is_some(),
+    };
+    if !accepted
+        || output.is_some_and(|output| {
+            output.exit_code != Some(0) || output.stop.is_some() || !output.cleanup_confirmed
+        })
+    {
+        TaskResult::error(text, 0)
+    } else {
+        TaskResult::success(
+            Content {
+                text,
+                ..Content::default()
+            },
+            0,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_skill_command_state_is_an_error_even_when_the_process_exited_zero() {
+        let output = RuntimeOutput {
+            exit_code: Some(0),
+            stdout: "check exited zero".into(),
+            stderr: String::new(),
+            stop: None,
+            cleanup_confirmed: true,
+        };
+        let rejected = result_task(
+            RuntimeAction::Run,
+            "command_failed",
+            "source seal rejected".into(),
+            Some(&output),
+        );
+        assert_eq!(
+            rejected.status.as_str(),
+            "error",
+            "zero process exit does not accept a rejected source or environment seal"
+        );
+        assert_eq!(
+            result_task(
+                RuntimeAction::Run,
+                "environment_prepared",
+                String::new(),
+                Some(&output)
+            )
+            .status
+            .as_str(),
+            "error"
+        );
+        assert_eq!(
+            result_task(
+                RuntimeAction::Run,
+                "command_verified",
+                String::new(),
+                Some(&output)
+            )
+            .status
+            .as_str(),
+            "success"
+        );
+        assert_eq!(
+            result_task(RuntimeAction::Status, "needs_prepare", String::new(), None)
+                .status
+                .as_str(),
+            "success"
+        );
+    }
     #[test]
     fn runtime_contract_never_accepts_shell_or_ambient_secrets() {
         let descriptor = ToolRegistry::new().descriptor(NAME).unwrap();

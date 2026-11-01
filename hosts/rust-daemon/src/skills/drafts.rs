@@ -220,7 +220,7 @@ impl SkillService {
         slug: Option<String>,
         files: Vec<super::SkillSupportingFile>,
     ) -> Result<SkillDraft, SkillError> {
-        self.import_package_with_source(bytes, slug, files, None)
+        self.import_package_with_source(bytes, slug, files, None, None)
             .await
     }
 
@@ -241,7 +241,19 @@ impl SkillService {
         {
             return Err(SkillError::invalid("GitHub original skill file mismatch"));
         }
-        self.import_package_with_source(bytes, slug, files, Some(source))
+        self.import_package_with_source(bytes, slug, files, Some(source), None)
+            .await
+    }
+
+    pub(super) async fn import_package_from_url(
+        &self,
+        bytes: Vec<u8>,
+        slug: Option<String>,
+        files: Vec<super::SkillSupportingFile>,
+        source: super::source::UrlSkillSource,
+    ) -> Result<SkillDraft, SkillError> {
+        source.validate_package(&bytes, &files)?;
+        self.import_package_with_source(bytes, slug, files, None, Some(source))
             .await
     }
 
@@ -251,6 +263,7 @@ impl SkillService {
         slug: Option<String>,
         files: Vec<super::SkillSupportingFile>,
         source: Option<super::github::GitHubSkillSource>,
+        url_source: Option<super::source::UrlSkillSource>,
     ) -> Result<SkillDraft, SkillError> {
         let file = parse_skill_file(&bytes).map_err(SkillError::invalid)?;
         anima_core::skill_packages::validate_skill_package(&bytes, &files)
@@ -267,6 +280,7 @@ impl SkillService {
                         SkillDraft::new(&slug, file, DraftSource::Import, None, base_hash, now_ms);
                     draft.files = files;
                     draft.github_source = source;
+                    draft.url_source = url_source;
                     Ok(add_draft(skills, draft, now_ms))
                 })
                 .await
@@ -437,10 +451,9 @@ impl SkillService {
                     ));
                 }
             }
-            if let Some(draft) = linked
-                .as_ref()
-                .filter(|draft| draft.is_pending() && draft.github_source.is_some())
-            {
+            if let Some(draft) = linked.as_ref().filter(|draft| {
+                draft.is_pending() && (draft.github_source.is_some() || draft.url_source.is_some())
+            }) {
                 let workspace = root.clone();
                 let slug = draft.slug.clone();
                 let package = blocking(move || super::package::read_package(&workspace, &slug))
@@ -618,7 +631,8 @@ impl SkillService {
                         if (automatic
                             || previous_draft.proposed_by.is_some()
                             || previous_draft.learning_source.is_some()
-                            || previous_draft.github_source.is_some())
+                            || previous_draft.github_source.is_some()
+                            || previous_draft.url_source.is_some())
                             && previous_draft.base_hash
                                 != skills
                                     .get(&previous_draft.slug)
