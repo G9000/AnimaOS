@@ -43,6 +43,76 @@ async fn configure(coordinator: &AgentRunCoordinator, id: &str, enabled: bool) -
 fn bytes(config: &AgentConfig) -> usize {
     serde_json::to_vec(&config.tools).unwrap().len()
 }
+
+#[tokio::test]
+async fn github_setup_discovery_exposes_internal_revision_resolution_without_web_fetch() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("search", "search_tools", "query", "web_fetch")]),
+        Step::Text(vec!["setup contract inspected"]),
+    ]);
+    let (coordinator, id) = coordinator_with(model.clone()).await;
+    let mut config = configure(&coordinator, &id, true).await;
+    config
+        .tools
+        .as_mut()
+        .unwrap()
+        .retain(|tool| matches!(tool.name.as_str(), "search_tools" | "describe_tool"));
+    coordinator
+        .state
+        .write()
+        .await
+        .restore_agent_config(&id, config);
+    coordinator
+        .run(chat_request(
+            &id,
+            "chat:github-setup-discovery",
+            "Install the requested GitHub skill",
+        ))
+        .await
+        .unwrap();
+
+    for config in model.configs() {
+        assert!(!config.allows_tool("web_fetch"));
+        let import = config
+            .tools
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|tool| tool.name == "import_github_skill")
+            .unwrap();
+        assert_eq!(
+            import.parameters_schema["required"],
+            DataValue::Array(vec![DataValue::String("repository".into())]),
+            "revision resolution belongs to the importer, not a browser prerequisite"
+        );
+    }
+    let state = coordinator.state.read().await;
+    let agent = state.get_agent(&id).unwrap();
+    let result = agent
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == anima_core::MessageRole::Tool
+                && message.content.text.contains("schemaVisibility")
+        })
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&result.content.text).unwrap();
+    let summary = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "import_github_skill")
+        .unwrap();
+    let description = summary["description"].as_str().unwrap();
+    assert!(
+        description.contains("HEAD")
+            && description.contains("branch")
+            && description.contains("tag"),
+        "the compact search result must explain the supported revision input: {description}"
+    );
+    assert!(description.contains("full commit hash"), "{description}");
+}
+
 #[tokio::test]
 async fn explicit_discovery_tool_grants_enable_catalog() {
     let model = ScriptedModel::new(vec![
