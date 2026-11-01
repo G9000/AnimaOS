@@ -1652,7 +1652,7 @@ impl AgentRunCoordinator {
                         RunError::new(RUN_STOPPED, STOPPED_BY_OWNER),
                     )
                 } else {
-                    (RunStatus::Failed, RunError::new(RUN_FAILED, message))
+                    (RunStatus::Failed, RunError::failed(message))
                 };
                 self.settle_unstarted(&next.run_id, status, error).await;
             }

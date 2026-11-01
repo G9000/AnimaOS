@@ -18,6 +18,18 @@ function interruptedReason(run: Run): string {
   }
 }
 
+/** Why a reply failed, in plain words where the daemon's own are internal.
+ *  Runs saved before the `execution_deadline` code carry only its message. */
+function failedReason(run: Run): string {
+  if (!run.error) return 'This reply failed.';
+  if (
+    run.error.code === 'execution_deadline' ||
+    run.error.message === 'Shared execution deadline reached'
+  )
+    return 'This reply ran out of time. Its time limit also covers the tools and helpers it started; anything it already did still happened.';
+  return `This reply failed: ${run.error.message}`;
+}
+
 function actionReceipts(run: Run) {
   if (!run.actionReceipts?.length) return null;
 
@@ -68,11 +80,7 @@ export function RunOutcomeCard({
   if (run.status === 'failed')
     return (
       <div className="run-outcome" data-outcome="failed">
-        <p>
-          {run.error
-            ? `This reply failed: ${run.error.message}`
-            : 'This reply failed.'}
-        </p>
+        <p>{failedReason(run)}</p>
         {actionReceipts(run)}
         {run.outcome && (
           <p>

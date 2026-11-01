@@ -176,8 +176,7 @@ impl RunOutcome {
     /// The ledger error for a failed or stopped run.
     pub(crate) fn error(&self) -> Option<RunError> {
         match self.status {
-            RunStatus::Failed => Some(RunError::new(
-                RUN_FAILED,
+            RunStatus::Failed => Some(RunError::failed(
                 self.result
                     .error
                     .clone()
@@ -308,6 +307,21 @@ mod tests {
         );
         let failed = RunOutcome::new(&change_set, TaskResult::error("boom", 1)).with_stop(false);
         assert_eq!(failed.status, RunStatus::Failed);
+        assert_eq!(failed.error(), Some(RunError::new(RUN_FAILED, "boom")));
+        // The shared deadline gets its own code, so clients can say it in
+        // their own words instead of matching the runtime's sentence.
+        let timed_out = RunOutcome::new(
+            &change_set,
+            TaskResult::error(anima_core::EXECUTION_DEADLINE_ERROR, 1),
+        )
+        .with_stop(false);
+        assert_eq!(
+            timed_out.error(),
+            Some(RunError::new(
+                crate::runs::ledger::EXECUTION_DEADLINE,
+                anima_core::EXECUTION_DEADLINE_ERROR
+            ))
+        );
     }
 
     #[test]

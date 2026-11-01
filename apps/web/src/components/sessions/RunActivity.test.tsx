@@ -656,6 +656,33 @@ describe('RunOutcomeCard', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('says a reply ran out of time instead of the runtime deadline wording', () => {
+    render(
+      <>
+        <RunOutcomeCard
+          run={runFixture('run_deadline', {
+            status: 'failed',
+            error: {
+              code: 'execution_deadline',
+              message: 'Shared execution deadline reached',
+            },
+          })}
+        />
+        <RunOutcomeCard
+          run={runFixture('run_deadline_old', {
+            status: 'failed',
+            error: {
+              code: 'run_failed',
+              message: 'Shared execution deadline reached',
+            },
+          })}
+        />
+      </>,
+    );
+    expect(screen.getAllByText(/^This reply ran out of time\./)).toHaveLength(2);
+    expect(screen.queryByText(/Shared execution deadline/)).toBeNull();
+  });
+
   it('offers Retry for a failed reply', async () => {
     const onSendAgain = vi.fn();
     const run = runFixture('run_f', {

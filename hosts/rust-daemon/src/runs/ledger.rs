@@ -29,6 +29,8 @@ pub(crate) const RESTART_BEFORE_START_MESSAGE: &str =
     "The daemon restarted before this run started; it is safe to send it again.";
 pub(crate) const RESTART_DURING_RUN: &str = "restart_during_run";
 pub(crate) const RUN_FAILED: &str = "run_failed";
+/// A run that used up its shared wall-time budget (tools and helpers count).
+pub(crate) const EXECUTION_DEADLINE: &str = "execution_deadline";
 pub(crate) const RUN_ABORTED: &str = "run_aborted";
 pub(crate) const COMMIT_REJECTED: &str = "commit_rejected";
 pub(crate) const COMMIT_FAILED: &str = "commit_failed";
@@ -154,6 +156,18 @@ impl RunError {
             code: code.to_string(),
             message: message.into(),
         }
+    }
+
+    /// A failure from its runtime message: the shared deadline gets its own
+    /// code, everything else is `run_failed`.
+    pub(crate) fn failed(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let code = if message == anima_core::EXECUTION_DEADLINE_ERROR {
+            EXECUTION_DEADLINE
+        } else {
+            RUN_FAILED
+        };
+        Self::new(code, message)
     }
 }
 

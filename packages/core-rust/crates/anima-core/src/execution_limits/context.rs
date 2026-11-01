@@ -220,7 +220,7 @@ impl ExecutionContext {
         self.deadline_at_ms
             .checked_sub(self.clock.now_ms())
             .filter(|remaining| *remaining > 0)
-            .ok_or_else(|| "Shared execution deadline reached".into())
+            .ok_or_else(|| crate::EXECUTION_DEADLINE_ERROR.into())
     }
     pub fn binding_hint(&self) -> super::ExecutionBindingHint {
         super::ExecutionBindingHint {
@@ -268,7 +268,7 @@ impl ExecutionContext {
             return Err(cancel.run_error().into());
         }
         if self.clock.now_ms() >= self.deadline_at_ms {
-            return Err("Shared execution deadline reached".into());
+            return Err(crate::EXECUTION_DEADLINE_ERROR.into());
         }
         Ok(())
     }
@@ -292,7 +292,7 @@ impl ExecutionContext {
             );
         }
         if self.clock.now_ms() >= allowance.deadline_at_ms {
-            return Err("Shared execution deadline reached".into());
+            return Err(crate::EXECUTION_DEADLINE_ERROR.into());
         }
         Ok(allowance)
     }
@@ -422,7 +422,7 @@ impl ExecutionContext {
             result = work => result,
             _ = cancelled => Err(self.cancel.run_error().into()),
             _ = secondary_cancelled => { self.cancel.cancel_with(secondary.cause().unwrap_or(crate::CancelCause::OwnerStop)); Err(secondary.run_error().into()) },
-            _ = timeout => { self.cancel.cancel_with(crate::CancelCause::ExecutionDeadline); Err("Shared execution deadline reached".into()) },
+            _ = timeout => { self.cancel.cancel_with(crate::CancelCause::ExecutionDeadline); Err(crate::EXECUTION_DEADLINE_ERROR.into()) },
         }
     }
 
@@ -450,7 +450,7 @@ impl ExecutionContext {
             _ = cancelled => Err(self.cancel.run_error().into()),
             _ = secondary_cancelled => { self.cancel.cancel_with(secondary.cause().unwrap_or(crate::CancelCause::OwnerStop)); Err(secondary.run_error().into()) },
             _ = local_cancelled => Err("Execution request cancelled".into()),
-            _ = timeout => { self.cancel.cancel_with(crate::CancelCause::ExecutionDeadline); local.cancel(); Err("Shared execution deadline reached".into()) },
+            _ = timeout => { self.cancel.cancel_with(crate::CancelCause::ExecutionDeadline); local.cancel(); Err(crate::EXECUTION_DEADLINE_ERROR.into()) },
             result = work => result,
         }
     }

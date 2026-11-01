@@ -36,6 +36,9 @@ pub const DAEMON_SHUTDOWN_TOOL_RESULT: &str = "Cancelled before running (daemon 
 pub const HELPER_DEADLINE_ERROR: &str = "Helper task timed out";
 pub const DAEMON_SHUTDOWN_ERROR: &str = "Daemon shutting down";
 pub const PROFILE_OWNERSHIP_LOST_ERROR: &str = "Profile ownership lost; effects require review";
+/// The error of a run that used up its shared wall-time budget: the reply and
+/// everything it started (tools, helpers, retries) count toward one deadline.
+pub const EXECUTION_DEADLINE_ERROR: &str = "Shared execution deadline reached";
 
 #[derive(Debug, Default)]
 struct CancelState {
@@ -106,7 +109,7 @@ impl CancelSignal {
             Some(CancelCause::HelperDeadline) => HELPER_DEADLINE_ERROR,
             Some(CancelCause::DaemonShutdown) => DAEMON_SHUTDOWN_ERROR,
             Some(CancelCause::ProfileOwnershipLost) => PROFILE_OWNERSHIP_LOST_ERROR,
-            Some(CancelCause::ExecutionDeadline) => "Shared execution deadline reached",
+            Some(CancelCause::ExecutionDeadline) => EXECUTION_DEADLINE_ERROR,
             _ => RUN_STOPPED_ERROR,
         }
     }

@@ -50,7 +50,7 @@ use repetition_guard::{is_runaway, REPETITION_ERROR, REPETITION_INTERRUPTED};
 mod control;
 pub use control::{
     CancelCause, CancelSignal, CancelWait, RunControl, SteeringInbox, CANCELLED_TOOL_RESULT,
-    RUN_STOPPED_ERROR, STEER_METADATA_KEY, STOPPED_METADATA_KEY,
+    EXECUTION_DEADLINE_ERROR, RUN_STOPPED_ERROR, STEER_METADATA_KEY, STOPPED_METADATA_KEY,
 };
 
 static NEXT_AGENT_ID: AtomicU64 = AtomicU64::new(0);

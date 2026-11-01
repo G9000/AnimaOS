@@ -323,7 +323,7 @@ impl ExecutionScope {
             };
         }
         if now_ms < self.created_at_ms || now_ms >= self.deadline_at_ms {
-            return Err("Shared execution deadline reached".into());
+            return Err(crate::EXECUTION_DEADLINE_ERROR.into());
         }
         let mut next = self.clone();
         next.version = next
@@ -515,7 +515,7 @@ impl ExecutionScope {
 
     pub fn allowance(&self, now_ms: u64) -> Result<ExecutionAllowance, String> {
         if now_ms < self.created_at_ms || now_ms >= self.deadline_at_ms {
-            return Err("Shared execution deadline reached".into());
+            return Err(crate::EXECUTION_DEADLINE_ERROR.into());
         }
         self.check_allowance(now_ms)?;
         let usage = self.consumption()?;
