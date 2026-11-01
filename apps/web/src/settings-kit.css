@@ -128,7 +128,8 @@
 
 /* Controls sized for a row, not a form. */
 .sk-row-control .field {
-  height: 32px;
+  height: var(--control-height);
+  min-height: 0;
   font-size: 12.5px;
 }
 
@@ -575,7 +576,7 @@
 }
 
 .settings-window .memory-toolbar > select {
-  height: 32px;
+  height: var(--control-height);
   margin-left: auto;
 }
 
@@ -586,7 +587,7 @@
 
 .settings-window .memory-search input {
   flex: 1;
-  height: 34px;
+  height: var(--control-height);
 }
 
 :root[data-appearance-theme='light'] .sk-row input[role='switch']:checked {
@@ -1917,16 +1918,64 @@ button.back-button:disabled {
   align-self: flex-start;
 }
 
-.agent-work-add {
+/* A write box: the text and its action share one frame, so the button
+ * belongs to what you type. */
+.agent-composer {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  padding-top: 10px;
+  margin-top: 10px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
+  transition: border-color 160ms ease;
 }
 
-.agent-work-add > textarea {
+.agent-work-field > .agent-composer {
+  margin-top: 0;
+}
+
+.agent-composer:hover {
+  border-color: var(--control-line-hover);
+}
+
+.agent-composer:focus-within {
+  border-color: rgb(var(--color-accent-rgb) / 0.7);
+}
+
+.agent-composer-input {
   width: 100%;
+  min-height: 0;
+  padding: 10px 12px 4px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink);
+  resize: vertical;
+}
+
+.agent-composer-input::placeholder {
+  color: var(--control-muted);
+}
+
+.agent-composer-input:focus-visible {
+  outline: none;
+}
+
+.agent-composer-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px;
+}
+
+.agent-composer-foot.is-start {
+  justify-content: flex-start;
+}
+
+.agent-composer-foot > .ui-button {
+  min-height: 28px;
+  padding: 0 10px;
 }
 
 .agent-task-list {
@@ -1949,15 +1998,26 @@ button.back-button:disabled {
 }
 
 .agent-task-number {
-  padding-top: 7px;
+  padding-top: 8px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-ink-3);
 }
 
-.agent-task-text {
+.agent-task .agent-task-text {
   min-height: 0;
-  resize: vertical;
+  padding: 5px 8px;
+  border-color: transparent;
+  background: transparent;
+  line-height: 1.5;
+  field-sizing: content;
+  resize: none;
+}
+
+.agent-task .agent-task-text:hover:not(:disabled),
+.agent-task .agent-task-text:focus-visible {
+  border-color: var(--control-line);
+  background: var(--control-fill);
 }
 
 .agent-task-controls {
@@ -1968,7 +2028,8 @@ button.back-button:disabled {
 
 .agent-task-controls > select {
   width: auto;
-  height: 30px;
+  height: var(--control-height);
+  min-height: 0;
   font-size: 12.5px;
 }
 
@@ -2009,14 +2070,7 @@ button.back-button:disabled {
 .agent-work-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.agent-work-field-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .agent-work-every {
@@ -2029,12 +2083,13 @@ button.back-button:disabled {
 
 .agent-work-every > input {
   width: 72px;
-  height: 30px;
+  height: var(--control-height);
+  min-height: 0;
+  text-align: right;
 }
 
 .agent-work .sk-row-control > select {
   width: auto;
-  height: 30px;
 }
 
 @media (max-width: 560px) {

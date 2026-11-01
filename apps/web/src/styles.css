@@ -278,6 +278,7 @@ input[type='radio'] {
  * Page rules may tune size, but not invent a new look. */
 :root {
   --control-radius: 4px;
+  --control-height: 32px;
   --panel-radius: 6px;
   --control-line: rgb(236 230 218 / 0.16);
   --control-line-hover: rgb(236 230 218 / 0.32);
@@ -290,7 +291,7 @@ input[type='radio'] {
 
 .field {
   width: 100%;
-  min-height: 34px;
+  min-height: var(--control-height);
   border-radius: var(--control-radius);
   border: 1px solid var(--control-line);
   background-color: var(--control-fill);
@@ -301,6 +302,14 @@ input[type='radio'] {
   transition:
     border-color 160ms ease,
     background-color 160ms ease;
+}
+
+/* One-line fields match a button's height; text areas keep their rows. */
+input.field,
+select.field {
+  height: var(--control-height);
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .field::placeholder {
@@ -328,7 +337,7 @@ select.field {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 0 12px;
   border: 1px solid var(--control-line);
   border-radius: var(--control-radius);
@@ -367,6 +376,15 @@ select.field {
   border-color: transparent;
   background: color-mix(in srgb, var(--color-accent) 86%, white);
   color: var(--color-accent-fg);
+}
+
+/* A primary with nothing to do steps back to a plain button rather than a
+ * faded block of accent. */
+.ui-button.is-primary:disabled {
+  border-color: var(--control-line);
+  background: var(--control-fill);
+  color: var(--control-muted);
+  opacity: 1;
 }
 
 .ui-button.is-danger {

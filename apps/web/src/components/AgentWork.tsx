@@ -372,7 +372,7 @@ export function AgentTasksView({
         <>
           <SettingsSection title="Add a task">
             <form
-              className="agent-work-add"
+              className="agent-composer"
               onSubmit={(event) => {
                 event.preventDefault();
                 edit((previous) => {
@@ -401,7 +401,7 @@ export function AgentTasksView({
               }}
             >
               <textarea
-                className="field"
+                className="agent-composer-input"
                 aria-label="New agent task"
                 placeholder="What should this agent work on? Include the details they need."
                 value={content}
@@ -412,12 +412,14 @@ export function AgentTasksView({
                 }}
                 rows={3}
               />
-              <button
-                className="ui-button"
-                disabled={!editable || !content.trim()}
-              >
-                Add task
-              </button>
+              <div className="agent-composer-foot">
+                <button
+                  className="ui-button"
+                  disabled={!editable || !content.trim()}
+                >
+                  Add task
+                </button>
+              </div>
             </form>
           </SettingsSection>
           <SettingsSection
@@ -763,30 +765,32 @@ export function AgentProactiveView({
           }}
         >
           <div className="agent-work-field">
-            <div className="agent-work-field-head">
-              <span className="sk-row-title">What should they do?</span>
-              <button
-                type="button"
-                className="ui-button is-quiet"
+            <span className="sk-row-title">What should they do?</span>
+            <div className="agent-composer">
+              <textarea
+                aria-label="Proactive instructions"
+                rows={5}
+                className="agent-composer-input"
+                value={prompt}
                 disabled={busy}
-                onClick={() =>
-                  setPrompt(
-                    'Read your own task list. Work on the next clear, pending task within your existing permissions and agreed scope. Update task progress with todo_write. Ask before consequential external actions. Report meaningful progress or blockers; otherwise return CHECKIN_OK.',
-                  )
-                }
-              >
-                Use my task list
-              </button>
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Describe the goal, what to check, and when to report back."
+              />
+              <div className="agent-composer-foot is-start">
+                <button
+                  type="button"
+                  className="ui-button is-quiet"
+                  disabled={busy}
+                  onClick={() =>
+                    setPrompt(
+                      'Read your own task list. Work on the next clear, pending task within your existing permissions and agreed scope. Update task progress with todo_write. Ask before consequential external actions. Report meaningful progress or blockers; otherwise return CHECKIN_OK.',
+                    )
+                  }
+                >
+                  Start from my task list
+                </button>
+              </div>
             </div>
-            <textarea
-              aria-label="Proactive instructions"
-              rows={5}
-              className="field"
-              value={prompt}
-              disabled={busy}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Describe the goal, what to check, and when to report back."
-            />
           </div>
           <SettingsCard>
             <SettingsRow

@@ -3953,7 +3953,7 @@ button.scenic-thread[aria-expanded='true'] {
   flex: none;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: var(--control-height);
   padding: 0 12px;
   border: 1px solid var(--control-line);
   border-radius: var(--control-radius);
@@ -4748,7 +4748,7 @@ details.settings-item > :not(summary) {
 }
 
 .work-toolbar > button {
-  height: 34px;
+  height: var(--control-height);
   padding: 0 12px;
   border: 1px solid rgb(236 230 218 / 0.14);
   border-radius: var(--control-radius);
@@ -4841,11 +4841,11 @@ details.settings-item > :not(summary) {
 
 .files-search input {
   width: 100%;
-  height: 40px;
-  padding: 0 14px;
-  border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: var(--panel-radius);
-  background: rgb(236 230 218 / 0.025);
+  height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
   font-size: 13px;
   color: var(--color-ink);
 }
@@ -5177,7 +5177,7 @@ details.settings-item > :not(summary) {
 
 .settings-window .usage-header .studio-tool-button,
 .settings-window .system-header .studio-tool-button {
-  height: 30px;
+  height: var(--control-height);
   min-height: 0;
   padding: 0 12px;
   border-radius: var(--control-radius);
@@ -5239,9 +5239,9 @@ details.settings-item > :not(summary) {
 .settings-window .usage-limit-edit,
 .settings-window .usage-limit-form button {
   align-self: flex-start;
-  min-height: 25px;
-  padding: 0 9px;
-  border: 1px solid rgb(236 230 218 / 0.14);
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
   border-radius: var(--control-radius);
   background: rgb(236 230 218 / 0.04);
   color: var(--color-ink);
@@ -5270,11 +5270,11 @@ details.settings-item > :not(summary) {
 
 .settings-window .usage-limit-form input {
   width: 100%;
-  min-height: 30px;
-  padding: 0 8px;
-  border: 1px solid rgb(236 230 218 / 0.16);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
   border-radius: var(--control-radius);
-  background: rgb(8 8 8 / 0.2);
+  background: var(--control-fill);
   color: var(--color-ink);
   font: inherit;
 }
@@ -5580,12 +5580,12 @@ details.settings-item > :not(summary) {
 }
 
 .settings-window .logs-search input {
-  height: 36px;
+  height: var(--control-height);
   min-width: 0;
   padding: 0 12px;
-  border: 1px solid rgb(236 230 218 / 0.12);
-  border-radius: var(--panel-radius);
-  background: transparent;
+  border: 1px solid var(--control-line);
+  border-radius: var(--control-radius);
+  background: var(--control-fill);
   font-family: var(--font-mono);
   font-size: 11px;
 }
