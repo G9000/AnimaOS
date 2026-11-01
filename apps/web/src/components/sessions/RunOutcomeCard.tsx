@@ -1,6 +1,7 @@
 import type { Run } from '@animaos/sdk';
 
 import { isOwnerWritten } from '../../lib/transcript';
+import { ActionReceiptList } from './ActionReceiptList';
 import { RunRecovery } from './RunRecovery';
 
 /** Why an interrupted run did not reply: a restart in the web's words,
@@ -21,40 +22,9 @@ function actionReceipts(run: Run) {
   if (!run.actionReceipts?.length) return null;
 
   return (
-    <section aria-label="Recorded actions">
-      <p>Recorded actions</p>
-      <ul>
-        {run.actionReceipts.map((receipt) => {
-          const statusLabel =
-            receipt.status === 'succeeded'
-              ? 'Reported success'
-              : receipt.status === 'failed'
-                ? 'Reported failure'
-                : 'Outcome unknown';
-          return (
-            <li key={receipt.toolCallId}>
-              <p>
-                <span>{receipt.name}</span> · <span>{statusLabel}</span>
-              </p>
-              {receipt.durability === 'memory' && (
-                <p>Temporary (memory only)</p>
-              )}
-              {receipt.argumentsPreview && (
-                <p>
-                  Arguments: <span>{receipt.argumentsPreview}</span>
-                  {receipt.argumentsTruncated && ' (shortened)'}
-                </p>
-              )}
-              {receipt.resultPreview !== null && (
-                <p>
-                  Result: <span>{receipt.resultPreview}</span>
-                  {receipt.resultTruncated && ' (shortened)'}
-                </p>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+    <section className="outcome-section" aria-label="Recorded actions">
+      <p className="outcome-section-title">Recorded actions</p>
+      <ActionReceiptList receipts={run.actionReceipts} />
     </section>
   );
 }
@@ -71,7 +41,8 @@ export function RunOutcomeCard({
   resent?: boolean;
 }) {
   // Outcome tasks use their own report controls; a new run cannot continue them.
-  const sendAgain = !run.outcome && isOwnerWritten(run) ? onSendAgain : undefined;
+  const sendAgain =
+    !run.outcome && isOwnerWritten(run) ? onSendAgain : undefined;
   const recovery =
     !run.outcome &&
     onSendAgain &&
@@ -82,6 +53,9 @@ export function RunOutcomeCard({
         agentId={run.agentId}
         runId={run.id}
         continuationRunId={run.recovery?.continuationRunId}
+        shownReceiptIds={run.actionReceipts?.map(
+          (receipt) => receipt.toolCallId,
+        )}
       />
     ) : null;
   if (run.status === 'cancelled')
@@ -100,7 +74,12 @@ export function RunOutcomeCard({
             : 'This reply failed.'}
         </p>
         {actionReceipts(run)}
-        {run.outcome && <p>Use this run’s success criteria report to review its evidence and available actions.</p>}
+        {run.outcome && (
+          <p>
+            Use this run’s success criteria report to review its evidence and
+            available actions.
+          </p>
+        )}
         {recovery}
         {sendAgain && !recovery && (
           <button
@@ -124,7 +103,12 @@ export function RunOutcomeCard({
         </p>
       )}
       {actionReceipts(run)}
-      {run.outcome && <p>Use this run’s success criteria report to review its evidence and available actions.</p>}
+      {run.outcome && (
+        <p>
+          Use this run’s success criteria report to review its evidence and
+          available actions.
+        </p>
+      )}
       {recovery}
       {sendAgain && !recovery && (
         <button

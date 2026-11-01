@@ -585,6 +585,9 @@ describe('RunOutcomeCard', () => {
       name: 'Recorded actions',
     });
     expect(within(recordedActions).getAllByText('Wrote file')).toHaveLength(2);
+    // Raw previews wait behind Details; each row reads as one line.
+    expect(within(recordedActions).getAllByText('Wrote file')[0]).not.toBeVisible();
+    expect(within(recordedActions).getAllByText('Write file')).toHaveLength(3);
     expect(
       within(recordedActions).getAllByText('path: <script>notes.txt</script>'),
     ).toHaveLength(3);

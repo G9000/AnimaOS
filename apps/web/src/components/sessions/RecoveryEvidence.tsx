@@ -1,41 +1,27 @@
 import type { RunRecoverySummary } from '@animaos/sdk';
 
+import { ActionReceiptList } from './ActionReceiptList';
+
 type Evidence = NonNullable<RunRecoverySummary['evidence']>;
 
 /** Saved previews are evidence, not proof of the wider task or its effects. */
-export function RecoveryEvidence({ evidence }: { evidence: Evidence }) {
+export function RecoveryEvidence({
+  evidence,
+  shownReceiptIds = [],
+}: {
+  evidence: Evidence;
+  /** Actions the card above already lists; they are not repeated here. */
+  shownReceiptIds?: readonly string[];
+}) {
+  const receipts = evidence.actionReceipts.filter(
+    (receipt) => !shownReceiptIds.includes(receipt.toolCallId),
+  );
   return (
-    <section aria-label="Saved evidence">
-      <p>Saved evidence may be incomplete. Check effects before continuing.</p>
-      {evidence.actionReceipts.length > 0 && (
-        <ul>
-          {evidence.actionReceipts.map((receipt) => (
-            <li key={receipt.toolCallId}>
-              <p>
-                {receipt.name} ·{' '}
-                {receipt.status === 'succeeded'
-                  ? 'Reported success'
-                  : receipt.status === 'failed'
-                    ? 'Reported failure'
-                    : 'Outcome unknown'}
-              </p>
-              {receipt.durability === 'memory' && <p>Temporary record</p>}
-              {receipt.argumentsPreview && (
-                <p>
-                  {receipt.argumentsPreview}
-                  {receipt.argumentsTruncated && ' (shortened)'}
-                </p>
-              )}
-              {receipt.resultPreview !== null && (
-                <p>
-                  {receipt.resultPreview}
-                  {receipt.resultTruncated && ' (shortened)'}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+    <section className="outcome-section" aria-label="Saved evidence">
+      <p className="outcome-section-title">
+        Saved evidence may be incomplete. Check effects before continuing.
+      </p>
+      {receipts.length > 0 && <ActionReceiptList receipts={receipts} />}
       {evidence.unreceiptedTools.length > 0 && (
         <p>
           Earlier requests without recorded outcomes:{' '}
@@ -45,16 +31,17 @@ export function RecoveryEvidence({ evidence }: { evidence: Evidence }) {
         </p>
       )}
       {evidence.checkpoint && (
-        <div>
-          {evidence.checkpoint.excerpts.length > 0 && <p>Saved excerpts:</p>}
-          {evidence.checkpoint.excerpts.map((excerpt, index) => (
-            <p
-              key={`${excerpt.role}:${index}`}
-              className="whitespace-pre-wrap break-words"
-            >
-              {excerpt.text}
-            </p>
-          ))}
+        <div className="outcome-evidence-checkpoint">
+          {evidence.checkpoint.excerpts.length > 0 && (
+            <details className="outcome-receipt-details">
+              <summary>
+                Saved excerpts ({evidence.checkpoint.excerpts.length})
+              </summary>
+              {evidence.checkpoint.excerpts.map((excerpt, index) => (
+                <pre key={`${excerpt.role}:${index}`}>{excerpt.text}</pre>
+              ))}
+            </details>
+          )}
           {evidence.checkpoint.intendedTools.length > 0 && (
             <p>
               Requested actions, with no outcome implied:{' '}

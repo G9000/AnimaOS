@@ -9,6 +9,8 @@ export function RunRecovery(props: {
   agentId: string;
   runId: string;
   continuationRunId?: string;
+  /** Recorded actions the outcome card already shows. */
+  shownReceiptIds?: readonly string[];
 }) {
   return <Recovery key={`${props.agentId}:${props.runId}`} {...props} />;
 }
@@ -17,10 +19,12 @@ function Recovery({
   agentId,
   runId,
   continuationRunId,
+  shownReceiptIds,
 }: {
   agentId: string;
   runId: string;
   continuationRunId?: string;
+  shownReceiptIds?: readonly string[];
 }) {
   const [view, setView] = useState<RunRecoverySummary | null>(null);
   const [continuation, setContinuation] = useState(continuationRunId);
@@ -65,6 +69,12 @@ function Recovery({
       if (alive.current) setBusy(false);
     }
   }
+  const canContinue =
+    view !== null &&
+    view.eligible &&
+    view.recoveryState !== 'invalid_or_stale' &&
+    view.recoveryState !== 'stopped' &&
+    view.recoveryState !== 'already_completed';
   if (continuation)
     return (
       <ContinuationStatus
@@ -74,7 +84,7 @@ function Recovery({
       />
     );
   return (
-    <section aria-label="Recover interrupted work">
+    <section className="outcome-recovery" aria-label="Recover interrupted work">
       {!view ? (
         <button
           className="studio-tool-button"
@@ -85,14 +95,17 @@ function Recovery({
         </button>
       ) : (
         <>
-          <p>
-            The new attempt will inspect saved progress and use your current
-            permissions and the remaining original limits. It starts a new
-            attempt, rather than resuming the exact interrupted operation.
-            Actions may be repeated; check their effects before continuing.
+          <p className="outcome-note">
+            Continuing starts a new attempt from the saved progress, with your
+            current permissions. Some actions may run again, so check them
+            first. {view.remainingAttempts} recovery attempts remaining.
           </p>
-          <p>{view.remainingAttempts} recovery attempts remaining.</p>
-          {view.evidence && <RecoveryEvidence evidence={view.evidence} />}
+          {view.evidence && (
+            <RecoveryEvidence
+              evidence={view.evidence}
+              shownReceiptIds={shownReceiptIds}
+            />
+          )}
           {view.unknownActionCount > 0 && (
             <p>
               {view.unknownActionCount} recorded action outcome(s) are unknown.
@@ -101,7 +114,7 @@ function Recovery({
           )}
           {view.projectContextNotice && <p>{view.projectContextNotice}</p>}
           {view.reviewRequired && (
-            <label>
+            <label className="outcome-check">
               <input
                 type="checkbox"
                 checked={reviewed}
@@ -111,41 +124,41 @@ function Recovery({
               changes to the shared project context.
             </label>
           )}
-          {view.eligible &&
-          view.recoveryState !== 'invalid_or_stale' &&
-          view.recoveryState !== 'stopped' &&
-          view.recoveryState !== 'already_completed' ? (
-            <button
-              className="studio-tool-button"
-              disabled={busy || (view.reviewRequired && !reviewed)}
-              onClick={() => void act(true)}
-            >
-              Continue remaining work
-            </button>
-          ) : (
+          {!canContinue && (
             <p>
               This run cannot be continued. Its saved state or permissions may
               have changed, or its recovery attempts may be exhausted.
             </p>
           )}
-          <button
-            className="studio-tool-button"
-            disabled={busy}
-            onClick={() => void act(false)}
-          >
-            Refresh recovery
-          </button>
-          <button
-            className="studio-tool-button"
-            disabled={busy}
-            onClick={() => {
-              setView(null);
-              setReviewed(false);
-              setError('');
-            }}
-          >
-            Leave interrupted
-          </button>
+          <div className="outcome-actions">
+            {canContinue && (
+              <button
+                className="studio-tool-button"
+                disabled={busy || (view.reviewRequired && !reviewed)}
+                onClick={() => void act(true)}
+              >
+                Continue remaining work
+              </button>
+            )}
+            <button
+              className="studio-tool-button"
+              disabled={busy}
+              onClick={() => void act(false)}
+            >
+              Refresh recovery
+            </button>
+            <button
+              className="studio-tool-button"
+              disabled={busy}
+              onClick={() => {
+                setView(null);
+                setReviewed(false);
+                setError('');
+              }}
+            >
+              Leave interrupted
+            </button>
+          </div>
         </>
       )}
       {error && <p role="alert">{error}</p>}

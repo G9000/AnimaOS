@@ -659,3 +659,180 @@
 :root[data-appearance-theme='light'] .chat-md li.task-list-item:hover {
   background: rgb(26 26 24 / 0.035);
 }
+
+/* Recorded actions on an interrupted, failed or stopped reply: one line per
+ * action; the raw arguments and result wait behind Details and wrap to the
+ * card instead of running past it. */
+.run-outcome {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.outcome-section {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.outcome-section-title {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.outcome-note {
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+}
+
+.outcome-receipts {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outcome-receipts > li {
+  padding: 8px 0;
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+}
+
+.outcome-receipt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+
+.outcome-receipt-mark {
+  width: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.outcome-receipts > li[data-status='succeeded'] .outcome-receipt-mark {
+  color: #7fbf8a;
+}
+
+.outcome-receipts > li[data-status='failed'] .outcome-receipt-mark {
+  color: var(--color-danger);
+}
+
+.outcome-receipt-name {
+  color: var(--color-ink);
+}
+
+.outcome-receipt-status,
+.outcome-receipt-temp {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.outcome-receipt-details {
+  margin: 4px 0 0 22px;
+  font-size: 12px;
+}
+
+.outcome-receipt-details > summary {
+  width: fit-content;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.outcome-receipt-details > summary:hover {
+  color: var(--color-ink);
+}
+
+.outcome-receipt-tool,
+.outcome-receipt-key {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.outcome-receipt-details pre {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid rgb(236 230 218 / 0.08);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.18);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* One rhythm inside an outcome card: 10px between parts, 6px inside a
+ * part, and a row of actions with its own gaps. */
+.run-outcome {
+  gap: 10px;
+  padding: 12px 14px;
+  line-height: 1.5;
+}
+
+.run-outcome > p {
+  margin: 0;
+}
+
+.outcome-recovery {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.outcome-recovery > p {
+  margin: 0;
+  color: var(--color-ink-2);
+}
+
+.outcome-recovery > .outcome-section {
+  padding-top: 10px;
+  border-top: 1px solid rgb(236 230 218 / 0.08);
+}
+
+.outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.outcome-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.outcome-check > input {
+  margin-top: 2px;
+}
+
+.outcome-section > p,
+.outcome-evidence-checkpoint > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.outcome-evidence-checkpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outcome-evidence-checkpoint > .outcome-receipt-details {
+  margin-left: 0;
+}

@@ -99,7 +99,8 @@ describe('RunRecovery', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Review interrupted work' }),
     );
-    expect(await screen.findByText('Saved draft excerpt')).toBeVisible();
+    fireEvent.click(await screen.findByText('Saved excerpts (1)'));
+    expect(screen.getByText('Saved draft excerpt')).toBeVisible();
     expect(screen.getByText(/Outcome unknown/)).toBeVisible();
     expect(screen.getByText(/2.*attempt/)).toBeVisible();
     expect(
