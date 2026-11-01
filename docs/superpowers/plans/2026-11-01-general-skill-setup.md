@@ -57,9 +57,9 @@ process custody, SDK TypeScript, existing Skills React UI and Bun verification.
 - [x] Run focused native regressions, real Node/Bun fixture acceptance, complete
   `bun run rust:test`, `bun run rust:lint`, relevant SDK/web tests/build/typecheck
   and whitespace checks. Reuse the main cache wrapper and private short temp.
-- [ ] Update user/contributor documentation and record evidence, distinctions
+- [x] Update user/contributor documentation and record evidence, distinctions
   between local checks and untested live model/account outcomes, and cleanup.
-- [ ] Integrate the verified feature, preserve any concurrent unrelated edits,
+- [x] Integrate the verified feature, preserve any concurrent unrelated edits,
   gracefully reload an idle local app, and verify owner tool availability and
   pending import persistence. Commit within the existing requested Git scope;
   do not push or connect real accounts as a side effect.
@@ -76,3 +76,15 @@ process custody, SDK TypeScript, existing Skills React UI and Bun verification.
   implementation. Windows process-facing path/cwd identity is covered.
 - These are local/offline checks. Real-model follow-through, account sign-in,
   arbitrary language packages and remote side effects are not measured here.
+
+## Local completion
+
+Feature commit `92841b75` is integrated on main. The normal local app was
+gracefully reloaded only after every activity counter was zero. Instance
+`fa57ff7d-98a0-44d1-9567-5b18fdde412c` advertises all three new owner controls;
+the console proxy reaches the same instance. The original pending last30days
+package survived with 159 total files. The owned feature worktree, verification
+temporary storage and scratch logs/scripts were removed after recording evidence.
+The shared native cache is 17.5 GiB, below its enforced 32 GiB cap. No push,
+provider call, account sign-in or package execution in the real owner profile
+was performed as part of acceptance.
