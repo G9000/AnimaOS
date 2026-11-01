@@ -54,6 +54,7 @@ import { useTranscriptActions } from './hooks/useTranscriptActions';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { AutomationsPage } from './pages/AutomationsPage';
 import { MemoryPage } from './pages/MemoryPage';
+import { MemorySearchStatus } from './components/memory/MemorySearchStatus';
 import { SkillsPage } from './pages/SkillsPage';
 import { HealthPage } from './pages/HealthPage';
 import { LogsPage } from './pages/LogsPage';
@@ -2338,10 +2339,19 @@ export function ViewHarness() {
           }
           logs={<LogsPage online={connection === 'online'} />}
           health={
-            <HealthPage
-              online={connection === 'online'}
-              epoch={live.state.epoch}
-            />
+            <>
+              <HealthPage
+                online={connection === 'online'}
+                epoch={live.state.epoch}
+              />
+              <div className="settings-form">
+                <MemorySearchStatus
+                  agentId={agent.id}
+                  online={connection === 'online'}
+                  epoch={live.state.epoch}
+                />
+              </div>
+            </>
           }
           skills={
             <SkillsPage

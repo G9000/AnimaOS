@@ -1920,7 +1920,7 @@ button.back-button:disabled {
 
 /* A write box: the text and its action share one frame, so the button
  * belongs to what you type. */
-.agent-composer {
+.sk-composer {
   display: flex;
   flex-direction: column;
   margin-top: 10px;
@@ -1930,19 +1930,19 @@ button.back-button:disabled {
   transition: border-color 160ms ease;
 }
 
-.agent-work-field > .agent-composer {
+.agent-work-field > .sk-composer {
   margin-top: 0;
 }
 
-.agent-composer:hover {
+.sk-composer:hover {
   border-color: var(--control-line-hover);
 }
 
-.agent-composer:focus-within {
+.sk-composer:focus-within {
   border-color: rgb(var(--color-accent-rgb) / 0.7);
 }
 
-.agent-composer-input {
+.sk-composer-input {
   width: 100%;
   min-height: 0;
   padding: 10px 12px 4px;
@@ -1955,25 +1955,25 @@ button.back-button:disabled {
   resize: vertical;
 }
 
-.agent-composer-input::placeholder {
+.sk-composer-input::placeholder {
   color: var(--control-muted);
 }
 
-.agent-composer-input:focus-visible {
+.sk-composer-input:focus-visible {
   outline: none;
 }
 
-.agent-composer-foot {
+.sk-composer-foot {
   display: flex;
   justify-content: flex-end;
   padding: 6px;
 }
 
-.agent-composer-foot.is-start {
+.sk-composer-foot.is-start {
   justify-content: flex-start;
 }
 
-.agent-composer-foot > .ui-button {
+.sk-composer-foot > .ui-button {
   min-height: 28px;
   padding: 0 10px;
 }
@@ -2100,4 +2100,22 @@ button.back-button:disabled {
   .agent-task-controls {
     grid-column: 2;
   }
+}
+
+/* Memory: the facts under "About you" get their own heading, with the
+ * replaced-facts toggle beside it. */
+.memory-facts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.memory-facts-head h4 {
+  margin: 0;
+}
+
+.memory-form .sk-composer {
+  margin-top: 8px;
 }

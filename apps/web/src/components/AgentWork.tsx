@@ -372,7 +372,7 @@ export function AgentTasksView({
         <>
           <SettingsSection title="Add a task">
             <form
-              className="agent-composer"
+              className="sk-composer"
               onSubmit={(event) => {
                 event.preventDefault();
                 edit((previous) => {
@@ -401,7 +401,7 @@ export function AgentTasksView({
               }}
             >
               <textarea
-                className="agent-composer-input"
+                className="sk-composer-input"
                 aria-label="New agent task"
                 placeholder="What should this agent work on? Include the details they need."
                 value={content}
@@ -412,7 +412,7 @@ export function AgentTasksView({
                 }}
                 rows={3}
               />
-              <div className="agent-composer-foot">
+              <div className="sk-composer-foot">
                 <button
                   className="ui-button"
                   disabled={!editable || !content.trim()}
@@ -766,17 +766,17 @@ export function AgentProactiveView({
         >
           <div className="agent-work-field">
             <span className="sk-row-title">What should they do?</span>
-            <div className="agent-composer">
+            <div className="sk-composer">
               <textarea
                 aria-label="Proactive instructions"
                 rows={5}
-                className="agent-composer-input"
+                className="sk-composer-input"
                 value={prompt}
                 disabled={busy}
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder="Describe the goal, what to check, and when to report back."
               />
-              <div className="agent-composer-foot is-start">
+              <div className="sk-composer-foot is-start">
                 <button
                   type="button"
                   className="ui-button is-quiet"

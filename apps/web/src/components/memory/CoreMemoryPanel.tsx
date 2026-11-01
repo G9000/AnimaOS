@@ -20,6 +20,8 @@ const BLOCKS: readonly { name: CoreMemoryBlockName; title: string }[] = [
   { name: 'notes', title: 'Agent notes' },
 ];
 
+const ALL_BLOCKS: readonly CoreMemoryBlockName[] = ['user', 'notes'];
+
 const DELETE_ENTRY_PROMPT =
   'Delete this entry? Your companion will stop seeing it.';
 
@@ -32,10 +34,16 @@ type Messages = Partial<Record<CoreMemoryBlockName, string>>;
 export function CoreMemoryPanel({
   agentId,
   epoch,
+  reload = 0,
+  blocks = ALL_BLOCKS,
   onChange,
 }: {
   agentId: string;
   epoch: number;
+  /** Bumped by the page's Refresh to read the blocks again. */
+  reload?: number;
+  /** Which blocks to show; both by default. */
+  blocks?: readonly CoreMemoryBlockName[];
   /** Both blocks whenever they load or an edit lands. */
   onChange?: (memory: CoreMemory) => void;
 }) {
@@ -70,7 +78,7 @@ export function CoreMemoryPanel({
     return () => {
       controller.abort();
     };
-  }, [agentId, epoch, changed]);
+  }, [agentId, epoch, reload, changed]);
 
   /** Runs one edit; true when the daemon took it. A result for another agent
    *  (the owner switched while it was in flight) is dropped. */
@@ -119,26 +127,28 @@ export function CoreMemoryPanel({
         </p>
       )}
       {memory &&
-        BLOCKS.map(({ name, title }) => (
-          <BlockSection
-            key={name}
-            title={title}
-            block={memory[name]}
-            error={errors[name]}
-            warning={warnings[name]}
-            onAdd={(text) =>
-              run(name, () => daemon.addCoreEntry(agentId, name, text))
-            }
-            onEdit={(entry, text) =>
-              run(name, () =>
-                daemon.updateCoreEntry(agentId, name, entry.id, text),
-              )
-            }
-            onDelete={(entry) =>
-              run(name, () => daemon.removeCoreEntry(agentId, name, entry.id))
-            }
-          />
-        ))}
+        BLOCKS.filter(({ name }) => blocks.includes(name)).map(
+          ({ name, title }) => (
+            <BlockSection
+              key={name}
+              title={title}
+              block={memory[name]}
+              error={errors[name]}
+              warning={warnings[name]}
+              onAdd={(text) =>
+                run(name, () => daemon.addCoreEntry(agentId, name, text))
+              }
+              onEdit={(entry, text) =>
+                run(name, () =>
+                  daemon.updateCoreEntry(agentId, name, entry.id, text),
+                )
+              }
+              onDelete={(entry) =>
+                run(name, () => daemon.removeCoreEntry(agentId, name, entry.id))
+              }
+            />
+          ),
+        )}
     </section>
   );
 }
@@ -219,22 +229,24 @@ function BlockSection({
           if (added) setDraft('');
         }}
       >
-        <label className="memory-field">
-          Add to {title}
+        <div className="sk-composer">
           <textarea
+            className="sk-composer-input"
+            aria-label={`Add to ${title}`}
+            placeholder="A short standalone note"
             value={draft}
             rows={2}
             onChange={(event) => setDraft(event.target.value)}
           />
-        </label>
-        <div className="memory-actions">
-          <button
-            type="submit"
-            className="studio-tool-button"
-            disabled={!text || busy}
-          >
-            Add
-          </button>
+          <div className="sk-composer-foot">
+            <button
+              type="submit"
+              className="ui-button"
+              disabled={!text || busy}
+            >
+              Add
+            </button>
+          </div>
         </div>
       </form>
     </section>

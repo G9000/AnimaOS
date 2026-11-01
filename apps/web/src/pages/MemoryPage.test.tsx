@@ -21,6 +21,7 @@ import {
   FACTS_EMPTY_BESIDE_CORE,
   FACT_EDIT_HINT,
   MEMORY_EMPTY,
+  MEMORY_PAGE_LIMIT,
   MEMORY_GONE,
   MEMORY_SEARCH_EMPTY,
   REPLACED_LABEL,
@@ -255,7 +256,7 @@ describe('MemoryPage: memories', () => {
     ).toBeVisible();
   });
 
-  it('offers no Edit on a core memory entry and points to its block', async () => {
+  it('keeps always-on entries out of the Memories list', async () => {
     vi.mocked(daemon.recentMemories).mockResolvedValue([
       memoryFixture('m1', { content: 'Prefers metric', tags: ['core:user'] }),
       memoryFixture('m2', { content: 'Needs bun', tags: ['core:notes'] }),
@@ -263,20 +264,25 @@ describe('MemoryPage: memories', () => {
     ]);
     renderPage();
 
-    const row = async (text: string) =>
-      (await screen.findByText(text)).closest('li') as HTMLElement;
-    const about = await row('Prefers metric');
-    expect(within(about).queryByRole('button', { name: 'Edit' })).toBeNull();
-    expect(within(about).getByText('Edit in About you')).toBeVisible();
-    expect(within(about).getByRole('button', { name: 'Delete' })).toBeVisible();
-    const notes = await row('Needs bun');
-    expect(within(notes).queryByRole('button', { name: 'Edit' })).toBeNull();
-    expect(within(notes).getByText('Edit in Agent notes')).toBeVisible();
-    const ordinary = await row('Likes tea');
-    expect(
-      within(ordinary).getByRole('button', { name: 'Edit' }),
-    ).toBeVisible();
-    expect(within(ordinary).queryByText(/Edit in/)).toBeNull();
+    expect(await screen.findByText('Likes tea')).toBeVisible();
+    expect(screen.queryByText('Prefers metric')).toBeNull();
+    expect(screen.queryByText('Needs bun')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Memories' })).toHaveTextContent(
+      'Memories1',
+    );
+  });
+
+  it('marks a full page of memories as more', async () => {
+    vi.mocked(daemon.recentMemories).mockResolvedValue(
+      Array.from({ length: MEMORY_PAGE_LIMIT }, (_, index) =>
+        memoryFixture(`m${index}`, { content: `Memory ${index}` }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Memory 0');
+    expect(screen.getByRole('tab', { name: 'Memories' })).toHaveTextContent(
+      `Memories${MEMORY_PAGE_LIMIT}+`,
+    );
   });
 
   it('lists memories with type, importance, tags, and date', async () => {
@@ -903,7 +909,7 @@ describe('MemoryPage: memories', () => {
 });
 
 describe('MemoryPage: About you', () => {
-  it('shows the core memory panel with both blocks', async () => {
+  it('shows About you and Agent notes on their own tabs', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -914,10 +920,29 @@ describe('MemoryPage: About you', () => {
     expect(
       await screen.findByRole('region', { name: 'About you' }),
     ).toBeVisible();
-    expect(screen.getByRole('region', { name: 'Agent notes' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Agent notes' })).toBeNull();
     expect(daemon.coreMemory).toHaveBeenCalledWith('agent-main', {
       signal: expect.any(AbortSignal),
     });
+
+    await user.click(screen.getByRole('tab', { name: 'Agent notes' }));
+    expect(
+      await screen.findByRole('region', { name: 'Agent notes' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'About you' })).toBeNull();
+  });
+
+  it('Refresh reads the always-on blocks again', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(MEMORY_EMPTY);
+    const before = vi.mocked(daemon.coreMemory).mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() =>
+      expect(vi.mocked(daemon.coreMemory).mock.calls.length).toBeGreaterThan(
+        before,
+      ),
+    );
   });
 
   async function openAbout() {
@@ -1196,71 +1221,12 @@ describe('MemoryPage: page', () => {
     ).toBeVisible();
   });
 
-  it('offers a memory search status check on the online page', () => {
-    renderPage();
-
-    const checkStatus = screen.getByRole('button', {
-      name: 'Check memory search status',
-    });
-
-    expect(checkStatus).toBeVisible();
-    expect(checkStatus).toBeEnabled();
-  });
-
-  it('keeps search, tab, and Refresh separate from the explicit index check', async () => {
-    const read = vi.spyOn(daemon, 'memoryReadiness').mockResolvedValue({
-      passed: false,
-      embeddings: {
-        enabled: false,
-        provider: 'local',
-        model: 'small-embed',
-        dimension: 384,
-        vectorCount: 0,
-        persisted: false,
-        status: 'off',
-        done: 0,
-        total: 0,
-      },
-      evaluation: {
-        passed: false,
-        totalChecks: 0,
-        passedChecks: 0,
-        failureMessages: [],
-        cases: [],
-      },
-    });
-    const user = userEvent.setup();
+  it('leaves the daemon-wide index check to Diagnostics', async () => {
     renderPage();
     await screen.findByText(MEMORY_EMPTY);
-    await user.type(
-      screen.getByRole('searchbox', { name: 'Search memories' }),
-      'tea',
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Search', exact: true }),
-    );
-    await user.click(screen.getByRole('tab', { name: 'About you' }));
-    await user.click(screen.getByRole('tab', { name: 'Memories' }));
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(read).not.toHaveBeenCalled();
     expect(
-      screen.getByRole('searchbox', { name: 'Search memories' }),
-    ).toHaveValue('tea');
-
-    await user.click(
-      screen.getByRole('button', { name: 'Check memory search status' }),
-    );
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(
-      await screen.findByText(/Daemon-wide vector index: disabled/),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('searchbox', { name: 'Search memories' }),
-    ).toHaveValue('tea');
-    expect(screen.getByRole('tab', { name: 'Memories' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+      screen.queryByRole('button', { name: 'Check memory search status' }),
+    ).toBeNull();
   });
 
   it('offline shows the unreachable text and no lists', () => {

@@ -234,20 +234,29 @@ export function MemorySearchStatus({ agentId, online, epoch }: Props) {
   };
 
   return (
-    <section className="memory-section" aria-label="Memory search status">
-      <h3>Memory search status</h3>
-      <p className="memory-meta">
-        Check a daemon-wide vector-index snapshot. These are not counts of this
-        companion’s saved facts.
-      </p>
-      <button
-        type="button"
-        className="studio-tool-button"
-        disabled={!online || busy}
-        onClick={check}
-      >
-        Check memory search status
-      </button>
+    <section
+      className="sk-section memory-search-status"
+      aria-label="Memory search status"
+    >
+      <div className="sk-section-head">
+        <div className="sk-section-text">
+          <h2 className="sk-section-title">Memory search</h2>
+          <p className="sk-section-desc">
+            Check a daemon-wide vector-index snapshot. These are not counts of
+            this companion’s saved facts.
+          </p>
+        </div>
+        <div className="sk-section-action">
+          <button
+            type="button"
+            className="ui-button"
+            disabled={!online || busy}
+            onClick={check}
+          >
+            Check memory search status
+          </button>
+        </div>
+      </div>
       {busy && (
         <p className="memory-meta" role="status">
           A memory search status check is pending. Reload if it does not finish.

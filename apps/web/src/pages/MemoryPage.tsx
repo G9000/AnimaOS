@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { MemoryType } from '@animaos/sdk';
+import type { CoreMemory, MemoryType } from '@animaos/sdk';
 
 import { EntityList, entityKey } from '../components/memory/EntityList';
 import { ExportMenu } from '../components/memory/ExportMenu';
 import { FactList } from '../components/memory/FactList';
 import { MemoryList } from '../components/memory/MemoryList';
-import { MemorySearchStatus } from '../components/memory/MemorySearchStatus';
 import { CoreMemoryPanel } from '../components/memory/CoreMemoryPanel';
 import { useMemory } from '../hooks/useMemory';
+import { useLatest } from '../hooks/useLatest';
 import { useResetOnChange } from '../hooks/useResetOnChange';
 import { daemon } from '../lib/daemon-api';
 import { COMPANION_UNREACHABLE } from '../lib/approvals';
@@ -16,10 +16,12 @@ import {
   FACTS_EMPTY,
   FACTS_EMPTY_BESIDE_CORE,
   MEMORY_EMPTY,
+  MEMORY_PAGE_LIMIT,
   MEMORY_SEARCH_EMPTY,
   MEMORY_SORT_LABELS,
   MEMORY_TYPES,
   MEMORY_TYPE_LABELS,
+  coreBlockLabel,
   filterByType,
   groupFacts,
   sortMemories,
@@ -37,6 +39,7 @@ export interface MemoryPageProps {
 const TABS = [
   { id: 'memories', label: 'Memories' },
   { id: 'about', label: 'About you' },
+  { id: 'notes', label: 'Agent notes' },
   { id: 'people', label: 'People & things' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -72,23 +75,35 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
   const [typeFilter, setTypeFilter] = useState<MemoryType | 'all'>('all');
   const [pickedSort, setPickedSort] = useState<MemorySort | null>(null);
   const [removingEntity, setRemovingEntity] = useState<string | null>(null);
-  // Entries in the always-on "About you" block. They count toward the tab
-  // beside the saved facts; the panel keeps this current after edits.
-  const [aboutEntries, setAboutEntries] = useState(0);
+  // Entries in the two always-on blocks, for their tabs' counts; the panel
+  // keeps them current after edits. Refresh reads the blocks again too.
+  const [coreEntries, setCoreEntries] = useState({ user: 0, notes: 0 });
+  const [coreReload, setCoreReload] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  useResetOnChange([agentId, epoch], () => setAboutEntries(0));
+  useResetOnChange([agentId, epoch], () =>
+    setCoreEntries({ user: 0, notes: 0 }),
+  );
+  const countCore = (memory: CoreMemory) =>
+    setCoreEntries({
+      user: memory.user.entries.length,
+      notes: memory.notes.entries.length,
+    });
+  const latestCountCore = useLatest(countCore);
   useEffect(() => {
     if (!online) return;
     const controller = new AbortController();
     daemon.coreMemory(agentId, { signal: controller.signal }).then(
       (memory) => {
-        if (!controller.signal.aborted)
-          setAboutEntries(memory.user.entries.length);
+        if (!controller.signal.aborted) latestCountCore.current(memory);
       },
       () => undefined,
     );
     return () => controller.abort();
-  }, [agentId, epoch, online]);
+  }, [agentId, epoch, online, coreReload, latestCountCore]);
+  const refresh = () => {
+    view.refresh();
+    setCoreReload((value) => value + 1);
+  };
 
   const searching = view.query !== '';
   const sort: MemorySort = searching
@@ -129,7 +144,14 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
     );
   }
 
-  const shown = sortMemories(filterByType(view.memories, typeFilter), sort);
+  // Always-on entries have their own tabs; the list holds everything else.
+  const ordinary = view.memories.filter(
+    (memory) => coreBlockLabel(memory.tags) === null,
+  );
+  const memoriesCount = `${ordinary.length}${
+    view.memories.length >= MEMORY_PAGE_LIMIT ? '+' : ''
+  }`;
+  const shown = sortMemories(filterByType(ordinary, typeFilter), sort);
   const groups = groupFacts(view.facts);
 
   return (
@@ -140,14 +162,13 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
           <button
             type="button"
             className="studio-tool-button"
-            onClick={view.refresh}
+            onClick={refresh}
           >
             Refresh
           </button>
         )}
         <ExportMenu agentId={agentId} />
       </div>
-      <MemorySearchStatus agentId={agentId} online={online} epoch={epoch} />
       {headerError && (
         <div className="memory-header">
           <p className="memory-error" role="alert">
@@ -156,7 +177,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
           <button
             type="button"
             className="studio-tool-button"
-            onClick={view.refresh}
+            onClick={refresh}
           >
             Refresh
           </button>
@@ -178,10 +199,12 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             {view.loaded && (
               <span className="memory-tab-count" aria-hidden>
                 {item.id === 'memories'
-                  ? view.memories.length
+                  ? memoriesCount
                   : item.id === 'about'
-                    ? view.facts.length + aboutEntries
-                    : view.entities.length}
+                    ? view.facts.length + coreEntries.user
+                    : item.id === 'notes'
+                      ? coreEntries.notes
+                      : view.entities.length}
               </span>
             )}
           </button>
@@ -210,6 +233,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
               <input
                 type="search"
                 aria-label="Search memories"
+                placeholder="Search memories"
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
               />
@@ -260,7 +284,7 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
                 ))}
               </select>
             </div>
-            {view.memories.length === 0 ? (
+            {ordinary.length === 0 ? (
               <p className="memory-empty">
                 {searching ? MEMORY_SEARCH_EMPTY : MEMORY_EMPTY}
               </p>
@@ -285,21 +309,26 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
             <CoreMemoryPanel
               agentId={agentId}
               epoch={epoch}
-              onChange={(memory) => setAboutEntries(memory.user.entries.length)}
+              reload={coreReload}
+              blocks={['user']}
+              onChange={countCore}
             />
-            <label className="memory-meta">
-              <input
-                type="checkbox"
-                checked={view.includeReplaced}
-                onChange={(event) =>
-                  view.setIncludeReplaced(event.target.checked)
-                }
-              />{' '}
-              Show replaced facts
-            </label>
+            <div className="memory-facts-head">
+              <h4>Other things it knows</h4>
+              <label className="memory-meta">
+                <input
+                  type="checkbox"
+                  checked={view.includeReplaced}
+                  onChange={(event) =>
+                    view.setIncludeReplaced(event.target.checked)
+                  }
+                />{' '}
+                Show replaced facts
+              </label>
+            </div>
             {view.facts.length === 0 ? (
               <p className="memory-empty">
-                {aboutEntries > 0 ? FACTS_EMPTY_BESIDE_CORE : FACTS_EMPTY}
+                {coreEntries.user > 0 ? FACTS_EMPTY_BESIDE_CORE : FACTS_EMPTY}
               </p>
             ) : (
               <>
@@ -330,6 +359,19 @@ export function MemoryPage({ agentId, online, epoch }: MemoryPageProps) {
                 )}
               </>
             )}
+          </>
+        ) : tab === 'notes' ? (
+          <>
+            <h3 ref={headingRef} tabIndex={-1}>
+              Agent notes
+            </h3>
+            <CoreMemoryPanel
+              agentId={agentId}
+              epoch={epoch}
+              reload={coreReload}
+              blocks={['notes']}
+              onChange={countCore}
+            />
           </>
         ) : (
           <>
