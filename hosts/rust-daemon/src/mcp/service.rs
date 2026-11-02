@@ -1401,6 +1401,7 @@ impl McpManager {
             {
                 Ok(session) => session,
                 Err(error) => {
+                    tracing::warn!(phase = "connect", category = ?error, "MCP transport failed");
                     let error = transport_error(error);
                     self.retire_if_generation(id, generation, Some(error))?;
                     return Err(error);
@@ -1450,12 +1451,14 @@ impl McpManager {
         let discovery = match discovery {
             Ok(discovery) => discovery,
             Err(error) => {
+                tracing::warn!(phase = "discover", category = ?error, "MCP transport failed");
                 let error = transport_error(error);
                 self.retire_if_generation(id, generation, Some(error))?;
                 return Err(error);
             }
         };
         if let Err(error) = validate_discovery(&discovery) {
+            tracing::warn!(phase = "discovery_validation", category = ?error, "MCP discovery validation failed");
             self.retire_if_generation(id, generation, Some(error))?;
             return Err(error);
         }

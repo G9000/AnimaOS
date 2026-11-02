@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 use crate::DataValue;
 
 pub const MAX_EXTERNAL_BYTES: usize = 16 * 1024;
+// Connector guidance has its own bound and does not consume the schema budget.
+const MAX_DESCRIPTION_BYTES: usize = 8 * 1024;
+// Bound the complete serialized descriptor, including JSON-escaped metadata.
+const MAX_DESCRIPTOR_BYTES: usize = 32 * 1024;
 const MAX_WIRE_BYTES: usize = 256 * 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_NODES: usize = 1024;
@@ -247,7 +251,7 @@ pub fn prepare_external_tool(
     if remote_name.trim().is_empty()
         || remote_name.len() > 128
         || remote_name.chars().any(char::is_control)
-        || description.len() > 2048
+        || description.len() > MAX_DESCRIPTION_BYTES
     {
         return Err(ExternalToolError::DescriptorBounds);
     }
@@ -276,7 +280,7 @@ pub fn prepare_external_tool(
     if serde_json::to_vec(&descriptor)
         .map_err(|_| ExternalToolError::DescriptorBounds)?
         .len()
-        > MAX_EXTERNAL_BYTES
+        > MAX_DESCRIPTOR_BYTES
     {
         return Err(ExternalToolError::DescriptorBounds);
     }
@@ -395,6 +399,96 @@ mod tests {
     use super::*;
     fn descriptor() -> ExternalToolDescriptor {
         prepare_external_tool("echo","Synthetic echo",json!({"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}),Some(json!({"type":"object","properties":{"ok":{"const":true}},"required":["ok"]}))).unwrap()
+    }
+    #[test]
+    fn observed_verbose_metadata_keeps_exact_description_digest_and_schema_constraints() {
+        let description = "d".repeat(3395);
+        let mut input = json!({"type":"object","description":"","properties":{
+            "value":{"type":"string","maxLength":4}
+        },"required":["value"],"additionalProperties":false});
+        let base_bytes = serde_json::to_vec(&input).unwrap().len();
+        input["description"] = json!("s".repeat(13_798 - base_bytes));
+        assert_eq!(serde_json::to_vec(&input).unwrap().len(), 13_798);
+
+        let tool = prepare_external_tool("verbose_record", &description, input, None).unwrap();
+        assert_eq!(tool.description, description);
+        assert!(serde_json::to_vec(&tool).unwrap().len() > MAX_EXTERNAL_BYTES);
+        validate_external_arguments(&tool, &json!({"value":"blue"})).unwrap();
+        assert_eq!(
+            validate_external_arguments(&tool, &json!({"value":"purple"})),
+            Err(ExternalToolError::ArgumentSchema)
+        );
+        assert_eq!(
+            prepare_external_tool(
+                &tool.remote_name,
+                &tool.description,
+                tool.input_schema.clone(),
+                tool.output_schema.clone()
+            )
+            .unwrap(),
+            tool,
+            "review and restore must preserve the exact metadata and digest"
+        );
+    }
+    #[test]
+    fn verbose_description_limit_counts_utf8_bytes() {
+        let description = "🦀".repeat(2048);
+        assert_eq!(description.len(), 8 * 1024);
+        let tool = prepare_external_tool(
+            "verbose_record",
+            &description,
+            json!({"type":"object"}),
+            None,
+        )
+        .unwrap();
+        assert_eq!(tool.description, description);
+        assert_eq!(
+            prepare_external_tool(
+                "verbose_record",
+                &(description + "x"),
+                json!({"type":"object"}),
+                None
+            )
+            .unwrap_err(),
+            ExternalToolError::DescriptorBounds
+        );
+    }
+    #[test]
+    fn complete_descriptor_budget_counts_json_escaping() {
+        assert_eq!(
+            prepare_external_tool(
+                "verbose_record",
+                &"\0".repeat(8 * 1024),
+                json!({"type":"object"}),
+                None
+            )
+            .unwrap_err(),
+            ExternalToolError::DescriptorBounds,
+            "a bounded raw description must still fit the serialized descriptor budget"
+        );
+    }
+    #[test]
+    fn verbose_metadata_does_not_expand_individual_or_combined_schema_budgets() {
+        assert_eq!(
+            prepare_external_tool(
+                "verbose_record",
+                "",
+                json!({"type":"object","description":"s".repeat(MAX_EXTERNAL_BYTES)}),
+                None
+            )
+            .unwrap_err(),
+            ExternalToolError::SchemaRejected
+        );
+        assert_eq!(
+            prepare_external_tool(
+                "verbose_record",
+                "",
+                json!({"type":"object","description":"s".repeat(8 * 1024)}),
+                Some(json!({"type":"object","description":"s".repeat(8 * 1024)}))
+            )
+            .unwrap_err(),
+            ExternalToolError::DescriptorBounds
+        );
     }
     #[test]
     fn reviewed_digest_dialect_and_actual_schema_constraints() {

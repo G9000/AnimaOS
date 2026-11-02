@@ -400,7 +400,10 @@ impl HttpBackend {
             oauth_token = control
                 .run(provider.token())
                 .await
-                .map_err(|error| self.failure(error))?;
+                .map_err(|error| {
+                    tracing::warn!(phase = "authorization", category = ?error, "MCP authorization failed");
+                    self.failure(error)
+                })?;
             (endpoint, &oauth_token)
         } else if let Some((endpoint, token)) = &self.bearer {
             (endpoint, token)
@@ -436,6 +439,13 @@ impl HttpBackend {
         let active = Active::new(&self.activity);
         let is_call = matches!(&message,ClientJsonRpcMessage::Request(r) if matches!(r.request,ClientRequest::CallToolRequest(_)));
         let initialize = matches!(&message,ClientJsonRpcMessage::Request(r) if matches!(r.request,ClientRequest::InitializeRequest(_)));
+        let phase = if initialize {
+            "initialize"
+        } else if is_call {
+            "call"
+        } else {
+            "session"
+        };
         let mut request = self
             .http
             .post(uri.as_ref())
@@ -456,9 +466,26 @@ impl HttpBackend {
         }
         let response = tokio::select! {biased;
             _=self.stop.cancelled()=>return Err(self.failure(McpTransportError::Unavailable)),
-            value=control.run(async {request.send().await.map_err(|_|McpTransportError::Unavailable)})=>value.map_err(|e|self.failure(e))?,
+            value=control.run(async {
+                request.send().await.map_err(|error| {
+                    tracing::warn!(
+                        phase,
+                        is_connect = error.is_connect(),
+                        is_timeout = error.is_timeout(),
+                        is_request = error.is_request(),
+                        is_body = error.is_body(),
+                        "MCP HTTP request failed"
+                    );
+                    McpTransportError::Unavailable
+                })
+            })=>value.map_err(|e|self.failure(e))?,
         };
         if !response.status().is_success() {
+            tracing::warn!(
+                phase,
+                status = response.status().as_u16(),
+                "MCP HTTP status rejected"
+            );
             if response.status() == reqwest::StatusCode::UNAUTHORIZED {
                 if let Some((_, provider)) = &self.oauth {
                     provider.authentication_rejected();
@@ -867,9 +894,29 @@ where
                     tool.description.as_deref().unwrap_or(""),
                     input,
                     tool.output_schema
-                        .map(|schema| Value::Object((*schema).clone())),
+                        .as_ref()
+                        .map(|schema| Value::Object((**schema).clone())),
                 )
-                .map_err(|_| McpTransportError::SchemaRejected)?,
+                .map_err(|error| {
+                    let input_schema_bytes = serde_json::to_vec(tool.input_schema.as_ref())
+                        .ok()
+                        .map(|bytes| bytes.len());
+                    let output_schema_bytes = tool
+                        .output_schema
+                        .as_ref()
+                        .and_then(|schema| serde_json::to_vec(schema.as_ref()).ok())
+                        .map(|bytes| bytes.len());
+                    tracing::warn!(
+                        phase = "descriptor_validation",
+                        category = ?error,
+                        tool_index = tool_count - 1,
+                        description_bytes = tool.description.as_deref().unwrap_or("").len(),
+                        input_schema_bytes = ?input_schema_bytes,
+                        output_schema_bytes = ?output_schema_bytes,
+                        "MCP discovery descriptor validation failed"
+                    );
+                    McpTransportError::SchemaRejected
+                })?,
             );
         }
         match result.next_cursor {
@@ -1893,6 +1940,91 @@ mod tests {
             methods,
             task,
         )
+    }
+    #[tokio::test]
+    async fn verbose_metadata_survives_sdk_discovery_and_reviewed_registry_restore() {
+        use super::super::{alias_for, McpConnectionRecord, McpRegistry, ReviewedMcpTool};
+
+        let description = "d".repeat(3395);
+        let mut input = json!({"type":"object","description":"","properties":{
+            "value":{"type":"string"}
+        },"required":["value"],"additionalProperties":false});
+        let base_bytes = serde_json::to_vec(&input).unwrap().len();
+        input["description"] = json!("s".repeat(13_798 - base_bytes));
+        assert_eq!(serde_json::to_vec(&input).unwrap().len(), 13_798);
+        let listed_tool =
+            json!({"name":"verbose_record","description":description,"inputSchema":input});
+        let methods = Arc::new(StdMutex::new(Vec::new()));
+        let fake_state = Fake {
+            sse: false,
+            fail: false,
+            methods: methods.clone(),
+            tool_result: None,
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let app = Router::new().route(
+            "/mcp",
+            post(move |Json(request): Json<Value>| {
+                let state = fake_state.clone();
+                let tool = listed_tool.clone();
+                async move {
+                    if request["method"] == "tools/list" {
+                        lock(&state.methods).push("tools/list".into());
+                        Json(json!({"jsonrpc":"2.0","id":request["id"],"result":{"tools":[tool]}}))
+                            .into_response()
+                    } else {
+                        fake(State(state), Json(request)).await
+                    }
+                }
+            }),
+        );
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let session = DefaultMcpTransportFactory::default()
+            .connect(
+                ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(endpoint.clone())),
+                control(5),
+            )
+            .await
+            .unwrap();
+        let discovery = session.discover(control(5)).await.unwrap();
+        assert_eq!(discovery.tools.len(), 1);
+        let descriptor = discovery.tools.into_iter().next().unwrap();
+        assert_eq!(descriptor.description, description);
+        assert!(serde_json::to_vec(&descriptor).unwrap().len() > 16 * 1024);
+        let id = uuid::Uuid::new_v4().to_string();
+        let alias = alias_for(&id, &descriptor.descriptor_digest).unwrap();
+        let reviewed = ReviewedMcpTool {
+            alias: alias.clone(),
+            descriptor,
+        };
+        let row = McpConnectionRecord {
+            id,
+            agent_id: "owner".into(),
+            label: "Own".into(),
+            endpoint,
+            stdio: None,
+            bearer_credential_ref: None,
+            oauth_credential_ref: None,
+            enabled: true,
+            version: 1,
+            reviewed_tools: vec![reviewed.clone()],
+        };
+        let decoded = serde_json::from_slice(&serde_json::to_vec(&row).unwrap()).unwrap();
+        let registry =
+            McpRegistry::restored(vec![decoded], &HashSet::from(["owner".into()])).unwrap();
+        assert_eq!(
+            registry.known_descriptor("owner", &alias),
+            Some(reviewed.tool_descriptor())
+        );
+        assert!(registry.published().read().unwrap().live.is_empty());
+        session.close().await.unwrap();
+        assert_eq!(
+            *lock(&methods),
+            ["initialize", "notifications/initialized", "tools/list"]
+        );
+        task.abort();
+        let _ = task.await;
     }
     #[tokio::test]
     async fn actual_sdk_json_and_request_sse_each_call_once_without_cached_discovery() {

@@ -55,7 +55,7 @@ Execution is Windows-only because whole-job descendant exit must be witnessed. O
 - Five seconds for initialization plus complete first discovery; at most four pages and 64 candidate tools.
 - Twenty seconds for one call, including queueing; one physical call per connection, two globally and at most four queued callers.
 - Aggregate raw wire budget 256 KiB, individual JSON/SSE event 64 KiB, including raw comments and progress traffic.
-- Reviewed descriptor/schema pair and arguments each 16 KiB, depth 16 and 1,024 nodes. Schemas use explicit Draft 2020-12, acyclic local `$defs` references and safe numeric values.
+- Tool descriptions allow 8 KiB of UTF-8 text; the complete serialized descriptor allows 32 KiB, including JSON escaping. The reviewed input/output schema pair and arguments each remain limited to 16 KiB, depth 16 and 1,024 nodes. Schemas use explicit Draft 2020-12, acyclic local `$defs` references and safe numeric values. Exact descriptions and schemas remain part of the reviewed digest.
 - Final model evidence envelope at most 16 KiB and 16 text blocks. Unsupported blocks and shortened content are explicitly marked. Returned text is external evidence with connection, generation, alias and digest provenance.
 
 There is no automatic retry, reconnect, protocol fallback, stale discovery cache or additional model lookup. A timeout, Stop or revocation cannot prove that a remote effect was undone. A retired physical call keeps its slot until owned cleanup joins. Unknown cleanup retains its quarantine; shutdown can report unsettled effects without reusing the slot.
