@@ -248,6 +248,19 @@ export function AppearancePage() {
             }
           />
         </label>
+        <label className="appearance-motion-row">
+          <span className="appearance-choice-copy">
+            <strong>Show work</strong>
+            <small>Each step, tool and timing while your agent works</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={preferences.showWork}
+            onChange={(event) =>
+              setPreferences({ showWork: event.target.checked })
+            }
+          />
+        </label>
       </section>
     </div>
   );

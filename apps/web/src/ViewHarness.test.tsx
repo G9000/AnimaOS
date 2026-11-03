@@ -851,7 +851,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   // The store remembers its last save in memory, past localStorage.clear().
-  saveAppearancePreferences({ advancedInput: false });
+  saveAppearancePreferences({ advancedInput: false, showWork: false });
   localStorage.clear();
   sessionStorage.clear();
   window.history.replaceState(null, '', '/');
@@ -4507,6 +4507,7 @@ it.each(['Plan Saturday again', ' /rename Task title ', '/btw quoted input'])(
 );
 
 it('streams a reply into the open session with its tool steps, then shows the committed reply', async () => {
+  saveAppearancePreferences({ showWork: true });
   const { stream } = await openLiveSession();
   const run = runningRun();
   act(() =>
@@ -5710,6 +5711,7 @@ it('says it is reconnecting once while its retries keep failing', async () => {
 });
 
 it('opens a helper’s session from its card', async () => {
+  saveAppearancePreferences({ showWork: true });
   const user = userEvent.setup();
   const helper = snapshot('helper-7', 'Researcher', 2);
   helper.state.config.settings = { additional: { workspaceRole: 'helper' } };

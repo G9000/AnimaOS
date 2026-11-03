@@ -36,6 +36,9 @@ export interface AppearancePreferences {
   /** Do/Plan and the model picker on the chat input. Off keeps the input
    *  to attachments; the model lives in Settings. */
   advancedInput: boolean;
+  /** Each tool step, its timing and results while the agent works. Off
+   *  shows one plain line of what it is doing and then only the answer. */
+  showWork: boolean;
 }
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
@@ -45,6 +48,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   density: 'comfortable',
   reduceMotion: false,
   advancedInput: false,
+  showWork: false,
 };
 
 const STORAGE_KEY = 'anima.appearance';
@@ -84,6 +88,10 @@ function sanitize(value: unknown): AppearancePreferences {
       typeof stored.advancedInput === 'boolean'
         ? stored.advancedInput
         : DEFAULT_APPEARANCE_PREFERENCES.advancedInput,
+    showWork:
+      typeof stored.showWork === 'boolean'
+        ? stored.showWork
+        : DEFAULT_APPEARANCE_PREFERENCES.showWork,
   };
 }
 

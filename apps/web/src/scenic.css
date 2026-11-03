@@ -1741,6 +1741,13 @@ button.scenic-thread[aria-expanded='true'] {
   height: 100%;
 }
 
+/* Show work off: no card, just the orb and what it is doing. */
+.scenic-shell .tool-block-simple {
+  padding: 4px 0;
+  color: rgb(236 230 218 / 0.7);
+  font-weight: 400;
+}
+
 .chat-thinking {
   display: flex;
   align-items: center;
@@ -8750,6 +8757,10 @@ details.settings-item > :not(summary) {
   border-color: #ddd7cb;
   background: #fffefa;
   color: #1a1a18;
+}
+
+:root[data-appearance-theme='light'] .scenic-shell [data-main-chat='true'] .tool-block-simple {
+  color: #5c5952;
 }
 
 :root[data-appearance-theme='light'] .scenic-shell [data-main-chat='true'] .studio-code {

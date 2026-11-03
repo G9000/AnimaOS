@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { automationNoticeFor } from '../../lib/automations';
 import { emptyLiveRun } from '../../lib/session-events';
@@ -10,6 +10,8 @@ import { automationFixture } from '../../test/automations';
 import { approvalFixture, runFixture } from '../../test/live';
 import { PendingMessage, RunActivity, ToolBlock } from './RunActivity';
 import { RunOutcomeCard } from './RunOutcomeCard';
+import { saveAppearancePreferences } from '../../lib/appearance-preferences';
+import { ChatExportScope } from './ChatExportDownload';
 
 function renderMessage(message: ChatMessage) {
   return <p data-role={message.role}>{message.content.text}</p>;
@@ -51,6 +53,11 @@ it.each(['queued', 'running'] as const)(
     expect(screen.queryByText(internal)).toBeNull();
   },
 );
+
+
+// These suites check the detailed view; Show work off has its own tests.
+beforeEach(() => saveAppearancePreferences({ showWork: true }));
+afterEach(() => saveAppearancePreferences({ showWork: false }));
 
 describe('RunActivity', () => {
   it('shows honest reference-only chips for queued attachment-only inputs before history arrives', () => {
@@ -1062,5 +1069,113 @@ describe('Plan shown in Free autonomy', () => {
         screen.queryByRole('region', { name: 'Plan: Lisbon trip' }),
       ).toBeNull();
     }
+  });
+});
+
+const EXPORT_SCOPE = { agentId: 'a', sessionId: 's' };
+
+describe('ToolBlock with Show work off', () => {
+  beforeEach(() => saveAppearancePreferences({ showWork: false }));
+
+  it('shows one plain line of what it is doing instead of step cards', () => {
+    const searching: ToolStep = {
+      ...step,
+      toolCallId: 'call_search',
+      name: 'web_search',
+      status: 'running',
+      durationMs: null,
+      result: null,
+    };
+    render(<ToolBlock steps={[step, searching]} active />);
+
+    expect(screen.getByText('Looking that up…')).toBeVisible();
+    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(screen.queryByText(/steps/)).toBeNull();
+  });
+
+  it('says it is thinking between calls', () => {
+    render(<ToolBlock steps={[step]} active />);
+    expect(screen.getByText('Thinking…')).toBeVisible();
+  });
+
+  it('leaves no trace of finished work but keeps the turn’s name line', () => {
+    render(
+      <ToolBlock
+        steps={[step, { ...step, toolCallId: 'call_2' }]}
+        active={false}
+        head={{ name: 'Nova', time: '10:02' }}
+      />,
+    );
+
+    expect(screen.getByText('Nova')).toBeVisible();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByText(/Worked for/)).toBeNull();
+  });
+
+  it('still shows what the owner can act on: an automation and a download', () => {
+    const made = automationFixture('schedule-1', {
+      name: 'Stretch',
+      createdBy: {
+        kind: 'agent',
+        agentId: 'agent-main',
+        sessionId: 'chat:1',
+        runId: 'run_1',
+        toolCallId: 'call-automation',
+      },
+    });
+    const exported: ToolStep = {
+      ...step,
+      toolCallId: 'call-export',
+      name: 'export_chat',
+      result: JSON.stringify({
+        url: '/api/agents/a/sessions/s/export',
+        filename: 'chat.md',
+      }),
+    };
+    render(
+      <ChatExportScope.Provider value={EXPORT_SCOPE}>
+        <ToolBlock
+          steps={[
+            {
+              ...step,
+              name: 'create_automation',
+              toolCallId: 'call-automation',
+            },
+            exported,
+          ]}
+          active={false}
+          actions={{
+            automationNotice: (candidate) =>
+              automationNoticeFor(candidate, [made]),
+          }}
+        />
+      </ChatExportScope.Provider>,
+    );
+
+    expect(
+      screen.getByRole('note', { name: 'Automation Stretch' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Download chat Markdown' }),
+    ).toBeVisible();
+  });
+
+  it('keeps approvals outside the hidden work', () => {
+    const run = runFixture('run_1', {
+      status: 'awaiting_approval',
+      startedAtMs: Date.now(),
+    });
+    render(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={{ ...emptyLiveRun(run), approvals: [approvalFixture('apr_1')] }}
+      />,
+    );
+
+    expect(
+      screen.getByRole('region', { name: 'Approval needed: bash' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('listitem')).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionSummary } from '@animaos/sdk';
 import type { AgentDetail, ChatMessage } from '../lib/types';
 import { createDaemonClient, type Run } from '@animaos/sdk';
@@ -17,6 +17,7 @@ import {
 } from '../lib/session-events';
 import { buildTranscript } from '../lib/transcript';
 import { runFixture } from '../test/live';
+import { saveAppearancePreferences } from '../lib/appearance-preferences';
 
 const messages: AgentDetail['messages'] = [
   {
@@ -65,6 +66,11 @@ async function openM83SearchCards() {
   for (const button of screen.getAllByRole('button', { name: /^Web search/ }))
     fireEvent.click(button);
 }
+
+
+// These suites check the detailed view; Show work off has its own tests.
+beforeEach(() => saveAppearancePreferences({ showWork: true }));
+afterEach(() => saveAppearancePreferences({ showWork: false }));
 
 describe('outcome task recovery controls', () => {
   it.each(['exhausted', 'awaiting_owner'] as const)(

@@ -17,10 +17,13 @@ import { AutomationNoticeCard } from './AutomationNoticeCard';
 import { HelperCard } from './HelperCard';
 import { PlanNoteCard } from './PlanCard';
 import { ToolStepCard } from './ToolStepCard';
+import { ChatExportDownload, chatExportResult } from './ChatExportDownload';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { ChevronIcon } from '../icons';
 import { HaloOrb } from '../halo/HaloOrb';
 import { orbPixel, useAgentOrbStyle } from '../../lib/orb-style-preferences';
+import { useAppearancePreferences } from '../../lib/appearance-preferences';
+import { workStatus } from '../../lib/work-status';
 import {
   mergeAcpSnapshots,
   parseCodingSession,
@@ -129,7 +132,9 @@ export interface TurnHead {
 }
 
 /** Tool requests as cards (spec §15.2): open while the run works, then
- *  collapsed to one "Worked for Ns · N steps" row. */
+ *  collapsed to one "Worked for Ns · N steps" row. With Show work off, the
+ *  steps stay hidden: one plain line while it works, then nothing but what
+ *  the owner can act on (a plan, a session, an automation, a download). */
 export function ToolBlock({
   steps,
   active,
@@ -147,6 +152,7 @@ export function ToolBlock({
   head?: TurnHead;
 }) {
   const [open, setOpen] = useState(false);
+  const [{ showWork }] = useAppearancePreferences();
   const orbStyle = useAgentOrbStyle(actions?.sessionAgentId ?? '');
   const count = steps.length;
   const total =
@@ -179,8 +185,23 @@ export function ToolBlock({
       ? [{ plan: step.plan, key: keys[index] }]
       : [],
   );
+  // A download is the answer itself, not a trace of the work.
+  const exports = showWork
+    ? []
+    : steps.flatMap((step, index) => {
+        const exported =
+          step.status === 'success'
+            ? chatExportResult(step.name, step.result)
+            : null;
+        return exported ? [{ exported, key: keys[index] }] : [];
+      });
+  const status = workStatus(steps);
   return (
-    <div className="tool-block" data-active={active || undefined}>
+    <div
+      className="tool-block"
+      data-active={active || undefined}
+      data-simple={!showWork || undefined}
+    >
       {head && (
         <div className="chat-agent-head">
           <span className="chat-agent-name">{head.name}</span>
@@ -195,55 +216,75 @@ export function ToolBlock({
           onStop={active ? onStop : undefined}
         />
       ))}
-      <div className="tool-block-card" data-open={expanded || undefined}>
-        {active ? (
-          <div className="tool-block-label" aria-label={label}>
-            {/* The agent's own orb, small and busy, while it works. */}
-            <span className="tool-block-live" aria-hidden>
-              <HaloOrb
-                accent={orbStyle.color}
-                energy={0.85}
-                pixel={orbPixel(orbStyle.grain)}
-              />
-            </span>
-            <span className="tool-block-title">{title}</span>
-            <span className="tool-block-meta">{meta}</span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="tool-block-toggle"
-            aria-expanded={open}
-            aria-label={label}
-            onClick={() => setOpen((value) => !value)}
-          >
-            <ChevronIcon size={14} className="tool-block-chevron" />
-            <span className="tool-block-title">{title}</span>
-            <span className="tool-block-meta">{meta}</span>
-          </button>
-        )}
-        {expanded && count > 0 && (
-          <ul className="tool-block-steps">
-            {steps.map((step, index) => (
-              <li key={keys[index]}>
-                {step.helper ? (
-                  <HelperCard
-                    step={step}
-                    target={actions?.helperSession?.(step) ?? null}
-                    onOpen={actions?.onOpenSession}
-                  />
-                ) : (
-                  <ToolStepCard
-                    step={step}
-                    agentId={agentId}
-                    pinned={pinned.has(index)}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {!showWork && active && (
+        <div
+          className="tool-block-label tool-block-simple"
+          aria-label={status}
+        >
+          <span className="tool-block-live" aria-hidden>
+            <HaloOrb
+              accent={orbStyle.color}
+              energy={0.85}
+              pixel={orbPixel(orbStyle.grain)}
+            />
+          </span>
+          <span className="tool-block-title">{status}</span>
+        </div>
+      )}
+      {exports.map(({ exported, key }) => (
+        <ChatExportDownload key={key} {...exported} />
+      ))}
+      {showWork && (
+        <div className="tool-block-card" data-open={expanded || undefined}>
+          {active ? (
+            <div className="tool-block-label" aria-label={label}>
+              {/* The agent's own orb, small and busy, while it works. */}
+              <span className="tool-block-live" aria-hidden>
+                <HaloOrb
+                  accent={orbStyle.color}
+                  energy={0.85}
+                  pixel={orbPixel(orbStyle.grain)}
+                />
+              </span>
+              <span className="tool-block-title">{title}</span>
+              <span className="tool-block-meta">{meta}</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="tool-block-toggle"
+              aria-expanded={open}
+              aria-label={label}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <ChevronIcon size={14} className="tool-block-chevron" />
+              <span className="tool-block-title">{title}</span>
+              <span className="tool-block-meta">{meta}</span>
+            </button>
+          )}
+          {expanded && count > 0 && (
+            <ul className="tool-block-steps">
+              {steps.map((step, index) => (
+                <li key={keys[index]}>
+                  {step.helper ? (
+                    <HelperCard
+                      step={step}
+                      target={actions?.helperSession?.(step) ?? null}
+                      onOpen={actions?.onOpenSession}
+                    />
+                  ) : (
+                    <ToolStepCard
+                      step={step}
+                      agentId={agentId}
+                      pinned={pinned.has(index)}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {snapshots.map(({ session, typed, index }) => (
         // A newer snapshot mounts afresh: a local Stop or Cancel no longer
         // stands in for what the daemon reported.

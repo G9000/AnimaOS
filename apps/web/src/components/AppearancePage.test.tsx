@@ -33,6 +33,7 @@ describe('appearance page', () => {
     await user.click(screen.getByRole('radio', { name: /Compact/ }));
     await user.click(screen.getByRole('checkbox', { name: /Reduce motion/ }));
     await user.click(screen.getByRole('checkbox', { name: /Advanced input/ }));
+    await user.click(screen.getByRole('checkbox', { name: /Show work/ }));
 
     expect(JSON.parse(localStorage.getItem('anima.appearance') ?? '{}')).toEqual(
       {
@@ -42,6 +43,7 @@ describe('appearance page', () => {
         density: 'compact',
         reduceMotion: true,
         advancedInput: true,
+        showWork: true,
       },
     );
   });
