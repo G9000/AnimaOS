@@ -6811,7 +6811,8 @@ details.settings-item > :not(summary) {
   box-shadow: 0 0 0 1px rgb(236 230 218 / 0.15);
 }
 
-.appearance-accent-choice:has(input:checked) > span {
+.appearance-accent-choice:has(input:checked) > span,
+.appearance-accent-choice[data-selected] > span {
   box-shadow: 0 0 0 2px #121211, 0 0 0 3px var(--color-accent);
 }
 
@@ -6821,6 +6822,9 @@ details.settings-item > :not(summary) {
 .appearance-accent-choice [data-accent='sage'] { background: #7fcb8a; }
 .appearance-accent-choice [data-accent='coral'] { background: #ff6b5b; }
 .appearance-accent-choice [data-accent='paper'] { background: #ece6da; }
+.appearance-accent-choice [data-accent='custom'] {
+  background: conic-gradient(#ff6b5b, #e8b04b, #7fcb8a, #4bb8e8, #8c93ff, #e94dab, #ff6b5b);
+}
 
 .appearance-accent-name {
   margin-left: 4px;

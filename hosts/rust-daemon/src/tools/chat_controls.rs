@@ -7,7 +7,7 @@ fn look_description(name: &str) -> &'static str {
     match name {
         "view" => "simple: the plain everyday console (work hidden, basic input); advanced: show each tool step and the Do/Plan and model controls",
         "theme" => "Colour theme",
-        "accent" => "Highlight colour used for the orb, buttons and anything that needs the owner",
+        "accent" => "Highlight colour used for the orb, buttons and anything that needs the owner: pink, lavender, amber, sage, coral or paper, or any other colour as #rrggbb (teal is #14b8a6); custom brings back the owner's own colour",
         "textSize" => "Chat and settings text size",
         "density" => "Space between messages and rows",
         "chatBackground" => "What sits behind the chat: the full orb, a quiet orb at the edge, or nothing",
@@ -42,6 +42,10 @@ pub(super) fn register(registry: &mut ToolRegistry) {
         .map(|(name, values)| {
             optional_parameter(name, string_enum_parameter(look_description(name), values))
         })
+        .chain(std::iter::once(optional_parameter(
+            "accent",
+            string_parameter(look_description("accent")),
+        )))
         .chain(
             crate::owner_look::LOOK_SWITCHES
                 .iter()
@@ -53,7 +57,7 @@ pub(super) fn register(registry: &mut ToolRegistry) {
     registry.register(
         tool_descriptor(
             NAMES[3],
-            "Change how the owner's anima console looks when they ask, for example \"show me the advanced stuff\", \"make it simple again\", \"switch to light mode\" or \"make the accent lavender\". When the owner asks to change the colour, theme, background, text or how things look without naming a specific file, page or document, they mean this app: use this tool instead of asking which. Applies at once on every open console and is undoable from the chat. Pass only what should change; with no arguments it reports the current look without changing anything. Only the listed choices exist: offer the closest one rather than inventing a colour. Cannot change agent behaviour or settings.",
+            "Change how the owner's anima console looks when they ask, for example \"show me the advanced stuff\", \"make it simple again\", \"switch to light mode\" or \"make the accent lavender\". When the owner asks to change the colour, theme, background, text or how things look without naming a specific file, page or document, they mean this app: use this tool instead of asking which. Applies at once on every open console and is undoable from the chat. Pass only what should change; with no arguments it reports the current look without changing anything. Only the listed choices exist, except that the accent can be any colour. Cannot change agent behaviour or settings.",
             schema,
         ),
         execute,

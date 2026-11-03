@@ -1,9 +1,6 @@
 import type { PresenceMode } from '../../lib/presence';
 import type { ChatBackground } from '../../lib/chat-background';
-import {
-  APPEARANCE_ACCENT_HEX,
-  type AppearanceAccent,
-} from '../../lib/appearance-preferences';
+import { APPEARANCE_ACCENT_HEX } from '../../lib/appearance-preferences';
 import { HaloOrb } from './HaloOrb';
 import {
   orbPixel,
@@ -21,9 +18,10 @@ const LOOK: Record<PresenceMode, { accent: string; energy: number }> = {
  *  background and in the header avatar. */
 export function presenceLook(
   mode: PresenceMode,
-  accent: AppearanceAccent = 'pink',
+  /** The accent in effect, as `#rrggbb`. */
+  accent: string = APPEARANCE_ACCENT_HEX.pink,
 ) {
-  return { ...LOOK[mode], accent: APPEARANCE_ACCENT_HEX[accent] };
+  return { ...LOOK[mode], accent };
 }
 
 /** At rest in the quiet background the orb barely moves. */
@@ -38,12 +36,13 @@ const QUIET_CALM_ENERGY = 0.15;
 export function HaloBackdrop({
   mode,
   variant = 'full',
-  accent = 'pink',
+  accent = APPEARANCE_ACCENT_HEX.pink,
   agentId = '',
 }: {
   mode: PresenceMode;
   variant?: ChatBackground;
-  accent?: AppearanceAccent;
+  /** The accent in effect, as `#rrggbb`. */
+  accent?: string;
   agentId?: string;
 }) {
   const orbStyle = useAgentOrbStyle(agentId);

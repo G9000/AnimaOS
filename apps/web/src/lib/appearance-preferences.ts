@@ -21,6 +21,43 @@ export const APPEARANCE_ACCENT_HEX: Record<AppearanceAccent, string> = {
   paper: '#ECE6DA',
 };
 
+/** The preset accents, or `custom` for the owner's own colour. */
+export type AccentChoice = AppearanceAccent | 'custom';
+export const DEFAULT_CUSTOM_ACCENT = '#e94dab';
+
+/** `#` and six hex digits. */
+export function isHexColour(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/** The accent in effect, as `#rrggbb`. */
+export function accentHex({
+  accent,
+  customAccent,
+}: Pick<AppearancePreferences, 'accent' | 'customAccent'>): string {
+  return accent === 'custom' ? customAccent : APPEARANCE_ACCENT_HEX[accent];
+}
+
+/** The colour variables a custom accent sets: the accent, a lighter action
+ *  colour, readable text on it, and its RGB channels. */
+export function customAccentVariables(hex: string): Record<string, string> {
+  const channels = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const [r, g, b] = channels;
+  const lighter = channels
+    .map((value) => Math.round(value + (255 - value) * 0.25))
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+  // Perceived brightness: light accents carry dark text.
+  const light = (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6;
+  return {
+    '--color-accent': hex,
+    '--color-action': `#${lighter}`,
+    '--color-accent-fg': light ? '#171614' : '#ffffff',
+    '--color-accent-rgb': `${r} ${g} ${b}`,
+    '--appearance-orb-accent': hex,
+  };
+}
+
 export const APPEARANCE_TEXT_SIZES = ['small', 'default', 'large'] as const;
 export type AppearanceTextSize = (typeof APPEARANCE_TEXT_SIZES)[number];
 
@@ -29,7 +66,9 @@ export type AppearanceDensity = (typeof APPEARANCE_DENSITIES)[number];
 
 export interface AppearancePreferences {
   theme: AppearanceTheme;
-  accent: AppearanceAccent;
+  accent: AccentChoice;
+  /** The owner's own accent as `#rrggbb`, kept while a preset is chosen. */
+  customAccent: string;
   textSize: AppearanceTextSize;
   density: AppearanceDensity;
   reduceMotion: boolean;
@@ -44,6 +83,7 @@ export interface AppearancePreferences {
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   theme: 'dark',
   accent: 'pink',
+  customAccent: DEFAULT_CUSTOM_ACCENT,
   textSize: 'default',
   density: 'comfortable',
   reduceMotion: false,
@@ -73,9 +113,13 @@ function sanitize(value: unknown): AppearancePreferences {
     theme: isOneOf(stored.theme, APPEARANCE_THEMES)
       ? stored.theme
       : DEFAULT_APPEARANCE_PREFERENCES.theme,
-    accent: isOneOf(stored.accent, APPEARANCE_ACCENTS)
-      ? stored.accent
-      : DEFAULT_APPEARANCE_PREFERENCES.accent,
+    accent:
+      stored.accent === 'custom' || isOneOf(stored.accent, APPEARANCE_ACCENTS)
+        ? stored.accent
+        : DEFAULT_APPEARANCE_PREFERENCES.accent,
+    customAccent: isHexColour(stored.customAccent)
+      ? stored.customAccent.toLowerCase()
+      : DEFAULT_APPEARANCE_PREFERENCES.customAccent,
     textSize: isOneOf(stored.textSize, APPEARANCE_TEXT_SIZES)
       ? stored.textSize
       : DEFAULT_APPEARANCE_PREFERENCES.textSize,

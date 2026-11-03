@@ -1,6 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  DEFAULT_APPEARANCE_PREFERENCES,
+  readAppearancePreferences,
+  saveAppearancePreferences,
+} from '../lib/appearance-preferences';
 import { saveChatBackground } from '../lib/chat-background';
 import { AppearancePage } from './AppearancePage';
 
@@ -23,6 +28,32 @@ describe('appearance page', () => {
     ).not.toBeChecked();
   });
 
+  it('takes any colour as the accent and keeps it while a preset is chosen', async () => {
+    const user = userEvent.setup();
+    saveAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);
+    render(<AppearancePage />);
+
+    fireEvent.change(screen.getByLabelText('Custom accent'), {
+      target: { value: '#14B8A6' },
+    });
+    expect(readAppearancePreferences()).toMatchObject({
+      accent: 'custom',
+      customAccent: '#14b8a6',
+    });
+    expect(screen.getByText('Custom · #14b8a6')).toBeVisible();
+    expect(screen.getByRole('radio', { name: 'Anima pink' })).not.toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: 'Sage' }));
+    expect(readAppearancePreferences()).toMatchObject({
+      accent: 'sage',
+      customAccent: '#14b8a6',
+    });
+    // Choosing the custom swatch again brings the owner's colour back.
+    await user.click(screen.getByLabelText('Custom accent'));
+    expect(readAppearancePreferences().accent).toBe('custom');
+    saveAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);
+  });
+
   it('persists the selected appearance preferences', async () => {
     const user = userEvent.setup();
     render(<AppearancePage />);
@@ -43,6 +74,7 @@ describe('appearance page', () => {
         density: 'compact',
         reduceMotion: true,
         advancedInput: true,
+        customAccent: '#e94dab',
         showWork: true,
       },
     );

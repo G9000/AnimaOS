@@ -86,6 +86,22 @@ describe('describeLookChange', () => {
   });
 });
 
+describe('a custom accent', () => {
+  it('is read from a change and named by its colour', () => {
+    const look = { ...BASE, accent: 'custom' as const, customAccent: '#14b8a6' };
+    const change = result({
+      look,
+      previous: BASE,
+      changed: ['accent', 'customAccent'],
+    });
+    expect(change?.look.customAccent).toBe('#14b8a6');
+    expect(describeLookChange(change!)).toBe('Accent #14b8a6');
+    expect(
+      result({ look: { ...look, customAccent: 'teal' }, previous: BASE, changed: ['accent'] }),
+    ).toBeNull();
+  });
+});
+
 describe('applyLook', () => {
   it('shows the look here without counting as the owner’s own change', () => {
     const seen: boolean[] = [];

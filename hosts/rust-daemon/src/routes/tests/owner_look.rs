@@ -58,7 +58,8 @@ async fn look_round_trips_and_validates() {
 
     let look = json!({
         "theme": "light",
-        "accent": "lavender",
+        "accent": "custom",
+        "customAccent": "#14b8a6",
         "textSize": "large",
         "density": "compact",
         "reduceMotion": true,
@@ -77,6 +78,10 @@ async fn look_round_trips_and_validates() {
     for (case, body) in [
         ("unknown theme", json!({"theme": "neon"})),
         ("unknown accent", json!({"accent": "teal"})),
+        (
+            "custom accent not a colour",
+            json!({"customAccent": "teal"}),
+        ),
         ("unknown background", json!({"chatBackground": "video"})),
         ("switch as text", json!({"showWork": "yes"})),
     ] {

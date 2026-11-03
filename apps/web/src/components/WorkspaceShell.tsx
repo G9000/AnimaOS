@@ -52,9 +52,17 @@ import { SettingsSection } from './settings/SettingsKit';
 import { NotificationsPage } from './NotificationsPage';
 import { useChatBackground } from '../lib/chat-background';
 import {
+  accentHex,
+  customAccentVariables,
+  DEFAULT_CUSTOM_ACCENT,
   useAppearancePreferences,
   type AppearanceTheme,
 } from '../lib/appearance-preferences';
+
+/** The variables a custom accent sets on the page root. */
+const CUSTOM_ACCENT_VARIABLES = Object.keys(
+  customAccentVariables(DEFAULT_CUSTOM_ACCENT),
+);
 
 /** Pages this release renders; the other hash pages open the conversation
  *  until their milestones build them. */
@@ -407,6 +415,15 @@ export function WorkspaceShell({
       root.dataset.appearanceTheme = effectiveTheme;
       root.dataset.appearanceThemeChoice = appearance.theme;
       root.dataset.appearanceAccent = appearance.accent;
+      // The presets live in CSS; the owner's own colour is set here.
+      const custom =
+        appearance.accent === 'custom'
+          ? customAccentVariables(appearance.customAccent)
+          : null;
+      for (const name of CUSTOM_ACCENT_VARIABLES) {
+        if (custom) root.style.setProperty(name, custom[name]);
+        else root.style.removeProperty(name);
+      }
       root.dataset.appearanceTextSize = appearance.textSize;
       root.dataset.appearanceDensity = appearance.density;
       root.dataset.appearanceReduceMotion = String(appearance.reduceMotion);
@@ -614,7 +631,7 @@ export function WorkspaceShell({
             <HaloBackdrop
               variant={chatBackground}
               mode={page === null ? presence : 'calm'}
-              accent={appearance.accent}
+              accent={accentHex(appearance)}
               agentId={settingsAgent.id}
             />
             <div className="studio-topbar scenic-topbar">
@@ -655,7 +672,7 @@ export function WorkspaceShell({
                   }
                   needsYou={(inbox?.count ?? 0) > 0}
                   presence={page === null ? presence : 'calm'}
-                  appearanceAccent={appearance.accent}
+                  appearanceAccent={accentHex(appearance)}
                   onOpenConversations={
                     sidebar !== null ? () => setDrawerOpen(true) : undefined
                   }

@@ -1164,6 +1164,7 @@ describe('ToolBlock with Show work off', () => {
     const look = {
       theme: 'light',
       accent: 'pink',
+      customAccent: '#e94dab',
       textSize: 'default',
       density: 'comfortable',
       reduceMotion: false,

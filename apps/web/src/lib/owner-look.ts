@@ -3,9 +3,10 @@ import {
   APPEARANCE_DENSITIES,
   APPEARANCE_TEXT_SIZES,
   APPEARANCE_THEMES,
+  isHexColour,
   readAppearancePreferences,
   saveAppearancePreferences,
-  type AppearanceAccent,
+  type AccentChoice,
   type AppearanceDensity,
   type AppearanceTextSize,
   type AppearanceTheme,
@@ -23,7 +24,9 @@ import { daemon } from './daemon-api';
  *  draws at once; the daemon's record wins when the two differ. */
 export interface OwnerLook {
   theme: AppearanceTheme;
-  accent: AppearanceAccent;
+  accent: AccentChoice;
+  /** `#rrggbb`, used when `accent` is `custom`. */
+  customAccent: string;
   textSize: AppearanceTextSize;
   density: AppearanceDensity;
   reduceMotion: boolean;
@@ -35,6 +38,7 @@ export interface OwnerLook {
 export const LOOK_KEYS = [
   'theme',
   'accent',
+  'customAccent',
   'textSize',
   'density',
   'reduceMotion',
@@ -66,7 +70,8 @@ export function parseLook(value: unknown): OwnerLook | null {
   const look = value as Record<string, unknown>;
   if (
     !isOneOf(look.theme, APPEARANCE_THEMES) ||
-    !isOneOf(look.accent, APPEARANCE_ACCENTS) ||
+    !(look.accent === 'custom' || isOneOf(look.accent, APPEARANCE_ACCENTS)) ||
+    !isHexColour(look.customAccent) ||
     !isOneOf(look.textSize, APPEARANCE_TEXT_SIZES) ||
     !isOneOf(look.density, APPEARANCE_DENSITIES) ||
     !isOneOf(look.chatBackground, CHAT_BACKGROUNDS) ||
@@ -78,6 +83,7 @@ export function parseLook(value: unknown): OwnerLook | null {
   return {
     theme: look.theme,
     accent: look.accent,
+    customAccent: look.customAccent.toLowerCase(),
     textSize: look.textSize,
     density: look.density,
     reduceMotion: look.reduceMotion,
@@ -179,7 +185,16 @@ export function describeLookChange({ look, changed }: LookChange): string {
   for (const key of changed) {
     if (view && (key === 'showWork' || key === 'advancedInput')) continue;
     if (key === 'theme') parts.push(THEME_NAMES[look.theme]);
-    if (key === 'accent') parts.push(`${capitalized(look.accent)} accent`);
+    if (key === 'accent' || key === 'customAccent') {
+      // A custom colour names itself once, however both fields moved.
+      if (key === 'customAccent' && changed.includes('accent')) continue;
+      if (key === 'customAccent' && look.accent !== 'custom') continue;
+      parts.push(
+        look.accent === 'custom'
+          ? `Accent ${look.customAccent}`
+          : `${capitalized(look.accent)} accent`,
+      );
+    }
     if (key === 'textSize')
       parts.push(look.textSize === 'default' ? 'Default text size' : `${capitalized(look.textSize)} text`);
     if (key === 'density') parts.push(`${capitalized(look.density)} spacing`);

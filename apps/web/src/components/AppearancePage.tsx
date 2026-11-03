@@ -57,6 +57,7 @@ const DENSITIES: Record<AppearanceDensity, string> = {
 export function AppearancePage() {
   const [preferences, setPreferences] = useAppearancePreferences();
   const [background, setBackground] = useChatBackground();
+  const customAccent = preferences.accent === 'custom';
   return (
     <div className="settings-form appearance-settings">
       <section className="settings-group appearance-theme-section">
@@ -126,8 +127,39 @@ export function AppearancePage() {
                 <span data-accent={accent} aria-hidden />
               </label>
             ))}
+            {/* Any colour: choosing it brings back the owner's own, and the
+             *  picker changes it. */}
+            <label
+              className="appearance-accent-choice"
+              data-selected={customAccent || undefined}
+              title="Pick your own colour"
+            >
+              <input
+                type="color"
+                aria-label="Custom accent"
+                value={preferences.customAccent}
+                onClick={() => setPreferences({ accent: 'custom' })}
+                onChange={(event) =>
+                  setPreferences({
+                    accent: 'custom',
+                    customAccent: event.target.value.toLowerCase(),
+                  })
+                }
+              />
+              <span
+                data-accent="custom"
+                style={
+                  customAccent
+                    ? { background: preferences.customAccent }
+                    : undefined
+                }
+                aria-hidden
+              />
+            </label>
             <span className="appearance-accent-name">
-              {ACCENTS[preferences.accent]}
+              {customAccent
+                ? `Custom · ${preferences.customAccent}`
+                : ACCENTS[preferences.accent as AppearanceAccent]}
             </span>
           </div>
         </fieldset>

@@ -13,8 +13,11 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct OwnerLook {
     /// `dark`, `light`, or `system`.
     pub(crate) theme: String,
-    /// `pink`, `lavender`, `amber`, `sage`, `coral`, or `paper`.
+    /// `pink`, `lavender`, `amber`, `sage`, `coral`, `paper`, or `custom`
+    /// for the owner's own colour in `customAccent`.
     pub(crate) accent: String,
+    /// The owner's own accent as `#rrggbb`, kept while a preset is chosen.
+    pub(crate) custom_accent: String,
     /// `small`, `default`, or `large`.
     pub(crate) text_size: String,
     /// `comfortable` or `compact`.
@@ -29,18 +32,18 @@ pub(crate) struct OwnerLook {
 }
 
 const THEMES: &[&str] = &["dark", "light", "system"];
-const ACCENTS: &[&str] = &["pink", "lavender", "amber", "sage", "coral", "paper"];
+/// The preset accents; `custom` uses the owner's own colour.
+pub(crate) const ACCENTS: &[&str] = &["pink", "lavender", "amber", "sage", "coral", "paper"];
 const TEXT_SIZES: &[&str] = &["small", "default", "large"];
 const DENSITIES: &[&str] = &["comfortable", "compact"];
 const CHAT_BACKGROUNDS: &[&str] = &["full", "quiet", "off"];
 const VIEWS: &[&str] = &["simple", "advanced"];
 
 /// The choices `change_look` takes, with what each may be; `view` sets the
-/// two power-user switches together.
+/// two power-user switches together. `accent` also takes any `#rrggbb`.
 pub(crate) const LOOK_CHOICES: &[(&str, &[&str])] = &[
     ("view", VIEWS),
     ("theme", THEMES),
-    ("accent", ACCENTS),
     ("textSize", TEXT_SIZES),
     ("density", DENSITIES),
     ("chatBackground", CHAT_BACKGROUNDS),
@@ -53,6 +56,7 @@ impl Default for OwnerLook {
         Self {
             theme: "dark".into(),
             accent: "pink".into(),
+            custom_accent: "#e94dab".into(),
             text_size: "default".into(),
             density: "comfortable".into(),
             reduce_motion: false,
@@ -71,11 +75,26 @@ fn one_of(field: &str, value: &str, allowed: &[&str]) -> Result<(), String> {
     }
 }
 
+/// `#` and six hex digits.
+fn is_hex_colour(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+const ACCENT_EXPECTED: &str =
+    "accent must be pink, lavender, amber, sage, coral, paper, custom, or a #rrggbb colour";
+
 impl OwnerLook {
     /// Every choice is one the console knows.
     pub(crate) fn validate(&self) -> Result<(), String> {
         one_of("theme", &self.theme, THEMES)?;
-        one_of("accent", &self.accent, ACCENTS)?;
+        if self.accent != "custom" && !ACCENTS.contains(&self.accent.as_str()) {
+            return Err(ACCENT_EXPECTED.into());
+        }
+        if !is_hex_colour(&self.custom_accent) {
+            return Err("customAccent must be a #rrggbb colour".into());
+        }
         one_of("textSize", &self.text_size, TEXT_SIZES)?;
         one_of("density", &self.density, DENSITIES)?;
         one_of("chatBackground", &self.chat_background, CHAT_BACKGROUNDS)
@@ -89,7 +108,21 @@ impl OwnerLook {
     ) -> Result<(OwnerLook, Vec<&'static str>), String> {
         let mut next = self.clone();
         for (key, value) in args {
-            if let Some((name, allowed)) = LOOK_CHOICES.iter().find(|(name, _)| name == key) {
+            if key == "accent" {
+                let DataValue::String(choice) = value else {
+                    return Err("accent must be a string".into());
+                };
+                let choice = choice.trim().to_ascii_lowercase();
+                if is_hex_colour(&choice) {
+                    next.accent = "custom".into();
+                    next.custom_accent = choice;
+                } else if choice == "custom" || ACCENTS.contains(&choice.as_str()) {
+                    next.accent = choice;
+                } else {
+                    return Err(ACCENT_EXPECTED.into());
+                }
+            } else if let Some((name, allowed)) = LOOK_CHOICES.iter().find(|(name, _)| name == key)
+            {
                 let DataValue::String(choice) = value else {
                     return Err(format!("{name} must be a string"));
                 };
@@ -102,7 +135,6 @@ impl OwnerLook {
                         next.advanced_input = advanced;
                     }
                     "theme" => next.theme = choice,
-                    "accent" => next.accent = choice,
                     "textSize" => next.text_size = choice,
                     "density" => next.density = choice,
                     _ => next.chat_background = choice,
@@ -123,6 +155,7 @@ impl OwnerLook {
         let changed = [
             ("theme", self.theme != next.theme),
             ("accent", self.accent != next.accent),
+            ("customAccent", self.custom_accent != next.custom_accent),
             ("textSize", self.text_size != next.text_size),
             ("density", self.density != next.density),
             ("reduceMotion", self.reduce_motion != next.reduce_motion),
@@ -180,6 +213,39 @@ mod tests {
         assert!(OwnerLook::default()
             .changed_by(&args(&[("font", DataValue::String("serif".into()))]))
             .is_err());
+    }
+
+    #[test]
+    fn any_colour_becomes_the_custom_accent_and_presets_keep_it() {
+        let (custom, changed) = OwnerLook::default()
+            .changed_by(&args(&[("accent", DataValue::String(" #14B8A6 ".into()))]))
+            .unwrap();
+        assert_eq!(
+            (custom.accent.as_str(), custom.custom_accent.as_str()),
+            ("custom", "#14b8a6")
+        );
+        assert_eq!(changed, ["accent", "customAccent"]);
+        let (preset, changed) = custom
+            .changed_by(&args(&[("accent", DataValue::String("sage".into()))]))
+            .unwrap();
+        assert_eq!(
+            preset.custom_accent, "#14b8a6",
+            "the owner's colour is kept"
+        );
+        assert_eq!(changed, ["accent"]);
+        for bad in ["#14b8a", "teal", "#zzzzzz"] {
+            assert!(
+                OwnerLook::default()
+                    .changed_by(&args(&[("accent", DataValue::String(bad.into()))]))
+                    .is_err(),
+                "{bad}"
+            );
+        }
+        let stored = OwnerLook {
+            custom_accent: "blue".into(),
+            ..OwnerLook::default()
+        };
+        assert!(stored.validate().is_err());
     }
 
     #[test]
