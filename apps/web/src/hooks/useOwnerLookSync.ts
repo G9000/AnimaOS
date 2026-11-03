@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 
 import { APPEARANCE_CHANGED } from '../lib/appearance-preferences';
-import { CHAT_BACKGROUND_CHANGED } from '../lib/chat-background';
 import { daemon } from '../lib/daemon-api';
 import {
   applyingDaemonLook,
@@ -44,14 +43,12 @@ export function useOwnerLookSync(agentId: string | null, online: boolean) {
     window.addEventListener('focus', load);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener(APPEARANCE_CHANGED, onLocalChange);
-    window.addEventListener(CHAT_BACKGROUND_CHANGED, onLocalChange);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener('focus', load);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener(APPEARANCE_CHANGED, onLocalChange);
-      window.removeEventListener(CHAT_BACKGROUND_CHANGED, onLocalChange);
-    };
+      };
   }, [online]);
 
   useAgentEvents(online ? agentId : null, (event) => {

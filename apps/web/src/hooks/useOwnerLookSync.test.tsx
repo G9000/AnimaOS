@@ -5,7 +5,6 @@ import {
   DEFAULT_APPEARANCE_PREFERENCES,
   saveAppearancePreferences,
 } from '../lib/appearance-preferences';
-import { saveChatBackground } from '../lib/chat-background';
 import { daemon } from '../lib/daemon-api';
 import { applyLook, localLook } from '../lib/owner-look';
 import { useOwnerLookSync } from './useOwnerLookSync';
@@ -14,7 +13,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   saveAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);
-  saveChatBackground('quiet');
 });
 
 it('loads the daemon’s look online and saves the owner’s own switches, not its echo', async () => {

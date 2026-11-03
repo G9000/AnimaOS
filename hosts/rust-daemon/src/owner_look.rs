@@ -1,5 +1,5 @@
-//! How the owner's console looks: theme, accent, text, the chat background,
-//! and how much of an agent's work it shows. The daemon keeps it so the owner
+//! How the owner's console looks: theme, accent, text, and how much of an
+//! agent's work it shows. The daemon keeps it so the owner
 //! can change it by asking in chat, and every open console follows.
 use std::collections::BTreeMap;
 
@@ -7,7 +7,8 @@ use anima_core::DataValue;
 use serde::{Deserialize, Serialize};
 
 /// Each choice the console offers, as it names them. A field missing from a
-/// saved record or a request takes its default, so an older record loads.
+/// saved record or a request takes its default, and one the console no longer
+/// offers (the old `chatBackground`) is ignored, so an older record loads.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct OwnerLook {
@@ -27,8 +28,6 @@ pub(crate) struct OwnerLook {
     pub(crate) advanced_input: bool,
     /// Each tool step while an agent works; off shows one plain line.
     pub(crate) show_work: bool,
-    /// What sits behind the chat: `full`, `quiet`, or `off`.
-    pub(crate) chat_background: String,
 }
 
 const THEMES: &[&str] = &["dark", "light", "system"];
@@ -36,7 +35,6 @@ const THEMES: &[&str] = &["dark", "light", "system"];
 pub(crate) const ACCENTS: &[&str] = &["pink", "lavender", "amber", "sage", "coral", "paper"];
 const TEXT_SIZES: &[&str] = &["small", "default", "large"];
 const DENSITIES: &[&str] = &["comfortable", "compact"];
-const CHAT_BACKGROUNDS: &[&str] = &["full", "quiet", "off"];
 const VIEWS: &[&str] = &["simple", "advanced"];
 
 /// The choices `change_look` takes, with what each may be; `view` sets the
@@ -46,12 +44,11 @@ pub(crate) const LOOK_CHOICES: &[(&str, &[&str])] = &[
     ("theme", THEMES),
     ("textSize", TEXT_SIZES),
     ("density", DENSITIES),
-    ("chatBackground", CHAT_BACKGROUNDS),
 ];
 pub(crate) const LOOK_SWITCHES: &[&str] = &["reduceMotion", "advancedInput", "showWork"];
 
 impl Default for OwnerLook {
-    /// What a new console shows: simple, dark, pink, the quiet background.
+    /// What a new console shows: simple, dark, pink.
     fn default() -> Self {
         Self {
             theme: "dark".into(),
@@ -62,7 +59,6 @@ impl Default for OwnerLook {
             reduce_motion: false,
             advanced_input: false,
             show_work: false,
-            chat_background: "quiet".into(),
         }
     }
 }
@@ -96,8 +92,7 @@ impl OwnerLook {
             return Err("customAccent must be a #rrggbb colour".into());
         }
         one_of("textSize", &self.text_size, TEXT_SIZES)?;
-        one_of("density", &self.density, DENSITIES)?;
-        one_of("chatBackground", &self.chat_background, CHAT_BACKGROUNDS)
+        one_of("density", &self.density, DENSITIES)
     }
 
     /// This look with a tool call's changes, and the names of the choices
@@ -136,8 +131,7 @@ impl OwnerLook {
                     }
                     "theme" => next.theme = choice,
                     "textSize" => next.text_size = choice,
-                    "density" => next.density = choice,
-                    _ => next.chat_background = choice,
+                    _ => next.density = choice,
                 }
             } else if let Some(name) = LOOK_SWITCHES.iter().find(|name| **name == key) {
                 let DataValue::Bool(on) = value else {
@@ -161,10 +155,6 @@ impl OwnerLook {
             ("reduceMotion", self.reduce_motion != next.reduce_motion),
             ("advancedInput", self.advanced_input != next.advanced_input),
             ("showWork", self.show_work != next.show_work),
-            (
-                "chatBackground",
-                self.chat_background != next.chat_background,
-            ),
         ]
         .into_iter()
         .filter_map(|(name, differs)| differs.then_some(name))
@@ -253,19 +243,22 @@ mod tests {
         let (look, changed) = OwnerLook::default()
             .changed_by(&args(&[
                 ("theme", DataValue::String("dark".into())),
-                ("chatBackground", DataValue::String("off".into())),
+                ("density", DataValue::String("compact".into())),
             ]))
             .unwrap();
-        assert_eq!(look.chat_background, "off");
-        assert_eq!(changed, ["chatBackground"]);
+        assert_eq!(look.density, "compact");
+        assert_eq!(changed, ["density"]);
     }
 
     #[test]
-    fn a_partial_saved_record_fills_in_defaults() {
-        let look: OwnerLook =
-            serde_json::from_value(serde_json::json!({"theme": "light"})).unwrap();
+    fn a_partial_or_older_saved_record_loads() {
+        let look: OwnerLook = serde_json::from_value(serde_json::json!({
+            "theme": "light",
+            "chatBackground": "full"
+        }))
+        .unwrap();
         assert_eq!(look.theme, "light");
-        assert_eq!(look.chat_background, "quiet");
+        assert_eq!(look.density, "comfortable");
         assert!(look.validate().is_ok());
     }
 

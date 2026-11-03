@@ -539,12 +539,10 @@ describe('WorkspaceShell', () => {
     ]);
   });
 
-  it('opens Appearance as an app-wide page with the chat background choice', () => {
+  it('opens Appearance as an app-wide page with the theme choice', () => {
     render(<Shell initialRoute={{ kind: 'page', page: 'appearance' }} />);
     expect(screen.getByText('All agents')).toBeInTheDocument();
-    expect(
-      screen.getByRole('group', { name: 'Chat background' }),
-    ).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Theme' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute(
       'aria-current',
       'page',

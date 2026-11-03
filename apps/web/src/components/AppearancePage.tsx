@@ -9,11 +9,6 @@ import {
   type AppearanceTextSize,
   type AppearanceTheme,
 } from '../lib/appearance-preferences';
-import {
-  CHAT_BACKGROUNDS,
-  useChatBackground,
-  type ChatBackground,
-} from '../lib/chat-background';
 
 const THEMES: Record<
   AppearanceTheme,
@@ -33,15 +28,6 @@ const ACCENTS: Record<AppearanceAccent, string> = {
   paper: 'Paper',
 };
 
-const BACKGROUNDS: Record<
-  ChatBackground,
-  { name: string; summary: string }
-> = {
-  full: { name: 'Full orb', summary: 'Behind the chat, as it is now' },
-  quiet: { name: 'Quiet', summary: 'Orb rests at the edge, text stays clear' },
-  off: { name: 'Off', summary: 'Plain dark, nothing moving' },
-};
-
 const TEXT_SIZES: Record<AppearanceTextSize, string> = {
   small: 'Small',
   default: 'Default',
@@ -56,7 +42,6 @@ const DENSITIES: Record<AppearanceDensity, string> = {
 /** How anima looks on this computer. These choices do not change agent data. */
 export function AppearancePage() {
   const [preferences, setPreferences] = useAppearancePreferences();
-  const [background, setBackground] = useChatBackground();
   const customAccent = preferences.accent === 'custom';
   return (
     <div className="settings-form appearance-settings">
@@ -161,51 +146,6 @@ export function AppearancePage() {
                 ? `Custom · ${preferences.customAccent}`
                 : ACCENTS[preferences.accent as AppearanceAccent]}
             </span>
-          </div>
-        </fieldset>
-      </section>
-
-      <section className="settings-group appearance-background-section">
-        <div className="appearance-section-heading">
-          <div>
-            <h2 className="settings-group-title">Chat background</h2>
-            <p className="settings-group-help">
-              What sits behind the conversation. The orb always returns when you
-              talk.
-            </p>
-          </div>
-        </div>
-        <fieldset className="settings-fieldset">
-          <legend className="sr-only">Chat background</legend>
-          <div className="appearance-background-grid">
-            {CHAT_BACKGROUNDS.map((value) => {
-              const { name, summary } = BACKGROUNDS[value];
-              const selected = background === value;
-              return (
-                <label
-                  key={value}
-                  className={`appearance-background-card${selected ? ' is-selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    id={`chat-background-${value}`}
-                    name="chat-background"
-                    checked={selected}
-                    onChange={() => setBackground(value)}
-                  />
-                  <span
-                    className="appearance-preview"
-                    data-variant={value}
-                    aria-hidden
-                  />
-                  <span className="appearance-choice-copy">
-                    <strong>{name}</strong>
-                    <small>{summary}</small>
-                  </span>
-                  {selected && <span className="appearance-current">CURRENT</span>}
-                </label>
-              );
-            })}
           </div>
         </fieldset>
       </section>

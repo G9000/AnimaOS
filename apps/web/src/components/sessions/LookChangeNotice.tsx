@@ -2,7 +2,6 @@ import { useState } from 'react';
 
 import { COMPANION_UNREACHABLE } from '../../lib/approvals';
 import { useAppearancePreferences } from '../../lib/appearance-preferences';
-import { useChatBackground } from '../../lib/chat-background';
 import {
   applyLook,
   changeLook,
@@ -15,10 +14,9 @@ import {
  *  look in effect. */
 export function LookChangeNotice({ change }: { change: LookChange }) {
   const [appearance] = useAppearancePreferences();
-  const [chatBackground] = useChatBackground();
   const [undoing, setUndoing] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const inEffect = sameLook({ ...appearance, chatBackground }, change.look);
+  const inEffect = sameLook(appearance, change.look);
   const undo = async () => {
     setUndoing(true);
     setProblem(null);

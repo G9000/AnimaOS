@@ -64,8 +64,7 @@ async fn look_round_trips_and_validates() {
         "density": "compact",
         "reduceMotion": true,
         "advancedInput": true,
-        "showWork": true,
-        "chatBackground": "off"
+        "showWork": true
     });
     let (status, value) = send(&app, "PUT", Some(look.clone())).await;
     assert_eq!(status, StatusCode::OK, "{value}");
@@ -82,7 +81,6 @@ async fn look_round_trips_and_validates() {
             "custom accent not a colour",
             json!({"customAccent": "teal"}),
         ),
-        ("unknown background", json!({"chatBackground": "video"})),
         ("switch as text", json!({"showWork": "yes"})),
     ] {
         let (status, value) = send(&app, "PUT", Some(body)).await;
@@ -95,9 +93,22 @@ async fn look_round_trips_and_validates() {
     assert_eq!(status, StatusCode::OK, "{value}");
     assert_eq!(value["theme"], "system");
     assert_eq!(
-        value["chatBackground"], "quiet",
+        value["density"], "comfortable",
         "a missing choice takes its default"
     );
+
+    let (status, value) = send(
+        &app,
+        "PUT",
+        Some(json!({"theme": "dark", "chatBackground": "full"})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an older console's look still saves: {value}"
+    );
+    assert_eq!(value.get("chatBackground"), None);
 }
 
 #[tokio::test]

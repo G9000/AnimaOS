@@ -10,7 +10,6 @@ fn look_description(name: &str) -> &'static str {
         "accent" => "Highlight colour used for the orb, buttons and anything that needs the owner: pink, lavender, amber, sage, coral or paper, or any other colour as #rrggbb (teal is #14b8a6); custom brings back the owner's own colour",
         "textSize" => "Chat and settings text size",
         "density" => "Space between messages and rows",
-        "chatBackground" => "What sits behind the chat: the full orb, a quiet orb at the edge, or nothing",
         "reduceMotion" => "Calmer orb and fewer animations",
         "advancedInput" => "Do/Plan and the model picker on the chat input",
         _ => "Each tool step, timing and result while the agent works; off shows one plain status line",

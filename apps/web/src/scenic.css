@@ -1,41 +1,10 @@
-/* Scenic shell: the conversation sits over anima's orb; everything else is a
- * square, solid surface on top of it. Loaded after the studio sheets. */
+/* Scenic shell: the conversation sits on a plain dark field; everything else
+ * is a square, solid surface on top of it. Loaded after the studio sheets. */
 
-/* ── Halo: anima's orb behind everything ──
- * A dark field with the presence orb in the middle. One layer is in front at
- * a time: while chatting the orb stays calm behind a reading lane; while the
- * owner talks it comes forward with their words and the chat blurs back. */
+/* ── The field, and anima's orb where it appears (avatar, status line) ── */
 
 .scenic-shell .studio-main {
   background: #0b0b0a;
-}
-
-.halo-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse 70% 80% at 50% 50%,
-    #141211 0%,
-    #0b0b0a 70%
-  );
-}
-
-.halo-glow {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: min(110vmin, 1100px);
-  aspect-ratio: 1;
-  translate: -50% -50%;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--halo-accent) 22%, transparent) 0%,
-    transparent 62%
-  );
-  transition: background 600ms ease;
 }
 
 .halo-orb {
@@ -59,57 +28,9 @@
   );
 }
 
-/* Talking: the orb comes forward with the owner's words. */
-.halo-backdrop-orb {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: min(72vmin, 640px);
-  aspect-ratio: 1;
-  translate: -50% -50%;
-  opacity: 0.6;
-  transition:
-    opacity 500ms ease,
-    scale 600ms ease;
-}
-
-/* The reading lane: a soft dark band under the message column, so text
- * reads the same over the bright core and the dark edges. */
-.halo-backdrop::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  background: linear-gradient(
-    to right,
-    transparent calc(50% - 600px),
-    rgb(11 11 10 / 0.6) calc(50% - 400px),
-    rgb(11 11 10 / 0.6) calc(50% + 400px),
-    transparent calc(50% + 600px)
-  );
-  transition: opacity 500ms ease;
-}
-
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading)) .halo-backdrop::after {
-  opacity: 1;
-}
-
-.halo-backdrop[data-mode='thinking'] .halo-backdrop-orb,
-.halo-backdrop[data-mode='speaking'] .halo-backdrop-orb,
-.halo-backdrop[data-mode='attention'] .halo-backdrop-orb {
-  opacity: 0.85;
-}
-
 .scenic-shell .studio-composer {
   position: relative;
   z-index: 3;
-}
-
-/* Text over the orb keeps a soft shadow so no bright pixel cuts a letter. */
-.scenic-shell .chat-turn .scenic-agent-text,
-.scenic-shell .scenic-user-bubble,
-.scenic-shell .scenic-welcome {
-  text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
 }
 
 /* The bar is clear and the chat reaches up behind it: history scrolls under
@@ -144,11 +65,6 @@
   > :has(~ :is(.studio-conversation-body, .chat-results-layout)) {
   position: relative;
   z-index: 2;
-}
-
-/* Settings sit over a dimmed orb. */
-.scenic-shell:has(.settings-window) .halo-backdrop-orb {
-  opacity: 0.35;
 }
 
 .scenic-shell .studio-topbar.scenic-topbar {
@@ -6001,138 +5917,6 @@ details.settings-item > :not(summary) {
   font-weight: 400;
 }
 
-/* ── Chat background ──
- * Full: the orb behind the chat. Quiet: it rests in the margin beside the
- * column, half out of the window, so the text sits on clean dark; a soft wash
- * of the accent colour falls from the top. Off: the plain field. An empty chat
- * and the owner talking still bring the orb to the middle. */
-
-.halo-wash {
-  position: absolute;
-  top: -310px;
-  left: 50%;
-  width: 960px;
-  height: 520px;
-  translate: -50% 0;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse at center,
-    rgb(var(--color-accent-rgb) / 0.2) 0%,
-    transparent 70%
-  );
-}
-
-.halo-backdrop[data-variant='off']::after {
-  display: none;
-}
-
-.halo-backdrop-orb,
-.halo-glow {
-  transition:
-    left 600ms ease,
-    opacity 500ms ease,
-    scale 600ms ease,
-    background 600ms ease;
-}
-
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet']
-  :is(.halo-backdrop-orb, .halo-glow) {
-  /* 100px short of the column, but never so far out that none of it shows. */
-  left: max(
-    calc((100% - 760px) / 2 - 420px),
-    calc(min(72vmin, 640px) / -2 + 90px)
-  );
-}
-
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet']
-  .halo-glow {
-  width: 800px;
-}
-
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet']
-  .halo-backdrop-orb {
-  opacity: 0.42;
-}
-
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet'][data-mode='thinking'] .halo-backdrop-orb,
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet'][data-mode='speaking'] .halo-backdrop-orb,
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-  .halo-backdrop[data-variant='quiet'][data-mode='attention']
-  .halo-backdrop-orb {
-  opacity: 0.6;
-}
-
-@media (max-width: 899px) {
-  .scenic-shell:has(:is(.studio-messages, .studio-transcript-loading))
-    .halo-backdrop[data-variant='quiet']
-    .halo-backdrop-orb {
-    opacity: 0.28;
-  }
-}
-
-/* The reading lane is for an orb behind the text; at the edge it has no job. */
-.scenic-shell:has(:is(.studio-messages, .studio-transcript-loading)) .halo-backdrop[data-variant='quiet']::after {
-  opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .halo-backdrop-orb,
-  .halo-glow {
-    transition: none;
-  }
-}
-
-/* The Appearance page's three choices, drawn small. */
-.appearance-preview {
-  position: relative;
-  display: block;
-  height: 72px;
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid rgb(236 230 218 / 0.12);
-  background: #0b0b0a;
-}
-
-.appearance-preview::before {
-  content: '';
-  position: absolute;
-  background: radial-gradient(
-    circle,
-    rgb(var(--color-accent-rgb) / 0.55),
-    transparent 68%
-  );
-}
-
-.appearance-preview::after {
-  content: '';
-  position: absolute;
-  right: 12%;
-  bottom: 10px;
-  left: 30%;
-  height: 10px;
-  border: 1px solid rgb(236 230 218 / 0.18);
-}
-
-.appearance-preview[data-variant='full']::before {
-  inset: -40% 20%;
-}
-
-.appearance-preview[data-variant='quiet']::before {
-  top: -30%;
-  bottom: -30%;
-  left: -34%;
-  width: 70%;
-}
-
-.appearance-preview[data-variant='off']::before {
-  display: none;
-}
-
 /* ── Messages ──
  * The owner's words sit in a near-black bubble with a small corner at the
  * bottom right; the agent's reply is plain text under its time. */
@@ -6626,15 +6410,13 @@ details.settings-item > :not(summary) {
   border: 0;
 }
 
-.appearance-settings .appearance-theme-grid,
-.appearance-settings .appearance-background-grid {
+.appearance-settings .appearance-theme-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
-.appearance-theme-card,
-.appearance-background-card {
+.appearance-theme-card {
   position: relative;
   display: flex;
   min-width: 0;
@@ -6647,14 +6429,12 @@ details.settings-item > :not(summary) {
   cursor: pointer;
 }
 
-.appearance-theme-card.is-selected,
-.appearance-background-card.is-selected {
+.appearance-theme-card.is-selected {
   border-color: var(--color-accent);
   box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 
 .appearance-theme-card > input,
-.appearance-background-card > input,
 .appearance-accent-choice > input,
 .appearance-segmented-options input {
   position: absolute;
@@ -6664,7 +6444,6 @@ details.settings-item > :not(summary) {
 }
 
 .appearance-theme-card:focus-within,
-.appearance-background-card:focus-within,
 .appearance-accent-choice:focus-within,
 .appearance-segmented-options label:focus-within {
   outline: 2px solid var(--color-accent);
@@ -6771,8 +6550,7 @@ details.settings-item > :not(summary) {
   line-height: 1.35;
 }
 
-.appearance-theme-card .appearance-choice-copy,
-.appearance-background-card .appearance-choice-copy {
+.appearance-theme-card .appearance-choice-copy {
   padding: 10px 11px 12px;
 }
 
@@ -6830,17 +6608,6 @@ details.settings-item > :not(summary) {
   margin-left: 4px;
   color: var(--color-ink-2);
   font-size: 11px;
-}
-
-.appearance-background-card > .appearance-preview {
-  height: 72px;
-  margin: 0;
-  border: 0;
-  border-bottom: 1px solid rgb(236 230 218 / 0.1);
-}
-
-.appearance-background-card > .appearance-choice-copy {
-  padding-right: 56px;
 }
 
 .appearance-display-section {
@@ -7207,14 +6974,6 @@ details.settings-item > :not(summary) {
   background: #f4f1ea;
 }
 
-:root[data-appearance-theme='light'] .scenic-shell .halo-backdrop {
-  background: #f4f1ea;
-}
-
-:root[data-appearance-theme='light'] .scenic-shell:has(.settings-window) .halo-backdrop-orb {
-  opacity: 0.08;
-}
-
 :root[data-appearance-theme='light'] .settings-profile-description {
   color: #5c5952;
 }
@@ -7225,8 +6984,7 @@ details.settings-item > :not(summary) {
   color: #5c5952;
 }
 
-:root[data-appearance-theme='light'] .appearance-theme-card,
-:root[data-appearance-theme='light'] .appearance-background-card {
+:root[data-appearance-theme='light'] .appearance-theme-card {
   border-color: rgb(26 26 24 / 0.14);
   background: rgb(255 254 250 / 0.8);
 }
@@ -8822,18 +8580,12 @@ details.settings-item > :not(summary) {
   transition-duration: 0.01ms !important;
 }
 
-:root[data-appearance-reduce-motion='true'] .halo-backdrop-orb,
-:root[data-appearance-reduce-motion='true'] .halo-glow {
-  transition: none !important;
-}
-
 @media (max-width: 767px) {
   .settings-window .appearance-settings {
     padding: 16px 16px 24px;
   }
 
-  .appearance-theme-grid,
-  .appearance-background-grid {
+  .appearance-theme-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 

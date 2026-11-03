@@ -1170,7 +1170,6 @@ describe('ToolBlock with Show work off', () => {
       reduceMotion: false,
       advancedInput: false,
       showWork: false,
-      chatBackground: 'quiet',
     };
     render(
       <ToolBlock

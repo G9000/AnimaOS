@@ -7,15 +7,11 @@ import {
   readAppearancePreferences,
   saveAppearancePreferences,
 } from '../../lib/appearance-preferences';
-import { saveChatBackground } from '../../lib/chat-background';
 import { daemon } from '../../lib/daemon-api';
 import { applyLook, type OwnerLook } from '../../lib/owner-look';
 import { LookChangeNotice } from './LookChangeNotice';
 
-const BASE: OwnerLook = {
-  ...DEFAULT_APPEARANCE_PREFERENCES,
-  chatBackground: 'quiet',
-};
+const BASE: OwnerLook = { ...DEFAULT_APPEARANCE_PREFERENCES };
 const ADVANCED: OwnerLook = { ...BASE, showWork: true, advancedInput: true };
 const CHANGE = {
   look: ADVANCED,
@@ -26,7 +22,6 @@ const CHANGE = {
 afterEach(() => {
   vi.restoreAllMocks();
   saveAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);
-  saveChatBackground('quiet');
 });
 
 it('undoes a look changed from chat by saving the one before', async () => {

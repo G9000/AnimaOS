@@ -794,7 +794,6 @@ fn registry_defines_every_registered_tool_schema() {
                 "accent",
                 "textSize",
                 "density",
-                "chatBackground",
                 "reduceMotion",
                 "advancedInput",
                 "showWork",

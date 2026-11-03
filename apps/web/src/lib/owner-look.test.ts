@@ -5,7 +5,6 @@ import {
   readAppearancePreferences,
   saveAppearancePreferences,
 } from './appearance-preferences';
-import { readChatBackground, saveChatBackground } from './chat-background';
 import { daemon } from './daemon-api';
 import {
   applyLook,
@@ -13,19 +12,16 @@ import {
   describeLookChange,
   localLook,
   lookChangeResult,
+  parseLook,
   syncLookFromDaemon,
   type OwnerLook,
 } from './owner-look';
 
-const BASE: OwnerLook = {
-  ...DEFAULT_APPEARANCE_PREFERENCES,
-  chatBackground: 'quiet',
-};
+const BASE: OwnerLook = { ...DEFAULT_APPEARANCE_PREFERENCES };
 
 afterEach(() => {
   vi.restoreAllMocks();
   saveAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);
-  saveChatBackground('quiet');
 });
 
 function result(body: unknown) {
@@ -78,11 +74,17 @@ describe('describeLookChange', () => {
   it('lists each other change in plain words', () => {
     expect(
       describeLookChange({
-        look: { ...BASE, theme: 'light', accent: 'lavender', chatBackground: 'off' },
+        look: { ...BASE, theme: 'light', accent: 'lavender', density: 'compact' },
         previous: BASE,
-        changed: ['theme', 'accent', 'chatBackground'],
+        changed: ['theme', 'accent', 'density'],
       }),
-    ).toBe('Light theme · Lavender accent · Background off');
+    ).toBe('Light theme · Lavender accent · Compact spacing');
+  });
+});
+
+describe('parseLook', () => {
+  it('reads a look an older daemon saved with its chat background', () => {
+    expect(parseLook({ ...BASE, chatBackground: 'full' })).toEqual(BASE);
   });
 });
 
@@ -107,10 +109,9 @@ describe('applyLook', () => {
     const seen: boolean[] = [];
     const listen = () => seen.push(applyingDaemonLook());
     window.addEventListener('anima:appearance', listen);
-    applyLook({ ...BASE, theme: 'light', chatBackground: 'off' });
+    applyLook({ ...BASE, theme: 'light' });
     window.removeEventListener('anima:appearance', listen);
     expect(readAppearancePreferences().theme).toBe('light');
-    expect(readChatBackground()).toBe('off');
     expect(seen).toEqual([true]);
     expect(applyingDaemonLook()).toBe(false);
   });

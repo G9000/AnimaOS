@@ -28,7 +28,6 @@ import {
 } from './SettingsNavigation';
 import { AgentSwitcher } from './AgentSwitcher';
 import { AgentsView } from './AgentsView';
-import { HaloBackdrop } from './halo/HaloBackdrop';
 import {
   presenceMode,
   usePresenceSignals,
@@ -50,7 +49,6 @@ import { AppearancePage } from './AppearancePage';
 import { AgentFilesPanel } from './AgentFilesPanel';
 import { SettingsSection } from './settings/SettingsKit';
 import { NotificationsPage } from './NotificationsPage';
-import { useChatBackground } from '../lib/chat-background';
 import {
   accentHex,
   customAccentVariables,
@@ -401,7 +399,6 @@ export function WorkspaceShell({
     typeof connectors === 'function'
       ? connectors(page === 'capabilities' ? 'tools' : 'connections')
       : connectors;
-  const [chatBackground] = useChatBackground();
   const [appearance] = useAppearancePreferences();
   useEffect(() => {
     const root = document.documentElement;
@@ -628,12 +625,6 @@ export function WorkspaceShell({
       >
         <div className="studio-frame relative flex min-h-0 flex-1">
           <main className="studio-main workspace-mobile-safe relative min-h-0 min-w-0 flex-1">
-            <HaloBackdrop
-              variant={chatBackground}
-              mode={page === null ? presence : 'calm'}
-              accent={accentHex(appearance)}
-              agentId={settingsAgent.id}
-            />
             <div className="studio-topbar scenic-topbar">
               <div className="scenic-identity">
                 {sideThread && (

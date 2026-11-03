@@ -11,12 +11,6 @@ import {
   type AppearanceTextSize,
   type AppearanceTheme,
 } from './appearance-preferences';
-import {
-  CHAT_BACKGROUNDS,
-  readChatBackground,
-  saveChatBackground,
-  type ChatBackground,
-} from './chat-background';
 import { daemon } from './daemon-api';
 
 /** How the owner's console looks, as the daemon keeps it (`/settings/look`)
@@ -32,7 +26,6 @@ export interface OwnerLook {
   reduceMotion: boolean;
   advancedInput: boolean;
   showWork: boolean;
-  chatBackground: ChatBackground;
 }
 
 export const LOOK_KEYS = [
@@ -44,15 +37,11 @@ export const LOOK_KEYS = [
   'reduceMotion',
   'advancedInput',
   'showWork',
-  'chatBackground',
 ] as const satisfies readonly (keyof OwnerLook)[];
 
 /** The look this browser shows now. */
 export function localLook(): OwnerLook {
-  return {
-    ...readAppearancePreferences(),
-    chatBackground: readChatBackground(),
-  };
+  return readAppearancePreferences();
 }
 
 export function sameLook(a: OwnerLook, b: OwnerLook): boolean {
@@ -74,7 +63,6 @@ export function parseLook(value: unknown): OwnerLook | null {
     !isHexColour(look.customAccent) ||
     !isOneOf(look.textSize, APPEARANCE_TEXT_SIZES) ||
     !isOneOf(look.density, APPEARANCE_DENSITIES) ||
-    !isOneOf(look.chatBackground, CHAT_BACKGROUNDS) ||
     typeof look.reduceMotion !== 'boolean' ||
     typeof look.advancedInput !== 'boolean' ||
     typeof look.showWork !== 'boolean'
@@ -89,7 +77,6 @@ export function parseLook(value: unknown): OwnerLook | null {
     reduceMotion: look.reduceMotion,
     advancedInput: look.advancedInput,
     showWork: look.showWork,
-    chatBackground: look.chatBackground,
   };
 }
 
@@ -106,9 +93,7 @@ export function applyLook(look: OwnerLook): void {
   if (sameLook(look, localLook())) return;
   applying = true;
   try {
-    const { chatBackground, ...appearance } = look;
-    saveAppearancePreferences(appearance);
-    saveChatBackground(chatBackground);
+    saveAppearancePreferences(look);
   } finally {
     applying = false;
   }
@@ -164,11 +149,6 @@ const THEME_NAMES: Record<AppearanceTheme, string> = {
   light: 'Light theme',
   system: 'Theme matches your computer',
 };
-const BACKGROUND_NAMES: Record<ChatBackground, string> = {
-  full: 'Full orb background',
-  quiet: 'Quiet background',
-  off: 'Background off',
-};
 
 function capitalized(value: string): string {
   return value[0].toUpperCase() + value.slice(1);
@@ -198,7 +178,6 @@ export function describeLookChange({ look, changed }: LookChange): string {
     if (key === 'textSize')
       parts.push(look.textSize === 'default' ? 'Default text size' : `${capitalized(look.textSize)} text`);
     if (key === 'density') parts.push(`${capitalized(look.density)} spacing`);
-    if (key === 'chatBackground') parts.push(BACKGROUND_NAMES[look.chatBackground]);
     if (key === 'reduceMotion')
       parts.push(look.reduceMotion ? 'Reduced motion' : 'Full motion');
     if (key === 'showWork')

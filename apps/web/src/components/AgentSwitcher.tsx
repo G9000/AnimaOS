@@ -3,7 +3,7 @@ import type { AgentDetail } from '../lib/types';
 import { companionAgents } from '../lib/active-agent';
 import { AgentAvatar } from './AgentAvatar';
 import { HaloOrb } from './halo/HaloOrb';
-import { presenceLook } from './halo/HaloBackdrop';
+import { presenceLook } from './halo/presence-look';
 import type { PresenceMode } from '../lib/presence';
 import { APPEARANCE_ACCENT_HEX } from '../lib/appearance-preferences';
 import {
