@@ -202,7 +202,7 @@ fn configured_instructions(config: &AgentConfig, file_identity: bool) -> String 
             config
                 .system
                 .clone()
-                .unwrap_or_else(|| "You are a helpful task agent.".into()),
+                .unwrap_or_else(|| anima_core::agent::DEFAULT_PERSONALITY.trim().into()),
         );
     }
     parts.join("\n\n")
@@ -570,6 +570,33 @@ pub(crate) fn mark_context_trimmed(
 mod tests {
     use super::*;
     use anima_core::{AgentSettings, Content, MessageRole};
+
+    #[test]
+    fn personality_estimate_matches_default_and_respects_replacements() {
+        let mut config = config(None, "offline", AgentSettings::default());
+        assert_eq!(
+            configured_instructions(&config, false),
+            config.legacy_personality()
+        );
+        assert!(
+            configured_instructions(&config, false).contains("## Default conversation behavior")
+        );
+        assert_eq!(configured_instructions(&config, true), "");
+        config.system = Some("Use the owner's custom voice.".into());
+        assert_eq!(
+            configured_instructions(&config, false),
+            config.legacy_personality()
+        );
+        assert_eq!(
+            configured_instructions(&config, false),
+            "Use the owner's custom voice."
+        );
+        config.knowledge = Some(vec!["retained knowledge".into()]);
+        assert_eq!(
+            configured_instructions(&config, true),
+            "## What You Know\n- retained knowledge"
+        );
+    }
 
     #[test]
     fn inspector_breakdown_keeps_the_conversation_meter_and_labels_partial_coverage() {

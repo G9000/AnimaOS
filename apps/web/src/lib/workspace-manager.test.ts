@@ -12,6 +12,23 @@ const context = {
 };
 
 describe('workspaceManagerProfile', () => {
+  it('provides an overridable conversation default alongside owner choices', () => {
+    for (const initiative of ['guided', 'balanced', 'proactive'] as const) {
+      const profile = workspaceManagerProfile({
+        ...context,
+        initiative,
+        priorities: 'Be formal, avoid humor, and ask fewer questions.',
+      });
+      expect(profile.system).toContain('## Default conversation behavior');
+      expect(profile.system).toContain('configured identity, personality, communication style');
+      expect(profile.system).toContain('Initiative: ' + initiative);
+      expect(profile.system).toContain('Be formal, avoid humor, and ask fewer questions.');
+      expect(profile.system.indexOf('## Default conversation behavior')).toBeLessThan(
+        profile.system.indexOf('Owner’s workspace preferences:'),
+      );
+    }
+  });
+
   it('provides a complete manager profile without a model call', () => {
     const profile = workspaceManagerProfile(context);
     expect(profile.bio).toContain('workspace manager');

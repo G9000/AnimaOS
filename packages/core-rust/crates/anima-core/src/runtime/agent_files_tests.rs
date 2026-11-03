@@ -45,6 +45,66 @@ fn config() -> AgentConfig {
         fallbacks: Vec::new(),
     }
 }
+
+#[test]
+fn default_personality_yields_to_custom_system_and_soul_without_changing_config() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(PromptSpy(captured.clone()));
+    let mut default_config = config();
+    default_config.system = None;
+    let personality = default_config.legacy_personality();
+    assert!(personality.contains("## Default conversation behavior"));
+    assert!(personality.contains("configured identity, personality, communication style"));
+    let mut runtime = AgentRuntime::new(default_config.clone(), adapter.clone());
+    runtime.set_host_guidance("host-permissions-retained".into());
+    let run = |runtime: &mut AgentRuntime| {
+        block_on(runtime.run(Content {
+            text: "Please be brief and ask fewer questions.".into(),
+            attachments: None,
+            metadata: None,
+        }));
+    };
+    run(&mut runtime);
+    runtime.set_agent_files(crate::RenderedAgentFiles {
+        identity: Some(crate::RuntimePromptIdentity {
+            text: "Custom SOUL: be formal and reserved.".into(),
+        }),
+        project_context: "project-instructions-retained".into(),
+        estimated_tokens: 20,
+    });
+    run(&mut runtime);
+    runtime.set_agent_files(crate::RenderedAgentFiles::default());
+    run(&mut runtime);
+    assert_eq!(runtime.state.config, default_config);
+
+    let prompts = captured.lock().unwrap();
+    assert!(prompts[0].contains("## Default conversation behavior"));
+    assert!(prompts[0].contains("legacy-style"));
+    assert!(prompts[0].contains("legacy-adjective"));
+    assert!(prompts[1].contains("Custom SOUL: be formal and reserved."));
+    assert!(prompts[1].contains("project-instructions-retained"));
+    assert!(!prompts[1].contains("## Default conversation behavior"));
+    assert!(!prompts[1].contains("legacy-style"));
+    assert_eq!(prompts[0], prompts[2]);
+    for prompt in prompts.iter() {
+        assert!(prompt.contains("retained-knowledge"));
+        assert!(prompt.contains("host-permissions-retained"));
+    }
+    drop(prompts);
+
+    for custom in ["Custom system: be terse.", ""] {
+        let mut custom_config = default_config.clone();
+        custom_config.system = Some(custom.into());
+        let runtime = AgentRuntime::new(custom_config.clone(), adapter.clone());
+        let prompt = runtime.build_system_prompt(&[]);
+        assert!(!prompt.contains("## Default conversation behavior"));
+        assert!(prompt.contains(custom));
+        assert!(!custom_config
+            .legacy_personality()
+            .contains("## Default conversation behavior"));
+    }
+}
+
 #[test]
 fn accepted_identity_replaces_persona_without_durable_text() {
     let captured = Arc::new(Mutex::new(Vec::new()));
