@@ -1213,4 +1213,45 @@ describe('ToolBlock with Show work off', () => {
     ).toBeVisible();
     expect(screen.queryByRole('listitem')).toBeNull();
   });
+
+  it('shows a queued message as just the message', () => {
+    const run = runFixture('run_q', {
+      input: { text: 'Later please', attachmentIds: [], skill: null },
+    });
+    render(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={emptyLiveRun(run)}
+        actions={{ onCancelQueued: vi.fn(), onSteerQueued: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByText('Later please')).toBeVisible();
+    expect(screen.queryByText('Queued')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('says nothing while a message is sent, but tells a failing send', () => {
+    const bubble = { key: 'k1', text: 'Book the train', createdAtMs: 1 };
+    const { rerender } = render(
+      <PendingMessage
+        pending={{ ...bubble, status: 'sending' }}
+        onCancel={vi.fn()}
+        renderMessage={renderMessage}
+      />,
+    );
+    expect(screen.getByText('Book the train')).toBeVisible();
+    expect(screen.queryByText('Sending…')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+
+    rerender(
+      <PendingMessage
+        pending={{ ...bubble, status: 'retrying' }}
+        onCancel={vi.fn()}
+        renderMessage={renderMessage}
+      />,
+    );
+    expect(screen.getByText(/Not delivered yet/)).toBeVisible();
+  });
 });

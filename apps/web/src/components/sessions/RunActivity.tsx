@@ -340,6 +340,7 @@ export function RunActivity({
     (id) => !attachments.some((item) => item.id === id),
   );
   const active = isActiveRun(run);
+  const [{ showWork }] = useAppearancePreferences();
   const elapsed = useElapsed(
     run.startedAtMs,
     isTerminalRunStatus(run.status)
@@ -367,34 +368,37 @@ export function RunActivity({
       <div className="run-queued">
         {input}
         <AttachmentReferences ids={unknownIds} />
-        <div className="run-queued-meta">
-          <span>Queued</span>
-          {/* Steering takes text only; a message with files or a skill
-           *  waits its turn. */}
-          {actions?.onSteerQueued &&
-            run.input.text.trim() !== '' &&
-            run.input.attachmentIds.length === 0 &&
-            !run.input.skill &&
-            !run.input.documentEditContext && (
+        {/* Simple view: a waiting message is just the message. */}
+        {showWork && (
+          <div className="run-queued-meta">
+            <span>Queued</span>
+            {/* Steering takes text only; a message with files or a skill
+             *  waits its turn. */}
+            {actions?.onSteerQueued &&
+              run.input.text.trim() !== '' &&
+              run.input.attachmentIds.length === 0 &&
+              !run.input.skill &&
+              !run.input.documentEditContext && (
+                <button
+                  type="button"
+                  className="studio-tool-button"
+                  title="Add this to the reply in progress"
+                  onClick={() => actions.onSteerQueued?.(run)}
+                >
+                  Steer
+                </button>
+              )}
+            {actions?.onCancelQueued && (
               <button
                 type="button"
                 className="studio-tool-button"
-                title="Add this to the reply in progress"
-                onClick={() => actions.onSteerQueued?.(run)}
+                onClick={() => actions.onCancelQueued?.(run)}
               >
-                Steer
+                Cancel
               </button>
             )}
-          {actions?.onCancelQueued && (
-            <button
-              type="button"
-              className="studio-tool-button"
-              onClick={() => actions.onCancelQueued?.(run)}
-            >
-              Cancel
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -489,6 +493,10 @@ export function PendingMessage({
   onCancel?: (key: string) => void;
   renderMessage: RenderMessage;
 }) {
+  const [{ showWork }] = useAppearancePreferences();
+  // Simple view says nothing while a message is on its way; a send that
+  // keeps failing still tells the owner.
+  const quiet = !showWork && pending.status !== 'retrying';
   return (
     <div className="pending-message" data-status={pending.status}>
       {renderMessage({
@@ -500,22 +508,24 @@ export function PendingMessage({
         },
         created_at_ms: pending.createdAtMs,
       })}
-      <p className="pending-message-label">
-        {PENDING_LABELS[pending.status]}
-        {onCancel && pending.status !== 'steering' ? (
-          <>
-            {' '}
-            <button
-              type="button"
-              className="studio-tool-button"
-              aria-label="Cancel sending"
-              onClick={() => onCancel(pending.key)}
-            >
-              Cancel
-            </button>
-          </>
-        ) : null}
-      </p>
+      {!quiet && (
+        <p className="pending-message-label">
+          {PENDING_LABELS[pending.status]}
+          {onCancel && pending.status !== 'steering' ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="studio-tool-button"
+                aria-label="Cancel sending"
+                onClick={() => onCancel(pending.key)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </p>
+      )}
     </div>
   );
 }
