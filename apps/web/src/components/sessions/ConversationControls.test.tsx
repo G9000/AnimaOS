@@ -1,10 +1,34 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveAppearancePreferences } from '../../lib/appearance-preferences';
 import { sessionFixture } from '../../test/sessions';
 import { runFixture } from '../../test/live';
 import { ConversationControls } from './ConversationControls';
 
+beforeEach(() => saveAppearancePreferences({ showWork: true }));
+afterEach(() => saveAppearancePreferences({ showWork: false }));
+
 describe('ConversationControls', () => {
+  it('keeps the waiting messages to itself in the simple view', () => {
+    saveAppearancePreferences({ showWork: false });
+    render(
+      <ConversationControls
+        session={sessionFixture('room-7')}
+        messages={[]}
+        runs={[
+          runFixture('waiting', {
+            sessionId: 'room-7',
+            status: 'queued',
+            source: 'web',
+          }),
+        ]}
+        enabled
+        onQueuePatch={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Waiting messages/)).not.toBeInTheDocument();
+  });
+
   it('offers safe revisions and a link to the source', () => {
     const revise = vi.fn();
     const openSource = vi.fn();

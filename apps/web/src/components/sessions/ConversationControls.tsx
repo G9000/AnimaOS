@@ -8,6 +8,7 @@ import type {
 import type { ChatMessage } from '../../lib/types';
 import { ghostBtnCls } from '../ui-bits';
 import { isOwnerWritten } from '../../lib/transcript';
+import { useAppearancePreferences } from '../../lib/appearance-preferences';
 
 export interface ConversationControlProps {
   session: Session;
@@ -40,6 +41,7 @@ export function ConversationControls({
   const [editing, setEditing] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [{ showWork }] = useAppearancePreferences();
   const waiting = runs
     .filter(
       (run) =>
@@ -162,7 +164,9 @@ export function ConversationControls({
           )}
         </details>
       )}
-      {waiting.length > 0 && onQueuePatch && (
+      {/* Simple view: every message waits a moment before its reply
+       *  starts, so the queue editor would only flash past. */}
+      {showWork && waiting.length > 0 && onQueuePatch && (
         <details open>
           <summary>Waiting messages ({waiting.length})</summary>
           <ol className="max-h-48 space-y-2 overflow-y-auto pt-2">
