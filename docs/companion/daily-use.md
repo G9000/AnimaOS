@@ -152,6 +152,21 @@ Storage labels describe configuration, rather than a successful persistence chec
 
 ## Identity and everyday work
 
+Agents without a configured system personality start with a helpful, warm,
+curious default: listen carefully, ask purposeful questions, act on clear
+requests, and report results honestly. New workspace-manager profiles include
+the same defaults. Configured personality, communication style, initiative,
+and explicit conversation preferences override conflicting defaults; asking
+for a formal tone or fewer questions does not require editing a file.
+
+For a lasting change, use the personality editor or your own `SOUL.md`.
+An accepted workspace or agent-profile SOUL replaces the complete configured
+personality, including these defaults. Without an accepted SOUL, a custom system
+personality replaces the built-in fallback. Existing saved personalities are
+not rewritten or automatically migrated; the new defaults apply to missing
+system personalities and newly created workspace managers. Personality changes
+do not grant tools or bypass approvals.
+
 Place UTF-8 `SOUL.md` in the configured workspace root for the lead companion's
 identity. Use `ANIMA.md` or `AGENTS.md` for project instructions. The console's
 instruction preview shows what loaded; it does not edit those files. See

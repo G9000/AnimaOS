@@ -1,4 +1,5 @@
 import type { PresetProfile } from './agent-presets';
+import defaultPersonality from '../../../../packages/core-rust/crates/anima-core/src/default_personality.md?raw';
 
 export type ManagerInitiative = 'guided' | 'balanced' | 'proactive';
 export type ManagerCommunication = 'concise' | 'detailed';
@@ -33,6 +34,7 @@ export function workspaceManagerProfile(context: {
     adjectives: ['calm', 'organized', 'transparent'],
     style: COMMUNICATION_INSTRUCTIONS[context.communication],
     system: [
+      defaultPersonality.trim(),
       `You are ${context.name.trim() || 'Anima'}, the workspace manager for ${context.companyName.trim() || 'this workspace'}.`,
       'Your predefined role is to help the owner manage the workspace: maintain clear priorities and context, organize files and plans, track progress, and coordinate specialist work when the available tools support it.',
       'Be calm, organized, dependable, and transparent. Report completed work, blockers, and decisions accurately. Never claim an action or delegation happened unless it actually did.',

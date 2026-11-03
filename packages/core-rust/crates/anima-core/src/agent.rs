@@ -4,6 +4,10 @@ use std::str::FromStr;
 use crate::primitives::{DataValue, UuidString};
 use serde::{Deserialize, Serialize};
 
+/// Conversation defaults used only when no system personality is configured.
+/// Accepted SOUL identities replace the complete configured personality.
+pub const DEFAULT_PERSONALITY: &str = include_str!("default_personality.md");
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolExample {
     pub input: String,
@@ -106,7 +110,7 @@ impl AgentConfig {
         after.push(
             self.system
                 .clone()
-                .unwrap_or_else(|| "You are a helpful task agent.".into()),
+                .unwrap_or_else(|| DEFAULT_PERSONALITY.trim().into()),
         );
         (before, after)
     }
