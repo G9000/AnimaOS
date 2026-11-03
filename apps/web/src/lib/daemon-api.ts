@@ -82,6 +82,7 @@ import {
 import { consoleSessionHeaders } from './console-session';
 import { ownerApiKeyHeaders } from './owner-api-key';
 import { ownerFetch } from './owner-fetch';
+import type { OwnerLook } from './owner-look';
 
 export type {
   AddProviderKeyInput,
@@ -1039,6 +1040,15 @@ export const daemon = {
     request<ModelChoice | null>('/settings/side-model', {
       method: 'PUT',
       body: JSON.stringify(choice),
+    }),
+
+  /** How the owner's console looks, or null until first saved. Chat can
+   *  change it too (`change_look`). */
+  look: () => request<OwnerLook | null>('/settings/look'),
+  setLook: (look: OwnerLook) =>
+    request<OwnerLook>('/settings/look', {
+      method: 'PUT',
+      body: JSON.stringify(look),
     }),
 
   listAgents: () => request<{ agents: DaemonSnapshot[] }>('/agents'),

@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 378, "complete registered operation count");
+    assert_eq!(actual.len(), 380, "complete registered operation count");
     let task_verification_additions = [
         ("GET", "/api/agents/{agent_id}/runs/{run_id}/outcome"),
         (
@@ -596,6 +596,13 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "side-task model operation must be registered"
         );
     }
+    let look_additions = [("GET", "/api/settings/look"), ("PUT", "/api/settings/look")];
+    for (method, path) in look_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "owner look operation must be registered"
+        );
+    }
     let provider_key_additions = [
         ("GET", "/api/provider-keys"),
         ("POST", "/api/provider-keys/{provider}"),
@@ -753,6 +760,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !coding_additions.contains(&(method.as_str(), path.as_str()))
                     && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                     && !side_model_additions.contains(&(method.as_str(), path.as_str()))
+                    && !look_additions.contains(&(method.as_str(), path.as_str()))
+                    && !look_additions.contains(&(method.as_str(), path.as_str()))
                     && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
                     && !system_additions.contains(&(method.as_str(), path.as_str()))
                     && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))
@@ -817,6 +826,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 && !coding_additions.contains(&(method.as_str(), path.as_str()))
                 && !autonomy_additions.contains(&(method.as_str(), path.as_str()))
                 && !side_model_additions.contains(&(method.as_str(), path.as_str()))
+                && !look_additions.contains(&(method.as_str(), path.as_str()))
                 && !provider_key_additions.contains(&(method.as_str(), path.as_str()))
                 && !system_additions.contains(&(method.as_str(), path.as_str()))
                 && !skill_ledger_additions.contains(&(method.as_str(), path.as_str()))

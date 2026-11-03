@@ -18,12 +18,14 @@ import { HelperCard } from './HelperCard';
 import { PlanNoteCard } from './PlanCard';
 import { ToolStepCard } from './ToolStepCard';
 import { ChatExportDownload, chatExportResult } from './ChatExportDownload';
+import { LookChangeNotice } from './LookChangeNotice';
 import { CodingSessionCard } from '../coding/CodingSessionCard';
 import { ChevronIcon } from '../icons';
 import { HaloOrb } from '../halo/HaloOrb';
 import { orbPixel, useAgentOrbStyle } from '../../lib/orb-style-preferences';
 import { useAppearancePreferences } from '../../lib/appearance-preferences';
 import { workStatus } from '../../lib/work-status';
+import { lookChangeResult } from '../../lib/owner-look';
 import {
   mergeAcpSnapshots,
   parseCodingSession,
@@ -195,6 +197,13 @@ export function ToolBlock({
             : null;
         return exported ? [{ exported, key: keys[index] }] : [];
       });
+  // The new look speaks for itself; its note and Undo are part of the work.
+  const lookChanges = !showWork
+    ? []
+    : steps.flatMap((step, index) => {
+        const change = lookChangeResult(step.name, step.status, step.result);
+        return change ? [{ change, key: keys[index] }] : [];
+      });
   const status = workStatus(steps);
   return (
     <div
@@ -302,6 +311,9 @@ export function ToolBlock({
           automation={automation}
           onUndo={actions?.onUndoAutomation}
         />
+      ))}
+      {lookChanges.map(({ change, key }) => (
+        <LookChangeNotice key={key} change={change} />
       ))}
     </div>
   );

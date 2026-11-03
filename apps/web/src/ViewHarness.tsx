@@ -89,6 +89,7 @@ import { shouldShowSession } from './lib/session-groups';
 import type { ChatAttention, AutomationToast } from './lib/automation-toasts';
 import { useApprovalNotifications } from './hooks/useApprovalNotifications';
 import { useAutomationToasts } from './hooks/useAutomationToasts';
+import { useOwnerLookSync } from './hooks/useOwnerLookSync';
 import { AutomationToasts } from './components/sessions/AutomationToasts';
 import { useHashRoute, type HashRoute } from './lib/hash-route';
 import { exportFileName, sessionKey } from './lib/session-groups';
@@ -840,6 +841,7 @@ export function ViewHarness() {
     enabled: connection === 'online',
     attention: chatAttention,
   });
+  useOwnerLookSync(agentId, connection === 'online');
   const [legacyMigrationError, setLegacyMigrationError] = useState<
     string | null
   >(null);

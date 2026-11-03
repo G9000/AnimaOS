@@ -60,6 +60,7 @@ mod images;
 mod oauth_apps;
 mod oauth_callback;
 mod outcomes;
+mod owner_look;
 mod personality;
 mod profile;
 mod project_connected_sources;
@@ -317,6 +318,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         usage::get_pricing, usage::put_pricing,
         usage::get_monthly_spend_limit, usage::put_monthly_spend_limit,
         side_model::get_side_model, side_model::put_side_model,
+        owner_look::get_look, owner_look::put_look,
         provider_keys::list_keys, provider_keys::add_key, provider_keys::remove_key, provider_keys::set_strategy,
         provider_keys::wake_key,
         system::begin_drain, system::drain_status, system::cancel_drain, system::shutdown,
@@ -1480,6 +1482,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/settings/side-model",
             get(side_model::get_side_model).put(side_model::put_side_model),
+        )
+        .route(
+            "/api/settings/look",
+            get(owner_look::get_look).put(owner_look::put_look),
         )
         .route("/api/provider-keys", get(provider_keys::list_keys))
         .route(
@@ -3479,6 +3485,7 @@ mod tests {
     mod logs;
     mod memory_edits;
     mod memory_export;
+    mod owner_look;
     mod personality;
     mod provider_keys;
     mod runs;

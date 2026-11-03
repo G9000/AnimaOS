@@ -1,6 +1,21 @@
 use super::*;
 
-const NAMES: &[&str] = &["rename_chat", "compact_chat", "export_chat"];
+const NAMES: &[&str] = &["rename_chat", "compact_chat", "export_chat", "change_look"];
+
+/// What each `change_look` choice means, for the model.
+fn look_description(name: &str) -> &'static str {
+    match name {
+        "view" => "simple: the plain everyday console (work hidden, basic input); advanced: show each tool step and the Do/Plan and model controls",
+        "theme" => "Colour theme",
+        "accent" => "Highlight colour used for the orb, buttons and anything that needs the owner",
+        "textSize" => "Chat and settings text size",
+        "density" => "Space between messages and rows",
+        "chatBackground" => "What sits behind the chat: the full orb, a quiet orb at the edge, or nothing",
+        "reduceMotion" => "Calmer orb and fewer animations",
+        "advancedInput" => "Do/Plan and the model picker on the chat input",
+        _ => "Each tool step, timing and result while the agent works; off shows one plain status line",
+    }
+}
 
 pub(super) fn register(registry: &mut ToolRegistry) {
     let mut title = non_blank_string_parameter(
@@ -22,6 +37,27 @@ pub(super) fn register(registry: &mut ToolRegistry) {
         schema.insert("additionalProperties".into(), DataValue::Bool(false));
         registry.register(tool_descriptor(name, description, schema), execute);
     }
+    let parameters = crate::owner_look::LOOK_CHOICES
+        .iter()
+        .map(|(name, values)| {
+            optional_parameter(name, string_enum_parameter(look_description(name), values))
+        })
+        .chain(
+            crate::owner_look::LOOK_SWITCHES
+                .iter()
+                .map(|name| optional_parameter(name, boolean_parameter(look_description(name)))),
+        )
+        .collect();
+    let mut schema = object_parameters(parameters);
+    schema.insert("additionalProperties".into(), DataValue::Bool(false));
+    registry.register(
+        tool_descriptor(
+            NAMES[3],
+            "Change how the owner's anima console looks when they ask, for example \"show me the advanced stuff\", \"make it simple again\", \"switch to light mode\" or \"make the accent lavender\". When the owner asks to change the colour, theme, background, text or how things look without naming a specific file, page or document, they mean this app: use this tool instead of asking which. Applies at once on every open console and is undoable from the chat. Pass only what should change; with no arguments it reports the current look without changing anything. Only the listed choices exist: offer the closest one rather than inventing a colour. Cannot change agent behaviour or settings.",
+            schema,
+        ),
+        execute,
+    );
 }
 
 fn options(call: &ToolCall) -> Result<crate::sessions::compaction::CompactionOptions, String> {
@@ -79,6 +115,7 @@ pub(super) fn execute(
                     if !call.args.is_empty() { return Err("export_chat takes no arguments".into()); }
                     serde_json::to_string(&coordinator.export_owner_chat(run).await?).map_err(|error| error.to_string())
                 }
+                "change_look" => Ok(coordinator.change_owner_look(run, call.args.clone()).await?.to_string()),
                 _ => Err("Unknown chat control".into()),
             }
         }.await;

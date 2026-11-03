@@ -766,6 +766,7 @@ mod tests {
                 "manage_skill_setup",
                 "compact_chat",
                 "export_chat",
+                "change_look",
                 "show_result",
                 "list_results"
             ]

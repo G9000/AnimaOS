@@ -8753,7 +8753,7 @@ details.settings-item > :not(summary) {
   text-shadow: none;
 }
 
-:root[data-appearance-theme='light'] .scenic-shell [data-main-chat='true'] :is(.session-kept-summary, .action-receipts-card, .plan-card, .approval-card, .automation-card, .helper-card, .run-outcome, .tool-block-card) {
+:root[data-appearance-theme='light'] .scenic-shell [data-main-chat='true'] :is(.session-kept-summary, .action-receipts-card, .plan-card, .approval-card, .automation-card, .automation-notice, .helper-card, .run-outcome, .tool-block-card) {
   border-color: #ddd7cb;
   background: #fffefa;
   color: #1a1a18;

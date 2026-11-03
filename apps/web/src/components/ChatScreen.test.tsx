@@ -460,6 +460,43 @@ describe('MessageList', () => {
     expect(within(card).queryByText('Deck contents')).not.toBeInTheDocument();
   });
 
+  it('leaves the action summary out with Show work off', () => {
+    saveAppearancePreferences({ showWork: false });
+    render(
+      <MessageList
+        agent={agent}
+        sending={false}
+        scrollerRef={{ current: null }}
+        onSuggestion={vi.fn()}
+        items={[
+          {
+            kind: 'receipts',
+            key: 'receipts:run-1',
+            runId: 'run-1',
+            createdAtMs: 1_725_000_000_000,
+            receipts: [
+              {
+                toolCallId: 'search-1',
+                name: 'search_tools',
+                status: 'succeeded',
+                startedAtMs: 1,
+                finishedAtMs: 2,
+                durationMs: 1,
+                argumentsPreview: 'query: appearance',
+                argumentsTruncated: false,
+                resultPreview: 'No match',
+                resultTruncated: false,
+                durability: 'persistent',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole('region', { name: 'What I did' })).toBeNull();
+  });
+
   it('keeps long action histories compact until the owner expands them', async () => {
     const user = userEvent.setup();
     const receipts = Array.from({ length: 5 }, (_, index) => ({

@@ -347,6 +347,9 @@ pub(crate) struct ControlPlaneSnapshot {
     /// learning reviews; `None` uses each agent's own.
     #[serde(default)]
     pub(crate) side_model: Option<anima_core::ModelChoice>,
+    /// How the owner's console looks; `None` until first saved.
+    #[serde(default)]
+    pub(crate) owner_look: Option<Box<crate::owner_look::OwnerLook>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -887,6 +890,7 @@ impl ControlPlaneSnapshot {
             monthly_spend_limit_micros: None,
             owner_time_zone: None,
             side_model: None,
+            owner_look: None,
             learning_reviews: vec![],
             learning_policies: vec![],
             memory_maintenance: crate::memory_maintenance::MaintenanceRegistry::default(),

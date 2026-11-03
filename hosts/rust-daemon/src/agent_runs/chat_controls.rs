@@ -126,6 +126,53 @@ impl AgentRunCoordinator {
         Ok(title)
     }
 
+    /// Changes the owner's console look as asked, or with no changes reads
+    /// it. Answers the look now in effect, the one before, and what changed.
+    pub(crate) async fn change_owner_look(
+        &self,
+        link: &RunLink,
+        args: std::collections::BTreeMap<String, anima_core::DataValue>,
+    ) -> Result<serde_json::Value, String> {
+        let coordinator = self.clone();
+        let link = link.clone();
+        tokio::spawn(async move { coordinator.change_owner_look_saved(&link, &args).await })
+            .await
+            .map_err(|_| "The look change worker stopped".to_string())?
+    }
+
+    async fn change_owner_look_saved(
+        &self,
+        link: &RunLink,
+        args: &std::collections::BTreeMap<String, anima_core::DataValue>,
+    ) -> Result<serde_json::Value, String> {
+        let _transaction = self.control_plane_transaction().await;
+        let (previous, look, changed, persist) = {
+            let mut state = self.state.write().await;
+            validate_owner_chat(&state, link)?;
+            let current = state.owner_look.as_deref().cloned().unwrap_or_default();
+            let (look, changed) = current.changed_by(args)?;
+            if changed.is_empty() {
+                return Ok(serde_json::json!({ "look": current, "changed": [] }));
+            }
+            let previous = state.set_owner_look(Some(look.clone()));
+            (
+                previous,
+                look,
+                changed,
+                state.control_plane_persist_request(),
+            )
+        };
+        if let Err(error) = persist.save().await {
+            self.state.write().await.set_owner_look(previous);
+            return Err(format!("The new look could not be saved: {error}"));
+        }
+        Ok(serde_json::json!({
+            "look": look,
+            "previous": previous.unwrap_or_default(),
+            "changed": changed,
+        }))
+    }
+
     pub(crate) async fn compact_owner_chat(
         &self,
         link: &RunLink,
@@ -296,6 +343,67 @@ mod tests {
                 .unwrap()
                 .title,
             "Renamed chat"
+        );
+    }
+
+    #[tokio::test]
+    async fn owner_look_changes_from_chat_report_the_previous_look_and_roll_back_a_failed_save() {
+        use anima_core::DataValue;
+        let (coordinator, link) = fixture().await;
+        let advanced = std::collections::BTreeMap::from([(
+            "view".to_string(),
+            DataValue::String("advanced".into()),
+        )]);
+        let answer = coordinator
+            .change_owner_look(&link, advanced)
+            .await
+            .unwrap();
+        assert_eq!(answer["look"]["showWork"], true);
+        assert_eq!(answer["previous"]["showWork"], false);
+        assert_eq!(
+            answer["changed"],
+            serde_json::json!(["advancedInput", "showWork"])
+        );
+        let saved = coordinator.state.read().await.owner_look.clone().unwrap();
+        assert!(saved.show_work && saved.advanced_input);
+
+        // No arguments only reads it.
+        let answer = coordinator
+            .change_owner_look(&link, Default::default())
+            .await
+            .unwrap();
+        assert_eq!(answer["changed"], serde_json::json!([]));
+        assert_eq!(answer["look"]["advancedInput"], true);
+
+        let gate = coordinator
+            .state
+            .write()
+            .await
+            .install_test_control_plane_save_gate(true);
+        let change = {
+            let coordinator = coordinator.clone();
+            let link = link.clone();
+            tokio::spawn(async move {
+                let light = std::collections::BTreeMap::from([(
+                    "theme".to_string(),
+                    DataValue::String("light".into()),
+                )]);
+                coordinator.change_owner_look(&link, light).await
+            })
+        };
+        gate.entered.acquire().await.unwrap().forget();
+        gate.release.add_permits(1);
+        assert!(change.await.unwrap().is_err());
+        assert_eq!(
+            coordinator
+                .state
+                .read()
+                .await
+                .owner_look
+                .as_ref()
+                .unwrap()
+                .theme,
+            "dark"
         );
     }
 

@@ -69,6 +69,7 @@ const READ_TOOLS: &[&str] = &[
 const WRITE_TOOLS: &[&str] = &[
     "clear_main_chat",
     "rename_chat",
+    "change_look",
     "rename_discord_thread",
     "send_discord_file",
     "compact_chat",

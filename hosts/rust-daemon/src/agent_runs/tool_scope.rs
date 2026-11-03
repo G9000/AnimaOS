@@ -162,6 +162,7 @@ pub(crate) fn select(
                 | "rename_chat"
                 | "compact_chat"
                 | "export_chat"
+                | "change_look"
                 | "manage_mcp"
                 | "import_github_skill"
                 | "manage_skill_runtime"
@@ -182,6 +183,7 @@ pub(crate) fn select(
             "manage_skill_setup",
             "compact_chat",
             "export_chat",
+            "change_look",
             "show_result",
             "list_results",
         ] {

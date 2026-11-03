@@ -52,7 +52,9 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
 };
 
 const STORAGE_KEY = 'anima.appearance';
-const CHANGED = 'anima:appearance';
+/** Fired in this tab when the preferences change. */
+export const APPEARANCE_CHANGED = 'anima:appearance';
+const CHANGED = APPEARANCE_CHANGED;
 let remembered: AppearancePreferences | null = null;
 let storageWriteFailed = false;
 let cachedSerialized: string | null | undefined;

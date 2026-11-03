@@ -8,7 +8,9 @@ export type ChatBackground = (typeof CHAT_BACKGROUNDS)[number];
 export const DEFAULT_CHAT_BACKGROUND: ChatBackground = 'quiet';
 
 const STORAGE_KEY = 'anima.chatBackground';
-const CHANGED = 'anima:chat-background';
+/** Fired in this tab when the chat background changes. */
+export const CHAT_BACKGROUND_CHANGED = 'anima:chat-background';
+const CHANGED = CHAT_BACKGROUND_CHANGED;
 
 // Kept when storage is unavailable (a private window): the choice still holds
 // for this visit.

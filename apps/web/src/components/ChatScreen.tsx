@@ -43,6 +43,7 @@ import {
   type TranscriptItem,
 } from '../lib/transcript';
 import { PendingMessage, RunActivity, ToolBlock } from './sessions/RunActivity';
+import { useAppearancePreferences } from '../lib/appearance-preferences';
 import { RunOutcomeCard } from './sessions/RunOutcomeCard';
 import { OutcomeStatus } from './sessions/OutcomeStatus';
 import { AutomationMessageCard } from './sessions/AutomationMessageCard';
@@ -379,7 +380,9 @@ function ActionReceiptCard({
   createdAtMs: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  if (!receipts.length) return null;
+  const [{ showWork }] = useAppearancePreferences();
+  // With Show work off the reply speaks for itself: no list of tool calls.
+  if (!receipts.length || !showWork) return null;
   const successes = receipts.filter(
     (receipt) => receipt.status === 'succeeded',
   ).length;

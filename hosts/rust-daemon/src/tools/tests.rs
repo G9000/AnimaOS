@@ -371,7 +371,7 @@ mod finished_documents {
 #[test]
 fn chat_controls_are_native_and_cannot_target_arbitrary_chats() {
     let registry = ToolRegistry::new();
-    for name in ["rename_chat", "compact_chat", "export_chat"] {
+    for name in ["rename_chat", "compact_chat", "export_chat", "change_look"] {
         let descriptor = registry.descriptor(name).expect("native owner control");
         assert!(registry.lookup(name).is_some());
         let DataValue::Object(properties) = &descriptor.parameters_schema["properties"] else {
@@ -785,6 +785,21 @@ fn registry_defines_every_registered_tool_schema() {
             &["keepLatestExchanges", "focus"][..],
         ),
         ("export_chat", &[][..], &[][..]),
+        (
+            "change_look",
+            &[][..],
+            &[
+                "view",
+                "theme",
+                "accent",
+                "textSize",
+                "density",
+                "chatBackground",
+                "reduceMotion",
+                "advancedInput",
+                "showWork",
+            ][..],
+        ),
         (
             "show_result",
             &["expectedRevision", "requestKey", "title", "payload"][..],

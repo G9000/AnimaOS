@@ -282,6 +282,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `GET`    | `/api/providers/chatgpt/status`                                                              |
 | `GET`    | `/api/ready`                                                                                 |
 | `GET`    | `/api/search`                                                                                |
+| `GET`    | `/api/settings/look`                                                                         |
 | `GET`    | `/api/settings/side-model`                                                                   |
 | `GET`    | `/api/skill-drafts`                                                                          |
 | `GET`    | `/api/skill-ledger`                                                                          |
@@ -457,6 +458,7 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PUT`    | `/api/agents/{agent_id}/tasks`                                                               |
 | `PUT`    | `/api/connectors/oauth-apps/{provider}`                                                      |
 | `PUT`    | `/api/provider-keys/{provider}/strategy`                                                     |
+| `PUT`    | `/api/settings/look`                                                                         |
 | `PUT`    | `/api/settings/side-model`                                                                   |
 | `PUT`    | `/api/skills/{slug}`                                                                         |
 | `PUT`    | `/api/usage/limit`                                                                           |
@@ -997,6 +999,15 @@ Both routes require local-owner authorization and answer `Cache-Control: no-stor
 | ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/api/settings/side-model` | `{ provider, model }`, or `null` when none is set.                                                                                                                                                                                                                                           |
 | `PUT`  | `/api/settings/side-model` | Body `{ provider, model }` or `null` (clear), answered with the saved value. `provider` is trimmed, lowercased and must be one the daemon can route to; `model` is trimmed, non-empty, at most 200 characters. `400` for an invalid body; `503` when it cannot be saved (the old one stays). |
+
+### Console look
+
+Both routes require local-owner authorization and answer `Cache-Control: no-store` (errors included). The look is how the owner's web console appears: `theme` (`dark`, `light`, `system`), `accent` (`pink`, `lavender`, `amber`, `sage`, `coral`, `paper`), `textSize` (`small`, `default`, `large`), `density` (`comfortable`, `compact`), `chatBackground` (`full`, `quiet`, `off`), and the switches `reduceMotion`, `advancedInput` and `showWork`. It is saved in the control plane. The companion's `change_look` tool changes the same record from a direct owner web/API chat (`view: simple | advanced` sets `showWork` and `advancedInput` together; no arguments reads it), and its result carries `{ look, previous, changed }` so the console can offer Undo.
+
+| Method | Path                 | Description                                                                                                                                                  |
+| ------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/settings/look` | The saved look, or `null` until a console or chat first saves one.                                                                                           |
+| `PUT`  | `/api/settings/look` | Body: the look, answered with the saved value. A missing choice takes its default. `400` for a choice the console does not offer; `503` when it cannot be saved. |
 
 ### Provider API keys
 

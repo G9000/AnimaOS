@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1157,6 +1157,40 @@ describe('ToolBlock with Show work off', () => {
     ).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Download chat Markdown' }),
+    ).toBeVisible();
+  });
+
+  it('shows no note for a look changed from chat: the look itself shows it', () => {
+    const look = {
+      theme: 'light',
+      accent: 'pink',
+      textSize: 'default',
+      density: 'comfortable',
+      reduceMotion: false,
+      advancedInput: false,
+      showWork: false,
+      chatBackground: 'quiet',
+    };
+    render(
+      <ToolBlock
+        steps={[
+          {
+            ...step,
+            name: 'change_look',
+            result: JSON.stringify({
+              look,
+              previous: { ...look, theme: 'dark' },
+              changed: ['theme'],
+            }),
+          },
+        ]}
+        active={false}
+      />,
+    );
+    expect(screen.queryByRole('note')).toBeNull();
+    act(() => saveAppearancePreferences({ showWork: true }));
+    expect(
+      screen.getByRole('note', { name: 'Look changed: Light theme' }),
     ).toBeVisible();
   });
 

@@ -101,6 +101,7 @@ impl RunToolCatalog {
                         "rename_chat"
                             | "compact_chat"
                             | "export_chat"
+                            | "change_look"
                             | "manage_mcp"
                             | "import_github_skill"
                             | "manage_skill_runtime"
@@ -603,6 +604,7 @@ impl ModelToolSelector for RunToolCatalog {
             "read_discord_thread",
             "compact_chat",
             "export_chat",
+            "change_look",
             "manage_mcp",
             "import_github_skill",
             "manage_skill_runtime",

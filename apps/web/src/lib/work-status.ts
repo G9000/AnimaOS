@@ -19,6 +19,7 @@ const PHRASES: readonly [RegExp, string][] = [
   [/^generate_image$/, 'Making an image'],
   [/^(propose_plan|todo_)/, 'Planning'],
   [/^get_current_time$/, 'Checking the time'],
+  [/^change_look$/, 'Changing the look'],
 ];
 
 function phrase(step: ToolStep): string {

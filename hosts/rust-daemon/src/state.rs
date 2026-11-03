@@ -1892,6 +1892,9 @@ pub(crate) struct DaemonState {
     pub(crate) test_evaluators: Vec<Arc<dyn anima_core::Evaluator>>,
     /// The model side tasks use before the agent's own (spec: side-task model).
     pub(crate) side_model: Option<anima_core::ModelChoice>,
+    /// How the owner's console looks, kept here so chat can change it.
+    /// Boxed: this state is moved by value, and debug-build stacks are tight.
+    pub(crate) owner_look: Option<Box<crate::owner_look::OwnerLook>>,
     pub(crate) history: crate::history::SharedHistory,
     /// Session creations per agent per minute (spec §14); not persisted.
     pub(crate) session_limiter: crate::sessions::SessionCreateLimiter,
@@ -2755,6 +2758,7 @@ impl DaemonState {
             #[cfg(test)]
             test_evaluators: Vec::new(),
             side_model: None,
+            owner_look: None,
             history: crate::history::HistoryService::ephemeral(),
             session_limiter: crate::sessions::SessionCreateLimiter::default(),
             side_posts: Vec::new(),
@@ -3104,6 +3108,7 @@ impl DaemonState {
             .get()
             .map(|zone| zone.name().to_string());
         snapshot.side_model = self.side_model.clone();
+        snapshot.owner_look = self.owner_look.clone();
         let learning = self.learning.snapshot();
         snapshot.learning_reviews = learning.reviews;
         snapshot.learning_policies = learning.policies;
@@ -3136,6 +3141,15 @@ impl DaemonState {
         choice: Option<anima_core::ModelChoice>,
     ) -> Option<anima_core::ModelChoice> {
         std::mem::replace(&mut self.side_model, choice)
+    }
+
+    /// Sets the owner's look and returns the previous one (for a rollback
+    /// after a failed save).
+    pub(crate) fn set_owner_look(
+        &mut self,
+        look: Option<crate::owner_look::OwnerLook>,
+    ) -> Option<crate::owner_look::OwnerLook> {
+        std::mem::replace(&mut self.owner_look, look.map(Box::new)).map(|look| *look)
     }
 
     pub(crate) fn restore_control_plane_snapshot(
@@ -3475,6 +3489,7 @@ impl DaemonState {
         self.owner_time_zone.set(owner_zone);
         self.monthly_spend_limit_micros = snapshot.monthly_spend_limit_micros;
         self.side_model = snapshot.side_model.clone();
+        self.owner_look = snapshot.owner_look.clone();
 
         if relabelled_messages > 0 || relabelled_runs > 0 || mapped_runs > 0 {
             info!(

@@ -47,6 +47,7 @@ mod memory_text;
 mod model;
 mod outcomes;
 mod owned_model;
+mod owner_look;
 mod paired_devices;
 mod profile_owner;
 mod projects;
