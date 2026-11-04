@@ -93,7 +93,9 @@ pub trait DatabaseAdapter: Send + Sync {
 }
 ```
 
-Checkpoint store for tool call state. Optional — inject via `set_database()`. When absent the runtime runs statelessly. `write_step` is called twice per tool call: once before execution (`Pending`) and once after (`Done` or `Failed`). Implementations must be idempotent: a second write to the same `(agent_id, step_index)` must not overwrite a terminal state.
+Checkpoint store for tool call state. Optional — inject via `set_database()`. Without an adapter, the runtime does not persist tool steps. For fresh calls, `write_step` is called before execution (`Pending`) and after execution (`Done` or `Failed`). Readable terminal results are reused without executing or rewriting the step. Implementations must be idempotent by `(agent_id, idempotency_key)` and must not overwrite a terminal state.
+
+Before dispatching a batch, the runtime resolves every saved step and waits for every fresh pending write to succeed. Lookup failures, unreadable terminal results, existing pending steps, or pending-write failures fail the run without executing any tool in that batch. A pending record does not establish whether an earlier attempt had effects; the host must reconcile that evidence before retrying. Pending writes acknowledged before a later write fails are retained conservatively. This interface does not provide an atomic claim across concurrent runtimes or an exactly-once execution guarantee.
 
 ### `Provider`
 

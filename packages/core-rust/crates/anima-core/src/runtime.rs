@@ -1315,48 +1315,50 @@ impl AgentRuntime {
                                 .collect();
                             self.step_counter += tool_calls.len() as u64;
 
-                            for tool_call in &tool_calls {
-                                self.record_event(
-                                    EventType::ToolBefore,
-                                    tool_before_event_data(tool_call),
-                                );
-                            }
-
-                            let prepared_steps = self
+                            let prepared_steps = match self
                                 .prepare_tool_steps(
                                     &user_message,
                                     iterations,
                                     &tool_calls,
                                     &step_indices,
                                 )
-                                .await;
-
-                            // Write pending steps to database
-                            if let Some(db) = self.db.clone() {
-                                let persistence_agent_id = self.persistence_agent_id().to_string();
-                                for prepared_step in prepared_steps.iter().filter(|prepared_step| {
-                                    prepared_step.recovered_result.is_none()
-                                }) {
-                                    let step = Step {
-                                        id: Uuid::new_v4().to_string(),
-                                        agent_id: persistence_agent_id.clone(),
-                                        step_index: prepared_step.step_index,
-                                        idempotency_key: prepared_step.idempotency_key.clone(),
-                                        step_type: "tool".to_string(),
-                                        status: StepStatus::Pending,
-                                        input: Some(tool_step_input_json(&prepared_step.tool_call)),
-                                        output: None,
-                                    };
-                                    if let Err(err) = db.write_step(&step).await {
-                                        self.record_event(
-                                            EventType::AgentMessage,
-                                            DataValue::String(format!(
-                                                "failed to persist pending step: step_index={}, error={}",
-                                                prepared_step.step_index, err
-                                            )),
+                                .await
+                            {
+                                Ok(steps) => steps,
+                                Err(error) => {
+                                    // These are protocol results for this rejected batch,
+                                    // never persisted outcomes of the uncertain prior attempt.
+                                    for tool_call in &tool_calls {
+                                        let content = self.tag_for_run(
+                                            content_from_tool_result(
+                                                tool_call,
+                                                TaskResult::error(error.clone(), 0),
+                                                false,
+                                            ),
+                                            Some(&step_id),
+                                            self.tool_markers(TaskStatus::Error, 0),
+                                        );
+                                        self.record_message_in_room(
+                                            room_id.clone(),
+                                            MessageRole::Tool,
+                                            content,
                                         );
                                     }
+                                    self.record_token_event();
+                                    if self.stop_requested() {
+                                        return self.finish_stopped(start);
+                                    }
+                                    let duration = now_millis().saturating_sub(start);
+                                    self.mark_failed(error.clone(), duration);
+                                    return TaskResult::error(error, duration);
                                 }
+                            };
+
+                            for tool_call in &tool_calls {
+                                self.record_event(
+                                    EventType::ToolBefore,
+                                    tool_before_event_data(tool_call),
+                                );
                             }
 
                             let execute_tool = &execute_tool;
@@ -2021,12 +2023,12 @@ impl AgentRuntime {
     }
 
     async fn prepare_tool_steps(
-        &mut self,
+        &self,
         user_message: &Message,
         iteration: usize,
         tool_calls: &[ToolCall],
         step_indices: &[i32],
-    ) -> Vec<PreparedToolStep> {
+    ) -> Result<Vec<PreparedToolStep>, String> {
         let mut prepared_steps = Vec::with_capacity(tool_calls.len());
         let db = self.db.clone();
         let persistence_agent_id = self.persistence_agent_id().to_string();
@@ -2042,34 +2044,23 @@ impl AgentRuntime {
                 &tool_call,
             );
             let recovered_result = if let Some(db) = db.as_ref() {
-                match db
+                let stored = db
                     .get_step_by_idempotency_key(&persistence_agent_id, &idempotency_key)
                     .await
-                {
-                    Ok(Some(step)) => match persisted_task_result(&step) {
-                        Ok(result) => result,
-                        Err(error) => {
-                            self.record_event(
-                                EventType::AgentMessage,
-                                DataValue::String(format!(
-                                    "failed to recover persisted step: step_index={}, error={}",
-                                    step.step_index, error
-                                )),
-                            );
-                            None
-                        }
-                    },
-                    Ok(None) => None,
-                    Err(error) => {
-                        self.record_event(
-                            EventType::AgentMessage,
-                            DataValue::String(format!(
-                                "failed to load persisted step: key={}, error={}",
-                                idempotency_key, error
-                            )),
-                        );
-                        None
-                    }
+                    .map_err(|error| format!(
+                        "Tool batch not executed: failed to load persisted step {idempotency_key}: {error}. Prior effects are unknown; reconcile before retrying."
+                    ))?;
+                match stored {
+                    Some(step) => Some(
+                        persisted_task_result(&step)
+                            .map_err(|error| format!(
+                                "Tool batch not executed: failed to recover persisted step {}: {error}. Reconcile before retrying.", step.id
+                            ))?
+                            .ok_or_else(|| format!(
+                                "Tool batch not executed: persisted step {} is pending; prior effects are unknown. Reconcile before retrying.", step.id
+                            ))?,
+                    ),
+                    None => None,
                 }
             } else {
                 None
@@ -2083,7 +2074,29 @@ impl AgentRuntime {
             });
         }
 
-        prepared_steps
+        // Resolve the entire batch before changing any evidence. Acknowledging
+        // every pending write is required before any executor can be called.
+        if let Some(db) = db {
+            for prepared_step in prepared_steps
+                .iter()
+                .filter(|step| step.recovered_result.is_none())
+            {
+                let step = Step {
+                    id: Uuid::new_v4().to_string(),
+                    agent_id: persistence_agent_id.clone(),
+                    step_index: prepared_step.step_index,
+                    idempotency_key: prepared_step.idempotency_key.clone(),
+                    step_type: "tool".to_string(),
+                    status: StepStatus::Pending,
+                    input: Some(tool_step_input_json(&prepared_step.tool_call)),
+                    output: None,
+                };
+                db.write_step(&step).await.map_err(|error| format!(
+                    "Tool batch not executed: failed to persist pending step {}: {error}. Persistence outcome is unknown; reconcile before retrying.", step.id
+                ))?;
+            }
+        }
+        Ok(prepared_steps)
     }
 
     /// Records the usage a call reported before it was stopped or failed.
