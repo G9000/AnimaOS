@@ -40,7 +40,6 @@ import { CommandMenu, type StudioCommand } from './CommandMenu';
 import { PROMPT_LIBRARY } from '../lib/prompt-library';
 import { sessionKey, shouldShowSession } from '../lib/session-groups';
 import { ChevronIcon, GlobeIcon, SearchIcon, XIcon } from './icons';
-import { PenIcon } from './PenIcon';
 import { ImportConversationDialog } from './sessions/ImportConversationDialog';
 import { onOpenInbox } from '../lib/inbox-events';
 import { HeaderContextProvider } from '../lib/header-context';
@@ -331,9 +330,7 @@ export function WorkspaceShell({
   /** The sessions list shown by the thread switcher. */
   sidebar?: ReactNode | null;
   connectors?:
-    | ReactNode
-    | ((mode: 'connections' | 'tools') => ReactNode)
-    | null;
+    ReactNode | ((mode: 'connections' | 'tools') => ReactNode) | null;
   /** Built-in tool permissions, shown at the top of Tools. */
   builtinTools?: ReactNode | null;
   /** The Approvals page, shown at `#/approvals` as Permissions. */
@@ -515,8 +512,17 @@ export function WorkspaceShell({
   }, [page, desktopNavigation]);
 
   const commands: StudioCommand[] = [
-    ...(projectPage !== null ? [{ id: 'projects', title: 'Projects', description: 'Shared work across selected agents',
-      group: 'Navigate', run: () => navigate({ kind: 'project', projectId: null }) }] : []),
+    ...(projectPage !== null
+      ? [
+          {
+            id: 'projects',
+            title: 'Projects',
+            description: 'Shared work across selected agents',
+            group: 'Navigate',
+            run: () => navigate({ kind: 'project', projectId: null }),
+          },
+        ]
+      : []),
     {
       id: 'new-chat',
       title: 'Main chat',
@@ -618,7 +624,7 @@ export function WorkspaceShell({
   return (
     <HeaderContextProvider>
       <div
-        className="studio-shell companion-shell scenic-shell relative z-[1] flex min-h-0 flex-1 flex-col"
+        className="studio-shell companion-shell scenic-shell friendly-shell relative z-[1] flex min-h-0 flex-1 flex-col"
         data-presence={page === null ? presence : 'calm'}
         inert={commandsOpen || drawerShown || undefined}
         aria-hidden={commandsOpen || drawerShown || undefined}
@@ -679,8 +685,18 @@ export function WorkspaceShell({
               </div>
               {page === null && !projectShown && <HeaderContextLine />}
               <div className="studio-topbar-actions">
-                {projectPage !== null && <button type="button" className="studio-tool-button" aria-pressed={projectShown}
-                  onClick={() => navigate({ kind: 'project', projectId: null })}>Projects</button>}
+                {projectPage !== null && (
+                  <button
+                    type="button"
+                    className="studio-tool-button"
+                    aria-pressed={projectShown}
+                    onClick={() =>
+                      navigate({ kind: 'project', projectId: null })
+                    }
+                  >
+                    Projects
+                  </button>
+                )}
                 {inbox ? (
                   <InboxButton inbox={inbox} />
                 ) : (
@@ -705,16 +721,17 @@ export function WorkspaceShell({
                   aria-label="Open command menu"
                 >
                   <SearchIcon size={12} />
-                  <span className="studio-command-trigger-label">
-                    Search or do anything
-                  </span>
+                  <span className="studio-command-trigger-label">Search</span>
                   <kbd>{isMacPlatform() ? '⌘K' : 'Ctrl K'}</kbd>
                 </button>
               </div>
             </div>
             <div className="studio-view">
               {/* Keep the conversation mounted so drafts and scroll survive page visits. */}
-              <div className="companion-chat-panel" hidden={page !== null || projectShown}>
+              <div
+                className="companion-chat-panel"
+                hidden={page !== null || projectShown}
+              >
                 {conversation}
               </div>
               {projectShown && projectPage}
@@ -798,10 +815,19 @@ export function WorkspaceShell({
                         disabled={locked}
                         onClick={openConversation}
                       >
-                        <span className="scenic-hide-narrow">ESC</span>
-                        <PenIcon name="x-circle-fill" size={16} />
+                        <XIcon size={18} />
                       </button>
                     </div>
+                    {!desktopNavigation && (
+                      <DestinationNavigation
+                        page={page}
+                        navigate={navigate}
+                        placement="mobile"
+                        pendingApprovals={pendingApprovals}
+                        pendingSkills={pendingSkills}
+                        locked={locked}
+                      />
+                    )}
                     <div className="settings-window-page">
                       {page === 'new-agent' ? (
                         newAgent
@@ -836,7 +862,9 @@ export function WorkspaceShell({
                                 companyName={companyName}
                                 placement="sidebar"
                                 hasAvatar={hasAvatar}
-                                onChangeWorkspaceAvatar={onChangeWorkspaceAvatar}
+                                onChangeWorkspaceAvatar={
+                                  onChangeWorkspaceAvatar
+                                }
                               />
                             </div>
                           </SettingsSection>
@@ -872,7 +900,9 @@ export function WorkspaceShell({
                         <>
                           {builtinTools}
                           <details className="sk-disclosure tools-inventory-details">
-                            <summary>Registered tools and runtime details</summary>
+                            <summary>
+                              Registered tools and runtime details
+                            </summary>
                             <WorkspaceCapabilities
                               online={connection === 'online'}
                             />
@@ -887,16 +917,6 @@ export function WorkspaceShell({
                         />
                       ) : null}
                     </div>
-                    {!desktopNavigation && (
-                      <DestinationNavigation
-                        page={page}
-                        navigate={navigate}
-                        placement="bottom-dock"
-                        pendingApprovals={pendingApprovals}
-                        pendingSkills={pendingSkills}
-                        locked={locked}
-                      />
-                    )}
                   </div>
                 </section>
               )}

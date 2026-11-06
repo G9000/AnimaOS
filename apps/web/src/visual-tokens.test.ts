@@ -100,7 +100,10 @@ describe('Anima operator visual contract', () => {
     // The owner-picked orb palette may offer violet; it is a choice, not an
     // app accent.
     const accents = productionPaths
-      .filter((path) => !path.replaceAll('\\', '/').endsWith('lib/orb-style-preferences.ts'))
+      .filter(
+        (path) =>
+          !path.replaceAll('\\', '/').endsWith('lib/orb-style-preferences.ts'),
+      )
       .map((path) => readFileSync(path, 'utf8'))
       .join('\n');
     expect(production).not.toMatch(/\b(?:sky|purple|violet)-/i);
@@ -157,9 +160,12 @@ describe('Anima operator visual contract', () => {
     expect(onboardingShell).toContain('min-height: 0');
     expect(onboardingShell).toContain('overflow-y: auto');
     expect(onboardingShell).not.toContain('--safe-area-');
-    expect(read('components/SettingsNavigation.tsx')).toContain(
-      "'safe-bottom-dock glass-strong absolute",
+    expect(read('components/SettingsNavigation.tsx')).not.toContain(
+      'safe-bottom-dock',
     );
+    expect(
+      cssRule(read('friendly.css'), '.friendly-shell .workspace-mobile-safe'),
+    ).toContain('padding-bottom: 0');
     // Settings render inside the app frame, so they take no safe area of their own.
     expect(read('components/SettingsPanel.tsx')).not.toContain('--safe-area-');
     expect(read('components/SettingsPanel.tsx')).not.toContain('fixed inset-0');
@@ -211,7 +217,9 @@ describe('Anima operator visual contract', () => {
       'data-placement={placement}',
     );
     expect(read('components/SettingsNavigation.tsx')).toContain("'sidebar'");
-    expect(read('components/SettingsNavigation.tsx')).toContain("'bottom-dock'");
+    expect(read('components/SettingsNavigation.tsx')).toContain(
+      'data-placement="mobile"',
+    );
     expect(read('components/WorkspaceShell.tsx')).toContain(
       'aria-label="Settings"',
     );
@@ -244,7 +252,7 @@ describe('Anima operator visual contract', () => {
     expect(bubble).toContain('bg-panel-2/90');
     expect(bubble).not.toContain('accent');
     expect(suggestions).toContain('studio-suggestion');
-    expect(suggestions).toContain('aria-label={`${s.title}. ${s.text}`}');
+    expect(suggestions).toContain('aria-label={`${s.label}. ${s.text}`}');
     expect(suggestions).toContain('onClick={() => onPick(s.text)}');
     expect(suggestions).not.toContain('accent');
     expect(suggestions).not.toMatch(/255,\s*57,\s*127/);

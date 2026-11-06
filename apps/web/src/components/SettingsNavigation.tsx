@@ -1,4 +1,5 @@
-import type { ReactNode, RefObject } from 'react';
+import { useId, useState, type ReactNode, type RefObject } from 'react';
+import { useResetOnChange } from '../hooks/useResetOnChange';
 import type { Navigate } from '../lib/hash-route';
 import type { AgentDetail } from '../lib/types';
 import type { AvailablePage } from './WorkspaceShell';
@@ -15,13 +16,14 @@ interface Destination {
 
 interface DestinationGroup {
   label: string;
+  advanced?: boolean;
   items: Destination[];
 }
 
 /** Settings are grouped by what the owner is deciding, not by daemon feature. */
 const DESTINATION_GROUPS: DestinationGroup[] = [
   {
-    label: 'Agent',
+    label: 'Personal',
     items: [
       {
         page: 'profile',
@@ -29,24 +31,14 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
         icon: <PenIcon name="user-circle-fill" size={14} />,
       },
       {
-        page: 'model',
-        label: 'Model',
-        icon: <PenIcon name="cpu-fill" size={14} />,
+        page: 'appearance',
+        label: 'Appearance',
+        icon: <PenIcon name="palette-fill" size={14} />,
       },
       {
-        page: 'approvals',
-        label: 'Permissions',
-        icon: <PenIcon name="shield-check-fill" size={14} />,
-      },
-    ],
-  },
-  {
-    label: 'Learning',
-    items: [
-      {
-        page: 'skills',
-        label: 'Skills',
-        icon: <PenIcon name="lightbulb-fill" size={14} />,
+        page: 'notifications',
+        label: 'Notifications',
+        icon: <BellIcon size={14} />,
       },
       {
         page: 'memory',
@@ -56,23 +48,18 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
     ],
   },
   {
-    label: 'Abilities',
+    label: 'Workspace',
     items: [
       {
-        page: 'capabilities',
-        label: 'Tools',
-        icon: <PenIcon name="wrench-fill" size={14} />,
+        page: 'approvals',
+        label: 'Permissions',
+        icon: <PenIcon name="shield-check-fill" size={14} />,
       },
       {
         page: 'connectors',
         label: 'Connections',
         icon: <PenIcon name="plugs-connected-fill" size={14} />,
       },
-    ],
-  },
-  {
-    label: 'Activity',
-    items: [
       {
         page: 'automations',
         label: 'Automations',
@@ -91,17 +78,23 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
     ],
   },
   {
-    label: 'App · all agents',
+    label: 'Advanced',
+    advanced: true,
     items: [
       {
-        page: 'appearance',
-        label: 'Appearance',
-        icon: <PenIcon name="palette-fill" size={14} />,
+        page: 'model',
+        label: 'Model',
+        icon: <PenIcon name="cpu-fill" size={14} />,
       },
       {
-        page: 'notifications',
-        label: 'Notifications',
-        icon: <BellIcon size={14} />,
+        page: 'skills',
+        label: 'Skills',
+        icon: <PenIcon name="lightbulb-fill" size={14} />,
+      },
+      {
+        page: 'capabilities',
+        label: 'Tools',
+        icon: <PenIcon name="wrench-fill" size={14} />,
       },
       {
         page: 'runtime',
@@ -129,6 +122,12 @@ const DESTINATION_GROUPS: DestinationGroup[] = [
 export const SETTINGS_DESTINATIONS = DESTINATION_GROUPS.flatMap(
   (group) => group.items,
 );
+
+function isAdvancedPage(page: AvailablePage | null): boolean {
+  return DESTINATION_GROUPS.some(
+    (group) => group.advanced && group.items.some((item) => item.page === page),
+  );
+}
 
 /** Whose a page is, and what it is for, under its title. */
 export const SETTINGS_PAGE_META: Partial<
@@ -236,7 +235,7 @@ export function DestinationNavigation({
 }: {
   page: AvailablePage | null;
   navigate: Navigate;
-  placement: 'sidebar' | 'bottom-dock';
+  placement: 'sidebar' | 'mobile';
   pendingApprovals: number;
   pendingSkills?: number;
   locked: boolean;
@@ -244,6 +243,11 @@ export function DestinationNavigation({
 }) {
   const sidebar = placement === 'sidebar';
   const search = query.trim().toLowerCase();
+  const advancedId = useId();
+  const [advancedOpen, setAdvancedOpen] = useState(() => isAdvancedPage(page));
+  useResetOnChange([page], () => {
+    if (isAdvancedPage(page)) setAdvancedOpen(true);
+  });
   const groups = DESTINATION_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter(
@@ -252,14 +256,57 @@ export function DestinationNavigation({
         item.label.toLowerCase().includes(search),
     ),
   })).filter((group) => group.items.length > 0);
-  const itemClass = `studio-nav-item ${sidebar ? 'is-row' : 'is-tab'}`;
+  const waitingFor = (item: Destination) =>
+    item.page === 'approvals'
+      ? pendingApprovals
+      : item.page === 'skills'
+        ? pendingSkills
+        : 0;
+  if (!sidebar) {
+    return (
+      <nav
+        aria-label="Workspace navigation"
+        data-placement="mobile"
+        className="settings-mobile-navigation"
+      >
+        <label>
+          <span className="sr-only">Settings section</span>
+          <select
+            value={
+              SETTINGS_DESTINATIONS.some((item) => item.page === page)
+                ? page!
+                : ''
+            }
+            disabled={locked}
+            onChange={(event) => {
+              const item = SETTINGS_DESTINATIONS.find(
+                (candidate) => candidate.page === event.target.value,
+              );
+              if (item) navigate({ kind: 'page', page: item.page });
+            }}
+          >
+            <option value="" disabled>
+              Choose a section
+            </option>
+            {DESTINATION_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.items.map((item) => (
+                  <option key={item.page} value={item.page}>
+                    {item.label}
+                    {waitingFor(item) > 0
+                      ? ` · ${waitingFor(item)} waiting`
+                      : ''}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      </nav>
+    );
+  }
   const destination = (item: Destination) => {
-    const waiting =
-      item.page === 'approvals'
-        ? pendingApprovals
-        : item.page === 'skills'
-          ? pendingSkills
-          : 0;
+    const waiting = waitingFor(item);
     return (
       <button
         key={item.page}
@@ -270,7 +317,7 @@ export function DestinationNavigation({
         aria-label={
           waiting > 0 ? `${item.label}, ${waiting} waiting` : item.label
         }
-        className={itemClass}
+        className="studio-nav-item is-row"
       >
         {item.icon}
         <span>{item.label}</span>
@@ -285,13 +332,9 @@ export function DestinationNavigation({
   return (
     <nav
       aria-label="Workspace navigation"
-      aria-orientation={sidebar ? 'vertical' : 'horizontal'}
+      aria-orientation="vertical"
       data-placement={placement}
-      className={
-        sidebar
-          ? 'studio-navigation'
-          : 'safe-bottom-dock glass-strong absolute inset-x-0 bottom-0 z-30 flex items-center gap-1 overflow-x-auto p-1.5'
-      }
+      className="studio-navigation"
     >
       {groups.length === 0 && (
         <p role="status" className="settings-search-empty">
@@ -303,10 +346,39 @@ export function DestinationNavigation({
           key={group.label}
           role="group"
           aria-label={group.label}
-          className="contents"
+          className="settings-navigation-group"
         >
-          {sidebar && <p className="studio-nav-group">{group.label}</p>}
-          {group.items.map((item) => destination(item))}
+          {group.advanced && !search ? (
+            <button
+              type="button"
+              className="settings-advanced-toggle"
+              disabled={locked}
+              aria-label={
+                pendingSkills > 0
+                  ? `Advanced, ${pendingSkills} waiting`
+                  : 'Advanced'
+              }
+              aria-expanded={advancedOpen}
+              aria-controls={advancedId}
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              <span>Advanced</span>
+              {pendingSkills > 0 && (
+                <span className="nav-badge" aria-hidden>
+                  {pendingSkills}
+                </span>
+              )}
+              <PenIcon name="caret-down-fill" size={12} />
+            </button>
+          ) : (
+            <p className="studio-nav-group">{group.label}</p>
+          )}
+          <div
+            id={group.advanced ? advancedId : undefined}
+            hidden={group.advanced && !advancedOpen && !search}
+          >
+            {group.items.map((item) => destination(item))}
+          </div>
         </div>
       ))}
     </nav>

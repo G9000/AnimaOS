@@ -15,6 +15,7 @@
 @import './scenic.css';
 @import './settings-kit.css';
 @import './components/artifacts/workspace-artifact-preview.css';
+@import './friendly.css';
 
 @source '../../packages/ui/src/**/*.{ts,tsx}';
 

@@ -499,7 +499,7 @@ describe('WorkspaceShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('groups settings by what the owner decides, the companion first', () => {
+  it('puts everyday settings first and expands Advanced for its active page', () => {
     render(<Shell initialRoute={{ kind: 'page', page: 'skills' }} />);
     const nav = screen.getByRole('navigation', {
       name: 'Workspace navigation',
@@ -510,17 +510,18 @@ describe('WorkspaceShell', () => {
         .map((button) => button.textContent?.trim()),
     ).toEqual([
       'Profile',
-      'Model',
-      'Permissions',
-      'Skills',
+      'Appearance',
+      'Notifications',
       'Memory',
-      'Tools',
+      'Permissions',
       'Connections',
       'Automations',
       'Work',
       'Files',
-      'Appearance',
-      'Notifications',
+      'Advanced',
+      'Model',
+      'Skills',
+      'Tools',
       'Runtime',
       'Usage',
       'Diagnostics',
@@ -530,13 +531,7 @@ describe('WorkspaceShell', () => {
       within(nav)
         .getAllByRole('group')
         .map((group) => group.getAttribute('aria-label')),
-    ).toEqual([
-      'Agent',
-      'Learning',
-      'Abilities',
-      'Activity',
-      'App · all agents',
-    ]);
+    ).toEqual(['Personal', 'Workspace', 'Advanced']);
   });
 
   it('opens Appearance as an app-wide page with the theme choice', () => {
@@ -644,9 +639,7 @@ describe('WorkspaceShell', () => {
         name: 'Workspace navigation',
       });
       await user.click(within(nav).getByRole('button', { name: label }));
-      expect(
-        await screen.findByText(content),
-      ).toBeVisible();
+      expect(await screen.findByText(content)).toBeVisible();
       expect(within(nav).getByRole('button', { name: label })).toHaveAttribute(
         'aria-current',
         'page',
@@ -745,10 +738,11 @@ describe('WorkspaceShell', () => {
     localStorage.setItem('anima.consoleSession', 'signed-header');
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockImplementation(async () =>
-        new Response(new Uint8Array([1]), {
-          headers: { 'content-type': 'image/png' },
-        }),
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(new Uint8Array([1]), {
+            headers: { 'content-type': 'image/png' },
+          }),
       ),
     );
     Object.defineProperties(URL, {
@@ -1017,7 +1011,7 @@ describe('WorkspaceShell', () => {
     expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
   });
 
-  it('puts the window navigation after the page on mobile', () => {
+  it('puts a section picker before the page on mobile', async () => {
     mobile();
     render(
       <Shell
@@ -1028,16 +1022,20 @@ describe('WorkspaceShell', () => {
     const navigation = screen.getByRole('navigation', {
       name: 'Workspace navigation',
     });
-    expect(navigation).toHaveAttribute('data-placement', 'bottom-dock');
+    expect(navigation).toHaveAttribute('data-placement', 'mobile');
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    const picker = within(navigation).getByRole('combobox', {
+      name: 'Settings section',
+    });
+    expect(picker).toHaveValue('usage');
     expect(
-      within(navigation).getByRole('button', { name: 'Usage' }),
-    ).toHaveAttribute('aria-current', 'page');
-    expect(
-      screen
-        .getByRole('button', { name: 'Usage action' })
-        .compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING,
+      navigation.compareDocumentPosition(
+        screen.getByRole('button', { name: 'Usage action' }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
+    await userEvent.selectOptions(picker, 'appearance');
+    expect(screen.getByRole('group', { name: 'Theme' })).toBeVisible();
+    expect(picker).toHaveValue('appearance');
   });
 
   it('opens Connections as a page', () => {
@@ -1069,7 +1067,7 @@ it('filters settings destinations and restores the complete sidebar after naviga
   await user.click(within(nav).getByRole('button', { name: 'Model' }));
   expect(screen.getByText('Model page')).toBeVisible();
   expect(search).toHaveValue('');
-  expect(within(nav).getAllByRole('button')).toHaveLength(16);
+  expect(within(nav).getAllByRole('button')).toHaveLength(17);
   expect(within(nav).getByRole('button', { name: 'Model' })).toHaveAttribute(
     'aria-current',
     'page',

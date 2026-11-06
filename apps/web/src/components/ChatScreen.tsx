@@ -240,23 +240,17 @@ const SUGGESTIONS = [
   {
     icon: <Sparkle />,
     text: 'What can you do for me?',
-    title: 'Explore what I can do',
-    label: 'DISCOVER',
-    detail: 'Understand the agent’s tools and access.',
+    label: 'Explore together',
   },
   {
     icon: <BoltIcon size={13} />,
     text: 'Help me plan my day',
-    title: 'Make space for your day',
-    label: 'MAKE A PLAN',
-    detail: 'Define the objective and next steps.',
+    label: 'Plan my day',
   },
   {
     icon: <PulseIcon size={13} />,
     text: 'Check in on me every hour',
-    title: 'Set a check-in',
-    label: 'STAY IN SYNC',
-    detail: 'Agree on a schedule for progress updates.',
+    label: 'Set a check-in',
   },
 ];
 
@@ -287,20 +281,23 @@ function EmptyState({
         {greetingForNow()}
       </h2>
       <p className="studio-hero-description">
-        Talk or type. {agentName} is listening.
+        A thought, a question, a little help with your day.
+        <span className="welcome-invitation">
+          Start anywhere. {agentName} is here.
+        </span>
       </p>
       <div className="studio-suggestions">
         {SUGGESTIONS.map((s) => (
           <button
             key={s.text}
-            aria-label={`${s.title}. ${s.text}`}
+            aria-label={`${s.label}. ${s.text}`}
             onClick={() => onPick(s.text)}
             className="studio-suggestion group text-left"
           >
             <span className="studio-suggestion-icon" aria-hidden>
               {s.icon}
             </span>
-            <span>{s.text}</span>
+            <span>{s.label}</span>
           </button>
         ))}
       </div>

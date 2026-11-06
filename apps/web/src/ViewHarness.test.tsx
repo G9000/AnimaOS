@@ -190,6 +190,8 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>) {
 async function openSpecificPermissions(
   user: ReturnType<typeof userEvent.setup>,
 ) {
+  const advanced = screen.getByRole('button', { name: /^Advanced/ });
+  if (advanced.getAttribute('aria-expanded') === 'false') await user.click(advanced);
   await user.click(screen.getByRole('button', { name: 'Tools' }));
   await user.click(await screen.findByText('Specific permissions'));
 }
@@ -1718,6 +1720,7 @@ describe('ViewHarness workspace controller', () => {
       revision: 'offline-personality',
     });
 
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
     await user.click(screen.getByRole('button', { name: 'Model' }));
     await user.click(screen.getByText('Change', { selector: 'summary' }));
     await user.selectOptions(
@@ -2005,7 +2008,8 @@ describe('ViewHarness workspace controller', () => {
     const close = screen.getByRole('button', { name: 'Open companion chat' });
     expect(close).toBeDisabled();
     expect(close).toHaveAccessibleDescription(/until the change finishes/i);
-    expect(screen.getByRole('button', { name: 'Model' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Advanced' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Permissions' })).toBeDisabled();
     await user.click(close);
     expect(screen.getByRole('region', { name: 'Settings' })).toBeVisible();
 

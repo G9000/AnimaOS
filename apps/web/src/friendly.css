@@ -1,0 +1,752 @@
+/* The everyday shell: shared, theme-aware surfaces for conversation and settings.
+ * Keep the existing layout and component state; this sheet owns presentation. */
+.friendly-shell {
+  --friendly-canvas: #181917;
+  --friendly-surface: #22231f;
+  --friendly-raised: #292a25;
+  --friendly-border: #3c3e36;
+  --friendly-ink: #eeeee6;
+  --friendly-muted: #acafa2;
+  --friendly-shadow: 0 8px 28px rgb(0 0 0 / 0.12);
+}
+
+:root[data-appearance-theme='light'] .friendly-shell {
+  --friendly-canvas: #f6f5ef;
+  --friendly-surface: #fffef9;
+  --friendly-raised: #eaeae1;
+  --friendly-border: #d6d8cb;
+  --friendly-ink: #292d25;
+  --friendly-muted: #646b5c;
+  --friendly-shadow: 0 8px 28px rgb(45 51 34 / 0.05);
+}
+
+:root .scenic-shell.friendly-shell .studio-main {
+  background: var(--friendly-canvas);
+}
+
+:root .scenic-shell.friendly-shell .studio-topbar.scenic-topbar {
+  padding-inline: clamp(16px, 3vw, 40px);
+  background: var(--friendly-canvas);
+}
+
+:root .scenic-shell.friendly-shell .scenic-wordmark {
+  color: var(--friendly-ink);
+  font-size: 18px;
+  font-weight: 500;
+  text-shadow: none;
+}
+
+:root .scenic-shell.friendly-shell .agent-switch-trigger {
+  gap: 12px;
+  border-radius: 14px;
+}
+
+:root .scenic-shell.friendly-shell .companion-status {
+  color: var(--friendly-muted);
+  font-size: 12px;
+  text-shadow: none;
+}
+
+:root .scenic-shell.friendly-shell .header-context {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+}
+
+:root .scenic-shell.friendly-shell .header-context-note {
+  color: var(--friendly-muted);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .scenic-topbar
+  .studio-topbar-actions
+  > :is(.studio-tool-button, .studio-command-trigger, .needs-you-button) {
+  min-height: 36px;
+  height: auto;
+  padding: 8px 12px;
+  border-color: transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--friendly-muted);
+  font-size: 13px;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .scenic-topbar
+  .studio-topbar-actions
+  > :is(.studio-tool-button, .studio-command-trigger, .needs-you-button):hover {
+  border-color: transparent;
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .scenic-topbar
+  .studio-topbar-actions
+  > :is(.needs-you-button.has-items, .scenic-waiting, [aria-pressed='true']) {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 12%,
+    var(--friendly-canvas)
+  );
+  color: var(--friendly-ink);
+}
+
+.friendly-shell .studio-command-trigger kbd {
+  display: none;
+}
+
+/* Bring the first message box up to the greeting. Once a chat starts, the
+ * existing transcript scroller and bottom composer resume their normal layout. */
+.friendly-shell .studio-conversation-body:has(.scenic-welcome) {
+  flex: 0 1 auto;
+  margin-top: auto;
+}
+
+.friendly-shell
+  .studio-conversation-body:has(.scenic-welcome)
+  .studio-message-scroller {
+  padding-top: 0;
+}
+
+.friendly-shell
+  .studio-conversation-body:has(.scenic-welcome)
+  ~ .studio-composer {
+  margin-bottom: auto;
+}
+
+:root .scenic-shell.friendly-shell .studio-welcome.scenic-welcome {
+  min-height: 0;
+  padding: 32px 24px;
+  gap: 18px;
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-hero-title {
+  color: var(--friendly-ink);
+  font-family: var(--font-serif);
+  font-size: clamp(36px, 4.4vw, 56px);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+  text-shadow: none;
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-hero-description {
+  max-width: 36ch;
+  color: var(--friendly-muted);
+  font-size: 16px;
+  line-height: 1.7;
+  text-shadow: none;
+}
+
+.welcome-invitation {
+  display: block;
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-suggestions {
+  gap: 8px;
+  margin-top: 6px;
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-suggestion {
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--friendly-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--friendly-muted);
+  font-size: 13px;
+  backdrop-filter: none;
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-suggestion:hover {
+  border-color: var(--friendly-muted);
+  background: var(--friendly-surface);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .scenic-welcome .studio-suggestion-icon {
+  color: inherit;
+}
+
+:root .scenic-shell.friendly-shell .studio-composer {
+  padding: 12px 24px 24px;
+  background: transparent;
+}
+
+:root .scenic-shell.friendly-shell .studio-composer-box.composer-bar,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .studio-composer-box.composer-bar {
+  padding: 10px;
+  border: 1px solid var(--friendly-border);
+  border-radius: 24px;
+  background: var(--friendly-surface);
+  box-shadow: var(--friendly-shadow);
+  backdrop-filter: none;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .studio-composer-box.composer-bar:focus-within,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .studio-composer-box.composer-bar:focus-within {
+  border-color: var(--friendly-muted);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--friendly-muted) 12%, transparent);
+}
+
+:root .scenic-shell.friendly-shell .composer-bar textarea,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .composer-bar
+  textarea {
+  min-height: 40px;
+  padding: 8px 6px;
+  color: var(--friendly-ink);
+  font-size: 1rem;
+  line-height: 24px;
+}
+
+:root .scenic-shell.friendly-shell .composer-bar textarea::placeholder {
+  color: var(--friendly-muted);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .composer-bar
+  :is(.composer-icon, .composer-attach) {
+  color: var(--friendly-muted);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .composer-bar
+  :is(.composer-icon, .composer-attach):hover {
+  color: var(--friendly-ink);
+  background: var(--friendly-raised);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .composer-bar
+  .composer-icon[aria-pressed='true'] {
+  color: var(--color-accent);
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 14%,
+    var(--friendly-surface)
+  );
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .composer-bar
+  :is(.composer-icon, .composer-attach, .composer-send),
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .composer-bar
+  .composer-controls
+  :is(.composer-icon, .composer-send),
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .composer-bar
+  .composer-attach {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+:root .scenic-shell.friendly-shell .composer-bar .composer-send,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .composer-bar
+  .composer-send {
+  background: var(--friendly-ink);
+  color: var(--friendly-canvas);
+}
+
+:root .scenic-shell.friendly-shell .composer-bar .composer-send:disabled,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .composer-bar
+  .composer-send:disabled {
+  background: var(--friendly-raised);
+  color: var(--friendly-muted);
+}
+
+:root .scenic-shell.friendly-shell .studio-messages,
+:root .scenic-shell.friendly-shell [data-main-chat='true'] .studio-messages {
+  gap: 24px;
+  padding-block: 28px;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .chat-turn
+  :is(.scenic-agent-text, .scenic-user-bubble),
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .chat-turn
+  [data-testid='markdown-message'] {
+  color: var(--friendly-ink);
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+:root .scenic-shell.friendly-shell .chat-turn .scenic-user-bubble,
+:root
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .chat-turn
+  .scenic-user-bubble {
+  padding: 12px 18px;
+  border-radius: 20px 20px 6px 20px;
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .chat-agent-name {
+  position: static;
+  min-width: 0;
+  max-width: 65%;
+  width: auto;
+  height: auto;
+  clip: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--friendly-ink);
+  font-size: 13px;
+}
+
+:root .scenic-shell.friendly-shell .chat-time,
+:root .scenic-shell.friendly-shell .chat-turn.is-user .chat-time {
+  color: var(--friendly-muted);
+  font-size: 11px;
+}
+
+:root .scenic-shell.friendly-shell .chat-actions button {
+  color: var(--friendly-muted);
+}
+
+:root .scenic-shell.friendly-shell .chat-actions button:hover {
+  color: var(--friendly-ink);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  :is(.agent-menu, .agent-switch-menu, .composer-menu, .header-summary-panel) {
+  padding: 8px;
+  border: 1px solid var(--friendly-border);
+  border-radius: 16px;
+  background: var(--friendly-surface);
+  color: var(--friendly-ink);
+  box-shadow: var(--friendly-shadow);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  :is(.agent-menu-item, .agent-switch-item, .composer-menu-item) {
+  border-radius: 9px;
+  color: var(--friendly-ink);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  :is(.agent-menu-item, .agent-switch-item, .composer-menu-item):hover {
+  background: var(--friendly-raised);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  :is(
+    .agent-switch-heading,
+    .agent-switch-item-status,
+    .composer-menu-label,
+    .composer-menu-item small,
+    .composer-thinking > span,
+    .composer-thinking button,
+    .agent-menu-item > svg,
+    .agent-switch-item > svg,
+    .composer-menu-item > svg
+  ) {
+  color: var(--friendly-muted);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .composer-thinking
+  button[aria-checked='true'] {
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .agent-coin.is-more {
+  background: var(--friendly-raised);
+  color: var(--friendly-muted);
+  border-color: var(--friendly-border);
+}
+
+:root .scenic-shell.friendly-shell .settings-window {
+  --color-ink: var(--friendly-ink);
+  --color-ink-2: var(--friendly-muted);
+  --color-ink-3: var(--friendly-muted);
+  inset: 0;
+  width: min(1040px, calc(100% - 48px));
+  height: min(760px, calc(100% - 32px));
+  margin: auto;
+  border: 1px solid var(--friendly-border);
+  border-radius: 20px;
+  background: var(--friendly-surface);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.16);
+  overflow: hidden;
+}
+
+:root .scenic-shell.friendly-shell .settings-window-nav.studio-sidebar {
+  width: 224px;
+  padding: 24px 16px;
+  background: var(--friendly-canvas);
+  border-color: var(--friendly-border);
+}
+
+:root .scenic-shell.friendly-shell .settings-window-title {
+  margin-bottom: 16px;
+  font: 500 18px/1.4 var(--font-sans);
+  letter-spacing: -0.02em;
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-window-nav .studio-nav-group {
+  margin: 0;
+  padding: 20px 10px 8px;
+  font: 500 12px/1.4 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--friendly-muted);
+}
+
+:root .scenic-shell.friendly-shell .settings-navigation-group {
+  flex: none;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-navigation-group
+  > div:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+:root .scenic-shell.friendly-shell .settings-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 16px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--friendly-muted);
+  font: 500 12px/1.4 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-advanced-toggle
+  > span:first-child {
+  flex: 1;
+}
+
+:root .scenic-shell.friendly-shell .settings-advanced-toggle > svg {
+  flex: none;
+  transform: rotate(-90deg);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-advanced-toggle[aria-expanded='true']
+  > svg {
+  transform: none;
+}
+
+:root .scenic-shell.friendly-shell .settings-advanced-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+:root .scenic-shell.friendly-shell .settings-search {
+  height: 38px;
+  border-color: var(--friendly-border);
+  border-radius: 10px;
+  background: var(--friendly-surface);
+}
+
+:root .scenic-shell.friendly-shell .settings-search:focus-within {
+  border-color: var(--color-accent);
+}
+
+:root .scenic-shell.friendly-shell .settings-search input {
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-search input::placeholder,
+:root .scenic-shell.friendly-shell .settings-search kbd,
+:root .scenic-shell.friendly-shell .settings-window-nav .settings-search > svg {
+  color: var(--friendly-muted);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row {
+  min-height: 38px;
+  border-radius: 9px;
+  color: var(--friendly-muted);
+  font-size: 13px;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row
+  > svg {
+  color: currentColor;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-advanced-toggle:hover:not(:disabled),
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row:hover:not(:disabled),
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row[aria-current='page'] {
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-window-head {
+  padding: 30px 32px 22px;
+  border-color: var(--friendly-border);
+}
+
+:root .scenic-shell.friendly-shell .settings-window-head .studio-tool-button {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--friendly-muted);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-head
+  .studio-tool-button
+  > svg {
+  color: currentColor;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-head
+  .studio-tool-button:hover:not(:disabled) {
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-scope,
+:root .scenic-shell.friendly-shell .settings-scope strong,
+:root .scenic-shell.friendly-shell .settings-scope-sub {
+  font: 400 12px/1.5 var(--font-sans);
+  color: var(--friendly-muted);
+}
+
+:root .scenic-shell.friendly-shell .settings-page-title {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+
+:root .scenic-shell.friendly-shell .settings-window-page {
+  padding: 0 32px 32px;
+  scrollbar-gutter: stable;
+}
+
+:root .scenic-shell.friendly-shell .settings-window-page > .settings-form,
+:root .scenic-shell.friendly-shell .settings-window .appearance-settings {
+  padding: 0;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  :is(
+    .settings-profile-description,
+    .sk-section-desc,
+    .sk-row-desc,
+    .settings-group-help,
+    .settings-item-text small,
+    .settings-item-text p
+  ) {
+  color: var(--friendly-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  :is(.sk-row-title, .settings-item-text strong, .settings-item-text h3) {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+:root .scenic-shell.friendly-shell .settings-window .field {
+  border-color: var(--friendly-border);
+  border-radius: 9px;
+  background-color: var(--friendly-canvas);
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-window .field:focus {
+  border-color: var(--color-accent);
+}
+
+:root .scenic-shell.friendly-shell .settings-window .appearance-theme-card {
+  border-radius: 12px;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  .settings-agent-picker-trigger {
+  min-height: 38px;
+  border-color: var(--friendly-border);
+  border-radius: 10px;
+  background: var(--friendly-surface);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  :is(
+    .profile-identity-edit-fields label,
+    .settings-item-action,
+    .profile-row-open,
+    .profile-orb-style-action,
+    .profile-avatar-help,
+    .profile-avatar-help button
+  ) {
+  color: var(--friendly-muted);
+}
+
+:root .scenic-shell.friendly-shell .profile-identity-edit-fields label {
+  font: 500 12px/1.5 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root .scenic-shell.friendly-shell .settings-mobile-navigation {
+  flex: none;
+  padding: 0 20px 20px;
+}
+
+:root .scenic-shell.friendly-shell .settings-mobile-navigation select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--friendly-border);
+  border-radius: 10px;
+  background: var(--friendly-canvas);
+  color: var(--friendly-ink);
+  font: 400 14px/1.5 var(--font-sans);
+}
+
+:root[data-appearance-density='compact']
+  .scenic-shell.friendly-shell
+  [data-main-chat='true']
+  .studio-messages {
+  gap: 16px;
+}
+
+:root[data-appearance-density='compact']
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row {
+  min-height: 28px;
+  height: 28px;
+}
+
+@media (max-width: 767px) {
+  /* Settings navigation sits above the page; no bottom dock needs space. */
+  .friendly-shell .workspace-mobile-safe {
+    padding-bottom: 0;
+  }
+
+  :root .scenic-shell.friendly-shell .studio-topbar.scenic-topbar {
+    padding: 10px 14px;
+  }
+
+  :root .scenic-shell.friendly-shell .studio-welcome.scenic-welcome {
+    padding: 24px 16px;
+  }
+
+  :root .scenic-shell.friendly-shell .scenic-welcome .studio-hero-description {
+    font-size: 14px;
+  }
+
+  :root .scenic-shell.friendly-shell .studio-composer {
+    padding: 10px 12px 16px;
+  }
+
+  :root .scenic-shell.friendly-shell .settings-window {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  :root .scenic-shell.friendly-shell .settings-window-head {
+    padding: 20px;
+  }
+
+  :root .scenic-shell.friendly-shell .settings-window-page {
+    padding: 0 20px 24px;
+  }
+}
+
+@media (max-width: 420px) {
+  :root .scenic-shell.friendly-shell .scenic-welcome .studio-suggestion {
+    min-height: 44px;
+    padding: 8px 11px;
+    font-size: 12px;
+  }
+}
