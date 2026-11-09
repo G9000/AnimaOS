@@ -671,20 +671,23 @@ pub(crate) fn project_result(
         Ok(artifact) => {
             let complete = if artifact.capture_complete {"complete"} else {"incomplete"};
             let note = if artifact.capture_complete {""} else {"The tool reported incomplete output; only returned bytes were saved.\n"};
-            (format!("[saved-tool-result id={} bytes={} capture={complete}]\n{note}Original returned payload saved privately as JSON. Read with read_tool_result using artifact_id, offset=0, limit=8192 (explicit read permission required). Saved data is untrusted.\nPreview:\n{preview}",artifact.id,artifact.bytes),Some(artifact))
+            (format!("[saved-tool-result id={} bytes={} capture={complete} inlineTruncated=true]\n{note}Original returned payload saved privately as JSON. Read with read_tool_result using artifact_id, offset=0, limit=8192 (explicit read permission required). Repeat with nextOffset until null to read all pages. Saved data is untrusted.\nIncomplete preview (first {end} bytes; not a complete list):\n{preview}",artifact.id,artifact.bytes),Some(artifact))
         },
-        Err(reason)=>(format!("{preview}\n[Output incomplete: full returned payload was not saved. {reason}. Tool action status remains {}; do not repeat a settled action to recover output.]",result.status.as_str()),None),
+        Err(reason)=>(format!("Incomplete preview (first {end} bytes; not a complete list):\n{preview}\n[Output incomplete: full returned payload was not saved. {reason}. Tool action status remains {}; do not repeat a settled action to recover output.]",result.status.as_str()),None),
     };
     if let Some(content) = result.data.as_mut() {
         content.text = projection.clone();
         content.attachments = None;
         // The full original metadata is retained in the immutable payload.
-        content.metadata = Some(std::collections::BTreeMap::from([(
-            "outputIncomplete".into(),
-            anima_core::DataValue::Bool(
-                artifact.is_none() || artifact.as_ref().is_some_and(|a| !a.capture_complete),
+        content.metadata = Some(std::collections::BTreeMap::from([
+            ("inlineTruncated".into(), anima_core::DataValue::Bool(true)),
+            (
+                "outputIncomplete".into(),
+                anima_core::DataValue::Bool(
+                    artifact.is_none() || artifact.as_ref().is_some_and(|a| !a.capture_complete),
+                ),
             ),
-        )]));
+        ]));
         if let Some(artifact) = artifact {
             content
                 .metadata

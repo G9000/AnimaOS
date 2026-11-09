@@ -813,6 +813,8 @@ fn registry_defines_every_registered_tool_schema() {
             "manage_mcp",
             &["action"][..],
             &[
+                "section",
+                "offset",
                 "label",
                 "configuration",
                 "connection_id",

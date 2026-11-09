@@ -219,6 +219,129 @@ async fn chat_mcp_setup_reports_browser_sign_in_and_saved_oauth_without_credenti
 }
 
 #[tokio::test]
+async fn chat_mcp_list_keeps_every_status_visible_with_many_tool_schemas() {
+    let f = Fixture::new(PolicyAction::Allow, false, false).await;
+    for index in 0..3 {
+        f.manager
+            .create(
+                &f.agent.id,
+                CreateMcpConnection {
+                    label: format!("Extra {index}"),
+                    endpoint: format!("https://example.com/{index}/mcp"),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let ids: Vec<_> = f
+        .manager
+        .list(&f.agent.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|view| view.record.id)
+        .collect();
+    let last = ids.last().unwrap().clone();
+    let last_view = f.manager.get(&f.agent.id, &last).await.unwrap();
+    f.manager
+        .disconnect(&f.agent.id, &last, last_view.record.version)
+        .await
+        .unwrap();
+    {
+        let mut state = f.state.write().await;
+        let first = state.mcp_registry.connections.get_mut(&ids[0]).unwrap();
+        let descriptor = prepare_external_tool(
+            "bulky_tool",
+            &"D".repeat(7_000),
+            json!({"type":"object"}),
+            None,
+        )
+        .unwrap();
+        first.reviewed_tools = (0..16)
+            .map(|index| crate::mcp::ReviewedMcpTool {
+                alias: format!("bulky_{index}"),
+                descriptor: descriptor.clone(),
+            })
+            .collect();
+        assert!(
+            serde_json::to_vec(&first.reviewed_tools).unwrap().len()
+                > crate::tool_results::INLINE_LIMIT
+        );
+        first.bearer_credential_ref = Some("synthetic-private-vault-reference".into());
+        let last_record = state.mcp_registry.connections.get_mut(&last).unwrap();
+        last_record.label = "M.O.T.H.E.R.".into();
+        last_record.enabled = false;
+    }
+    let model = manage(&f, json!({"action":"list"})).await;
+    let text = model
+        .requests()
+        .iter()
+        .flat_map(|request| &request.messages)
+        .find(|message| {
+            message.role == anima_core::MessageRole::Tool
+                && message.content.text.contains("canConfigureMcp")
+        })
+        .expect("model receives the list")
+        .content
+        .text
+        .clone();
+    let output: Value = serde_json::from_str(&text)
+        .expect("normal model-visible list must be complete JSON, not a saved preview");
+    assert!(text.len() < crate::tool_results::INLINE_LIMIT);
+    assert_eq!(output["connectionsComplete"], true);
+    assert_eq!(output["connections"].as_array().unwrap().len(), 4);
+    let mother = output["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|connection| connection["label"] == "M.O.T.H.E.R.")
+        .unwrap();
+    assert_eq!(mother["id"], last);
+    assert_eq!(mother["enabled"], false);
+    assert_eq!(mother["state"], "disconnected");
+    assert_eq!(output["connections"][3]["label"], "M.O.T.H.E.R.");
+    for connection in output["connections"].as_array().unwrap() {
+        for field in ["label", "id", "enabled", "state", "error"] {
+            assert!(
+                connection.get(field).is_some(),
+                "missing status field {field}"
+            );
+        }
+    }
+    assert!(!text.contains("synthetic-private-vault-reference"));
+    assert!(!text.contains("bulky_tool"));
+    assert!(!text.contains(&"D".repeat(1_000)));
+    let version = f
+        .manager
+        .get(&f.agent.id, &ids[0])
+        .await
+        .unwrap()
+        .record
+        .version;
+    let model = manage(
+        &f,
+        json!({"action":"details", "connection_id":ids[0],
+        "expected_version":version, "section":"reviewed_tools", "offset":0}),
+    )
+    .await;
+    let page = model
+        .requests()
+        .iter()
+        .flat_map(|request| &request.messages)
+        .find(|message| message.role == anima_core::MessageRole::Tool)
+        .map(|message| serde_json::from_str::<Value>(&message.content.text).unwrap())
+        .unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["nextOffset"], 1);
+    assert_eq!(page["total"], 16);
+    assert!(!page
+        .to_string()
+        .contains("synthetic-private-vault-reference"));
+    assert_eq!(f.factory.calls.load(Ordering::SeqCst), 0);
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
 async fn chat_mcp_connect_refreshes_tools_and_continues_in_the_same_run() {
     for discovery in [false, true] {
         let f = Fixture::new(PolicyAction::Allow, false, false).await;

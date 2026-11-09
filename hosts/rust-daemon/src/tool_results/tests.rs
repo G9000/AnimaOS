@@ -397,6 +397,63 @@ fn projection_saves_original_content_and_preserves_settled_status_on_failure() {
 }
 
 #[test]
+fn oversized_projection_explicitly_marks_preview_and_explains_all_pages() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = ToolResultStore::new(temp.path().join("results"));
+    let link = crate::runs::RunLink {
+        agent_id: "agent".into(),
+        run_id: "run".into(),
+        session_id: "chat".into(),
+    };
+    let call = anima_core::ToolCall {
+        id: "details".into(),
+        name: "manage_mcp".into(),
+        args: Default::default(),
+    };
+    let original = result(&"schema".repeat(5000));
+    for retention in [Some(&store), None] {
+        let projected = project_result(
+            retention,
+            "agent",
+            Some(temp.path()),
+            Some(&link),
+            &call,
+            original.clone(),
+        );
+        let content = projected.data.unwrap();
+        assert_eq!(
+            content.metadata.as_ref().unwrap()["inlineTruncated"],
+            anima_core::DataValue::Bool(true)
+        );
+        assert!(content.text.contains("Incomplete preview"));
+        if retention.is_some() {
+            assert!(content.text.contains("nextOffset until null"));
+            let anima_core::DataValue::Object(artifact) =
+                &content.metadata.unwrap()["toolResultArtifact"]
+            else {
+                panic!("artifact metadata")
+            };
+            let anima_core::DataValue::String(id) = &artifact["id"] else {
+                panic!("artifact id")
+            };
+            let mut bytes = String::new();
+            let mut offset = 0;
+            loop {
+                let page = store
+                    .page("agent", temp.path(), id, offset, MAX_PAGE_BYTES)
+                    .unwrap();
+                bytes.push_str(&page.text);
+                match page.next_offset {
+                    Some(next) => offset = next,
+                    None => break,
+                }
+            }
+            assert_eq!(bytes, serde_json::to_string(&original).unwrap());
+        }
+    }
+}
+
+#[test]
 fn restart_with_leftover_lock_and_pending_file_still_saves_without_deleting_results() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("results");
