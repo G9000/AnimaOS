@@ -70,6 +70,7 @@ mod tool_rpc;
 mod tools;
 mod usage;
 mod voice;
+mod workspace_context;
 mod workspace_file_preview;
 
 pub mod postgres;

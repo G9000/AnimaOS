@@ -88,6 +88,7 @@ mod workflow_templates;
 mod workflows;
 mod workspace;
 mod workspace_agent_yaml;
+mod workspace_context;
 mod workspace_files;
 
 use std::sync::Arc;
@@ -204,6 +205,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         get_agent_tasks_entry,
         agent_files::preview,
         personality::get, personality::put, personality::preview,
+        workspace_context::get, workspace_context::put,
         put_agent_tasks_entry,
         put_agent_avatar_entry,
         delete_agent_avatar_entry,
@@ -1611,6 +1613,10 @@ fn router_with_services_with_policies_and_integrations(
         .route(
             "/api/agents/{agent_id}/personality",
             get(personality::get).put(personality::put),
+        )
+        .route(
+            "/api/agents/{agent_id}/workspace-context",
+            get(workspace_context::get).put(workspace_context::put),
         )
         .route(
             "/api/agents/{agent_id}/personality/preview",
@@ -3496,6 +3502,7 @@ mod tests {
     mod swarm_reliability;
     mod usage;
     mod workflows;
+    mod workspace_context;
     mod workspace_download;
 
     use super::{router, router_with_services, router_with_services_with_policies};

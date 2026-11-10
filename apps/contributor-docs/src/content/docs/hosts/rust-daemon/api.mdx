@@ -15,6 +15,14 @@ The daemon serves operational endpoints, `/api/*` application endpoints and a Sc
 - **Optional API key.** With `ANIMAOS_RS_API_KEY` set, every non-exempt route also needs `Authorization: Bearer` or `x-api-key` with that key.
 - **Idempotency.** Session run submission requires an `Idempotency-Key` header (1 to 128 visible ASCII characters, remembered for 24 hours).
 
+## Per-agent workspace context
+
+Owner-only `GET /api/agents/{agent_id}/workspace-context` returns credential-free binding metadata and the current configuration revision. `PUT` accepts `{ expectedRevision, binding }`; an explicit `null` removes the binding, and a stale revision returns `409`. Saving a binding does not create a key or grant MCP tool permissions.
+
+The optional binding pins an agent-owned MCP connection, reader, workspace ID, restore generation, subject and role. Companion mode adopts the independently supplied persona and primary durable memory. Shared mode retains the local personality and uses the remote key's selected context. M.O.T.H.E.R's native setup provisions its own keys and sharing policy; the AnimaOS Profile panel displays or disables the binding.
+
+Offline or invalid context restores the saved local personality in the same chat, retains history and withholds the affected connection's tools. Companion durable memory is not mirrored to local memory or another provider during fallback. Bounded reads revalidate current authority before model requests; mutations are never replayed automatically.
+
 ## Operational Endpoints
 
 | Method | Path | Description |

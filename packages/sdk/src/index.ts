@@ -1,6 +1,7 @@
 export { AgentsClient, agent } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export type { AgentPersonality, SaveAgentPersonality } from './agent-files.js';
+export type { WorkspaceContextBinding, WorkspaceContextView, SaveWorkspaceContext } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { ImagesClient } from './images.js';
 export { DocumentInspectionsClient } from './document-inspections.js';

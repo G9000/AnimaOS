@@ -750,6 +750,7 @@ impl super::super::transport::McpAccessTokenProvider for OAuthProvider {
             McpManager {
                 inner,
                 management_run: None,
+                context_run: None,
             }
             .oauth_needs_sign_in(&self.id);
         }
@@ -773,6 +774,7 @@ impl super::super::transport::McpAccessTokenProvider for OAuthProvider {
             let manager = McpManager {
                 inner,
                 management_run: None,
+                context_run: None,
             };
             let owned = manager.clone();
             manager

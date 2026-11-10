@@ -25,6 +25,9 @@ mod chat_management_tests;
 #[path = "autonomy_tests.rs"]
 mod autonomy_tests;
 
+#[path = "workspace_context_tests.rs"]
+mod workspace_context_tests;
+
 #[path = "oauth_tests.rs"]
 mod oauth_tests;
 
@@ -35,6 +38,7 @@ fn candidate() -> anima_core::ExternalToolDescriptor {
 
 #[derive(Default)]
 struct FakeFactory {
+    context_result: Arc<StdMutex<Option<serde_json::Value>>>,
     connects: AtomicUsize,
     stdio_launches: StdMutex<Vec<(McpStdioSpec, String)>>,
     hold_calls: AtomicBool,
@@ -43,6 +47,8 @@ struct FakeFactory {
     oauth_launches: StdMutex<Vec<Arc<dyn McpAccessTokenProvider>>>,
 }
 struct FakeSession {
+    fail_calls: AtomicBool,
+    context_result: Arc<StdMutex<Option<serde_json::Value>>>,
     changed_schema: AtomicBool,
     discoveries: AtomicUsize,
     calls: AtomicUsize,
@@ -56,8 +62,10 @@ struct FakeSession {
     close_entered: Arc<Semaphore>,
 }
 impl FakeSession {
-    fn new(hold: bool) -> Self {
+    fn new(hold: bool, context_result: Arc<StdMutex<Option<serde_json::Value>>>) -> Self {
         Self {
+            fail_calls: AtomicBool::new(false),
+            context_result,
             changed_schema: AtomicBool::new(false),
             discoveries: AtomicUsize::new(0),
             calls: AtomicUsize::new(0),
@@ -98,7 +106,10 @@ impl McpTransportFactory for FakeFactory {
                 .unwrap()
                 .push((spec, connection_id));
         }
-        let session = Arc::new(FakeSession::new(self.hold_calls.load(Ordering::SeqCst)));
+        let session = Arc::new(FakeSession::new(
+            self.hold_calls.load(Ordering::SeqCst),
+            self.context_result.clone(),
+        ));
         self.sessions.lock().unwrap().push(session.clone());
         Box::pin(async move { Ok(session as Arc<dyn McpTransportSession>) })
     }
@@ -110,8 +121,19 @@ impl McpTransportSession for FakeSession {
     ) -> BoxFuture<'static, Result<McpDiscovery, McpTransportError>> {
         self.discoveries.fetch_add(1, Ordering::SeqCst);
         let changed = self.changed_schema.load(Ordering::SeqCst);
+        let context = self.context_result.lock().unwrap().is_some();
         Box::pin(async move {
-            let mut descriptor = candidate();
+            let mut descriptor = if context {
+                prepare_external_tool(
+                    "mother_get_context",
+                    "Read synthetic workspace context",
+                    json!({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}),
+                    None,
+                )
+                .unwrap()
+            } else {
+                candidate()
+            };
             if changed {
                 descriptor = prepare_external_tool(
                     &descriptor.remote_name,
@@ -129,20 +151,34 @@ impl McpTransportSession for FakeSession {
     }
     fn call_once(
         &self,
-        _call: McpCall,
+        call: McpCall,
         control: TransportControl,
     ) -> BoxFuture<'static, Result<ExternalToolResult, McpTransportError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.entered.add_permits(1);
         let hold = self.hold_calls.load(Ordering::SeqCst);
+        let fail = self.fail_calls.load(Ordering::SeqCst);
+        let mut context = self.context_result.lock().unwrap().clone();
+        if let Some(value) = &mut context {
+            if let Some(records) = value["records"].as_array_mut() {
+                if let Some(limit) = call.arguments["limit"].as_u64() {
+                    records.truncate(limit as usize);
+                }
+            }
+        }
         Box::pin(async move {
+            if fail {
+                return Err(McpTransportError::Unavailable);
+            }
             if hold {
                 control.cancel.cancelled().await;
                 return Err(McpTransportError::OutcomeUnknown);
             }
             Ok(ExternalToolResult {
-                text_blocks: vec!["synthetic violet record".into()],
-                structured_data: None,
+                structured_data: context.as_ref().map(test_data_value),
+                text_blocks: vec![context
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "synthetic violet record".into())],
                 is_error: false,
                 omitted_blocks: 0,
                 shortened: false,
@@ -178,6 +214,22 @@ impl McpTransportSession for FakeSession {
                 notify.notify_waiters();return Ok(PhysicalClose::for_test())}}
             }
         })
+    }
+}
+
+fn test_data_value(value: &serde_json::Value) -> anima_core::DataValue {
+    use anima_core::DataValue;
+    match value {
+        serde_json::Value::Null => DataValue::Null,
+        serde_json::Value::Bool(v) => DataValue::Bool(*v),
+        serde_json::Value::Number(v) => DataValue::Number(v.as_f64().unwrap()),
+        serde_json::Value::String(v) => DataValue::String(v.clone()),
+        serde_json::Value::Array(v) => DataValue::Array(v.iter().map(test_data_value).collect()),
+        serde_json::Value::Object(v) => DataValue::Object(
+            v.iter()
+                .map(|(k, v)| (k.clone(), test_data_value(v)))
+                .collect(),
+        ),
     }
 }
 

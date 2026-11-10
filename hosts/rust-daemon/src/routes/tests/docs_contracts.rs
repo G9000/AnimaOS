@@ -42,7 +42,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 380, "complete registered operation count");
+    assert_eq!(actual.len(), 382, "complete registered operation count");
     let task_verification_additions = [
         ("GET", "/api/agents/{agent_id}/runs/{run_id}/outcome"),
         (
@@ -518,6 +518,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         );
     }
     let owner_editing_additions = [
+        ("GET", "/api/agents/{agent_id}/workspace-context"),
+        ("PUT", "/api/agents/{agent_id}/workspace-context"),
         ("GET", "/api/agents/{agent_id}/personality"),
         ("PUT", "/api/agents/{agent_id}/personality"),
         ("POST", "/api/agents/{agent_id}/personality/preview"),

@@ -6,6 +6,46 @@ import {
 } from './index.js';
 
 describe('agent file preview client', () => {
+  it('reads and disables a workspace binding with the exact owner revision', async () => {
+    const requests: { url: string; method?: string; body?: unknown }[] = [];
+    const view = {
+      revision: 'config-r1',
+      binding: null,
+      status: 'independent',
+      connections: [],
+    };
+    const client = createDaemonClient({
+      baseUrl: '',
+      fetch: async (url, init) => {
+        requests.push({
+          url: String(url),
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return Response.json(view);
+      },
+    });
+    expect(await client.agentFiles.workspaceContext('agent/one')).toEqual(view);
+    expect(
+      await client.agentFiles.saveWorkspaceContext('agent/one', {
+        expectedRevision: 'config-r1',
+        binding: null,
+      }),
+    ).toEqual(view);
+    expect(requests).toEqual([
+      {
+        url: '/api/agents/agent%2Fone/workspace-context',
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: '/api/agents/agent%2Fone/workspace-context',
+        method: 'PUT',
+        body: { expectedRevision: 'config-r1', binding: null },
+      },
+    ]);
+  });
+
   it('reads the effective personality and saves its exact revision', async () => {
     const calls: {
       url: string;

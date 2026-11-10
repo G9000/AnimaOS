@@ -108,6 +108,7 @@ struct ToolRegistration {
 
 #[derive(Clone)]
 pub(crate) struct ToolExecutionContext {
+    workspace_context: Option<Arc<crate::workspace_context::WorkspaceRunContext>>,
     pub(super) mcp: Option<crate::mcp::McpManager>,
     pub(super) tool_catalog: Option<Arc<catalog::RunToolCatalog>>,
     pub(super) tool_refresh: Option<Arc<mcp_refresh::McpToolRefresh>>,
@@ -184,6 +185,13 @@ pub(crate) struct ToolExecutionContext {
 }
 
 impl ToolExecutionContext {
+    pub(crate) fn with_workspace_context(
+        mut self,
+        context: Option<Arc<crate::workspace_context::WorkspaceRunContext>>,
+    ) -> Self {
+        self.workspace_context = context;
+        self
+    }
     pub(crate) fn with_project_lease(
         mut self,
         lease: Option<crate::projects::ProjectAccessLease>,
@@ -248,6 +256,7 @@ impl ToolExecutionContext {
             execution: Arc::new(crate::execution_backends::ExecutionService::default()),
             command_binding: None,
             mcp_stamp: None,
+            workspace_context: None,
             browser: None,
             browser_stamp: None,
             team: None,
@@ -1226,6 +1235,23 @@ impl ToolExecutionContext {
         agent: &AgentState,
         tool_call: &ToolCall,
     ) -> Result<(), TaskResult<Content>> {
+        if crate::workspace_context::primary_memory(&agent.config)
+            && crate::workspace_context::local_memory_tool(&tool_call.name)
+        {
+            return Err(TaskResult::error("Durable memory belongs to the configured workspace; local memory is disabled even during fallback", 0));
+        }
+        if tool_call.name.starts_with("mcp_") {
+            if let Some(context) = &self.workspace_context {
+                if Box::pin(context.applies_to_tool(&tool_call.name)).await
+                    && !Box::pin(context.valid()).await
+                {
+                    return Err(TaskResult::error(
+                        "Workspace context authority changed; retry context on the next turn",
+                        0,
+                    ));
+                }
+            }
+        }
         self.verify_profile_owner().await?;
         self.check_preview_tool(tool_call).await?;
         if let (Some(coordinator), Some(run)) = (&self.team, &self.run_link) {

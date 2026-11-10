@@ -27,6 +27,7 @@ import { ChatGptModelSelect } from './ChatGptModelSelect';
 import { AgentProfileDetails } from './AgentProfileDetails';
 import { TaskRegressionPanel } from './task-regressions/TaskRegressionPanel';
 import { PersonalityEditor } from './personality/PersonalityEditor';
+import { WorkspaceContextPanel } from './personality/WorkspaceContextPanel';
 import { FallbackModels } from './models/FallbackModels';
 import {
   SettingsCard,
@@ -1013,6 +1014,7 @@ export function SettingsPanel({
                 disabled={controlsDisabled}
                 compactProfile
               />
+              <WorkspaceContextPanel agentId={agent.id} disabled={controlsDisabled} />
               <button
                 type="button"
                 className="settings-item profile-soul-open"

@@ -1508,6 +1508,9 @@ impl Provider for RecentMemoriesProvider {
         runtime: &AgentRuntime,
         message: &Message,
     ) -> Result<ProviderResult, String> {
+        if crate::workspace_context::primary_memory(runtime.config()) {
+            return Ok(ProviderResult::default());
+        }
         let deadline = Instant::now() + CONTEXT_LOOKUP_TIMEOUT;
         let mut exclusions = ContextExclusions::default();
         let mut core = String::new();

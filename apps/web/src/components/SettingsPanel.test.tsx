@@ -52,6 +52,12 @@ vi.mock('./personality/PersonalityEditor', () => ({
     />
   ),
 }));
+// WorkspaceContextPanel.test.tsx covers its grant-specific request lifecycle.
+vi.mock('./personality/WorkspaceContextPanel', () => ({
+  WorkspaceContextPanel: ({ agentId }: { agentId: string }) => (
+    <section aria-label="Agent workspace context" data-agent-id={agentId} />
+  ),
+}));
 
 it('renders the active personality editor instead of editing an inactive legacy prompt', () => {
   renderPanel(agent({ system: 'This can be shadowed by SOUL.md.' }), {
@@ -60,6 +66,7 @@ it('renders the active personality editor instead of editing an inactive legacy 
   expect(
     screen.getByRole('region', { name: 'Active personality editor' }),
   ).toHaveAttribute('data-agent-id', 'agent-main');
+  expect(screen.getByRole('region', { name: 'Agent workspace context' })).toHaveAttribute('data-agent-id', 'agent-main');
   expect(screen.queryByLabelText('System prompt')).not.toBeInTheDocument();
   expect(
     screen.queryByRole('radio', { name: 'Direct & practical' }),

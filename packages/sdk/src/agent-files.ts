@@ -16,9 +16,51 @@ export interface SaveAgentPersonality {
   revision: string;
 }
 
+/** Owner-selected, pinned context source; credentials stay in its MCP connection. */
+export interface WorkspaceContextBinding {
+  connectionId: string;
+  tool: string;
+  mode: 'companion' | 'shared';
+  workspaceId: string;
+  generation: string;
+  subject: string;
+}
+
+export interface WorkspaceContextView {
+  revision: string;
+  binding: WorkspaceContextBinding | null;
+  status: 'independent' | 'configured';
+  connections: { id: string; label: string; state: string; tool: string }[];
+}
+
+export interface SaveWorkspaceContext {
+  expectedRevision: string;
+  binding: WorkspaceContextBinding | null;
+}
+
 /** Owner-only personality editing and instruction file previews. */
 export class AgentFilesClient {
   constructor(private readonly client: DaemonClient) {}
+
+  workspaceContext(
+    agentId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkspaceContextView> {
+    return this.client.requestJson<WorkspaceContextView>(
+      `/api/agents/${encodeURIComponent(agentId)}/workspace-context`,
+      { signal: options.signal },
+    );
+  }
+
+  saveWorkspaceContext(
+    agentId: string,
+    input: SaveWorkspaceContext,
+  ): Promise<WorkspaceContextView> {
+    return this.client.requestJson<WorkspaceContextView>(
+      `/api/agents/${encodeURIComponent(agentId)}/workspace-context`,
+      { method: 'PUT', body: input },
+    );
+  }
 
   personality(
     agentId: string,

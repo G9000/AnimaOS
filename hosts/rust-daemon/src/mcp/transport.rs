@@ -1081,17 +1081,126 @@ pub(super) fn bound_sdk_result(
             _ => omitted_blocks = omitted_blocks.saturating_add(1),
         }
     }
-    external_tools::bound_external_result(
-        ExternalToolResult {
-            text_blocks,
-            structured_data: structured,
-            is_error,
-            omitted_blocks,
-            shortened: omitted_blocks > 0,
-        },
-        1024,
+    let mut result = ExternalToolResult {
+        text_blocks,
+        structured_data: structured,
+        is_error,
+        omitted_blocks,
+        shortened: omitted_blocks > 0,
+    };
+    deduplicate_structured_text(&mut result);
+    external_tools::bound_external_result(result, 1024).map_err(|_| McpTransportError::WireLimit)
+}
+/// SDKs may repeat structuredContent as an identical JSON text block.
+pub(super) fn deduplicate_structured_text(result: &mut ExternalToolResult) {
+    if let Some(data) = result.structured_data.as_ref() {
+        let data = crate::routes::data_value_to_json(data);
+        result.text_blocks.retain(|block| {
+            !serde_json::from_str::<Value>(block)
+                .ok()
+                .is_some_and(|text| same_json(&text, &data))
+        });
+    }
+}
+
+fn same_json(left: &Value, right: &Value) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left, right) {
+        // The portable MCP value bridge represents every JSON number as f64.
+        (Value::Number(left), Value::Number(right)) => {
+            same_integer_float(left, right) || same_integer_float(right, left)
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| same_json(left, right))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .all(|(key, value)| right.get(key).is_some_and(|right| same_json(value, right)))
+        }
+        _ => left == right,
+    }
+}
+
+fn same_integer_float(integer: &serde_json::Number, float: &serde_json::Number) -> bool {
+    const MAX_SAFE: i64 = 9_007_199_254_740_991;
+    if !float.is_f64() {
+        return false;
+    }
+    let Some(float) = float.as_f64() else {
+        return false;
+    };
+    if !float.is_finite() || float.fract() != 0.0 {
+        return false;
+    }
+    if let Some(integer) = integer.as_i64() {
+        return (-MAX_SAFE..=MAX_SAFE).contains(&integer) && float == integer as f64;
+    }
+    integer
+        .as_u64()
+        .is_some_and(|integer| integer <= MAX_SAFE as u64 && float == integer as f64)
+}
+
+#[cfg(test)]
+#[test]
+fn workspace_context_sdk_duplicate_is_removed_before_wire_bounds_without_hiding_omissions() {
+    let descriptor = external_tools::prepare_external_tool(
+        "read_context",
+        "Synthetic read",
+        serde_json::json!({"type":"object","properties":{}}),
+        None,
     )
-    .map_err(|_| McpTransportError::WireLimit)
+    .unwrap();
+    let data = serde_json::json!({"access":{"version":1},"persona":{"content":"体贴思考".repeat(800)},"records":[{"excerpt":"reference".repeat(100)}]});
+    let raw = serde_json::json!({"content":[{"type":"text","text":data.to_string()},{"type":"text","text":"Independent supporting text"}],"structuredContent":data,"isError":false});
+    assert!(raw.to_string().len() > 16 * 1024);
+    let result = bound_sdk_result(
+        ServerResult::CallToolResult(serde_json::from_value(raw).unwrap()),
+        &descriptor,
+    )
+    .unwrap();
+    assert!(!result.shortened);
+    assert_eq!(result.omitted_blocks, 0);
+    assert_eq!(result.text_blocks, vec!["Independent supporting text"]);
+    assert!(result.structured_data.is_some());
+    let mut unequal = ExternalToolResult {
+        text_blocks: vec!["{\"n\":9007199254740993}".into()],
+        structured_data: Some(DataValue::Object(BTreeMap::from([(
+            "n".into(),
+            DataValue::Number(9_007_199_254_740_992.0),
+        )]))),
+        is_error: false,
+        omitted_blocks: 0,
+        shortened: false,
+    };
+    deduplicate_structured_text(&mut unequal);
+    assert_eq!(
+        unequal.text_blocks.len(),
+        1,
+        "different large integers must never compare through f64 rounding"
+    );
+    unequal.structured_data = Some(DataValue::Object(BTreeMap::from([(
+        "n".into(),
+        DataValue::Number(1.0),
+    )])));
+    unequal.text_blocks = vec![
+        "{\"n\":1,\"extra\":true}".into(),
+        "{\"n\":2}".into(),
+        "{\"n\":1}".into(),
+    ];
+    deduplicate_structured_text(&mut unequal);
+    assert_eq!(
+        unequal.text_blocks.len(),
+        2,
+        "genuine extra fields and different values remain"
+    );
 }
 fn portable(value: Value) -> Result<DataValue, McpTransportError> {
     Ok(match value {

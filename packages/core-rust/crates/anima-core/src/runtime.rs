@@ -1,3 +1,4 @@
+pub mod prompt_context;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -88,6 +89,7 @@ pub struct AgentRuntimeSnapshot {
 }
 
 pub struct AgentRuntime {
+    prompt_context: Option<Arc<dyn prompt_context::PromptContextSource>>,
     agent_files: crate::RenderedAgentFiles,
     host_guidance: String,
     /// The host's tool-round budget for agents whose settings leave it unset.
@@ -178,6 +180,7 @@ impl AgentRuntime {
             execution_context: None,
             execution_binding: None,
             agent_files: crate::RenderedAgentFiles::default(),
+            prompt_context: None,
             host_guidance: String::new(),
             host_tool_iterations: None,
         }
@@ -229,6 +232,7 @@ impl AgentRuntime {
             execution_context: None,
             execution_binding: snapshot.execution_binding,
             agent_files: crate::RenderedAgentFiles::default(),
+            prompt_context: None,
             host_guidance: String::new(),
             host_tool_iterations: None,
         }
@@ -268,6 +272,11 @@ impl AgentRuntime {
 
     pub fn set_host_guidance(&mut self, guidance: String) {
         self.host_guidance = guidance;
+    }
+
+    /// Installs a host-admitted run-local context source, excluded from snapshots.
+    pub fn set_prompt_context(&mut self, source: Arc<dyn prompt_context::PromptContextSource>) {
+        self.prompt_context = Some(source);
     }
 
     pub fn set_event_listener(&mut self, listener: Arc<dyn Fn(EngineEvent) + Send + Sync>) {
@@ -746,7 +755,7 @@ impl AgentRuntime {
             let budget_wrapup = iterations >= max_tool_iterations;
             let failure_wrapup = exact_failures.exhausted();
             let wrapup = budget_wrapup || failure_wrapup;
-            let call_config = if wrapup {
+            let mut call_config = if wrapup {
                 let mut config = self.state.config.clone();
                 config.tools = Some(Vec::new());
                 config
@@ -827,6 +836,26 @@ impl AgentRuntime {
             self.emit_frame(RunFrame::StepStarted {
                 step_id: step_id.clone(),
             });
+            if let Some(source) = &self.prompt_context {
+                let context = source.current(&self.state).await;
+                let mut parts = context_parts.clone();
+                if !context.reference.is_empty() {
+                    parts.push(context.reference);
+                }
+                let local = self.build_system_prompt(&context_parts);
+                let projected =
+                    self.build_system_prompt_with_identity(&parts, context.identity.as_deref());
+                system = system.replacen(&local, &projected, 1);
+                if !context.withheld_tools.is_empty() {
+                    let config = call_config.get_or_insert_with(|| self.state.config.clone());
+                    if let Some(tools) = &mut config.tools {
+                        tools.retain(|tool| !context.withheld_tools.contains(&tool.name));
+                    }
+                }
+                if self.stop_requested() {
+                    return self.finish_stopped(start);
+                }
+            }
             let request = ModelGenerateRequest {
                 system,
                 messages: self.tool_output_pruning.project(&conversation),
@@ -1937,10 +1966,20 @@ impl AgentRuntime {
     }
 
     fn build_system_prompt(&self, context_parts: &[String]) -> String {
+        self.build_system_prompt_with_identity(context_parts, None)
+    }
+
+    fn build_system_prompt_with_identity(
+        &self,
+        context_parts: &[String],
+        identity: Option<&str>,
+    ) -> String {
         let mut parts = Vec::new();
 
         let (legacy_before, legacy_after) = self.state.config.legacy_personality_parts();
-        if let Some(identity) = &self.agent_files.identity {
+        if let Some(identity) = identity {
+            parts.push(identity.to_owned());
+        } else if let Some(identity) = &self.agent_files.identity {
             parts.push(identity.text.clone());
         } else {
             parts.extend(legacy_before);
@@ -1961,7 +2000,7 @@ impl AgentRuntime {
                     .join("\n")
             ));
         }
-        if self.agent_files.identity.is_none() {
+        if identity.is_none() && self.agent_files.identity.is_none() {
             parts.extend(legacy_after);
         }
         if !self.agent_files.project_context.is_empty() {

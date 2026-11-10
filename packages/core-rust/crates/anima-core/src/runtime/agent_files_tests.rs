@@ -204,3 +204,76 @@ fn empty_identity_keeps_persona_and_runtime_instances_are_isolated() {
     assert!(!prompt.contains("first-only"));
     assert!(prompt.contains("legacy-system"));
 }
+
+struct LiveContext(std::sync::atomic::AtomicBool);
+#[async_trait]
+impl super::prompt_context::PromptContextSource for LiveContext {
+    async fn current(&self, _: &AgentState) -> super::prompt_context::PromptContext {
+        if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            super::prompt_context::PromptContext {
+                identity: Some("remote-identity".into()),
+                reference: "remote-reference".into(),
+                ..Default::default()
+            }
+        } else {
+            super::prompt_context::PromptContext {
+                reference: "context-unavailable".into(),
+                ..Default::default()
+            }
+        }
+    }
+}
+
+#[test]
+fn workspace_context_transient_identity_online_offline_recovery_preserves_local_personality() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(PromptSpy(captured.clone()));
+    let mut runtime = AgentRuntime::new(config(), adapter.clone());
+    let source = Arc::new(LiveContext(std::sync::atomic::AtomicBool::new(true)));
+    runtime.set_prompt_context(source.clone());
+    let original = runtime.config().clone();
+    for online in [true, false, true] {
+        source.0.store(online, std::sync::atomic::Ordering::SeqCst);
+        block_on(runtime.run(Content {
+            text: "same-chat".into(),
+            ..Default::default()
+        }));
+    }
+    let prompts = captured.lock().unwrap();
+    for index in [0, 2] {
+        assert!(prompts[index].contains("remote-identity"));
+        assert!(prompts[index].contains("remote-reference"));
+        for local in [
+            "legacy-bio",
+            "legacy-lore",
+            "legacy-adjective",
+            "legacy-topic",
+            "legacy-style",
+            "legacy-system",
+        ] {
+            assert!(!prompts[index].contains(local), "{local}");
+        }
+    }
+    assert!(prompts[1].contains("context-unavailable"));
+    for local in [
+        "legacy-bio",
+        "legacy-lore",
+        "legacy-adjective",
+        "legacy-topic",
+        "legacy-style",
+        "legacy-system",
+    ] {
+        assert!(prompts[1].contains(local), "{local}");
+    }
+    assert!(!prompts[1].contains("remote-identity"));
+    assert_eq!(runtime.config(), &original);
+    let snapshot = runtime.snapshot();
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains("remote-identity"));
+    let restored = AgentRuntime::from_snapshot(snapshot, adapter);
+    assert!(!restored
+        .build_system_prompt(&[])
+        .contains("remote-identity"));
+    assert!(restored.build_system_prompt(&[]).contains("legacy-system"));
+}
