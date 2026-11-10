@@ -97,6 +97,142 @@ async function openExisting(user: UserEvent) {
 }
 
 describe('CompanionSetup', () => {
+  it('creates once and verifies optional M.O.T.H.E.R pairing before completing', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const agent = { state: { id: 'new-companion', name: 'Anima' } };
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent } as never);
+    const load = vi.spyOn(daemon, 'workspaceContext').mockResolvedValue({
+      revision: 'r1',
+      status: 'independent',
+      binding: null,
+      connections: [],
+    });
+    const completed = vi.fn();
+    renderSetup({ onCreated: completed });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.click(screen.getByRole('radio', { name: /M\.O\.T\.H\.E\.R/ }));
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Connect M.O.T.H.E.R' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('form', { name: 'Connect M.O.T.H.E.R' }),
+    ).toBeVisible();
+    expect(await screen.findByText('Not paired yet')).toBeVisible();
+    expect(create).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
+    expect(create.mock.calls[0][0].agent.system).toContain(
+      'Suggest a useful next step',
+    );
+    expect(create.mock.calls[0][0].agent.system).not.toContain(
+      'You are M.O.T.H.E.R',
+    );
+    load.mockResolvedValue({
+      revision: 'r2',
+      status: 'configured',
+      binding: {
+        connectionId: 'mother',
+        tool: 'mother_get_context',
+        mode: 'companion',
+        workspaceId: 'w',
+        generation: 'g',
+        subject: 'new-companion',
+      },
+      connections: [
+        {
+          id: 'mother',
+          label: 'M.O.T.H.E.R',
+          state: 'ready',
+          tool: 'mother_get_context',
+        },
+      ],
+    });
+    await user.click(button('Check connection'));
+    expect(await screen.findByText('Saved connection ready')).toBeVisible();
+    await user.click(button('Continue'));
+    expect(completed).toHaveBeenCalledExactlyOnceWith(agent);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('can finish optional pairing later without changing another agent or pretending a connection exists', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const agent = { state: { id: 'new-companion', name: 'Anima' } };
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent } as never);
+    vi.spyOn(daemon, 'workspaceContext').mockResolvedValue({
+      revision: 'r1',
+      status: 'independent',
+      binding: null,
+      connections: [],
+    });
+    const save = vi.spyOn(daemon, 'saveWorkspaceContext');
+    const completed = vi.fn();
+    renderSetup({ onCreated: completed });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.click(screen.getByRole('radio', { name: /M\.O\.T\.H\.E\.R/ }));
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    expect(await screen.findByText('Not paired yet')).toBeVisible();
+    expect(
+      screen.getByText(
+        /Until paired, this companion uses its local personality and memory/,
+      ),
+    ).toBeVisible();
+    await user.click(button('Finish pairing later'));
+    expect(completed).toHaveBeenCalledExactlyOnceWith(agent);
+    expect(create).toHaveBeenCalledOnce();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the M.O.T.H.E.R pairing step after a coder know-how warning', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
+    const agent = { state: { id: 'coder', name: 'Coder' } };
+    const create = vi
+      .spyOn(daemon, 'bootstrapWorkspace')
+      .mockResolvedValue({ agent } as never);
+    vi.spyOn(daemon, 'codingApps').mockRejectedValue(new Error('Unavailable'));
+    vi.spyOn(daemon, 'workspaceContext').mockResolvedValue({
+      revision: 'r1',
+      status: 'independent',
+      binding: null,
+      connections: [],
+    });
+    const completed = vi.fn();
+    renderSetup({ onCreated: completed });
+    const user = userEvent.setup();
+    await start(user);
+    await user.click(button('Continue'));
+    await user.click(button('Coder'));
+    await user.click(screen.getByRole('radio', { name: /M\.O\.T\.H\.E\.R/ }));
+    await user.click(button('Continue'));
+    await screen.findByText(
+      /couldn’t check the coding apps|could not check|couldn't check/i,
+    );
+    await user.click(button('Continue'));
+    await user.click(await screen.findByRole('button', { name: 'Finish' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Almost there' }),
+    ).toBeVisible();
+    await user.click(button('Continue'));
+    expect(
+      await screen.findByRole('heading', { name: 'Connect M.O.T.H.E.R' }),
+    ).toBeVisible();
+    expect(completed).not.toHaveBeenCalled();
+    await user.click(button('Finish pairing later'));
+    expect(completed).toHaveBeenCalledExactlyOnceWith(agent);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
   it('uses a chosen ordinary folder for a new companion', async () => {
     vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     vi.spyOn(daemon, 'pickWorkspaceFolder').mockResolvedValue({

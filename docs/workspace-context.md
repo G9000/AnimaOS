@@ -4,6 +4,12 @@ An agent can use an MCP workspace as its personality and primary durable memory.
 
 ## Connect with M.O.T.H.E.R
 
+Personal onboarding and **Add companion** offer **Memory and context → M.O.T.H.E.R**. This is optional; the default keeps memory in AnimaOS. Your chosen local personality remains the offline fallback.
+
+After creating the companion, onboarding shows its name and ID and guides you through `mother connect animaos`. Select that new companion and the **Companion** role in M.O.T.H.E.R, review its separate key, and confirm. Return to onboarding and choose **Check connection**. **Saved connection ready** means the owner metadata contains this agent's companion binding and its exact reviewed reader is ready; the runtime still checks live access before each reply. Shared-context mode alone does not make M.O.T.H.E.R the primary memory or personality.
+
+**Finish pairing later** opens the companion without claiming that M.O.T.H.E.R was activated. Until it is paired, the companion uses local memory and personality. If a companion binding already exists but its source is offline, the screen instead explains that the saved personality is available while M.O.T.H.E.R memory remains offline. Pairing checks never create the companion again, send a model prompt, or alter another agent's connection. Existing agents and chats remain intact when adding a companion or choosing a separate project folder.
+
 Use versions of both applications supporting workspace context bindings. In M.O.T.H.E.R, open **Connect AnimaOS**, enter the local owner's credentials in the masked fields, and choose an agent.
 
 For a dedicated M.O.T.H.E.R agent, create an agent with that name in AnimaOS first, then select it here. Your other agents keep their existing personalities and access.

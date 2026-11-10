@@ -46,6 +46,7 @@ import { AddKeyForm } from '../models/AddKeyForm';
 import { ResumeCard } from './ResumeCard';
 import { MicCheck, VoiceCheck } from './VoiceCheck';
 import { OnboardingScene } from './OnboardingScene';
+import { MotherOnboarding } from './MotherOnboarding';
 import './companion-onboarding.css';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 
@@ -357,6 +358,11 @@ export function CompanionSetup({
   const [name, setName] = useState('Anima');
   const [ownerName, setOwnerName] = useState('');
   const [personality, setPersonality] = useState<Personality>('balanced');
+  const [memoryProvider, setMemoryProvider] = useState<'local' | 'mother'>(
+    'local',
+  );
+  const [motherAgent, setMotherAgent] = useState<DaemonSnapshot | null>(null);
+  const createdAgent = useRef<DaemonSnapshot | null>(null);
   const [avatar, setAvatar] = useState<{ file: File; url: string } | null>(
     null,
   );
@@ -651,7 +657,7 @@ export function CompanionSetup({
     setStep(next);
   };
   const submit = async (keepVoice: boolean) => {
-    if (!ready || preview || submitting.current) return;
+    if (!ready || preview || submitting.current || createdAgent.current) return;
     submitting.current = true;
     setCreating(true);
     setError(null);
@@ -718,6 +724,7 @@ export function CompanionSetup({
             },
           });
       const agentId = result.agent?.state?.id;
+      createdAgent.current = result.agent;
       if (avatar && agentId) {
         // The companion exists either way; a failed upload keeps the default orb.
         await daemon
@@ -740,13 +747,19 @@ export function CompanionSetup({
           note: `${result.agent?.state?.name ?? name.trim()} is ready, but know-how for ${missed.join(', ')} didn't install. You can add it later in Settings › Tools › Community bundles.`,
           agent: result.agent,
         });
-      else onCreated(result.agent);
+      else finishCreated(result.agent);
     } catch (caught) {
       if (mounted.current) setError(errorText(caught));
     } finally {
       submitting.current = false;
       if (mounted.current) setCreating(false);
     }
+  };
+  const finishCreated = (agent: DaemonSnapshot) => {
+    if (memoryProvider === 'mother') {
+      setKnowHowNote(null);
+      setMotherAgent(agent);
+    } else onCreated(agent);
   };
   /** Installs know-how for every coding app that is found and starts,
    *  plus the generic handoff; returns what did not install. A broken
@@ -777,7 +790,7 @@ export function CompanionSetup({
     return missed;
   };
   const next = async () => {
-    if (preview || knowHowNote) return;
+    if (preview || knowHowNote || motherAgent) return;
     if (step === 'welcome' && workspaceReady) goTo('model');
     else if (step === 'model' && modelReady) goTo('you');
     else if (step === 'you' && youReady) goTo('access');
@@ -1090,7 +1103,16 @@ export function CompanionSetup({
     );
   };
 
-  if (knowHowNote) {
+  if (motherAgent?.state?.id) {
+    body = (
+      <MotherOnboarding
+        agentId={motherAgent.state.id}
+        name={motherAgent.state.name || name.trim()}
+        onDone={() => onCreated(motherAgent)}
+      />
+    );
+    footer = null;
+  } else if (knowHowNote) {
     body = (
       <>
         {heading('Almost there', 'One thing to know before you start.')}
@@ -1103,7 +1125,7 @@ export function CompanionSetup({
       <button
         type="button"
         className="onboarding__button onboarding__button--primary"
-        onClick={() => onCreated(knowHowNote.agent)}
+        onClick={() => finishCreated(knowHowNote.agent)}
       >
         Continue
         <ArrowRightIcon size={15} />
@@ -1392,8 +1414,42 @@ export function CompanionSetup({
           </div>
         )}
         <div className="onboarding__section">
+          <span id="onboarding-memory-label" className="onboarding__label">
+            Memory and context
+          </span>
+          <div
+            role="radiogroup"
+            aria-labelledby="onboarding-memory-label"
+            className="onboarding__options"
+          >
+            <Option
+              name="onboarding-memory"
+              checked={memoryProvider === 'local'}
+              onChange={() => setMemoryProvider('local')}
+              title="This companion"
+              summary="Keep its personality and memory in AnimaOS."
+            />
+            <Option
+              name="onboarding-memory"
+              checked={memoryProvider === 'mother'}
+              onChange={() => setMemoryProvider('mother')}
+              title="M.O.T.H.E.R"
+              summary="Pair your independent workspace for personality, primary memory and context."
+            />
+          </div>
+          {memoryProvider === 'mother' && (
+            <p className="onboarding__hint">
+              After creating this companion, we’ll guide you through pairing it
+              in M.O.T.H.E.R. Choose its offline personality below; other agents
+              keep their own memory.
+            </p>
+          )}
+        </div>
+        <div className="onboarding__section">
           <span id="onboarding-personality-label" className="onboarding__label">
-            Personality
+            {memoryProvider === 'mother'
+              ? 'Offline personality'
+              : 'Personality'}
           </span>
           <div
             role="radiogroup"
