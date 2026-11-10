@@ -372,6 +372,39 @@ async fn tool_discovery_visibility_drops_currently_revoked_native_and_fails_clos
     drop(guard);
     assert!(catalog.visible_tool_names().contains("search_tools"));
 }
+
+#[tokio::test]
+async fn tool_discovery_request_waits_for_registry_then_rechecks_authority() {
+    let (state, agent, run, catalog) = fixture(&["calculate"]).await;
+    catalog.describe(&agent, &run, "calculate").await.unwrap();
+    let guard = state.write().await;
+    let mut selection = Box::pin(catalog.visible_tool_names_for_request());
+    assert!(futures::poll!(selection.as_mut()).is_pending());
+    drop(guard);
+    assert!(selection.await.contains("calculate"));
+
+    let mut guard = state.write().await;
+    let mut selection = Box::pin(catalog.visible_tool_names_for_request());
+    assert!(futures::poll!(selection.as_mut()).is_pending());
+    let mut revoked = agent.config.clone();
+    revoked.tools = Some(vec![]);
+    guard.restore_agent_config(&agent.id, revoked);
+    drop(guard);
+    assert!(!selection.await.contains("calculate"));
+}
+
+#[tokio::test]
+async fn tool_discovery_request_cancellation_does_not_wait_for_registry_unlock() {
+    let (state, agent, run, _) = fixture(&["calculate"]).await;
+    let cancel = CancelSignal::new();
+    let catalog = RunToolCatalog::new(&state, run, cancel.clone(), &agent.config, &agent, None);
+    let guard = state.write().await;
+    let mut selection = Box::pin(catalog.visible_tool_names_for_request());
+    assert!(futures::poll!(selection.as_mut()).is_pending());
+    cancel.cancel();
+    assert!(selection.await.is_empty());
+    drop(guard);
+}
 #[tokio::test]
 async fn tool_discovery_auto_memory_pins_the_exact_source_descriptor() {
     let (state, mut agent, run, _) = fixture(&["memory_add"]).await;

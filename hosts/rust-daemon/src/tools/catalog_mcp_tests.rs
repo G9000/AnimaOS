@@ -272,6 +272,10 @@ async fn provider_capture_mcp(count: usize, discovery: bool) {
         .unwrap();
     let size = |config: &anima_core::AgentConfig| serde_json::to_vec(&config.tools).unwrap().len();
     if discovery {
+        assert!(model.requests()[1]
+            .system
+            .contains("Tool discovery is preparation"));
+        assert!(model.requests()[1].system.contains("same run"));
         assert!(configs[0].allows_tool("search_tools"));
         assert!(!configs[0]
             .tools

@@ -149,6 +149,79 @@ async fn explicit_discovery_tool_grants_enable_catalog() {
 }
 
 #[tokio::test]
+async fn tool_discovery_continues_owner_task_in_the_same_run_without_changing_grants() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("find", "search_tools", "query", "memory_add")]),
+        Step::Tools(vec![call(
+            "save",
+            "memory_add",
+            "content",
+            "synthetic discovery continuation",
+        )]),
+        Step::Text(vec!["Saved the requested synthetic memory"]),
+    ]);
+    let (coordinator, id) = coordinator_with(model.clone()).await;
+    let original = configure(&coordinator, &id, true).await;
+    coordinator
+        .run(chat_request(
+            &id,
+            "chat:discovery-continuation",
+            "Save this synthetic memory",
+        ))
+        .await
+        .unwrap();
+
+    let requests = model.requests();
+    let configs = model.configs();
+    assert_eq!(requests.len(), 3);
+    assert!(!configs[0].allows_tool("memory_add"));
+    assert!(configs[1].allows_tool("memory_add"));
+    assert!(
+        requests[1].system.contains("Tool discovery is preparation"),
+        "the next model request must distinguish discovery from completing the task"
+    );
+    assert!(requests[1].system.contains("same run"));
+    assert!(
+        requests[1]
+            .system
+            .contains("only asked to find or list tools"),
+        "discovery alone must not authorize execution"
+    );
+    let result = requests[1]
+        .messages
+        .iter()
+        .find(|m| {
+            m.role == anima_core::MessageRole::Tool && m.content.text.contains("schemaVisibility")
+        })
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&result.content.text).unwrap();
+    assert!(result["schemaVisibility"]
+        .as_str()
+        .unwrap()
+        .contains("same run"));
+    assert!(result["schemaVisibility"]
+        .as_str()
+        .unwrap()
+        .contains("does not execute"));
+    let state = coordinator.state.read().await;
+    assert_eq!(state.agents[&id].config(), &original);
+    let record = state
+        .runs
+        .for_agent(&id)
+        .into_iter()
+        .find(|r| r.session_id == "chat:discovery-continuation")
+        .unwrap();
+    assert_eq!(
+        record
+            .action_receipts
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>(),
+        ["search_tools", "memory_add"]
+    );
+}
+
+#[tokio::test]
 async fn tool_discovery_provider_request_is_compact_then_exact_native_schema_and_receipts() {
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![call("search", "search_tools", "query", "memory_add")]),
@@ -206,6 +279,39 @@ async fn tool_discovery_provider_request_is_compact_then_exact_native_schema_and
         bytes(&configs[0]),
         bytes(&configs[1])
     );
+}
+
+#[tokio::test]
+async fn tool_discovery_find_only_request_finishes_without_executing_the_target() {
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![call("find", "search_tools", "query", "memory_add")]),
+        Step::Text(vec!["Found the memory tool; nothing saved"]),
+    ]);
+    let (coordinator, id) = coordinator_with(model.clone()).await;
+    configure(&coordinator, &id, true).await;
+    let result = coordinator
+        .run(chat_request(
+            &id,
+            "chat:find-only",
+            "Only find the memory tool; do not use it",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(result.result.status, "success");
+    assert_eq!(
+        model.requests().len(),
+        2,
+        "discovery must not force another model turn"
+    );
+    let state = coordinator.state.read().await;
+    let record = state
+        .runs
+        .for_agent(&id)
+        .into_iter()
+        .find(|r| r.session_id == "chat:find-only")
+        .unwrap();
+    assert_eq!(record.action_receipts.len(), 1);
+    assert_eq!(record.action_receipts[0].name, "search_tools");
 }
 #[tokio::test]
 async fn tool_discovery_default_keeps_full_provider_catalog_and_no_discovery_tools() {

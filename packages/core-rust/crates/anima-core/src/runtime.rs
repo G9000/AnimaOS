@@ -754,16 +754,19 @@ impl AgentRuntime {
                     .get_or_insert_with(Default::default)
                     .max_retries = Some(0);
                 Some(config)
+            } else if let Some(selector) = &self.model_tool_selector {
+                let selected = selector.visible_tool_names_for_request().await;
+                let mut config = self.state.config.clone();
+                if let Some(tools) = &mut config.tools {
+                    tools.retain(|tool| selected.contains(&tool.name));
+                }
+                Some(config)
             } else {
-                self.model_tool_selector.as_ref().map(|selector| {
-                    let selected = selector.visible_tool_names();
-                    let mut config = self.state.config.clone();
-                    if let Some(tools) = &mut config.tools {
-                        tools.retain(|tool| selected.contains(&tool.name));
-                    }
-                    config
-                })
+                None
             };
+            if self.stop_requested() {
+                return self.finish_stopped(start);
+            }
             let context_parts = match self
                 .build_provider_context(&user_message, &mut provider_snapshots)
                 .await

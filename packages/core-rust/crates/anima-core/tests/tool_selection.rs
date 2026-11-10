@@ -74,6 +74,46 @@ fn call(name: &str) -> ToolCall {
         args: Default::default(),
     }
 }
+
+struct BoundarySelection(Option<anima_core::CancelSignal>);
+#[async_trait]
+impl ModelToolSelector for BoundarySelection {
+    fn visible_tool_names(&self) -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+    async fn visible_tool_names_for_request(&self) -> BTreeSet<String> {
+        if let Some(cancel) = &self.0 {
+            cancel.cancel();
+        }
+        BTreeSet::from(["essential".into(), "fabricated".into()])
+    }
+}
+
+#[tokio::test]
+async fn tool_selection_uses_request_boundary_without_widening_the_tool_ceiling() {
+    let adapter = Arc::new(Capture::default());
+    let mut runtime = AgentRuntime::new(config(), adapter.clone());
+    runtime.set_model_tool_selector(Some(Arc::new(BoundarySelection(None))));
+    runtime.run(Content::default()).await;
+    assert_eq!(
+        adapter.configs.lock().unwrap()[0].tools,
+        Some(vec![descriptor("essential")])
+    );
+    assert_eq!(runtime.config(), &config());
+}
+
+#[tokio::test]
+async fn tool_selection_stop_during_request_selection_prevents_provider_dispatch() {
+    let adapter = Arc::new(Capture::default());
+    let mut runtime = AgentRuntime::new(config(), adapter.clone());
+    let control = anima_core::RunControl::default();
+    runtime.set_model_tool_selector(Some(Arc::new(BoundarySelection(Some(
+        control.cancel.clone(),
+    )))));
+    runtime.set_run_control(control);
+    runtime.run(Content::default()).await;
+    assert!(adapter.configs.lock().unwrap().is_empty());
+}
 #[tokio::test]
 async fn tool_selection_filters_only_each_provider_copy_and_hydrates_next_request() {
     let original = config();

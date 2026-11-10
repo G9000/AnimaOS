@@ -116,10 +116,18 @@ impl RunToolRefresher for McpToolRefresh {
     }
 }
 
+#[async_trait::async_trait]
 impl ModelToolSelector for McpToolRefresh {
     fn visible_tool_names(&self) -> BTreeSet<String> {
         self.catalog()
             .map(|catalog| catalog.visible_tool_names())
             .unwrap_or_default()
+    }
+
+    async fn visible_tool_names_for_request(&self) -> BTreeSet<String> {
+        match self.catalog() {
+            Some(catalog) => catalog.visible_tool_names_for_request().await,
+            None => BTreeSet::new(),
+        }
     }
 }
