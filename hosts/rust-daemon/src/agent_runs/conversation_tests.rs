@@ -498,9 +498,7 @@ async fn main_chat_search_reads_original_pruned_turn_after_automatic_compaction_
             ])]),
             Step::Text(vec!["Found the original instruction."]),
         ],
-        vec![Step::Text(vec![
-            "Earlier planning was summarized without the exact rendezvous details.",
-        ])],
+        vec![Step::Text(vec!["Earlier planning."])],
     );
     let (coordinator, agent_id) = searcher(model.clone()).await;
     let store = Arc::new(MemoryHistoryStore::new());

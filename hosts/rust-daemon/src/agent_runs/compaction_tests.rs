@@ -1,5 +1,8 @@
 //! Automatic compaction before a run (spec §5.4).
 
+#[path = "compaction_headroom_tests.rs"]
+mod headroom;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -25,7 +28,8 @@ use crate::sessions::{
 };
 use crate::state::{DaemonState, RunBuild};
 
-/// A 26-token summary: with it, the newer hot turn (22) no longer fits.
+/// A summary larger than the small source exchange: automatic compaction must
+/// reject it rather than evict more recent context and repeat next turn.
 const LONG_SUMMARY: &str = "They planned a trip to Lisbon in May and asked for two hotel options.";
 
 const QUALITY_CHECKPOINT_RESPONSE: &str = r#"{"summary":"They planned a trip.","checkpoint":{"goal":{"text":"Plan a trip","sourceMessageIds":["u1"]},"decisions":[{"text":"Consider Lisbon in May","sourceMessageIds":["a1"]}],"openWork":[{"text":"Choose the trip details","sourceMessageIds":["u1"]}]}}"#;
@@ -134,6 +138,7 @@ async fn quality_checkpoint_legacy_or_invalid_checkpoint_keeps_previous_continui
             let previous = record.checkpoint.clone().expect("first checkpoint saved");
             // Force another compaction while retaining the independently covered checkpoint.
             record.summary = None;
+            record.compaction_error = None;
             previous
         };
         coordinator
@@ -598,11 +603,9 @@ async fn with_auto_compaction_off_a_run_never_summarizes() {
     );
 }
 
-/// Controller ruling 3 (Task 12): the run goes on from the rebuilt
-/// selection, and what that selection still leaves out is the session's
-/// `contextTrimmed`, set in the summary's own save.
+/// An ineffective automatic summary leaves the previous runtime intact.
 #[tokio::test]
-async fn what_the_rebuilt_context_still_leaves_out_is_saved_with_the_summary() {
+async fn an_ineffective_automatic_summary_preserves_history_and_delays_retry() {
     let model = ScriptedModel::with_secondary(
         vec![Step::Text(vec!["Booked"])],
         vec![Step::Text(vec![LONG_SUMMARY])],
@@ -616,10 +619,10 @@ async fn what_the_rebuilt_context_still_leaves_out_is_saved_with_the_summary() {
 
     assert_eq!(
         sent_texts(&model),
-        ["book one"],
-        "the long summary leaves no room for the newer turn"
+        ["and hotels?", "Two options", "book one"],
+        "an expanding summary must not evict the latest exchange"
     );
-    assert!(model.requests()[0].system.contains(LONG_SUMMARY));
+    assert!(!model.requests()[0].system.contains(LONG_SUMMARY));
     let guard = coordinator.state.read().await;
     let session = guard.sessions.get(&agent_id, "chat:long").unwrap();
     assert_eq!(
@@ -627,16 +630,21 @@ async fn what_the_rebuilt_context_still_leaves_out_is_saved_with_the_summary() {
             .summary
             .as_ref()
             .map(|summary| summary.through_message_id.as_str()),
-        Some("a1")
+        None
     );
     assert_eq!(
         session
             .context_trimmed
             .as_ref()
             .map(|trimmed| trimmed.dropped_through_message_id.as_str()),
-        Some("a2")
+        Some("a1")
     );
-    assert_eq!(session.compaction_error, None);
+    assert!(session
+        .compaction_error
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("did not free enough"));
 }
 
 /// Streams like its `ScriptedModel`; its summarizing call first runs `hook`
@@ -1319,7 +1327,8 @@ async fn a_helper_deadline_ends_its_compaction() {
 #[tokio::test]
 async fn a_run_lets_go_of_its_dropped_turns_once_compaction_is_decided() {
     for auto in [false, true] {
-        let model = ScriptedModel::with_secondary(vec![], vec![Step::Text(vec![LONG_SUMMARY])]);
+        let model =
+            ScriptedModel::with_secondary(vec![], vec![Step::Text(vec!["Trip discussion."])]);
         let (coordinator, agent_id) = long_session(model, auto).await;
         let input = book_one();
         let (build, live_run, record) = run_parts(&coordinator, &agent_id, &input).await;
@@ -1347,12 +1356,14 @@ async fn a_run_lets_go_of_its_dropped_turns_once_compaction_is_decided() {
             .await;
 
         assert!(context.dropped.is_empty(), "auto {auto}");
+        assert!(context.compaction_input.is_empty(), "auto {auto}");
         match rebuilt {
             None => assert!(!auto, "a compaction rebuilds the run"),
             Some(rebuilt) => {
                 assert!(auto, "no compaction, no rebuild");
-                assert_eq!(rebuilt.context.trimmed_through.as_deref(), Some("a2"));
+                assert_eq!(rebuilt.context.trimmed_through, None);
                 assert!(rebuilt.context.dropped.is_empty());
+                assert!(rebuilt.context.compaction_input.is_empty());
             }
         }
     }

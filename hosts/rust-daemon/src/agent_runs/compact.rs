@@ -14,11 +14,12 @@ use crate::live::{LiveEvent, LiveEventBody, LiveRun};
 use crate::runs::RunRecord;
 use crate::sessions::checkpoint::{CheckpointInputs, SessionCheckpoint};
 use crate::sessions::compaction::{
-    auto_compact_enabled, compaction_input_chars, pruned_turns, summarize_with_focus,
-    CompactionOptions, PrunedSpan, COMPACTING_PHASE, COMPACTION_TIMED_OUT,
+    auto_compact_enabled, automatic_summary_is_effective, compaction_input_chars,
+    compaction_source_tokens, pruned_turns, summarize_with_focus, CompactionOptions, PrunedSpan,
+    AUTO_COMPACTION_RETRY_MS, COMPACTING_PHASE, COMPACTION_TIMED_OUT,
 };
 use crate::sessions::context::{mark_context_trimmed, newest_left_out, ContextBudget};
-use crate::sessions::{SessionCompactionError, SessionSummary};
+use crate::sessions::{SessionCompactionError, SessionRecord, SessionSummary};
 use crate::side_model::side_call;
 use crate::state::{RunBuild, RunContextReport};
 use crate::usage::metered::{record_secondary, SecondaryCall};
@@ -132,12 +133,25 @@ impl AgentRunCoordinator {
         run: RunCompaction<'_>,
         context: &mut RunContextReport,
     ) -> Option<RunBuild> {
-        let dropped = std::mem::take(&mut context.dropped);
+        let dropped = std::mem::take(&mut context.compaction_input);
+        context.dropped.clear();
         let cancel = live_run.control().cancel;
         if context.trimmed_through.is_none()
             || !auto_compact_enabled(run.config)
             || cancel.is_cancelled()
         {
+            return None;
+        }
+        let before = self
+            .state
+            .read()
+            .await
+            .sessions
+            .get(&started.agent_id, &started.session_id)
+            .cloned()?;
+        if before.compaction_error.as_ref().is_some_and(|error| {
+            now_millis().saturating_sub(error.at_ms) < AUTO_COMPACTION_RETRY_MS
+        }) {
             return None;
         }
         live_run.publish(LiveEvent::for_run(
@@ -146,28 +160,74 @@ impl AgentRunCoordinator {
                 phase: COMPACTING_PHASE,
             },
         ));
-        match self
+        let outcome = self
             .compact(
                 &started.agent_id,
                 &started.session_id,
                 &dropped,
                 Some(&run),
-                Some(cancel),
+                Some(cancel.clone()),
                 None,
                 None,
             )
-            .await
-        {
+            .await;
+        if !cancel.is_cancelled() {
+            live_run.publish(LiveEvent::for_run(
+                started,
+                LiveEventBody::RunProgress {
+                    phase: "responding",
+                },
+            ));
+        }
+        match outcome {
             Compacted::Saved(Some(mut rebuilt)) => {
                 rebuilt.context.dropped = Vec::new();
+                rebuilt.context.compaction_input.clear();
                 Some(*rebuilt)
             }
             Compacted::Failed(error) => {
+                self.record_automatic_compaction_failure(&before, &error)
+                    .await;
                 warn!(agent_id = %started.agent_id, session_id = %started.session_id, error = %error, "session compaction failed; the run goes on with its trimmed context");
                 None
             }
             Compacted::Saved(None) | Compacted::Nothing | Compacted::Stopped => None,
         }
+    }
+
+    /// Cover early failures too (budget setup, usage custody), without stamping
+    /// an error onto a replaced session or newer independently saved continuity.
+    async fn record_automatic_compaction_failure(&self, before: &SessionRecord, error: &str) {
+        let transaction = self.control_plane_transaction().await;
+        let persist = {
+            let mut state = self.state.write().await;
+            let Some(session) = state.sessions.get_mut(&before.agent_id, &before.id) else {
+                return;
+            };
+            let now = now_millis();
+            if session.created_at_ms != before.created_at_ms
+                || session.room_id() != before.room_id()
+                || session.summary != before.summary
+                || session.checkpoint != before.checkpoint
+                || session
+                    .compaction_error
+                    .as_ref()
+                    .is_some_and(|last| now.saturating_sub(last.at_ms) < AUTO_COMPACTION_RETRY_MS)
+            {
+                return;
+            }
+            session.compaction_error = Some(compaction_error(error, now));
+            state.control_plane_persist_request()
+        };
+        if let Err(error) = persist.save().await {
+            warn!(%error, "automatic compaction cooldown could not be saved");
+        }
+        drop(transaction);
+        self.state.read().await.publish_session_event(
+            &before.agent_id,
+            &before.id,
+            LiveEventBody::SessionUpdated,
+        );
     }
 
     /// One compaction. The history-store read and the model call run with
@@ -315,6 +375,10 @@ impl AgentRunCoordinator {
                 return Err(NO_EARLIER_TURNS.to_string());
             }
             let mut turns = turns.into_owned();
+            let source_tokens = compaction_source_tokens(
+                previous.as_ref().map(|summary| summary.text.as_str()),
+                &turns,
+            );
             // Capture source identities/digests before document hydration changes
             // these prompt copies. The admitted current input never joins turns.
             let checkpoint_inputs = CheckpointInputs::capture(
@@ -353,6 +417,12 @@ impl AgentRunCoordinator {
                 }
             })
             .await?;
+            if run.is_some() && !automatic_summary_is_effective(source_tokens, &output.text) {
+                return Err(
+                    "The summary did not free enough context; automatic retry is delayed"
+                        .to_string(),
+                );
+            }
             let checkpoint = output
                 .checkpoint
                 .and_then(|draft| checkpoint_inputs.accept(draft, &through, now_millis()));
@@ -457,6 +527,15 @@ impl AgentRunCoordinator {
                             }),
                             now_ms,
                         );
+                        if rebuilt
+                            .as_ref()
+                            .is_some_and(|build| build.context.trimmed_through.is_some())
+                        {
+                            session.compaction_error = Some(compaction_error(
+                                "The summary left the context full; automatic retry is delayed",
+                                now_ms,
+                            ));
+                        }
                     }
                 }
                 Err(error) => session.compaction_error = Some(compaction_error(error, now_ms)),
