@@ -1303,6 +1303,24 @@ fn normal_windows_component(name: &str) -> bool {
 }
 
 #[cfg(windows)]
+fn shell_search_path(fixed: &[PathBuf], helpers: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut path = fixed
+        .iter()
+        .map(|directory| shell_process_path(directory))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Inherited helpers are optional. Protected WindowsApps ancestors, stale
+    // entries, or special filenames must not prevent the fixed shell launching.
+    // Omit them rather than weakening the filesystem identity checks.
+    let helpers = helpers
+        .iter()
+        .filter(|directory| directory.is_dir())
+        .filter_map(|directory| shell_process_path(directory).ok())
+        .collect::<Vec<_>>();
+    append_unique_directories(&mut path, &helpers);
+    Ok(path)
+}
+
+#[cfg(windows)]
 fn shell_path_identity(path: &Path) -> Result<(u64, u64), String> {
     use cap_fs_ext::MetadataExt;
     let metadata = if path.is_dir() {
@@ -1446,14 +1464,14 @@ pub(super) async fn launch_invocation(
     }
     #[cfg(not(windows))]
     path.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
-    append_unique_directories(&mut path, helper_dirs);
     #[cfg(windows)]
     if shell_mode {
-        path = path
-            .iter()
-            .map(|directory| shell_process_path(directory))
-            .collect::<Result<Vec<_>, _>>()?;
+        path = shell_search_path(&path, helper_dirs)?;
+    } else {
+        append_unique_directories(&mut path, helper_dirs);
     }
+    #[cfg(not(windows))]
+    append_unique_directories(&mut path, helper_dirs);
     native.env(
         "PATH",
         std::env::join_paths(path).map_err(|_| "Python runtime path is invalid")?,

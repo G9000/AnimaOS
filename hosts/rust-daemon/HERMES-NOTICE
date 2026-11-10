@@ -2,6 +2,13 @@ Hermes Agent attribution for agent_files/{disk,selection,scan}.rs, tools/memory.
 tools.rs memory descriptions and components/providers.rs memory curation guidance
 Source: https://github.com/NousResearch/hermes-agent
 
+Automatic compaction headroom and retry guards are behaviorally informed by
+agent/context_compressor.py, agent/context_compressor_tail.py and
+hermes_cli/config_defaults.py, inspected in the local public source checkout
+on 2026-11-10. The Rust implementation independently uses Anima's context
+selection, source-bound checkpoints, bounded summarizer, durable error state
+and live events. No Hermes Python runtime or private configuration is imported.
+
 Discord two-stage thread titles are behaviorally adapted from public Hermes
 revision bac34e9e9946c9c6a9ce7ce64efadd47f8fa375b:
 plugins/platforms/discord/adapter.py::_derive_auto_thread_name / rename_thread

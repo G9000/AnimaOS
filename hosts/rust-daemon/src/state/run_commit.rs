@@ -44,11 +44,13 @@ pub(crate) struct RunContextReport {
     /// newest dropped turn's last message, or the newest pruned message when
     /// the summary does not reach it (audit I5) and it is newer.
     pub(crate) trimmed_through: Option<String>,
-    /// Every hot message the selection left out, oldest first: compaction's
-    /// input, which takes it once compaction is decided (Task 12 ruling 4).
+    /// Hot messages the ordinary selection left out, oldest first.
     /// Pruned messages are not in the control plane; compaction reads them
     /// back from the history store.
     pub(crate) dropped: Vec<Message>,
+    /// Automatic summary candidates, including extra older selected exchanges
+    /// for headroom. Neither this nor its boundary changes the fallback runtime.
+    pub(crate) compaction_input: Vec<Message>,
 }
 
 impl DaemonState {
@@ -268,30 +270,30 @@ impl DaemonState {
                 .map_or(1.0, |permille| f64::from(permille) / 1000.0),
         );
         let budget = ContextBudget::for_config(config);
+        let history_budget_tokens = budget
+            .history_tokens(estimator.content_tokens(input))
+            .saturating_sub(
+                checkpoint_text
+                    .as_ref()
+                    .map_or(0, |text| estimator.text_tokens(text)),
+            )
+            .saturating_sub(
+                agent_conversations
+                    .as_ref()
+                    .map_or(0, |text| estimator.text_tokens(text)),
+            )
+            .saturating_sub(
+                (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil() as u64,
+            )
+            .saturating_sub(
+                project
+                    .as_ref()
+                    .map_or(0, |context| context.estimated_tokens()),
+            );
         let selection = select_context(
             &history,
             summary.as_ref(),
-            budget
-                .history_tokens(estimator.content_tokens(input))
-                .saturating_sub(
-                    checkpoint_text
-                        .as_ref()
-                        .map_or(0, |text| estimator.text_tokens(text)),
-                )
-                .saturating_sub(
-                    agent_conversations
-                        .as_ref()
-                        .map_or(0, |text| estimator.text_tokens(text)),
-                )
-                .saturating_sub(
-                    (files.estimated_tokens as f64 * estimator.calibration().max(1.0)).ceil()
-                        as u64,
-                )
-                .saturating_sub(
-                    project
-                        .as_ref()
-                        .map_or(0, |context| context.estimated_tokens()),
-                ),
+            history_budget_tokens,
             &estimator,
         );
         let project = project.map(|context| {
@@ -324,11 +326,32 @@ impl DaemonState {
                 .as_ref()
                 .map_or(0, |text| raw.text_tokens(text));
         let pruned = session.and_then(|session| uncovered_pruned_through(session, &history));
+        let trimmed_through = newest_left_out(selection.dropped.last(), pruned);
+        let compaction_input = if trimmed_through.is_some()
+            && crate::sessions::compaction::auto_compact_enabled(config)
+        {
+            // select_context transforms older image attachments for the prompt.
+            // Compaction/checkpoint provenance must use canonical messages.
+            let canonical_selected = selection
+                .messages
+                .first()
+                .and_then(|first| history.iter().position(|message| message.id == first.id))
+                .map_or(&[][..], |start| &history[start..]);
+            crate::sessions::compaction::compaction_input_with_headroom(
+                selection.dropped.clone(),
+                canonical_selected,
+                history_budget_tokens,
+                &estimator,
+            )
+        } else {
+            Vec::new()
+        };
         let context = RunContextReport {
             budget_tokens: budget.budget_tokens,
             raw_estimate_tokens,
-            trimmed_through: newest_left_out(selection.dropped.last(), pruned),
+            trimmed_through,
             dropped: selection.dropped,
+            compaction_input,
         };
         let mut runtime = AgentRuntime::from_snapshot(
             canonical.run_snapshot(selection.messages),

@@ -4,8 +4,8 @@
 
 use anima_core::primitives::now_millis;
 use anima_core::{
-    turn_starts, AgentConfig, Content, DataValue, Message, MessageRole, ModelAdapter,
-    ModelGenerateRequest,
+    turn_starts, AgentConfig, Content, ContextTokenEstimator, DataValue, Message, MessageRole,
+    ModelAdapter, ModelGenerateRequest,
 };
 
 use super::checkpoint::{
@@ -24,6 +24,11 @@ pub(crate) const COMPACTION_TEMPERATURE: f64 = 0.2;
 pub(crate) const AUTO_COMPACT_SETTING: &str = "autoCompact";
 /// The `run.progress` phase a run shows while it compacts.
 pub(crate) const COMPACTING_PHASE: &str = "compacting";
+/// A failed automatic attempt must not delay every arriving message.
+pub(crate) const AUTO_COMPACTION_RETRY_MS: u64 = 5 * 60 * 1_000;
+/// Retain a small recent tail, then let the summary carry older continuity.
+const MIN_RECENT_TAIL_TOKENS: u64 = 10_000;
+const MAX_RECENT_TAIL_TOKENS: u64 = 25_000;
 /// A manual compaction keeps this many newest turns out of the summary.
 pub(crate) const MANUAL_COMPACT_KEEP_TURNS: usize = 1;
 pub(crate) const MAX_KEEP_LATEST_EXCHANGES: usize = 100;
@@ -91,6 +96,54 @@ pub(crate) fn auto_compact_enabled(config: &AgentConfig) -> bool {
         .as_ref()
         .and_then(|settings| settings.additional.get(AUTO_COMPACT_SETTING))
         != Some(&DataValue::Bool(false))
+}
+
+/// Expand an overflowing selection's summary span without changing its runtime.
+/// Keep complete exchanges and at least the newest selected exchange, even if
+/// that exchange alone exceeds the target. The incoming user input is separate.
+pub(crate) fn compaction_input_with_headroom(
+    mut dropped: Vec<Message>,
+    selected: &[Message],
+    history_budget_tokens: u64,
+    estimator: &dyn ContextTokenEstimator,
+) -> Vec<Message> {
+    let target = (history_budget_tokens / 5)
+        .clamp(MIN_RECENT_TAIL_TOKENS, MAX_RECENT_TAIL_TOKENS)
+        .min(history_budget_tokens / 2);
+    let starts: Vec<usize> = turn_starts(selected).collect();
+    let mut keep_from = selected.len();
+    let mut retained = 0u64;
+    for (index, &start) in starts.iter().enumerate().rev() {
+        let end = starts.get(index + 1).copied().unwrap_or(selected.len());
+        let cost = selected[start..end]
+            .iter()
+            .map(|message| estimator.message_tokens(message))
+            .sum::<u64>();
+        if keep_from != selected.len() && retained.saturating_add(cost) > target {
+            break;
+        }
+        retained = retained.saturating_add(cost);
+        keep_from = start;
+    }
+    dropped.extend_from_slice(&selected[..keep_from]);
+    dropped
+}
+
+/// Estimate the context that a successful summary replaces, before document
+/// hydration or source-index formatting changes the summarizer's prompt copies.
+pub(crate) fn compaction_source_tokens(previous: Option<&str>, dropped: &[Message]) -> u64 {
+    let estimator = anima_service_adapters::ServiceTokenEstimator::new(1.0);
+    dropped.iter().fold(
+        previous.map_or(0, |text| estimator.text_tokens(text)),
+        |tokens, message| tokens.saturating_add(estimator.message_tokens(message)),
+    )
+}
+
+/// The source index may consume the transcript allowance; it does not reduce
+/// how much original conversation context the summary actually replaces.
+pub(crate) fn automatic_summary_is_effective(source_tokens: u64, summary: &str) -> bool {
+    let estimator = anima_service_adapters::ServiceTokenEstimator::new(1.0);
+    estimator.text_tokens(summary).saturating_mul(10) <= source_tokens.saturating_mul(9)
 }
 
 /// The agent's provider and model, without tools (spec §5.4).
@@ -537,6 +590,73 @@ mod tests {
             settings: Some(AgentSettings::default()),
             fallbacks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn automatic_tail_keeps_whole_exchanges_and_reclaims_a_larger_block() {
+        let selected: Vec<_> = (0..10)
+            .flat_map(|n| {
+                [
+                    message(&format!("u{n}"), MessageRole::User, &"u".repeat(4_000)),
+                    message(&format!("a{n}"), MessageRole::Assistant, &"a".repeat(4_000)),
+                ]
+            })
+            .collect();
+        let dropped = compaction_input_with_headroom(
+            vec![],
+            &selected,
+            30_000,
+            &anima_core::TokenEstimator::default(),
+        );
+        assert_eq!(
+            dropped.len(),
+            12,
+            "retain only four whole exchanges in the 10k tail"
+        );
+        assert_eq!(dropped.last().unwrap().id, "a5");
+        assert_eq!(selected[dropped.len()].role, MessageRole::User);
+    }
+
+    #[test]
+    fn automatic_tail_protects_an_oversized_latest_exchange_and_its_tools() {
+        let selected = vec![
+            message("u0", MessageRole::User, "earlier"),
+            message("a0", MessageRole::Assistant, "earlier reply"),
+            message("u1", MessageRole::User, "new task"),
+            message("call", MessageRole::Assistant, "calling tool"),
+            message("result", MessageRole::Tool, &"x".repeat(12_000)),
+            message("reply", MessageRole::Assistant, "latest reply"),
+        ];
+        let dropped = compaction_input_with_headroom(
+            vec![],
+            &selected,
+            4_000,
+            &anima_core::TokenEstimator::default(),
+        );
+        assert_eq!(
+            dropped.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["u0", "a0"]
+        );
+        let empty = compaction_input_with_headroom(
+            selected.clone(),
+            &[],
+            0,
+            &anima_core::TokenEstimator::default(),
+        );
+        assert_eq!(
+            empty, selected,
+            "no selected exchange must not lose the overflow"
+        );
+    }
+
+    #[test]
+    fn automatic_summary_savings_measure_replaced_context_and_previous_summary() {
+        let dropped = vec![message("u", MessageRole::User, &"x".repeat(30_000))];
+        let source = compaction_source_tokens(None, &dropped);
+        assert!(automatic_summary_is_effective(source, &"y".repeat(100)));
+        assert!(!automatic_summary_is_effective(source, &"y".repeat(30_000)));
+        let with_previous = compaction_source_tokens(Some(&"p".repeat(1_000)), &dropped);
+        assert!(with_previous > source);
     }
 
     #[test]

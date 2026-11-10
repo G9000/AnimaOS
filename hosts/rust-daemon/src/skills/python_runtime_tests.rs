@@ -134,6 +134,38 @@ fn helper_path_keeps_installed_tools_and_excludes_project_shims_and_duplicates()
 
 #[cfg(windows)]
 #[test]
+fn shell_search_path_skips_unusable_helpers_but_requires_fixed_directories() {
+    let private = crate::document_edits::store::test_support::private_directory();
+    let fixed = private.path().join("fixed");
+    let helper = private.path().join("helper with spaces");
+    let missing = private.path().join("missing");
+    let file = private.path().join("file");
+    std::fs::create_dir(&fixed).unwrap();
+    std::fs::create_dir(&helper).unwrap();
+    std::fs::write(&file, "not a search directory").unwrap();
+    // Verbatim Windows paths can name directories CMD cannot safely represent.
+    let reserved = private.path().canonicalize().unwrap().join("NUL");
+    std::fs::create_dir(&reserved).unwrap();
+    assert!(shell_process_path(&reserved).is_err());
+    let helpers = [
+        missing.clone(),
+        reserved,
+        file,
+        helper.clone(),
+        fixed.clone(),
+    ];
+    assert_eq!(
+        shell_search_path(std::slice::from_ref(&fixed), &helpers).unwrap(),
+        vec![
+            shell_process_path(&fixed).unwrap(),
+            shell_process_path(&helper).unwrap()
+        ]
+    );
+    assert!(shell_search_path(&[missing], &helpers).is_err());
+}
+
+#[cfg(windows)]
+#[test]
 fn shell_process_paths_use_normal_spellings_without_changing_filesystem_identity() {
     use std::path::{Component, Prefix};
     let private = crate::document_edits::store::test_support::private_directory();

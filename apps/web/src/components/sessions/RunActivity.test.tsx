@@ -306,6 +306,17 @@ describe('RunActivity', () => {
     );
     expect(screen.getByRole('status')).toBe(region);
     expect(region).toHaveTextContent('Compacting earlier messages…');
+
+    // Compaction has finished even though the main model has not emitted text.
+    rerender(
+      <RunActivity
+        agentName="Nova"
+        renderMessage={renderMessage}
+        live={{ ...emptyLiveRun(run), phase: 'responding' }}
+      />,
+    );
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toBeEmptyDOMElement();
   });
 
   it('shows the run’s approval cards inline and decides through the transcript actions', async () => {
