@@ -97,6 +97,183 @@ async function openExisting(user: UserEvent) {
 }
 
 describe('CompanionSetup', () => {
+  const savedWorkspace = {
+    configured: true,
+    workspace: {
+      rootPath: '/saved',
+      companyName: 'Saved',
+      mission: 'Keep me',
+      values: ['Care'],
+      hasAvatar: false,
+    },
+    defaultRoot: '/data/workspace',
+  };
+
+  it('starts a new agent in the panel without repeating the welcome page', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    renderSetup({ embedded: true });
+    expect(
+      screen.queryByRole('button', { name: 'Set it up' }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(button('Continue')).toBeEnabled());
+    expect(
+      screen.queryByRole('button', { name: 'Back' }),
+    ).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(button('Continue'));
+    await user.click(button('Continue'));
+    expect(
+      screen.getByRole('radio', { name: /Before every change/ }),
+    ).toBeVisible();
+  });
+
+  it('changes the shared folder explicitly while preserving workspace metadata', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    const validate = vi.spyOn(daemon, 'validateWorkspace').mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/new' },
+    });
+    const save = vi.spyOn(daemon, 'putWorkspace').mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/new' },
+    });
+    const create = vi.spyOn(daemon, 'createAgent');
+    renderSetup();
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Change folder'));
+    const input = screen.getByRole('textbox', { name: 'New home folder' });
+    await user.clear(input);
+    await user.type(input, '/new');
+    expect(button('Continue')).toBeDisabled();
+    expect(button('Back')).toBeDisabled();
+    await user.click(button('Check folder'));
+    expect(save).not.toHaveBeenCalled();
+    vi.mocked(daemon.getWorkspace)
+      .mockResolvedValueOnce(savedWorkspace)
+      .mockResolvedValue({
+        ...savedWorkspace,
+        workspace: { ...savedWorkspace.workspace, rootPath: '/new' },
+      });
+    await user.click(button('Use this folder'));
+    expect(
+      await screen.findByRole('textbox', { name: 'Home folder' }),
+    ).toHaveValue('/new');
+    expect(save).toHaveBeenCalledExactlyOnceWith({
+      rootPath: '/new',
+      companyName: 'Saved',
+      mission: 'Keep me',
+      values: ['Care'],
+    });
+    expect(validate).toHaveBeenCalledOnce();
+    expect(button('Continue')).toBeEnabled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('cancels a folder change without saving or creating an agent', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    const save = vi.spyOn(daemon, 'putWorkspace');
+    const lock = vi.fn();
+    renderSetup({ onWorkspaceEditingChange: lock });
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Change folder'));
+    expect(lock).toHaveBeenLastCalledWith(true);
+    await user.click(button('Cancel folder change'));
+    expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveValue(
+      '/saved',
+    );
+    expect(save).not.toHaveBeenCalled();
+    expect(button('Continue')).toBeEnabled();
+    expect(lock).toHaveBeenLastCalledWith(false);
+  });
+
+  it('requires a new check after editing a reviewed folder', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    vi.spyOn(daemon, 'validateWorkspace').mockResolvedValue(savedWorkspace);
+    const save = vi.spyOn(daemon, 'putWorkspace');
+    renderSetup();
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Change folder'));
+    await user.click(button('Check folder'));
+    expect(button('Use this folder')).toBeEnabled();
+    await user.type(
+      screen.getByRole('textbox', { name: 'New home folder' }),
+      '/different',
+    );
+    expect(button('Check folder')).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Use this folder' }),
+    ).not.toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a workspace switched elsewhere during review', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    vi.spyOn(daemon, 'validateWorkspace').mockResolvedValue(savedWorkspace);
+    const save = vi.spyOn(daemon, 'putWorkspace');
+    renderSetup();
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Change folder'));
+    await user.click(button('Check folder'));
+    vi.mocked(daemon.getWorkspace).mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/elsewhere' },
+    });
+    await user.click(button('Use this folder'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'workspace changed elsewhere',
+    );
+    expect(screen.getByRole('textbox', { name: 'Home folder' })).toHaveValue(
+      '/elsewhere',
+    );
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an uncertain folder save without replaying it', async () => {
+    vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(savedWorkspace);
+    vi.spyOn(daemon, 'validateWorkspace').mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/new' },
+    });
+    const save = vi
+      .spyOn(daemon, 'putWorkspace')
+      .mockRejectedValue(new Error('Connection lost'));
+    renderSetup();
+    const user = userEvent.setup();
+    await toAccess(user);
+    await user.click(button('Change folder'));
+    const input = screen.getByRole('textbox', { name: 'New home folder' });
+    await user.clear(input);
+    await user.type(input, '/new');
+    await user.click(button('Check folder'));
+    await user.click(button('Use this folder'));
+    expect(
+      await screen.findByRole('button', { name: 'Check saved folder' }),
+    ).toBeVisible();
+    expect(button('Continue')).toBeDisabled();
+    await user.click(button('Check saved folder'));
+    expect(button('Check saved folder')).toBeVisible();
+    expect(button('Continue')).toBeDisabled();
+    expect(save).toHaveBeenCalledOnce();
+    vi.mocked(daemon.getWorkspace).mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/canonical/new' },
+    });
+    // A newly created folder may be canonicalized by the actual save.
+    vi.mocked(daemon.validateWorkspace).mockResolvedValue({
+      ...savedWorkspace,
+      workspace: { ...savedWorkspace.workspace, rootPath: '/canonical/new' },
+    });
+    await user.click(button('Check saved folder'));
+    expect(
+      await screen.findByRole('textbox', { name: 'Home folder' }),
+    ).toHaveValue('/canonical/new');
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it('creates once and verifies optional M.O.T.H.E.R pairing before completing', async () => {
     vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const agent = { state: { id: 'new-companion', name: 'Anima' } };

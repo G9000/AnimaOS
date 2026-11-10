@@ -47,10 +47,14 @@ import { ResumeCard } from './ResumeCard';
 import { MicCheck, VoiceCheck } from './VoiceCheck';
 import { OnboardingScene } from './OnboardingScene';
 import { MotherOnboarding } from './MotherOnboarding';
+import { WorkspaceFolderChange } from './WorkspaceFolderChange';
 import './companion-onboarding.css';
 import { useResetOnChange } from '../../hooks/useResetOnChange';
 
 export interface CompanionSetupProps {
+  embedded?: boolean;
+  onWorkspaceEditingChange?(editing: boolean): void;
+  onWorkspaceChanged?(): void | Promise<void>;
   providers: DaemonProvider[] | null;
   providersError: string | null;
   retryProviders(): void | Promise<void>;
@@ -349,12 +353,15 @@ function Option({
 }
 
 export function CompanionSetup({
+  embedded = false,
+  onWorkspaceEditingChange,
+  onWorkspaceChanged,
   providers,
   providersError,
   retryProviders,
   onCreated,
 }: CompanionSetupProps) {
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>(embedded ? 'model' : 'welcome');
   const [name, setName] = useState('Anima');
   const [ownerName, setOwnerName] = useState('');
   const [personality, setPersonality] = useState<Personality>('balanced');
@@ -409,6 +416,11 @@ export function CompanionSetup({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [rootPath, setRootPath] = useState('');
+  const [changingWorkspace, setChangingWorkspace] = useState(false);
+  useEffect(
+    () => () => onWorkspaceEditingChange?.(false),
+    [onWorkspaceEditingChange],
+  );
   const rootPathRef = useRef('');
   const [preview, setPreview] = useState<{
     rootPath: string;
@@ -649,7 +661,11 @@ export function CompanionSetup({
     !!resolvedModel;
   const youReady = !!name.trim();
   const accessReady =
-    workspaceReady && !!rootPath.trim() && !browsing && !inspecting;
+    workspaceReady &&
+    !!rootPath.trim() &&
+    !browsing &&
+    !inspecting &&
+    !changingWorkspace;
   const ready = workspaceReady && modelReady && youReady && accessReady;
 
   const goTo = (next: Step) => {
@@ -883,9 +899,24 @@ export function CompanionSetup({
       </div>
       <p className="onboarding__hint">
         {workspace?.configured
-          ? 'anima already has a home on this server.'
+          ? 'The shared home folder for agents on this server.'
           : 'A folder on the machine running anima. Existing files are kept.'}
       </p>
+      {workspace?.configured && (
+        <WorkspaceFolderChange
+          workspace={workspace}
+          disabled={busy}
+          onEditingChange={(editing) => {
+            setChangingWorkspace(editing);
+            onWorkspaceEditingChange?.(editing);
+          }}
+          onChanged={(state) => {
+            setWorkspace(state);
+            changeRootPath(state.workspace?.rootPath ?? state.defaultRoot);
+            void onWorkspaceChanged?.();
+          }}
+        />
+      )}
       {folderNote && !preview && (
         <p role="status" className="onboarding__hint">
           {folderNote}
@@ -925,7 +956,7 @@ export function CompanionSetup({
     <button
       type="button"
       className="onboarding__link"
-      disabled={busy}
+      disabled={busy || changingWorkspace}
       onClick={() => goTo(target)}
     >
       {label}
@@ -1301,7 +1332,7 @@ export function CompanionSetup({
     );
     footer = (
       <>
-        {back('welcome')}
+        {!embedded && back('welcome')}
         {primary('Continue', modelReady)}
       </>
     );
@@ -1686,7 +1717,7 @@ export function CompanionSetup({
                 )}
               </div>
             </div>
-            {narrow && autonomyChoice}
+            {(narrow || embedded) && autonomyChoice}
           </>
         )}
       </>
@@ -1728,8 +1759,11 @@ export function CompanionSetup({
   }
 
   return (
-    <main className="onboarding" data-step={step}>
-      <span className="onboarding__wordmark">anima</span>
+    <main
+      className={`onboarding${embedded ? ' onboarding--embedded' : ''}`}
+      data-step={step}
+    >
+      {!embedded && <span className="onboarding__wordmark">anima</span>}
       <div className="onboarding__dock">
         <section className="onboarding__panel">
           <header>
@@ -1806,72 +1840,76 @@ export function CompanionSetup({
         </section>
         {extras}
       </div>
-      <OnboardingScene
-        step={step}
-        modelLabel={resolvedModel}
-        sourceLabel={selectedProvider?.label ?? ''}
-        rootPath={rootPath}
-      >
-        {step === 'you' && (
-          <div
-            className="ob-float ob-preview"
-            style={{ '--x': 968, '--y': 610, '--w': 300 } as CSSProperties}
-          >
-            <span className="onboarding__kicker">Preview</span>
-            <div className="ob-preview__message">
-              <span className="onboarding__avatar">
-                {avatar ? <img src={avatar.url} alt="" /> : null}
-              </span>
-              <div>
-                <strong style={{ fontSize: 13 }}>
-                  {name.trim() || 'Anima'}
-                </strong>
-                <p>{greeting(ownerName.trim(), personality)}</p>
+      {!embedded && (
+        <OnboardingScene
+          step={step}
+          modelLabel={resolvedModel}
+          sourceLabel={selectedProvider?.label ?? ''}
+          rootPath={rootPath}
+        >
+          {step === 'you' && (
+            <div
+              className="ob-float ob-preview"
+              style={{ '--x': 968, '--y': 610, '--w': 300 } as CSSProperties}
+            >
+              <span className="onboarding__kicker">Preview</span>
+              <div className="ob-preview__message">
+                <span className="onboarding__avatar">
+                  {avatar ? <img src={avatar.url} alt="" /> : null}
+                </span>
+                <div>
+                  <strong style={{ fontSize: 13 }}>
+                    {name.trim() || 'Anima'}
+                  </strong>
+                  <p>{greeting(ownerName.trim(), personality)}</p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        {step === 'access' && !narrow && !preview && (
-          <div
-            className="ob-float ob-approval"
-            style={{ '--x': 938, '--y': 540, '--w': 340 } as CSSProperties}
-          >
-            {autonomyChoice}
-          </div>
-        )}
-        {step === 'voice' && (
-          <>
-            {speakingVoice && (
-              <div
-                className="ob-float ob-playing"
-                style={{ '--x': 242, '--y': 684, '--w': 330 } as CSSProperties}
-              >
-                <div className="ob-playing__row">
-                  <span>✦ Speaking · {speakingVoice}</span>
+          )}
+          {step === 'access' && !narrow && !preview && (
+            <div
+              className="ob-float ob-approval"
+              style={{ '--x': 938, '--y': 540, '--w': 340 } as CSSProperties}
+            >
+              {autonomyChoice}
+            </div>
+          )}
+          {step === 'voice' && (
+            <>
+              {speakingVoice && (
+                <div
+                  className="ob-float ob-playing"
+                  style={
+                    { '--x': 242, '--y': 684, '--w': 330 } as CSSProperties
+                  }
+                >
+                  <div className="ob-playing__row">
+                    <span>✦ Speaking · {speakingVoice}</span>
+                  </div>
+                  <span className="ob-wave" aria-hidden="true">
+                    {Array.from({ length: 70 }, (_, index) => (
+                      <i
+                        key={index}
+                        style={
+                          {
+                            '--i': index,
+                            '--h': 4 + ((index * 37) % 17),
+                          } as CSSProperties
+                        }
+                      />
+                    ))}
+                  </span>
+                  <p>
+                    “Hi{ownerName.trim() ? ` ${ownerName.trim()}` : ''}. This is
+                    how I'll sound.”
+                  </p>
                 </div>
-                <span className="ob-wave" aria-hidden="true">
-                  {Array.from({ length: 70 }, (_, index) => (
-                    <i
-                      key={index}
-                      style={
-                        {
-                          '--i': index,
-                          '--h': 4 + ((index * 37) % 17),
-                        } as CSSProperties
-                      }
-                    />
-                  ))}
-                </span>
-                <p>
-                  “Hi{ownerName.trim() ? ` ${ownerName.trim()}` : ''}. This is
-                  how I'll sound.”
-                </p>
-              </div>
-            )}
-            <MicCheck />
-          </>
-        )}
-      </OnboardingScene>
+              )}
+              <MicCheck />
+            </>
+          )}
+        </OnboardingScene>
+      )}
     </main>
   );
 }

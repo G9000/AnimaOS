@@ -750,6 +750,7 @@ export function ViewHarness() {
   >({});
   const [resetError, setResetError] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [newAgentWorkspaceEditing, setNewAgentWorkspaceEditing] = useState(false);
   const [mcpBusy, setMcpBusy] = useState(false);
   const mcpBusyRef = useRef(false);
   const mcpPermissionsUnknownRef = useRef(false);
@@ -1656,7 +1657,7 @@ export function ViewHarness() {
   // page shows its part and keeps the save and reset guards.
   // A save or reset holds the window on its page; an external tool grant
   // keeps running when the owner leaves Connections.
-  const settingsBusy = savingSettings || resetting;
+  const settingsBusy = savingSettings || resetting || newAgentWorkspaceEditing;
   const settingsPage = (
     sections: Parameters<typeof SettingsPanel>[0]['sections'],
   ) => (
@@ -2077,6 +2078,9 @@ export function ViewHarness() {
           onSelectAgent={selectAgent}
           newAgent={
             <CompanionSetup
+              embedded
+              onWorkspaceEditingChange={setNewAgentWorkspaceEditing}
+              onWorkspaceChanged={refreshWorkspace}
               providers={providers}
               providersError={providersError}
               retryProviders={retryProviders}

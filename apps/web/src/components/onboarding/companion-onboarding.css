@@ -1304,6 +1304,126 @@ textarea.onboarding__input {
   }
 }
 
+/* Settings already supplies a window and heading. Use its actual content area,
+ * without the full-screen stage or a second floating window. */
+.onboarding.onboarding--embedded {
+  --ob-ink: var(--color-ink);
+  --ob-hair: var(--color-line);
+  --ob-muted: var(--color-ink-3);
+  display: block;
+  container-type: normal;
+  background: transparent;
+  overflow: visible;
+}
+
+.onboarding--embedded .onboarding__dock,
+.onboarding--embedded[data-step='voice'] .onboarding__dock {
+  position: relative;
+  align-items: stretch;
+  padding: 0;
+  overflow: visible;
+}
+
+.onboarding--embedded .onboarding__panel,
+.onboarding--embedded[data-step='voice'] .onboarding__panel {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12px 0 24px;
+  flex: none;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.onboarding--embedded .onboarding__body {
+  overflow: visible;
+}
+
+.onboarding--embedded .onboarding__heading h1 {
+  font-size: clamp(30px, 4vw, 42px);
+  overflow-wrap: anywhere;
+}
+
+.onboarding--embedded .onboarding__row {
+  flex-wrap: wrap;
+}
+
+.onboarding--embedded
+  :is(
+    .onboarding__heading p,
+    .onboarding__label,
+    .onboarding__hint,
+    .onboarding__input[readonly],
+    .onboarding__option-desc,
+    .onboarding__link,
+    .onboarding__icon,
+    .onboarding__field,
+    .onboarding__action,
+    .onboarding__play,
+    .ob-traits dt,
+    .ob-list[data-kind='cannot'] li
+  ) {
+  color: var(--color-ink-2);
+}
+
+.onboarding--embedded
+  :is(
+    .onboarding__trail,
+    .onboarding__trail i,
+    .onboarding__counter,
+    .onboarding__kicker,
+    .onboarding__mono:not(.onboarding__mono--lead),
+    .onboarding__group-label
+  ) {
+  color: var(--color-ink-3);
+}
+
+.onboarding--embedded .onboarding__trail [data-state='complete'] {
+  color: var(--color-ink-2);
+}
+
+.onboarding--embedded .onboarding__input {
+  background: var(--color-panel);
+}
+
+.onboarding--embedded .ob-bubble--reply {
+  background: var(--color-panel);
+}
+
+.onboarding--embedded .onboarding__button--secondary,
+.onboarding--embedded .onboarding__mark {
+  border-color: var(--color-line);
+}
+
+.onboarding--embedded .onboarding__choice[data-checked]::before {
+  display: none;
+}
+
+.onboarding--embedded .onboarding__choice:has(input:focus-visible) {
+  outline-color: var(--color-accent);
+}
+
+.onboarding--embedded .onboarding__choice[data-checked] .onboarding__mark {
+  border-color: var(--color-accent);
+}
+
+.onboarding--embedded .onboarding__square {
+  color: var(--color-ink-3);
+}
+
+.onboarding--embedded .onboarding__choice[data-checked] .onboarding__square,
+.onboarding--embedded .onboarding__tag {
+  color: var(--color-accent);
+}
+
+.onboarding--embedded .onboarding__button--primary {
+  background: var(--color-ink);
+  color: var(--color-panel);
+}
+
 .onboarding__template {
   margin: 0;
 }
