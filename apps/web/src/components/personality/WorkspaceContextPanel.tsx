@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { SaveWorkspaceContext, WorkspaceContextView } from '@animaos/sdk';
 import { daemon } from '../../lib/daemon-api';
+import { PenIcon } from '../PenIcon';
 
 type Props = {
   agentId: string;
@@ -97,95 +98,96 @@ function WorkspaceContextSettings({
   const connection = view?.connections.find(
     (candidate) => candidate.id === binding?.connectionId,
   );
+  const status = invalidBinding
+    ? 'Connection needs attention'
+    : binding?.mode === 'companion'
+      ? 'M.O.T.H.E.R companion'
+      : binding?.mode === 'shared'
+        ? 'Shared context only'
+        : 'Independent agent';
   return (
     <section
-      className="settings-group"
+      className="settings-item workspace-context-row"
       aria-labelledby={titleId}
       aria-busy={busy || (!view && !error)}
     >
-      <h3 className="settings-group-title" id={titleId}>
-        M.O.T.H.E.R
-      </h3>
-      {!view && !error && <p role="status">Loading workspace connection…</p>}
-      {error && (
-        <p role="alert" className="personality-error">
-          {error}
-        </p>
-      )}
-      {view && (
-        <>
-          <p>
-            <strong>
-              {invalidBinding
-                ? 'Connection needs attention'
-                : binding?.mode === 'companion'
-                  ? 'M.O.T.H.E.R companion'
-                  : binding?.mode === 'shared'
-                    ? 'Shared context only'
-                    : 'Independent agent'}
-            </strong>
+      <span className="settings-item-icon" aria-hidden="true">
+        <PenIcon name="plugs-connected-fill" size={16} />
+      </span>
+      <div className="settings-item-text">
+        <h3 id={titleId}>M.O.T.H.E.R</h3>
+        {!view && !error && <p role="status">Loading workspace connection…</p>}
+        {error && (
+          <p role="alert" className="personality-error">
+            {error}
           </p>
-          {invalidBinding ? (
-            <p className="settings-group-help">
-              This saved connection could not be read. Clear it here or
-              reconnect from M.O.T.H.E.R. The same chat keeps its saved local
-              personality.
+        )}
+        {view && (
+          <>
+            <p>
+              <strong className="workspace-context-status">{status}</strong>
             </p>
-          ) : binding?.mode === 'companion' ? (
-            <>
-              <p className="settings-group-help">
-                Uses your M.O.T.H.E.R personality. Primary memory stays in
-                M.O.T.H.E.R.
+            {invalidBinding ? (
+              <p>
+                This saved connection could not be read. Clear it here or
+                reconnect from M.O.T.H.E.R. The same chat keeps its saved local
+                personality.
               </p>
-              <p className="settings-group-help">
-                When unavailable, continue the same chat with this agent’s saved
-                personality. M.O.T.H.E.R memory stays offline until the
-                connection returns.
+            ) : binding?.mode === 'companion' ? (
+              <>
+                <p>
+                  Uses your M.O.T.H.E.R personality. Primary memory stays in
+                  M.O.T.H.E.R.
+                </p>
+                <p>
+                  When unavailable, continue the same chat with this agent’s
+                  saved personality. M.O.T.H.E.R memory stays offline until the
+                  connection returns.
+                </p>
+              </>
+            ) : binding?.mode === 'shared' ? (
+              <p>
+                Keeps its own personality and reads only the records allowed by
+                its M.O.T.H.E.R key.
               </p>
-            </>
-          ) : binding?.mode === 'shared' ? (
-            <p className="settings-group-help">
-              Keeps its own personality and reads only the records allowed by
-              its M.O.T.H.E.R key.
-            </p>
-          ) : (
-            <p className="settings-group-help">
-              Uses its own personality and memory. In M.O.T.H.E.R, choose
-              Connect AnimaOS to give this agent a companion or shared-context
-              key.
-            </p>
-          )}
-          {(binding || invalidBinding) && (
-            <>
-              <p className="settings-group-help">
-                {connection
-                  ? `${connection.label} · ${connection.state.replaceAll('_', ' ')}`
-                  : 'Connection unavailable'}{' '}
-                · Access is checked before each reply.
+            ) : (
+              <p>
+                Uses its own personality and memory. In M.O.T.H.E.R, choose
+                Connect AnimaOS to give this agent a companion or shared-context
+                key.
               </p>
-              <button
-                type="button"
-                className="personality-secondary"
-                disabled={disabled || busy || needsReload}
-                onClick={() => void disconnect()}
-              >
-                Use this agent independently
-              </button>
-              <p className="settings-group-help">
-                Change its role or shared records in M.O.T.H.E.R. Other agents
-                keep their own keys.
-              </p>
-            </>
-          )}
-        </>
-      )}
+            )}
+            {(binding || invalidBinding) && (
+              <>
+                <p>
+                  {connection
+                    ? `${connection.label} · ${connection.state.replaceAll('_', ' ')}`
+                    : 'Connection unavailable'}{' '}
+                  · Access is checked before each reply. Change its role or
+                  shared records in M.O.T.H.E.R. Other agents keep their own
+                  keys.
+                </p>
+                <button
+                  type="button"
+                  className="settings-item-action workspace-context-detach"
+                  disabled={disabled || busy || needsReload}
+                  onClick={() => void disconnect()}
+                >
+                  Use this agent independently
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
       <button
         type="button"
-        className="personality-secondary"
+        className="settings-item-action"
         disabled={disabled || busy}
         onClick={onReload}
+        aria-label="Reload connection"
       >
-        Reload connection
+        Reload
       </button>
     </section>
   );

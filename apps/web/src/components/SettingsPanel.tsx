@@ -1027,7 +1027,9 @@ export function SettingsPanel({
                       <strong>{name || agent.name}</strong>
                       <small>
                         {isMainAgent
-                          ? 'Calls you ' + (ownerName || 'Not set')
+                          ? ownerName
+                            ? 'Calls you ' + ownerName
+                            : "Doesn't know your name yet"
                           : bio || 'Helper agent'}
                       </small>
                     </div>

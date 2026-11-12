@@ -404,41 +404,69 @@
   border-color: var(--friendly-border);
 }
 
+/* Settings: one calm sheet under the top bar. Square-ish corners (4–6px),
+ * one left edge for the header and every page, and section headings that
+ * read as headings. Page roots built for standalone use lose their own
+ * padding here so content never jumps sideways between pages. */
 :root .scenic-shell.friendly-shell .settings-window {
   --color-ink: var(--friendly-ink);
   --color-ink-2: var(--friendly-muted);
   --color-ink-3: var(--friendly-muted);
-  inset: 0;
-  width: min(1040px, calc(100% - 48px));
-  height: min(760px, calc(100% - 32px));
-  margin: auto;
+  --settings-gutter: 40px;
+  --settings-radius: 6px;
+  --settings-control-radius: 4px;
+  inset: 8px 0 24px;
+  width: min(1240px, calc(100% - 48px));
+  height: auto;
+  margin: 0 auto;
   border: 1px solid var(--friendly-border);
-  border-radius: 20px;
+  border-radius: var(--settings-radius);
   background: var(--friendly-surface);
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.16);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.22);
   overflow: hidden;
 }
 
+/* Sidebar: title, agent, search stay put; only the list scrolls. */
 :root .scenic-shell.friendly-shell .settings-window-nav.studio-sidebar {
-  width: 224px;
-  padding: 24px 16px;
+  width: 248px;
+  gap: 10px;
+  padding: 22px 12px 12px;
+  overflow: hidden;
   background: var(--friendly-canvas);
   border-color: var(--friendly-border);
 }
 
 :root .scenic-shell.friendly-shell .settings-window-title {
-  margin-bottom: 16px;
-  font: 500 18px/1.4 var(--font-sans);
-  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font: 600 15px/1.4 var(--font-sans);
+  letter-spacing: -0.01em;
   color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-window-nav .studio-navigation {
+  flex: 1;
+  min-height: 0;
+  margin: 2px -12px 0;
+  padding: 0 12px 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-navigation:is(:hover, :focus-within) {
+  scrollbar-color: var(--friendly-border) transparent;
 }
 
 :root .scenic-shell.friendly-shell .settings-window-nav .studio-nav-group {
   margin: 0;
-  padding: 20px 10px 8px;
-  font: 500 12px/1.4 var(--font-sans);
-  letter-spacing: 0;
-  text-transform: none;
+  padding: 18px 10px 6px;
+  font: 500 10.5px/1.4 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--friendly-muted);
 }
 
@@ -452,22 +480,25 @@
   > div:not([hidden]) {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 :root .scenic-shell.friendly-shell .settings-advanced-toggle {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  min-height: 40px;
-  margin-top: 16px;
-  padding: 8px 10px;
+  min-height: 34px;
+  margin-top: 12px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: 9px;
+  border-top: 1px solid var(--friendly-border);
+  border-radius: 0;
   background: transparent;
   color: var(--friendly-muted);
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 10.5px/1.4 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   text-align: left;
   cursor: pointer;
 }
@@ -482,6 +513,7 @@
 :root .scenic-shell.friendly-shell .settings-advanced-toggle > svg {
   flex: none;
   transform: rotate(-90deg);
+  transition: transform 120ms ease;
 }
 
 :root
@@ -496,10 +528,14 @@
   cursor: default;
 }
 
+:root .scenic-shell.friendly-shell .settings-advanced-toggle:hover:not(:disabled) {
+  color: var(--friendly-ink);
+}
+
 :root .scenic-shell.friendly-shell .settings-search {
-  height: 38px;
+  height: 34px;
   border-color: var(--friendly-border);
-  border-radius: 10px;
+  border-radius: var(--settings-control-radius);
   background: var(--friendly-surface);
 }
 
@@ -521,10 +557,12 @@
   .scenic-shell.friendly-shell
   .settings-window-nav
   .studio-nav-item.is-row {
-  min-height: 38px;
-  border-radius: 9px;
+  position: relative;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: var(--settings-control-radius);
   color: var(--friendly-muted);
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 :root
@@ -533,34 +571,66 @@
   .studio-nav-item.is-row
   > svg {
   color: currentColor;
+  opacity: 0.8;
 }
 
 :root
   .scenic-shell.friendly-shell
-  .settings-advanced-toggle:hover:not(:disabled),
-:root
-  .scenic-shell.friendly-shell
   .settings-window-nav
-  .studio-nav-item.is-row:hover:not(:disabled),
+  .studio-nav-item.is-row:hover:not(:disabled) {
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+}
+
 :root
   .scenic-shell.friendly-shell
   .settings-window-nav
   .studio-nav-item.is-row[aria-current='page'] {
   background: var(--friendly-raised);
   color: var(--friendly-ink);
+  font-weight: 500;
 }
 
+/* The current page gets a short accent bar, not a tinted pill. */
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  inset: 9px auto 9px 0;
+  width: 2px;
+  background: var(--color-accent);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-nav
+  .studio-nav-item.is-row[aria-current='page']
+  > svg {
+  color: var(--color-accent);
+  opacity: 1;
+}
+
+:root .scenic-shell.friendly-shell .settings-window-nav .nav-badge {
+  border-radius: 2px;
+}
+
+/* Header: scope, title, description and close on one left edge, ruled off
+ * from the scrolling page below. */
 :root .scenic-shell.friendly-shell .settings-window-head {
-  padding: 30px 32px 22px;
-  border-color: var(--friendly-border);
+  gap: 16px;
+  padding: 26px var(--settings-gutter) 22px;
+  border-bottom: 1px solid var(--friendly-border);
 }
 
 :root .scenic-shell.friendly-shell .settings-window-head .studio-tool-button {
-  width: 40px;
-  height: 40px;
-  min-height: 40px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  margin: -4px -8px 0 0;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: var(--settings-control-radius);
   color: var(--friendly-muted);
 }
 
@@ -587,20 +657,87 @@
   color: var(--friendly-muted);
 }
 
-:root .scenic-shell.friendly-shell .settings-page-title {
-  font-size: 26px;
+:root .scenic-shell.friendly-shell .settings-scope strong {
   font-weight: 500;
-  letter-spacing: -0.04em;
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-page-title {
+  margin-top: 6px;
+  font: 400 32px/1.15 var(--font-serif);
+  letter-spacing: -0.01em;
+  color: var(--friendly-ink);
+}
+
+:root .scenic-shell.friendly-shell .settings-window .settings-profile-description {
+  max-width: 62ch;
+  margin-top: 6px;
+  font-size: 14px;
 }
 
 :root .scenic-shell.friendly-shell .settings-window-page {
-  padding: 0 32px 32px;
+  padding: 28px var(--settings-gutter) 48px;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--friendly-border) transparent;
 }
 
 :root .scenic-shell.friendly-shell .settings-window-page > .settings-form,
-:root .scenic-shell.friendly-shell .settings-window .appearance-settings {
+:root .scenic-shell.friendly-shell .settings-window .appearance-settings,
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-page
+  > :is(
+    .memory-page,
+    .approvals-page,
+    .connections-page,
+    .automations-page,
+    .work-page,
+    .files-page,
+    .skills-page,
+    .runtime-page,
+    .usage-page,
+    .system-page
+  ),
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-page
+  > .settings-health-page
+  > .system-page {
   padding: 0;
+}
+
+/* Everyday pages read best at a comfortable line length; data-heavy pages
+ * (usage, logs, files, work, health) keep the full width. */
+:root
+  .scenic-shell.friendly-shell
+  .settings-window-page
+  > :not(
+    .usage-page,
+    .system-page,
+    .files-page,
+    .work-page,
+    .settings-health-page
+  ) {
+  max-width: 880px;
+}
+
+/* Section headings: one size and weight on every page. */
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  :is(
+    .sk-section-title,
+    .settings-form .settings-group-title,
+    .settings-form.settings-profile .settings-group-title,
+    .runtime-section h2,
+    .usage-chart-section h3
+  ) {
+  margin: 0;
+  font: 600 15px/1.4 var(--font-sans);
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--friendly-ink);
 }
 
 :root
@@ -616,7 +753,7 @@
   ) {
   color: var(--friendly-muted);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 :root
@@ -624,12 +761,16 @@
   .settings-window
   :is(.sk-row-title, .settings-item-text strong, .settings-item-text h3) {
   font-size: 14px;
-  line-height: 1.5;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--friendly-ink);
 }
 
-:root .scenic-shell.friendly-shell .settings-window .field {
+/* Square-ish controls everywhere inside settings. */
+:root .scenic-shell.friendly-shell .settings-window .field,
+:root .scenic-shell.friendly-shell .settings-window select.field {
   border-color: var(--friendly-border);
-  border-radius: 9px;
+  border-radius: var(--settings-control-radius);
   background-color: var(--friendly-canvas);
   color: var(--friendly-ink);
 }
@@ -638,8 +779,21 @@
   border-color: var(--color-accent);
 }
 
-:root .scenic-shell.friendly-shell .settings-window .appearance-theme-card {
-  border-radius: 12px;
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  :is(
+    .ui-button,
+    .settings-item-action,
+    .personality-secondary,
+    .appearance-theme-card,
+    .settings-agent-picker-trigger,
+    .sk-card,
+    .settings-list,
+    [role='radiogroup'],
+    [role='group']
+  ) {
+  border-radius: var(--settings-control-radius);
 }
 
 :root
@@ -648,7 +802,6 @@
   .settings-agent-picker-trigger {
   min-height: 38px;
   border-color: var(--friendly-border);
-  border-radius: 10px;
   background: var(--friendly-surface);
 }
 
@@ -672,9 +825,41 @@
   text-transform: none;
 }
 
+/* M.O.T.H.E.R reads as one row in Identity, like SOUL.md below it. */
+:root .scenic-shell.friendly-shell .settings-window .workspace-context-row {
+  align-items: flex-start;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  .workspace-context-row
+  .settings-item-text
+  > p {
+  margin: 2px 0 0;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  .workspace-context-row
+  .workspace-context-status {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--friendly-ink);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  .workspace-context-row
+  .workspace-context-detach {
+  margin-top: 10px;
+}
+
 :root .scenic-shell.friendly-shell .settings-mobile-navigation {
   flex: none;
-  padding: 0 20px 20px;
+  padding: 0 20px 16px;
 }
 
 :root .scenic-shell.friendly-shell .settings-mobile-navigation select {
@@ -682,7 +867,7 @@
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid var(--friendly-border);
-  border-radius: 10px;
+  border-radius: 4px;
   background: var(--friendly-canvas);
   color: var(--friendly-ink);
   font: 400 14px/1.5 var(--font-sans);
@@ -734,12 +919,20 @@
     box-shadow: none;
   }
 
+  :root .scenic-shell.friendly-shell .settings-window {
+    inset: 0;
+  }
+
   :root .scenic-shell.friendly-shell .settings-window-head {
     padding: 20px;
   }
 
+  :root .scenic-shell.friendly-shell .settings-page-title {
+    font-size: 26px;
+  }
+
   :root .scenic-shell.friendly-shell .settings-window-page {
-    padding: 0 20px 24px;
+    padding: 20px 20px 32px;
   }
 }
 
