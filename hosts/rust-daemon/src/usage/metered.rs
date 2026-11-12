@@ -1,5 +1,5 @@
 //! Metering the secondary model calls (spec §11): titles, compaction, and
-//! profile and agency generation have no run record, so their callers wrap
+//! profile generation has no run record, so their callers wrap
 //! the adapter in [`Metered`] and hand what it kept to [`record_secondary`].
 
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
@@ -16,7 +16,7 @@ use super::{is_zero, usage_record, UsageCall, UsageSource};
 use crate::app::SharedDaemonState;
 use crate::history::HistoryError;
 
-/// The agent id of a call made for no agent (profile or agency generation
+/// The agent id of a call made for no agent (profile generation
 /// that names none).
 pub(crate) const USAGE_NO_AGENT: &str = "system";
 

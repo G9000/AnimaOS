@@ -14,7 +14,7 @@ function createAgentProfile(
 ): AgentProfile {
   return {
     name: 'manager',
-    role: 'orchestrator',
+    role: 'lead',
     bio: 'Keeps the swarm aligned.',
     lore: 'Was built to coordinate specialized agents.',
     adjectives: ['sharp', 'methodical'],
@@ -37,7 +37,7 @@ describe('AgentsPanel interactions', () => {
           createAgentProfile(),
           createAgentProfile({
             name: 'writer',
-            role: 'worker',
+            role: 'member',
             bio: 'Turns research into concise output.',
             adjectives: ['concise', 'fast'],
           }),
@@ -75,14 +75,14 @@ describe('AgentsPanel interactions', () => {
           createAgentProfile(),
           createAgentProfile({
             name: 'writer',
-            role: 'worker',
+            role: 'member',
             bio: 'Turns research into output.',
             adjectives: ['concise', 'fast'],
             topics: ['docs'],
           }),
           createAgentProfile({
             name: 'reviewer',
-            role: 'worker',
+            role: 'member',
             bio: 'Reviews output for correctness.',
             adjectives: ['sharp', 'thorough'],
             topics: ['qa'],

@@ -1,7 +1,6 @@
 use anima_core::{AgentConfig, Content, Message, MessageRole, ModelAdapter, ModelGenerateRequest};
 use serde_json::Value;
 
-use super::agencies::strip_code_fences;
 use super::contracts::{AgentProfileEnvelope, AgentProfileResponse, GenerateProfileRequest};
 use super::ApiError;
 use crate::app::SharedDaemonState;
@@ -237,6 +236,22 @@ pub(crate) async fn handle_generate_profile(
         ))
     })?;
     Ok(AgentProfileEnvelope { profile })
+}
+
+/// Model output without a surrounding Markdown code fence.
+pub(super) fn strip_code_fences(value: &str) -> String {
+    let mut text = value.trim().to_string();
+    if text.starts_with("```") {
+        if let Some(rest) = text.strip_prefix("```") {
+            let after = rest.trim_start_matches(|c: char| c.is_alphanumeric());
+            let after = after.strip_prefix('\n').unwrap_or(after);
+            text = after.to_string();
+        }
+        if let Some(rest) = text.strip_suffix("```") {
+            text = rest.trim_end().to_string();
+        }
+    }
+    text
 }
 
 #[cfg(test)]

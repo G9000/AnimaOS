@@ -8,8 +8,6 @@ import { PROVIDER_MODELS, type AgentDetail, type ChatMessage } from './types';
 import {
   createDaemonClient,
   type ActiveHours,
-  type AgencyGenerateRequest,
-  type AgencyGenerateResponse,
   type ApprovalDecisionInput,
   type ApprovalListOptions,
   type ApprovalPolicy,
@@ -536,20 +534,8 @@ export interface AgentProfile {
   system: string;
 }
 
-// UI drafts tolerate partial previews in tests; real generation uses the SDK wire contract.
-export type GeneratedAgency = Pick<AgencyGenerateResponse, 'name'> &
-  Partial<Omit<AgencyGenerateResponse, 'name' | 'agents'>> & {
-    agents: Array<
-      Pick<AgencyGenerateResponse['agents'][number], 'name' | 'role'> &
-        Partial<
-          Omit<AgencyGenerateResponse['agents'][number], 'name' | 'role'>
-        > & { provider?: string | null }
-    >;
-  };
-
 export interface BootstrapWorkspaceInput extends WorkspaceBootstrapRequest {
   workspace: WorkspaceConfigInput;
-  workers?: BootstrapWorkspaceInput['agent'][];
   agent: {
     name: string;
     presetId: string;
@@ -577,8 +563,8 @@ export interface WorkspaceInspectFound {
   mission?: string;
   /** Omitted when the yaml lacks values. */
   values?: string[];
-  orchestrator: WorkspaceInspectAgentPreview;
-  workers: WorkspaceInspectAgentPreview[];
+  /** The agents the workspace file lists, all equals. */
+  agents: WorkspaceInspectAgentPreview[];
   providerAvailable: boolean;
 }
 
@@ -586,8 +572,10 @@ export type WorkspaceInspectResponse = { found: false } | WorkspaceInspectFound;
 
 export interface WorkspaceResumeResponse {
   workspace: DaemonWorkspaceConfig;
-  orchestrator: DaemonSnapshot;
-  workers: DaemonSnapshot[];
+  /** Every agent the file lists, in file order, whether new or kept. */
+  agents: DaemonSnapshot[];
+  /** The workspace's system agent. */
+  steward: DaemonSnapshot;
   skipped: string[];
 }
 
@@ -1255,15 +1243,12 @@ export const daemon = {
       body: JSON.stringify(input),
     }),
 
-  generateAgency: (input: AgencyGenerateRequest): Promise<GeneratedAgency> =>
-    setupClient.agencies.generate(input),
-
   bootstrapWorkspace: (
     input: BootstrapWorkspaceInput,
   ): Promise<{
     workspace: DaemonWorkspaceConfig;
     agent: DaemonSnapshot;
-    workers?: DaemonSnapshot[];
+    steward: DaemonSnapshot;
   }> => setupClient.workspace.bootstrap(input),
 
   inspectWorkspace: async (
@@ -1273,8 +1258,7 @@ export const daemon = {
     if (!response.found) return { found: false };
     if (
       response.companyName === undefined ||
-      !response.orchestrator ||
-      !response.workers ||
+      !response.agents?.length ||
       response.providerAvailable === undefined
     )
       throw new Error(
@@ -1284,8 +1268,7 @@ export const daemon = {
       ...response,
       found: true,
       companyName: response.companyName,
-      orchestrator: response.orchestrator,
-      workers: response.workers,
+      agents: response.agents,
       providerAvailable: response.providerAvailable,
     };
   },
@@ -1329,6 +1312,9 @@ export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
   return {
     ...(state.config.settings?.additional?.workspaceRole === 'helper'
       ? { workspaceRole: 'helper' as const }
+      : {}),
+    ...(state.config.settings?.additional?.agentKind === 'steward'
+      ? { isSteward: true }
       : {}),
     id: state.id,
     name: state.name,

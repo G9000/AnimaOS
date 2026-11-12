@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgencyConfig, AgentDefinition } from './types.js';
+import type { AgentDefinition } from './types.js';
 import { agentSlug } from './diagram.js';
 
 export type SeedMemoryType = 'fact' | 'observation' | 'task_result' | 'reflection';
@@ -27,8 +27,7 @@ const VALID_TYPES = new Set<SeedMemoryType>([
 const DEFAULT_IMPORTANCE = 0.5;
 
 /**
- * Discover and parse `agents/<slug>/memory/seed.json` for every agent in the
- * agency. Returns one entry per agent that has a non-empty seed file.
+ * Discover and parse `agents/<slug>/memory/seed.json` for every given agent. Returns one entry per agent that has a non-empty seed file.
  *
  * Each entry in seed.json may look like:
  *   { "type": "fact", "content": "...", "importance": 0.8, "tags": ["..."] }
@@ -38,9 +37,8 @@ const DEFAULT_IMPORTANCE = 0.5;
  */
 export function loadSeedMemories(
   dir: string,
-  agency: AgencyConfig
+  allAgents: readonly AgentDefinition[]
 ): AgentSeedMemories[] {
-  const allAgents: AgentDefinition[] = [agency.orchestrator, ...agency.agents];
   const out: AgentSeedMemories[] = [];
 
   for (const agent of allAgents) {

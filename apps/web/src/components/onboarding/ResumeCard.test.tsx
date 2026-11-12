@@ -11,13 +11,13 @@ const PREVIEW: WorkspaceInspectFound = {
   companyName: 'Northwind Research',
   mission: 'Continuous equity research',
   values: ['cite sources'],
-  orchestrator: {
-    name: 'Anima',
-    bio: 'Keeps the team moving.',
-    provider: 'moonshot',
-    model: 'kimi-k2',
-  },
-  workers: [
+  agents: [
+    {
+      name: 'Anima',
+      bio: 'Keeps things moving.',
+      provider: 'moonshot',
+      model: 'kimi-k2',
+    },
     {
       name: 'Scout',
       bio: 'Finds things.',

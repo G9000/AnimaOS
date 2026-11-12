@@ -40,12 +40,6 @@ export type {
   StartBrowserProfileLoginInput,
 } from './browser.js';
 export type { UploadedAttachment } from './attachments.js';
-export { AgenciesClient } from './agencies.js';
-export type {
-  AgencyGenerateRequest,
-  AgencyGenerateResponse,
-  AgentDefinitionResponse,
-} from './agencies.js';
 export { WorkspaceClient } from './workspace.js';
 export type {
   WorkspaceConfigRequest,

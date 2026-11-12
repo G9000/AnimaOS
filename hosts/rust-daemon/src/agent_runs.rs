@@ -24,6 +24,7 @@ use crate::state::DaemonState;
 
 pub(crate) mod action_receipts;
 mod admission;
+mod agent_team;
 pub(crate) use admission::{
     AdmitMode, RoomReservation, RunReservation, WaitingBudgetUnit, MAX_QUEUED_RUNS_PER_AGENT,
 };
@@ -123,6 +124,7 @@ fn is_coordination_tool(name: &str) -> bool {
         "list_workspace_agents"
             | "delegate_to_agent"
             | "spawn_helper"
+            | "dissolve_helpers"
             | "spawn_helper_async"
             | "spawn_helpers"
             | "wait_helper_runs"
@@ -537,16 +539,29 @@ impl AgentRunCoordinator {
             .agents
             .get(&owner)
             .is_some_and(|agent| talks_with_agents(agent.config()));
+        // The steward looks after the workspace, so it sees every agent.
+        let owner_is_steward = guard
+            .agents
+            .get(&owner)
+            .is_some_and(|agent| crate::steward::is_steward_config(agent.config()));
         let agents: Vec<_> = guard.agent_states().iter().filter(|agent| {
             agent.id == viewer
                 || agent.id == owner
                 || helper_parent(agent) == Some(owner.as_str())
+                || (owner_is_steward && is_standalone_config(&agent.config))
                 || (owner_talks && talks_with_agents(&agent.config))
         }).map(|agent| {
             let uses_identity = identity_owner.is_some_and(|owner| {
                 agent.id == owner || helper_parent(agent) == Some(owner)
             });
-            serde_json::json!({"id": agent.id, "name": agent.name, "role": if helper_parent(agent).is_some() { "helper" } else { "agent" }, "parentAgentId": helper_parent(agent), "description": if uses_identity { None } else { agent.config.bio.as_ref() }, "status": agent.status.as_str()})
+            let role = if helper_parent(agent).is_some() {
+                "helper"
+            } else if crate::steward::is_steward_config(&agent.config) {
+                "steward"
+            } else {
+                "agent"
+            };
+            serde_json::json!({"id": agent.id, "name": agent.name, "role": role, "parentAgentId": helper_parent(agent), "talksWithAgents": talks_with_agents(&agent.config), "description": if uses_identity { None } else { agent.config.bio.as_ref() }, "status": agent.status.as_str()})
         }).collect();
         serde_json::json!({"totalAgents": agents.len(), "agents": agents}).to_string()
     }

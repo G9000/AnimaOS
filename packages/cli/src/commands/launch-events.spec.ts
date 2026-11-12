@@ -1,3 +1,4 @@
+import { formAgency } from '../agency/loader.js';
 import { describe, expect, it } from 'vitest';
 
 import type { IEventBus } from '@animaos/tui';
@@ -31,37 +32,29 @@ function createRecordingBus(): {
 }
 
 describe('launch event bridge', () => {
-  const agency = {
+  const workspace = {
     name: 'launch-fixture',
     description: '',
     model: 'gpt-5.4',
     provider: 'openai',
-    strategy: 'round-robin' as const,
-    orchestrator: {
-      name: 'manager',
-      bio: 'Coordinate',
-      system: 'Coordinate',
-    },
     agents: [
-      {
-        name: 'worker-a',
-        bio: 'Work',
-        system: 'Work',
-      },
+      { name: 'manager', bio: 'Coordinate', system: 'Coordinate' },
+      { name: 'worker-a', bio: 'Work', system: 'Work' },
     ],
   };
+  const agency = formAgency(workspace, { strategy: 'round-robin' });
 
   it('derives stable display agents from an agency config', () => {
     expect(launchDisplayAgents(agency)).toEqual([
       {
         id: 'launch:manager',
         name: 'manager',
-        role: 'orchestrator',
+        role: 'lead',
       },
       {
         id: 'launch:worker-a',
         name: 'worker-a',
-        role: 'worker',
+        role: 'member',
       },
     ]);
   });

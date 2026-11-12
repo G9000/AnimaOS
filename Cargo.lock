@@ -157,6 +157,7 @@ dependencies = [
  "anima-process",
  "anima-schedule",
  "anima-service-adapters",
+ "anima-steward",
  "anima-swarm",
  "anima-worktree",
  "async-trait",
@@ -403,6 +404,13 @@ dependencies = [
  "tokio-rustls",
  "webpki-roots",
  "zeroize",
+]
+
+[[package]]
+name = "anima-steward"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

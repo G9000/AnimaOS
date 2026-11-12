@@ -96,9 +96,13 @@ pub(crate) fn select(
     // Talking with other agents is an owner grant on both sides; a helper
     // never talks with agents.
     let talks = super::talks_with_agents(config);
+    // The steward reads the whole roster without talking with agents.
+    let steward = crate::steward::is_steward_config(config);
     tools.retain(|tool| {
-        tool.name != "spawn_helper"
-            && (talks || !super::PEER_TOOLS.contains(&tool.name.as_str()))
+        !matches!(tool.name.as_str(), "spawn_helper" | "dissolve_helpers")
+            && (talks
+                || !super::PEER_TOOLS.contains(&tool.name.as_str())
+                || (steward && tool.name == "list_workspace_agents"))
             && (scope.can_delegate
                 || !matches!(
                     tool.name.as_str(),
@@ -146,7 +150,7 @@ pub(crate) fn select(
         add(&["core_memory"]);
     }
     if scope.can_delegate {
-        add(&["spawn_helper"]);
+        add(&["spawn_helper", "dissolve_helpers"]);
     }
     if discovery(config, scope) {
         add(&["search_tools", "describe_tool"]);
@@ -165,6 +169,7 @@ pub(crate) fn select(
                 | "compact_chat"
                 | "export_chat"
                 | "change_look"
+                | "set_agent_talk"
                 | "manage_mcp"
                 | "import_github_skill"
                 | "manage_skill_runtime"
@@ -186,6 +191,7 @@ pub(crate) fn select(
             "compact_chat",
             "export_chat",
             "change_look",
+            "set_agent_talk",
             "show_result",
             "list_results",
         ] {

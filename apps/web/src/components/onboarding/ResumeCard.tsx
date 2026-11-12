@@ -55,27 +55,16 @@ export function ResumeCard({
       <div className="rounded-2xl border border-line bg-white/[0.02] p-4">
         <p className={labelCls}>Agents</p>
         <ul className="space-y-2">
-          <li className="flex items-baseline justify-between gap-3">
-            <span className="text-sm font-medium text-ink">
-              {preview.orchestrator.name}{' '}
-              <span className="rounded-full border border-line px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-ink-3">
-                Main agent
-              </span>
-            </span>
-            <span className="text-xs text-ink-3">
-              {preview.orchestrator.provider} / {preview.orchestrator.model}
-            </span>
-          </li>
-          {preview.workers.map((worker) => (
+          {preview.agents.map((agent) => (
             <li
-              key={worker.name}
+              key={agent.name}
               className="flex items-baseline justify-between gap-3"
             >
               <span className="text-sm font-medium text-ink">
-                {worker.name}
+                {agent.name}
               </span>
               <span className="text-xs text-ink-3">
-                {worker.provider} / {worker.model}
+                {agent.provider} / {agent.model}
               </span>
             </li>
           ))}

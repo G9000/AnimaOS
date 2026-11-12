@@ -440,12 +440,11 @@ describe('CompanionSetup', () => {
       found: true,
       companyName: 'My workspace',
       mission: 'Continue my work',
-      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
-      workers: [],
+      agents: [{ name: 'Ari', provider: 'openai', model: 'gpt-test' }],
       providerAvailable: true,
     });
     const resume = vi.spyOn(daemon, 'resumeWorkspace').mockResolvedValue({
-      orchestrator: { state: { id: 'ari' } },
+      agents: [{ state: { id: 'ari' } }],
     } as never);
     const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
     const created = vi.fn();
@@ -474,12 +473,11 @@ describe('CompanionSetup', () => {
     vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
       found: true,
       companyName: 'Saved',
-      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
-      workers: [],
+      agents: [{ name: 'Ari', provider: 'openai', model: 'gpt-test' }],
       providerAvailable: false,
     });
     const resume = vi.spyOn(daemon, 'resumeWorkspace').mockResolvedValue({
-      orchestrator: { state: { id: 'ari' } },
+      agents: [{ state: { id: 'ari' } }],
     } as never);
     renderSetup({ providers: [] });
     const user = userEvent.setup();
@@ -498,8 +496,7 @@ describe('CompanionSetup', () => {
     vi.mocked(daemon.inspectWorkspace).mockResolvedValue({
       found: true,
       companyName: 'Saved',
-      orchestrator: { name: 'Ari', provider: 'openai', model: 'gpt-test' },
-      workers: [],
+      agents: [{ name: 'Ari', provider: 'openai', model: 'gpt-test' }],
       providerAvailable: true,
     });
     const bootstrap = vi.spyOn(daemon, 'bootstrapWorkspace');
@@ -859,12 +856,11 @@ describe('CompanionSetup', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('creates exactly one companion using the daemon workspace directory, with no agency generation', async () => {
+  it('creates exactly one companion using the daemon workspace directory', async () => {
     vi.spyOn(daemon, 'getWorkspace').mockResolvedValue(freshWorkspace);
     const create = vi
       .spyOn(daemon, 'bootstrapWorkspace')
       .mockResolvedValue({ agent: { state: { id: 'main' } } } as never);
-    const generate = vi.spyOn(daemon, 'generateAgency');
     const created = vi.fn();
     renderSetup({ onCreated: created });
     const user = userEvent.setup();
@@ -888,7 +884,6 @@ describe('CompanionSetup', () => {
       expect.arrayContaining(['browser_navigate', 'browser_observe']),
     );
     expect(create.mock.calls[0][0].agent.tools).not.toContain('browser_act');
-    expect(generate).not.toHaveBeenCalled();
     expect(created).toHaveBeenCalledOnce();
   });
 

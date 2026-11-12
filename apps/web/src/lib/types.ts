@@ -23,6 +23,8 @@ export interface ChatMessage {
 
 export interface AgentDetail {
   workspaceRole?: 'helper';
+  /** The workspace's system agent: always there, cannot be deleted. */
+  isSteward?: boolean;
   id: string;
   name: string;
   bio?: string | null;

@@ -1,7 +1,6 @@
-mod agencies;
 mod agent_avatar;
 mod agent_files;
-mod agents;
+pub(crate) mod agents;
 mod approvals;
 mod attachments;
 mod automation_events;
@@ -47,6 +46,7 @@ pub(crate) mod owner_test_support;
 mod paired_devices;
 mod queue_controls;
 mod standing_intents;
+mod workspace_file;
 pub(crate) use multipart::MAX_FORM_HEADER_BYTES;
 mod account_workflow_rules;
 mod chat_capabilities;
@@ -115,7 +115,6 @@ use crate::schedules::SchedulerService;
 
 pub(crate) use self::contracts::data_value_to_json;
 use self::contracts::{
-    AgencyCreateRequest, AgencyCreateResponse, AgencyGenerateRequest, AgencyGenerateResponse,
     AgentConfigRequest, AgentEnvelope, AgentProfileEnvelope, AgentRecentMemoriesQuery,
     AgentRelationshipCreateRequest, AgentRelationshipQuery, AgentRelationshipResponse,
     AgentRelationshipsEnvelope, AgentUpdateRequest, AgentsEnvelope, DeleteResponse, ErrorBody,
@@ -178,8 +177,6 @@ use crate::runtime_model::provider_summaries_with_pool;
         goals::change_status,
         goals::goal_jobs,
         ready_entry,
-        create_agency_entry,
-        generate_agency_entry,
         create_memory_entry,
         memories_search_entry,
         search_alias_entry,
@@ -374,7 +371,6 @@ use crate::runtime_model::provider_summaries_with_pool;
         (name = "attachments", description = "Owner-authorized session uploads and downloads"),
         (name = "voice", description = "Explicit owner-scoped ephemeral transcription drafts and selected reply speech"),
         (name = "health", description = "Daemon health endpoints"),
-        (name = "agencies", description = "Agency generation and team drafting"),
         (name = "agents", description = "Agent management and execution"),
         (name = "memories", description = "Memory storage and search"),
         (name = "swarms", description = "Swarm creation, execution, and streaming"),
@@ -1543,10 +1539,6 @@ fn router_with_services_with_policies_and_integrations(
             "/api/workspace/resume",
             axum::routing::post(resume_workspace_entry),
         )
-        .route(
-            "/api/agencies/create",
-            axum::routing::post(create_agency_entry),
-        )
         .route("/api/memories", axum::routing::post(create_memory_entry))
         .route("/api/memories/search", get(memories_search_entry))
         .route("/api/search", get(search_alias_entry))
@@ -1776,10 +1768,6 @@ fn router_with_services_with_policies_and_integrations(
             config.request_timeout,
         ));
     let run_routes = Router::new()
-        .route(
-            "/api/agencies/generate",
-            axum::routing::post(generate_agency_entry),
-        )
         .route(
             "/api/agents/{agent_id}/messages",
             axum::routing::post(peer_message_entry),
@@ -2050,61 +2038,6 @@ async fn metrics_entry(State(state): State<AppState>) -> AxumResponse {
         body,
     )
         .into_response()
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/agencies/create",
-    tag = "agencies",
-    request_body = AgencyCreateRequest,
-    responses(
-        (status = 201, description = "Agency workspace created", body = AgencyCreateResponse),
-        (status = 400, description = "Invalid request, invalid model output, or invalid workspace path", body = ErrorBody)
-    )
-)]
-async fn create_agency_entry(State(state): State<AppState>, request: AxumRequest) -> AxumResponse {
-    match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match agencies::handle_create_agency(
-            body,
-            &state.daemon,
-            &state.agent_runs.control_plane_transactions(),
-        )
-        .await
-        {
-            Ok(response) => json_response(StatusCode::CREATED, &response),
-            Err(error) => error.into_response(),
-        },
-        Err(response) => response,
-    }
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/agencies/generate",
-    tag = "agencies",
-    request_body = AgencyGenerateRequest,
-    responses(
-        (status = 200, description = "Generated agency draft", body = AgencyGenerateResponse),
-        (status = 400, description = "Invalid request or model output", body = ErrorBody)
-    )
-)]
-async fn generate_agency_entry(
-    State(state): State<AppState>,
-    request: AxumRequest,
-) -> AxumResponse {
-    match read_limited_body(request, state.config.max_request_bytes).await {
-        Ok(body) => match agencies::handle_generate_agency(
-            body,
-            &state.daemon,
-            &state.agent_runs.control_plane_transactions(),
-        )
-        .await
-        {
-            Ok(response) => json_response(StatusCode::OK, &response),
-            Err(error) => error.into_response(),
-        },
-        Err(response) => response,
-    }
 }
 
 #[utoipa::path(
@@ -2516,7 +2449,7 @@ async fn get_agent_entry(
         (status = 200, description = "Agent deleted; its messages still waiting to start are cancelled (agent_deleted)", body = DeleteResponse),
         (status = 403, description = "Local owner authorization required", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
-        (status = 409, description = "The agent has a run in progress", body = ErrorBody)
+        (status = 409, description = "The agent has a run in progress, or is the workspace steward", body = ErrorBody)
     )
 )]
 async fn delete_agent_entry(
@@ -2539,6 +2472,18 @@ async fn delete_agent_entry(
         );
     }
     let _deleting = state.agent_runs.begin_agent_deletion(&agent_id);
+    if state
+        .daemon
+        .read()
+        .await
+        .agents
+        .get(&agent_id)
+        .is_some_and(|agent| crate::steward::is_steward_config(agent.config()))
+    {
+        return jobs::no_store(
+            ApiError::conflict("The workspace steward cannot be deleted").into_response(),
+        );
+    }
     if state
         .daemon
         .read()
@@ -3253,7 +3198,7 @@ async fn put_workspace_avatar_entry(
     tag = "workspace",
     request_body = WorkspaceBootstrapRequest,
     responses(
-        (status = 201, description = "Workspace, agency file, and orchestrator agent created atomically", body = WorkspaceBootstrapResponse),
+        (status = 201, description = "Workspace, anima.yaml, its first agent and the steward created atomically", body = WorkspaceBootstrapResponse),
         (status = 400, description = "Invalid workspace, agent, or tool request", body = ErrorBody),
         (status = 409, description = "Workspace already bootstrapped", body = ErrorBody),
         (status = 503, description = "Bootstrap could not be completed; all state was rolled back", body = ErrorBody)
@@ -3431,7 +3376,7 @@ async fn workspace_file_download_entry(
     request_body = WorkspaceResumeRequest,
     responses(
         (status = 201, description = "Workspace adopted; existing agents kept, missing agents created atomically", body = WorkspaceResumeResponse),
-        (status = 400, description = "Missing folder/anima.yaml or invalid agency file", body = ErrorBody),
+        (status = 400, description = "Missing folder/anima.yaml or invalid workspace file", body = ErrorBody),
         (status = 409, description = "Workspace already configured for a different root, or every agent from anima.yaml already exists", body = ErrorBody),
         (status = 503, description = "Resume could not be persisted; all state was rolled back", body = ErrorBody)
     )
@@ -3590,44 +3535,6 @@ mod tests {
     struct SlowModelAdapter {
         delay: Duration,
         calls: AtomicUsize,
-    }
-
-    struct SlowAgencyModelAdapter;
-
-    #[async_trait]
-    impl ModelAdapter for SlowAgencyModelAdapter {
-        fn single_attempt_contract(&self) -> bool {
-            true
-        }
-        fn generated_usage_is_complete(&self, _: &anima_core::ModelGenerateResponse) -> bool {
-            true
-        }
-        fn provider(&self) -> &str {
-            "slow-agency-test"
-        }
-
-        async fn generate(
-            &self,
-            _config: &AgentConfig,
-            _request: &ModelGenerateRequest,
-        ) -> Result<ModelGenerateResponse, String> {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            Ok(ModelGenerateResponse {
-                content: Content {
-                    text: r#"{"agents":[{"name":"Manager","role":"orchestrator"},{"name":"Researcher","role":"worker"}]}"#.into(),
-                    attachments: None,
-                    metadata: None,
-                },
-                tool_calls: None,
-                usage: TokenUsage {
-                    prompt_tokens: 1,
-                    completion_tokens: 1,
-                    total_tokens: 2,
-                    ..TokenUsage::default()
-                },
-                stop_reason: ModelStopReason::End,
-            })
-        }
     }
 
     struct GateFirstModelAdapter {
@@ -4962,54 +4869,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn agency_generation_uses_bounded_run_timeout() {
-        for (request_timeout, run_timeout, expected) in [
-            (
-                Duration::from_millis(1),
-                Duration::from_secs(2),
-                StatusCode::OK,
-            ),
-            (
-                Duration::from_secs(2),
-                Duration::from_millis(1),
-                StatusCode::REQUEST_TIMEOUT,
-            ),
-        ] {
-            let state = Arc::new(RwLock::new(DaemonState::with_model_adapter(Arc::new(
-                SlowAgencyModelAdapter,
-            ))));
-            let app = router(
-                Arc::clone(&state),
-                DaemonConfig {
-                    request_timeout,
-                    run_request_timeout: run_timeout,
-                    ..DaemonConfig::default()
-                },
-            );
-            let response = app
-                .oneshot(
-                    crate::routes::owner_test_support::authenticate(Request::builder())
-                        .method("POST")
-                        .uri("/api/agencies/generate")
-                        .header("content-type", "application/json")
-                        .body(Body::from(
-                            r#"{"name":"Studio","description":"Research topics","teamSize":2}"#,
-                        ))
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(response.status(), expected);
-            if expected == StatusCode::OK {
-                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-                let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-                assert_eq!(body["teamSize"], 2);
-                assert_eq!(body["agents"][0]["role"], "orchestrator");
-            }
-            assert!(state.read().await.list_agents().is_empty());
-        }
-    }
     #[tokio::test(flavor = "multi_thread")]
     async fn run_routes_respect_run_request_timeout() {
         let entered = Arc::new(Semaphore::new(0));

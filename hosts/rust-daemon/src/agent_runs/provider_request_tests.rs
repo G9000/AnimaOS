@@ -35,6 +35,8 @@ const SELECTED: &[&str] = &[
 ];
 // Peer tools are an owner grant, not something every run adds.
 const AUGMENTED: &[&str] = &[
+    "dissolve_helpers",
+    "set_agent_talk",
     "rename_chat",
     "import_github_skill",
     "manage_skill_runtime",

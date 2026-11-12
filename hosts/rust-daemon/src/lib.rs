@@ -62,6 +62,7 @@ mod skills;
 mod speech;
 mod standing_intents;
 mod state;
+pub(crate) mod steward;
 pub mod system;
 mod task_regressions;
 mod threat_scan;

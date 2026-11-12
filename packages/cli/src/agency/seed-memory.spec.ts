@@ -8,25 +8,14 @@ import {
   resolveAgentIds,
   seedDaemonMemories,
 } from './seed-memory.js';
-import type { AgencyConfig } from './types.js';
+import type { AgentDefinition } from './types.js';
 
-function makeAgency(): AgencyConfig {
-  return {
-    name: 'Test Agency',
-    description: 'fixture',
-    model: 'gpt-4o',
-    provider: 'openai',
-    strategy: 'supervisor',
-    orchestrator: {
-      name: 'Sarah Chen',
-      bio: 'orchestrator',
-      system: 'lead',
-    },
-    agents: [
-      { name: 'Marcus Rivera', bio: 'worker', system: 'execute' },
-      { name: 'Aiko Tanaka', bio: 'worker', system: 'execute' },
-    ],
-  };
+function makeAgency(): AgentDefinition[] {
+  return [
+    { name: 'Sarah Chen', bio: 'researcher', system: 'research' },
+    { name: 'Marcus Rivera', bio: 'writer', system: 'execute' },
+    { name: 'Aiko Tanaka', bio: 'editor', system: 'execute' },
+  ];
 }
 
 function writeSeed(dir: string, slug: string, body: unknown) {

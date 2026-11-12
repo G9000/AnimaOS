@@ -42,7 +42,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    assert_eq!(actual.len(), 382, "complete registered operation count");
+    // The two persistent-agency routes were removed when agencies became temporary.
+    assert_eq!(actual.len(), 380, "complete registered operation count");
     let task_verification_additions = [
         ("GET", "/api/agents/{agent_id}/runs/{run_id}/outcome"),
         (
@@ -783,7 +784,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                     && !reminder_additions.contains(&(method.as_str(), path.as_str()))
             })
             .count(),
-        193,
+        191,
         "all pre-M58 operations remain present"
     );
     let additions = [
@@ -850,7 +851,7 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
                 && !browser_profile_additions.contains(&(method.as_str(), path.as_str()))
                 && !runtime_capability_additions.contains(&(method.as_str(), path.as_str())))
             .count(),
-        188,
+        186,
         "pre-M49 registered operations remain present"
     );
     assert_eq!(

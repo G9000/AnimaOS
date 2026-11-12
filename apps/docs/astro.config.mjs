@@ -100,7 +100,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { label: 'Overview', link: '/cli/' },
-            { label: 'Agency Workflow', link: '/cli/workspaces/' },
+            { label: 'Workspace Workflow', link: '/cli/workspaces/' },
             { label: 'Daemon Commands', link: '/cli/daemon/' },
             { label: 'Providers & Environment', link: '/cli/providers/' },
           ],

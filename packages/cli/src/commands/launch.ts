@@ -13,7 +13,7 @@ import {
   type TaskResult,
 } from '@animaos/sdk';
 import type { IEventBus, TuiSessionApi } from '@animaos/tui';
-import { loadAgency, agencyExists } from '../agency/loader.js';
+import { formAgency, loadWorkspace, workspaceExists } from '../agency/loader.js';
 import {
   loadSeedMemories,
   resolveAgentIds,
@@ -47,6 +47,11 @@ export interface LaunchOptions {
   dir: string;
   apiKey?: string;
   tui: boolean;
+  /** The agent that coordinates this launch only; default the first agent. */
+  lead?: string;
+  strategy?: string;
+  /** Supervisor only: how many members the lead may run at once. */
+  maxParallelDelegations?: number;
 }
 
 interface DaemonTuiRuntime {
@@ -656,10 +661,11 @@ function agentDefToDaemonConfig(
   };
 }
 
-function saveAgency(dir: string, agency: AgencyConfig) {
+/** Saves profile edits back to the workspace file; the agency itself is never saved. */
+function saveWorkspace(dir: string, agency: AgencyConfig) {
   writeFileSync(
     join(dir, 'anima.yaml'),
-    dump(agency, { lineWidth: 120, noRefs: true })
+    dump(agency.workspace, { lineWidth: 120, noRefs: true })
   );
 }
 
@@ -678,8 +684,8 @@ function buildDaemonSwarmConfig(
       agent, agency.model, provider, resolveDaemonModelSettings(provider, apiKey)
     );
   };
-  const manager = configureAgent(agency.orchestrator);
-  const workers = agency.agents.map(configureAgent);
+  const manager = configureAgent(agency.lead);
+  const workers = agency.members.map(configureAgent);
 
   return {
     swarmConfig: {
@@ -826,7 +832,7 @@ async function executeDaemonLaunchCommand(
 ): Promise<void> {
   try {
     const client = deps.client ?? createCliDaemonClient();
-    const seeds = loadSeedMemories(opts.dir, agency);
+    const seeds = loadSeedMemories(opts.dir, [agency.lead, ...agency.members]);
     const swarmSession = createDaemonSwarmSession(
       client,
       agency,
@@ -848,7 +854,7 @@ async function executeDaemonLaunchCommand(
         });
 
       console.log(
-        `${agency.name} — ${agency.strategy} strategy — ${agency.model}`
+        `${agency.name} — temporary agency led by ${agency.lead.name} — ${agency.strategy} strategy — ${agency.model}`
       );
       if (daemonWarning) {
         printPlainTextDaemonWarning(daemonWarning);
@@ -948,7 +954,7 @@ async function executeDaemonLaunchCommand(
     }
     const swarm = await swarmSession.getSwarm();
     console.log(
-      `Launching "${agency.name}" with strategy "${agency.strategy}" and model ${agency.model}...\n`
+      `Forming a temporary agency in "${agency.name}", led by ${agency.lead.name} for this task (strategy "${agency.strategy}", model ${agency.model})...\n`
     );
     const execution = await client.swarms
       .run(swarm.id, { text: task })
@@ -994,7 +1000,7 @@ async function executeDaemonTuiLaunchCommand(
   try {
     const client = deps.client ?? createCliDaemonClient();
     const tuiSessionClient = requireTuiSessionClient(client);
-    const seeds = loadSeedMemories(opts.dir, agency);
+    const seeds = loadSeedMemories(opts.dir, [agency.lead, ...agency.members]);
     const swarmSession = createDaemonSwarmSession(
       client,
       agency,
@@ -1014,20 +1020,18 @@ async function executeDaemonTuiLaunchCommand(
     const pollDaemonWarning = createDaemonWarningPoller(client);
 
     const agentProfiles: AgentProfile[] = [
-      toProfile(agency.orchestrator, 'orchestrator'),
-      ...agency.agents.map((agent) => toProfile(agent, 'worker')),
+      toProfile(agency.lead, 'lead'),
+      ...agency.members.map((agent) => toProfile(agent, 'member')),
     ];
 
     function onSaveAgent(profile: AgentProfile) {
-      if (profile.name === agency.orchestrator.name) {
-        Object.assign(agency.orchestrator, profile);
-      } else {
-        const idx = agency.agents.findIndex(
-          (agent) => agent.name === profile.name
-        );
-        if (idx >= 0) Object.assign(agency.agents[idx], profile);
-      }
-      saveAgency(opts.dir, agency);
+      // Lead and members are the workspace file's own agent records.
+      const { role: _role, ...fields } = profile;
+      const agent = agency.workspace.agents.find(
+        (candidate) => candidate.name === profile.name
+      );
+      if (agent) Object.assign(agent, fields);
+      saveWorkspace(opts.dir, agency);
       swarmSession.invalidate();
     }
 
@@ -1163,7 +1167,7 @@ export async function executeLaunchCommand(
   opts: LaunchOptions,
   deps: LaunchDeps = {}
 ): Promise<void> {
-  if (!agencyExists(opts.dir)) {
+  if (!workspaceExists(opts.dir)) {
     console.error(
       `Error: No anima.yaml found in "${opts.dir}". Run "animaos create" first.`
     );
@@ -1173,7 +1177,11 @@ export async function executeLaunchCommand(
 
   let agency: AgencyConfig;
   try {
-    agency = loadAgency(opts.dir);
+    agency = formAgency(loadWorkspace(opts.dir), {
+      lead: opts.lead,
+      strategy: opts.strategy,
+      maxParallelDelegations: opts.maxParallelDelegations,
+    });
   } catch (error) {
     console.error('Error:', getErrorMessage(error));
     process.exitCode = 1;
@@ -1189,7 +1197,9 @@ export async function executeLaunchCommand(
 }
 
 export const launchCommand = new Command('launch')
-  .description('Launch an agent swarm from an anima.yaml config')
+  .description(
+    'Form a temporary agency from the agents in anima.yaml for one task; it dissolves when the launch ends'
+  )
   .argument(
     '[task]',
     'The task to execute (omit to open interactive TUI session)'
@@ -1197,6 +1207,9 @@ export const launchCommand = new Command('launch')
   .option('-d, --dir <dir>', 'Directory containing anima.yaml', '.')
   .option('--api-key <key>', 'API key override')
   .option('--no-tui', 'Disable TUI, use plain text output')
-  .action((task: string | undefined, opts: LaunchOptions) =>
-    executeLaunchCommand(task, opts)
+  .option('--lead <name>', 'Agent that coordinates this launch only (default: the first agent)')
+  .option('-s, --strategy <strategy>', 'How the team works: supervisor, dynamic or round-robin', 'supervisor')
+  .option('--max-parallel <n>', 'Supervisor only: members the lead may run at once', (value: string) => Number.parseInt(value, 10))
+  .action((task: string | undefined, opts: LaunchOptions & { maxParallel?: number }) =>
+    executeLaunchCommand(task, { ...opts, maxParallelDelegations: opts.maxParallel })
   );

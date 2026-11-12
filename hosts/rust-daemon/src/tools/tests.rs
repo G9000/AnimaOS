@@ -909,6 +909,8 @@ fn registry_defines_every_registered_tool_schema() {
         ("execute_code", &["code"][..], &["reset"][..]),
         ("list_workspace_agents", &[][..], &[][..]),
         ("delegate_to_agent", &["agent_id", "task"][..], &[][..]),
+        ("set_agent_talk", &["agent", "enabled"][..], &[][..]),
+        ("dissolve_helpers", &[][..], &[][..]),
         (
             "spawn_helper",
             &["name", "task"][..],

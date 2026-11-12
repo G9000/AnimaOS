@@ -17,7 +17,8 @@ import { extractResultText, toRuntimeTaskResult } from './utils.js';
 export interface LaunchDisplayAgent {
   id: string;
   name: string;
-  role: 'orchestrator' | 'worker';
+  /** The lead coordinates this launch only; the rest are members. */
+  role: 'lead' | 'member';
 }
 
 export function launchDisplayAgents(
@@ -25,14 +26,14 @@ export function launchDisplayAgents(
 ): LaunchDisplayAgent[] {
   return [
     {
-      id: `launch:${agency.orchestrator.name}`,
-      name: agency.orchestrator.name,
-      role: 'orchestrator',
+      id: `launch:${agency.lead.name}`,
+      name: agency.lead.name,
+      role: 'lead',
     },
-    ...agency.agents.map((agent) => ({
+    ...agency.members.map((agent) => ({
       id: `launch:${agent.name}`,
       name: agent.name,
-      role: 'worker' as const,
+      role: 'member' as const,
     })),
   ];
 }
@@ -257,7 +258,7 @@ export async function relayLaunchSwarmEvent(
   const result = normalizeResult(data.result);
 
   for (const agent of agents) {
-    if (agent.role === 'worker') {
+    if (agent.role === 'member') {
       await eventBus.emit(
         'agent:terminated',
         {
@@ -320,7 +321,7 @@ function resolveDisplayAgent(
     agents.find((agent) => agent.name === payload.agentName) ?? {
       id: payload.agentId,
       name: payload.agentName,
-      role: 'worker',
+      role: 'member',
     }
   );
 }

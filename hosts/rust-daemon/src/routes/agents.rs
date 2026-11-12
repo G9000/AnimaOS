@@ -756,6 +756,7 @@ mod tests {
                 "write_file",
                 "bash",
                 "spawn_helper",
+                "dissolve_helpers",
                 "rename_chat",
                 "import_github_skill",
                 "manage_skill_runtime",
@@ -765,6 +766,7 @@ mod tests {
                 "compact_chat",
                 "export_chat",
                 "change_look",
+                "set_agent_talk",
                 "show_result",
                 "list_results"
             ]

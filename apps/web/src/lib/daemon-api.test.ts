@@ -540,13 +540,13 @@ describe('daemon workspace requests', () => {
           companyName: 'Acme',
           mission: 'Ship it',
           values: ['rigor', 'care'],
-          orchestrator: {
-            name: 'Anima',
-            bio: 'A precise operator.',
-            provider: 'anthropic',
-            model: 'claude-sonnet-4',
-          },
-          workers: [
+          agents: [
+            {
+              name: 'Anima',
+              bio: 'A precise operator.',
+              provider: 'anthropic',
+              model: 'claude-sonnet-4',
+            },
             { name: 'Scout', provider: 'anthropic', model: 'claude-sonnet-4' },
           ],
           providerAvailable: true,
@@ -561,8 +561,7 @@ describe('daemon workspace requests', () => {
     expect(result.found).toBe(true);
     if (!result.found) throw new Error('Expected an existing workspace');
     expect(result.companyName).toBe('Acme');
-    expect(result.orchestrator.name).toBe('Anima');
-    expect(result.workers).toHaveLength(1);
+    expect(result.agents.map((agent) => agent.name)).toEqual(['Anima', 'Scout']);
     expect(result.providerAvailable).toBe(true);
   });
 
@@ -572,12 +571,9 @@ describe('daemon workspace requests', () => {
         JSON.stringify({
           found: true,
           companyName: 'Acme',
-          orchestrator: {
-            name: 'Anima',
-            provider: 'anthropic',
-            model: 'claude-sonnet-4',
-          },
-          workers: [],
+          agents: [
+            { name: 'Anima', provider: 'anthropic', model: 'claude-sonnet-4' },
+          ],
           providerAvailable: false,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -592,17 +588,30 @@ describe('daemon workspace requests', () => {
     expect(result.companyName).toBe('Acme');
     expect(result.mission).toBeUndefined();
     expect(result.values).toBeUndefined();
-    expect(result.workers).toEqual([]);
+    expect(result.agents).toHaveLength(1);
+  });
+
+  it('inspectWorkspace refuses a found preview without agents', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({ found: true, companyName: 'Acme', agents: [], providerAvailable: true }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await expect(daemon.inspectWorkspace('/srv/company')).rejects.toThrow(/incomplete/);
   });
 
   it('resumeWorkspace posts rootPath and returns the envelope', async () => {
-    const orchestrator = snapshot();
+    const agent = snapshot();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
           workspace: workspaceState.workspace,
-          orchestrator,
-          workers: [],
+          agents: [agent],
+          steward: snapshot(),
           skipped: ['Scout'],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -620,8 +629,7 @@ describe('daemon workspace requests', () => {
       }),
     );
     expect(result.workspace.companyName).toBe('Acme');
-    expect(result.orchestrator.state.id).toBe('agent-1');
-    expect(result.workers).toEqual([]);
+    expect(result.agents[0].state.id).toBe('agent-1');
     expect(result.skipped).toEqual(['Scout']);
   });
 });

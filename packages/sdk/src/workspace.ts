@@ -43,13 +43,13 @@ export interface BootstrapAgentRequest {
 export interface WorkspaceBootstrapRequest {
   workspace: WorkspaceConfigRequest;
   agent: BootstrapAgentRequest;
-  workers?: BootstrapAgentRequest[];
 }
 
 export interface WorkspaceBootstrapResponse {
   workspace: WorkspaceConfigResponse;
   agent: AgentSnapshot;
-  workers: AgentSnapshot[];
+  /** The workspace's system agent, created with it. */
+  steward: AgentSnapshot;
 }
 
 export interface WorkspaceInspectAgentPreview {
@@ -64,8 +64,8 @@ export interface WorkspaceInspectResponse {
   companyName?: string;
   mission?: string;
   values?: string[];
-  orchestrator?: WorkspaceInspectAgentPreview;
-  workers?: WorkspaceInspectAgentPreview[];
+  /** The agents the workspace file lists, all equals. */
+  agents?: WorkspaceInspectAgentPreview[];
   providerAvailable?: boolean;
 }
 
@@ -75,8 +75,10 @@ export interface WorkspaceResumeRequest {
 
 export interface WorkspaceResumeResponse {
   workspace: WorkspaceConfigResponse;
-  orchestrator: AgentSnapshot;
-  workers: AgentSnapshot[];
+  /** Every agent the file lists, in file order, whether new or kept. */
+  agents: AgentSnapshot[];
+  /** The workspace's system agent. */
+  steward: AgentSnapshot;
   skipped: string[];
 }
 

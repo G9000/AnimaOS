@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use anima_core::{AgentConfig, AgentRuntimeSnapshot, ToolDescriptor};
 use atomicwrites::{AllowOverwrite, AtomicFile};
 
-use super::agencies::{load_agency_yaml, AgencyYamlAgent, AgencyYamlConfig};
 use super::contracts::{
     AgentRuntimeSnapshotResponse, WorkspaceBootstrapRequest, WorkspaceBootstrapResponse,
     WorkspaceConfigRequest, WorkspaceConfigResponse, WorkspaceInspectAgentPreview,
     WorkspaceInspectResponse, WorkspaceResponse, WorkspaceResumeRequest, WorkspaceResumeResponse,
 };
 use super::profile::profile_preset;
+use super::workspace_file::{load_workspace_file, WorkspaceFile, WorkspaceFileAgent};
 use super::ApiError;
 use crate::app::SharedDaemonState;
 use crate::control_plane_store::WorkspaceConfig;
@@ -158,8 +158,7 @@ pub(crate) async fn handle_inspect_workspace(
         company_name: None,
         mission: None,
         values: None,
-        orchestrator: None,
-        workers: None,
+        agents: None,
         provider_available: None,
     };
     let trimmed = root_path.trim();
@@ -174,14 +173,14 @@ pub(crate) async fn handle_inspect_workspace(
     if !yaml_path.is_file() {
         return Ok(not_found());
     }
-    let config = load_agency_yaml(&yaml_path)?;
+    let file = load_workspace_file(&yaml_path)?;
     // Mirror the resume contract up front: a workspace without a mission or
     // description cannot be adopted, so report it as malformed here instead
     // of showing a resume card that would always fail at resume time.
-    let mission = config
+    let mission = file
         .mission
         .clone()
-        .unwrap_or_else(|| config.description.clone());
+        .unwrap_or_else(|| file.description.clone());
     if mission.trim().is_empty() {
         return Err(ApiError::bad_request_static(
             "anima.yaml: mission or description is required",
@@ -191,39 +190,30 @@ pub(crate) async fn handle_inspect_workspace(
     // unconfigured providers (and the deterministic adapter) report false.
     // Every agent must be ready, including explicit per-agent overrides.
     let providers = provider_summaries_with_pool(provider_keys);
-    let provider_available = std::iter::once(&config.orchestrator)
-        .chain(&config.agents)
-        .all(|agent| {
-            let provider = agent.effective_provider(&config.provider);
-            providers.iter().any(|summary| {
-                summary.id == provider && summary.configured && summary.id != "deterministic"
-            })
-        });
-    let preview = |agent: &AgencyYamlAgent, include_bio: bool| WorkspaceInspectAgentPreview {
-        name: agent.name.clone(),
-        bio: if include_bio {
-            Some(agent.bio.clone())
-        } else {
-            None
-        },
-        provider: agent.effective_provider(&config.provider),
-        model: agent.model.clone().unwrap_or_else(|| config.model.clone()),
-    };
+    let provider_available = file.agents.iter().all(|agent| {
+        let provider = agent.effective_provider(&file.provider);
+        providers.iter().any(|summary| {
+            summary.id == provider && summary.configured && summary.id != "deterministic"
+        })
+    });
     Ok(WorkspaceInspectResponse {
         found: true,
-        company_name: Some(config.name.clone()),
-        mission: config
+        company_name: Some(file.name.clone()),
+        mission: file
             .mission
             .clone()
-            .or_else(|| Some(config.description.clone()))
+            .or_else(|| Some(file.description.clone()))
             .filter(|mission| !mission.trim().is_empty()),
-        values: config.values.clone(),
-        orchestrator: Some(preview(&config.orchestrator, true)),
-        workers: Some(
-            config
-                .agents
+        values: file.values.clone(),
+        agents: Some(
+            file.agents
                 .iter()
-                .map(|agent| preview(agent, false))
+                .map(|agent| WorkspaceInspectAgentPreview {
+                    name: agent.name.clone(),
+                    bio: Some(agent.bio.clone()).filter(|bio| !bio.trim().is_empty()),
+                    provider: agent.effective_provider(&file.provider),
+                    model: agent.model.clone().unwrap_or_else(|| file.model.clone()),
+                })
                 .collect(),
         ),
         provider_available: Some(provider_available),
@@ -308,7 +298,7 @@ fn validate_document_workspace(
 
 fn prepare_bootstrap_agent(
     agent: super::contracts::BootstrapAgentRequest,
-) -> Result<(AgentConfig, AgencyYamlAgent), ApiError> {
+) -> Result<(AgentConfig, WorkspaceFileAgent), ApiError> {
     let name = agent.name.trim().to_string();
     if name.is_empty() {
         return Err(ApiError::bad_request_static("agent.name is required"));
@@ -348,8 +338,7 @@ fn prepare_bootstrap_agent(
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
     };
-    // The CLI agency loader requires a truthy orchestrator bio, so a blank or
-    // omitted bio is rejected rather than serialized as an empty field.
+    // A blank or omitted bio is rejected rather than saved as an empty field.
     let bio = non_blank(agent.bio)
         .ok_or_else(|| ApiError::bad_request_static("agent.bio is required"))?;
     let style = non_blank(agent.style);
@@ -392,16 +381,19 @@ fn prepare_bootstrap_agent(
         fallbacks: Vec::new(),
     };
 
-    let mut yaml = AgencyYamlAgent::orchestrator(
+    let yaml = WorkspaceFileAgent {
         name,
         bio,
+        lore: None,
+        knowledge: None,
+        topics: None,
+        adjectives,
         style,
         system,
-        Some(model),
-        Some(tool_names),
-        adjectives,
-    );
-    yaml.provider = provider;
+        model: Some(model),
+        provider,
+        tools: Some(tool_names),
+    };
     Ok((config, yaml))
 }
 
@@ -422,39 +414,15 @@ pub(crate) async fn handle_bootstrap_workspace(
         validate_document_workspace(&guard, None)?;
     }
 
-    if request.workers.len() > 9 {
-        return Err(ApiError::bad_request_static(
-            "workers must contain at most 9 agents",
-        ));
-    }
-    let mut names = std::collections::BTreeSet::new();
-    let mut team = std::iter::once(request.agent)
-        .chain(request.workers)
-        .map(prepare_bootstrap_agent)
-        .collect::<Result<Vec<_>, _>>()?;
-    let provider = team[0].0.provider.clone();
-    for (config, yaml) in &mut team {
-        if !names.insert(config.name.to_lowercase()) {
-            return Err(ApiError::bad_request(format!(
-                "duplicate agent name '{}'",
-                config.name
-            )));
-        }
-        if config.provider.is_none() {
-            config.provider = provider.clone();
-            yaml.provider = provider.clone();
-        }
-    }
+    let (config, agent_yaml) = prepare_bootstrap_agent(request.agent)?;
     {
         let guard = state.read().await;
-        for (config, _) in &team {
-            guard
-                .tool_registry
-                .validate_tools(config.tools.as_deref())
-                .map_err(ApiError::bad_request)?;
-        }
+        guard
+            .tool_registry
+            .validate_tools(config.tools.as_deref())
+            .map_err(ApiError::bad_request)?;
     }
-    // Validate the complete team before creating even the workspace directory.
+    // Validate everything before creating even the workspace directory.
     let mut workspace_request = request.workspace;
     workspace_request.validate_only = true;
     let prospective = validate_workspace_request(&workspace_request)?;
@@ -471,58 +439,49 @@ pub(crate) async fn handle_bootstrap_workspace(
             yaml_path.display()
         )));
     }
-    let model = team[0].0.model.clone();
-    let mut snapshots = Vec::with_capacity(team.len());
+    let provider = config.provider.clone();
+    let model = config.model.clone();
+    let mut snapshots = Vec::with_capacity(2);
     let persist_request = {
         let mut guard = state.write().await;
         // Route callers hold the control-plane transaction for this whole handler.
-        // Recheck under the write lock as well, before creating any team members.
+        // Recheck under the write lock as well, before creating any agent.
         if guard.workspace.is_some() {
             return Err(ApiError::conflict("workspace is already bootstrapped"));
         }
         validate_document_workspace(&guard, Some(&workspace_config.root_path))?;
         validate_document_workspace(&guard, None)?;
-        for (config, _) in &team {
-            match guard.create_agent(config.clone()) {
-                Ok(snapshot) => {
-                    guard.start_free(&snapshot.state.id);
-                    snapshots.push(snapshot)
-                }
-                Err(error) => {
-                    for snapshot in &snapshots {
-                        guard.remove_agent(&snapshot.state.id);
-                    }
-                    return Err(ApiError::bad_request(error));
-                }
+        let agent = guard.create_agent(config).map_err(ApiError::bad_request)?;
+        guard.start_free(&agent.state.id);
+        snapshots.push(agent);
+        // Every workspace gets its steward together with its first agent.
+        match crate::steward::ensure_steward(&mut guard, provider.as_deref(), Some(&model)) {
+            Ok((steward, _)) => snapshots.push(steward),
+            Err(error) => {
+                guard.remove_agent(&snapshots[0].state.id);
+                return Err(ApiError::bad_request(error));
             }
         }
         guard.set_workspace(Some(workspace_config.clone()));
         guard.control_plane_persist_request()
     };
 
-    // Write anima.yaml at the workspace root after the entire team exists,
+    // Write anima.yaml at the workspace root after the agents exist,
     //    atomically (tmp file + rename within the same directory, i.e. the
     //    same filesystem). On IO failure roll back the state write so
     //    bootstrap stays atomic.
-    let (_, lead_yaml) = team.remove(0);
-    let mut agency_yaml = AgencyYamlConfig::single_orchestrator(
-        workspace_config.company_name.clone(),
-        workspace_config.mission.clone(),
-        workspace_config.values.clone(),
-        provider.unwrap_or_default(),
+    let file = WorkspaceFile {
+        name: workspace_config.company_name.clone(),
+        description: workspace_config.mission.clone(),
+        mission: Some(workspace_config.mission.clone()),
+        values: (!workspace_config.values.is_empty()).then(|| workspace_config.values.clone()),
         model,
-        lead_yaml,
-    );
-    agency_yaml.agents = team
-        .into_iter()
-        .map(|(_, mut yaml)| {
-            yaml.position = None;
-            yaml
-        })
-        .collect();
+        provider: provider.unwrap_or_default(),
+        agents: vec![agent_yaml],
+    };
     let tmp_path = workspace_config.root_path.join("anima.yaml.tmp");
-    let write_result = serde_yaml::to_string(&agency_yaml)
-        .map_err(|error| format!("failed to serialize agency yaml: {error}"))
+    let write_result = serde_yaml::to_string(&file)
+        .map_err(|error| format!("failed to serialize anima.yaml: {error}"))
         .and_then(|yaml| {
             std::fs::write(&tmp_path, yaml)
                 .and_then(|()| std::fs::rename(&tmp_path, &yaml_path))
@@ -543,15 +502,12 @@ pub(crate) async fn handle_bootstrap_workspace(
     Ok(WorkspaceBootstrapResponse {
         workspace: config_response(&workspace_config),
         agent: AgentRuntimeSnapshotResponse::from(&snapshots[0]),
-        workers: snapshots[1..]
-            .iter()
-            .map(AgentRuntimeSnapshotResponse::from)
-            .collect(),
+        steward: AgentRuntimeSnapshotResponse::from(&snapshots[1]),
     })
 }
 
-/// Undo a partially applied bootstrap: drop the team and workspace state,
-/// remove any written agency yaml files, and persist the rolled-back state on
+/// Undo a partially applied bootstrap: drop its agents and workspace state,
+/// remove any written anima.yaml files, and persist the rolled-back state on
 /// a best-effort basis.
 async fn rollback_bootstrap(
     state: &SharedDaemonState,
@@ -574,11 +530,11 @@ async fn rollback_bootstrap(
 }
 
 /// Adopt an existing workspace folder: parse its anima.yaml, create the
-/// orchestrator and workers it describes, and mark the workspace configured.
-/// Atomic, like bootstrap: all validation happens before any mutation, a
-/// mid-batch creation failure rolls back the whole batch, and a persist
-/// failure restores the previous state. The anima.yaml file is never
-/// modified — resume does not own it.
+/// agents it lists (all equals) and the workspace steward, and mark the
+/// workspace configured. Atomic, like bootstrap: all validation happens
+/// before any mutation, a mid-batch creation failure rolls back the whole
+/// batch, and a persist failure restores the previous state. The anima.yaml
+/// file is never modified — resume does not own it.
 ///
 /// Conflict + idempotency policy: a workspace already configured for a
 /// DIFFERENT root is a 409. Otherwise (same root, or unconfigured) agents
@@ -613,19 +569,19 @@ pub(crate) async fn handle_resume_workspace(
             root.display()
         )));
     }
-    let agency = load_agency_yaml(&yaml_path)?;
+    let file = load_workspace_file(&yaml_path)?;
 
     // 2. Build the workspace config; the yaml owns these fields.
     let workspace_config = WorkspaceConfig {
         root_path: root,
-        company_name: agency.name.trim().to_string(),
-        mission: agency
+        company_name: file.name.trim().to_string(),
+        mission: file
             .mission
             .clone()
-            .unwrap_or_else(|| agency.description.clone())
+            .unwrap_or_else(|| file.description.clone())
             .trim()
             .to_string(),
-        values: agency.values.clone().unwrap_or_default(),
+        values: file.values.clone().unwrap_or_default(),
     };
     if workspace_config.mission.is_empty() {
         return Err(ApiError::bad_request_static(
@@ -633,78 +589,59 @@ pub(crate) async fn handle_resume_workspace(
         ));
     }
 
-    // 3. Build every agent's config up front (orchestrator first) so
-    //    validation errors surface before any state mutation. Tool slugs are
-    //    validated by create_agent against the registry before it inserts.
-    let to_agent_config =
-        |agent: &AgencyYamlAgent, is_orchestrator: bool| -> Result<AgentConfig, ApiError> {
-            let name = agent.name.trim().to_string();
-            if name.is_empty() {
-                return Err(ApiError::bad_request_static(
-                    "anima.yaml: agent name is required",
-                ));
-            }
-            let model = agent
-                .model
-                .clone()
-                .unwrap_or_else(|| agency.model.clone())
-                .trim()
-                .to_string();
-            if model.is_empty() {
-                return Err(ApiError::bad_request(format!(
-                    "anima.yaml: agent {name} has no model and the file sets no default"
-                )));
-            }
-            let bio = agent.bio.trim().to_string();
-            if is_orchestrator && bio.is_empty() {
-                return Err(ApiError::bad_request_static(
-                    "anima.yaml: orchestrator bio is required",
-                ));
-            }
-            // Trim-consistent with the loader's orchestrator.system check:
-            // a whitespace-only worker system would resume an agent with no
-            // instructions, so reject it naming the agent.
-            let system = agent.system.trim().to_string();
-            if system.is_empty() {
-                return Err(ApiError::bad_request(format!(
-                    "anima.yaml: agent {name} system is required"
-                )));
-            }
-            Ok(AgentConfig {
-                name,
-                model,
-                bio: if bio.is_empty() { None } else { Some(bio) },
-                lore: agent.lore.clone(),
-                knowledge: agent.knowledge.clone(),
-                topics: agent.topics.clone(),
-                adjectives: agent.adjectives.clone(),
-                style: agent.style.clone(),
-                provider: Some(agent.effective_provider(&agency.provider)),
-                system: Some(system),
-                tools: agent.tools.as_ref().map(|tools| {
-                    tools
-                        .iter()
-                        .map(|tool| ToolDescriptor {
-                            name: tool.clone(),
-                            description: String::new(),
-                            parameters_schema: BTreeMap::new(),
-                            examples: None,
-                        })
-                        .collect::<Vec<_>>()
-                }),
-                plugins: None,
-                settings: None,
-                fallbacks: Vec::new(),
-            })
-        };
+    // 3. Build every agent's config up front so validation errors surface
+    //    before any state mutation. Tool slugs are validated by create_agent
+    //    against the registry before it inserts.
+    let to_agent_config = |agent: &WorkspaceFileAgent| -> Result<AgentConfig, ApiError> {
+        let name = agent.name.trim().to_string();
+        let model = agent
+            .model
+            .clone()
+            .unwrap_or_else(|| file.model.clone())
+            .trim()
+            .to_string();
+        if model.is_empty() {
+            return Err(ApiError::bad_request(format!(
+                "anima.yaml: agent {name} has no model and the file sets no default"
+            )));
+        }
+        let bio = agent.bio.trim().to_string();
+        Ok(AgentConfig {
+            name,
+            model,
+            bio: if bio.is_empty() { None } else { Some(bio) },
+            lore: agent.lore.clone(),
+            knowledge: agent.knowledge.clone(),
+            topics: agent.topics.clone(),
+            adjectives: agent.adjectives.clone(),
+            style: agent.style.clone(),
+            provider: Some(agent.effective_provider(&file.provider)),
+            system: Some(agent.system.trim().to_string()),
+            tools: agent.tools.as_ref().map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| ToolDescriptor {
+                        name: tool.clone(),
+                        description: String::new(),
+                        parameters_schema: BTreeMap::new(),
+                        examples: None,
+                    })
+                    .collect::<Vec<_>>()
+            }),
+            plugins: None,
+            settings: None,
+            fallbacks: Vec::new(),
+        })
+    };
     // Reject yaml-internal duplicate names before any mutation; create_agent
     // does not enforce name uniqueness, so without this a duplicated name
     // would silently create two agents.
     let mut seen_names = std::collections::BTreeSet::new();
-    let agent_configs = std::iter::once((&agency.orchestrator, true))
-        .chain(agency.agents.iter().map(|agent| (agent, false)))
-        .map(|(agent, is_orchestrator)| {
-            to_agent_config(agent, is_orchestrator).and_then(|config| {
+    let agent_configs = file
+        .agents
+        .iter()
+        .map(|agent| {
+            to_agent_config(agent).and_then(|config| {
                 if seen_names.insert(config.name.clone()) {
                     Ok(config)
                 } else {
@@ -716,13 +653,17 @@ pub(crate) async fn handle_resume_workspace(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let names_in_file: Vec<String> = agent_configs.iter().map(|c| c.name.clone()).collect();
+    let steward_model = (
+        agent_configs[0].provider.clone(),
+        agent_configs[0].model.clone(),
+    );
 
     // 4. Conflict + skip rules, resolved inside one read: a workspace
     //    configured for a different root is a 409. Otherwise agents whose
     //    names already exist are skipped (the persisted agent is kept) and
     //    only the missing ones are created.
-    let orchestrator_name = agent_configs[0].name.clone();
-    let (configs_to_create, skipped, orchestrator_existed) = {
+    let (configs_to_create, skipped) = {
         let guard = state.read().await;
         if let Some(current) = &guard.workspace {
             if current.root_path != workspace_config.root_path {
@@ -737,7 +678,6 @@ pub(crate) async fn handle_resume_workspace(
             .iter()
             .map(|snapshot| snapshot.state.name.clone())
             .collect();
-        let orchestrator_existed = existing_names.contains(&orchestrator_name);
         let mut skipped = Vec::new();
         let configs_to_create = agent_configs
             .into_iter()
@@ -750,7 +690,7 @@ pub(crate) async fn handle_resume_workspace(
                 }
             })
             .collect::<Vec<_>>();
-        (configs_to_create, skipped, orchestrator_existed)
+        (configs_to_create, skipped)
     };
 
     // Idempotency signal: a re-resume with the full roster already live has
@@ -761,13 +701,11 @@ pub(crate) async fn handle_resume_workspace(
         ));
     }
 
-    // 5. One write guard: create the missing agents in order (orchestrator
-    //    first when it was not skipped), tracking created ids so a failure
-    //    mid-batch rolls back the whole batch (create_agent validates tool
-    //    slugs before inserting, but an earlier agent in the batch would
-    //    already exist).
+    // 5. One write guard: create the missing agents in file order, then the
+    //    steward if this workspace has none, tracking created ids so a
+    //    failure mid-batch rolls back the whole batch.
     let mut created: Vec<(String, AgentRuntimeSnapshot)> = Vec::new();
-    let (previous_workspace, persist_request) = {
+    let (previous_workspace, persist_request, steward) = {
         let mut guard = state.write().await;
         validate_document_workspace(&guard, Some(&workspace_config.root_path))?;
         validate_document_workspace(
@@ -793,19 +731,36 @@ pub(crate) async fn handle_resume_workspace(
                 }
             }
         }
-        match failure {
-            Some(error) => {
-                for (id, _) in &created {
-                    guard.remove_agent(id);
-                }
-                return Err(error);
-            }
-            None => {
-                let previous_workspace = guard.workspace.clone();
-                guard.set_workspace(Some(workspace_config.clone()));
-                (previous_workspace, guard.control_plane_persist_request())
+        if failure.is_none() {
+            match crate::steward::ensure_steward(
+                &mut guard,
+                steward_model.0.as_deref(),
+                Some(&steward_model.1),
+            ) {
+                Ok((steward, true)) => created.push((steward.state.id.clone(), steward)),
+                Ok((_, false)) => {}
+                Err(message) => failure = Some(ApiError::bad_request(message)),
             }
         }
+        if let Some(error) = failure {
+            for (id, _) in &created {
+                guard.remove_agent(id);
+            }
+            return Err(error);
+        }
+        let steward = guard
+            .agent_states()
+            .into_iter()
+            .find(|agent| crate::steward::is_steward_config(&agent.config))
+            .and_then(|agent| guard.get_agent(&agent.id))
+            .expect("ensure_steward left a steward");
+        let previous_workspace = guard.workspace.clone();
+        guard.set_workspace(Some(workspace_config.clone()));
+        (
+            previous_workspace,
+            guard.control_plane_persist_request(),
+            steward,
+        )
     };
 
     // 6. Persist; on failure roll back to the previous state (None for a
@@ -815,33 +770,25 @@ pub(crate) async fn handle_resume_workspace(
         return Err(ApiError::service_unavailable(error.to_string()));
     }
 
-    let mut snapshots = created.into_iter().map(|(_, snapshot)| snapshot);
-    let orchestrator = if orchestrator_existed {
-        // The orchestrator was skipped by the name-skip rule: report the
-        // existing agent, not the first created worker.
+    // Every agent the file lists, existing or new, in file order.
+    let agents = {
         let guard = state.read().await;
-        guard
-            .list_agents()
-            .into_iter()
-            .find(|snapshot| snapshot.state.name == orchestrator_name)
-            // Safe today: the route wrapper holds control_plane_transaction() for the
-            // whole handler, and every live remove_agent path takes the same mutex.
-            .ok_or_else(|| {
-                ApiError::conflict(format!(
-                    "orchestrator '{orchestrator_name}' was deleted concurrently; retry resume"
-                ))
-            })?
-    } else {
-        snapshots
-            .next()
-            .expect("fresh adopt always creates the orchestrator first")
+        let live = guard.list_agents();
+        names_in_file
+            .iter()
+            .filter_map(|name| live.iter().find(|snapshot| &snapshot.state.name == name))
+            .map(AgentRuntimeSnapshotResponse::from)
+            .collect::<Vec<_>>()
     };
+    if agents.is_empty() {
+        return Err(ApiError::conflict(
+            "the resumed agents were deleted concurrently; retry resume",
+        ));
+    }
     Ok(WorkspaceResumeResponse {
         workspace: config_response(&workspace_config),
-        orchestrator: AgentRuntimeSnapshotResponse::from(&orchestrator),
-        workers: snapshots
-            .map(|snapshot| AgentRuntimeSnapshotResponse::from(&snapshot))
-            .collect(),
+        agents,
+        steward: AgentRuntimeSnapshotResponse::from(&steward),
         skipped,
     })
 }

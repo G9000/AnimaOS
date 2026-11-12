@@ -119,12 +119,18 @@ export function AgentsView({
                   <span
                     className="rounded-full border border-line bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-2"
                     title={
-                      talks
-                        ? 'Can talk with other agents that also allow it'
-                        : 'Works alone; other agents cannot reach it'
+                      agent.isSteward
+                        ? 'The workspace system agent. It works even without a language model.'
+                        : talks
+                          ? 'Can talk with other agents that also allow it'
+                          : 'Works alone; other agents cannot reach it'
                     }
                   >
-                    {talks ? 'Talks with agents' : 'Solo'}
+                    {agent.isSteward
+                      ? 'Steward'
+                      : talks
+                        ? 'Talks with agents'
+                        : 'Solo'}
                   </span>
                 </div>
                 <div className="studio-agent-usage">

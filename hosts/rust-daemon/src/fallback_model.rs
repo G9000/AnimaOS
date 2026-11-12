@@ -149,9 +149,13 @@ where
             Err(error) => error,
         };
         let kind = classify_model_error(&error).kind;
+        // The steward's rules can always answer, so any failure reaches them.
+        let rules_follow = choices[index + 1..]
+            .iter()
+            .any(|choice| choice.provider.as_deref() == Some(crate::steward::STEWARD_PROVIDER));
         // Only the first model tried decides whether to fall back at all;
         // after that every choice is tried, whatever its own error.
-        if committed || (index == start && !kind.falls_back()) {
+        if committed || (index == start && !kind.falls_back() && !rules_follow) {
             return Err(error);
         }
         if index + 1 < choices.len() {

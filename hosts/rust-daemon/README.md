@@ -322,8 +322,6 @@ the companion console sends to session `/runs` and consumes `/events`.
 | `PATCH`  | `/api/memories/facts/{fact_id}`                                                              |
 | `PATCH`  | `/api/memories/{memory_id}`                                                                  |
 | `PATCH`  | `/api/skills/{slug}`                                                                         |
-| `POST`   | `/api/agencies/create`                                                                       |
-| `POST`   | `/api/agencies/generate`                                                                     |
 | `POST`   | `/api/agents`                                                                                |
 | `POST`   | `/api/agents/generate-profile`                                                               |
 | `POST`   | `/api/agents/{agent_id}/acp-sessions/{session_id}/cancel`                                    |
@@ -1152,13 +1150,6 @@ work or undo its effects. Use the run's normal stop and outcome controls for it.
 | `GET`    | `/api/agents/{agent_id}/schedules/{schedule_id}/history` | `{ runs }`, newest first, `?limit=` 1–50 (default 50): `{ id, scheduleId, agentId, firedAtMs, finishedAtMs, outcome, runId, sessionId, errorCode, manual }`. `400` (`limit must be from 1 to 50`); `404`; `503` (`automation history is unavailable`) when the history store cannot be read.                                                                                                                                                                                                                                                                                                                                                                             |
 | `POST`   | `/api/schedules/preview`                                 | `{ trigger, activeHours? }` → `{ nextRuns }`, the next three fire times (one for `once`), so the browser never computes schedules. `400` with the trigger's problem.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
-### Agencies
-
-| Method | Path                     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST` | `/api/agencies/create`   | Generate an agency and materialize a CLI-style workspace under the daemon workspace root. Body includes `name`, `description`, `teamSize`, optional `provider`, optional `model`, optional `modelPool`, optional `outputDir`, optional `seedMemories`, and optional `overwrite`. Writes `anima.yaml`, `org-chart.mmd`, `README.md`, and `agents/*/profile.md` plus workspace placeholders, and can also write `agents/*/memory/seed.json` files with LLM-generated starter memories. The response includes the created file list plus seed-memory counts. |
-| `POST` | `/api/agencies/generate` | Generate an agency draft from a plain-language description. Body includes `name`, `description`, `teamSize`, optional `provider`, optional `model`, and optional `modelPool`. Returns a mission, values, and normalized agent definitions that can be spawned into a swarm without unsupported tool slugs.                                                                                                                                                                                                                                                |
-
 ### Memories
 
 Native hybrid vector recall checks current canonical records and the supplied
@@ -1513,6 +1504,47 @@ its roster lists only itself and its own helpers, and peer messages or requests
 to it are refused (`That agent does not take messages from other agents`).
 With it, the roster and broadcasts reach only other agents that also talk with
 agents. A peer or delegated run never hands the work on again.
+
+The owner can change this from Settings or from chat: in a direct owner chat
+every agent has `set_agent_talk` (`{ agent, enabled }`, where `agent` is a
+name, an ID or `self`), which saves through the same path as a settings save.
+
+An agency is temporary. An agent forms one by spawning helpers for a job and
+ends it with `dissolve_helpers`, which removes its helpers that are not
+working (busy ones stay; their results already in the chat stay, their own
+transcripts cannot be opened afterwards). There is no persistent agency,
+orchestrator or team generator.
+
+### The workspace steward
+
+Every workspace has one system agent, the steward (`settings.agentKind:
+steward`), created with the workspace by `POST /api/workspace/bootstrap` and
+by `POST /api/workspace/resume` when none exists. It cannot be deleted (`409`,
+`The workspace steward cannot be deleted`), sees every standalone agent in
+its roster without the talk grant, and can turn talking on or off for any
+agent from its owner chat.
+
+The steward runs on the workspace's model when there is one, with provider
+`steward`, model `rules` as its last fallback; with no model it runs on the
+rules alone. Any failure of its model, not only the usual fallback-worthy
+ones, moves it to the rules. The rules (crate `anima-steward`) are the
+pre-language-model kind: greetings, `help`, `list agents`, `let Ada talk with
+other agents`, `make Ada work alone`, yes/no and thanks. They call
+`list_workspace_agents` or `set_agent_talk` through the normal tool and
+approval path and never guess an answer; any other question gets a plain "I
+can't answer that without a language model".
+
+### `anima.yaml`
+
+The workspace file lists the workspace and its agents as equals:
+`name`, `description`, optional `mission` and `values`, default `model` and
+`provider`, and `agents` (at least one, each with `name` and `system`, and
+optional `bio`, `lore`, `knowledge`, `topics`, `adjectives`, `style`,
+`model`, `provider`, `tools`). The steward is not listed. Bootstrap writes it
+with the first agent; resume creates every listed agent that does not exist
+yet. `POST /api/workspace/bootstrap` takes `{ workspace, agent }` and returns
+`{ workspace, agent, steward }`; `GET /api/workspace/inspect` returns
+`agents` previews; resume returns `{ workspace, agents, steward, skipped }`.
 
 ## Standard Markdown agent files
 

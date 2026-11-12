@@ -20,6 +20,7 @@ anima-memory = { path = "../../packages/core-rust/crates/anima-memory", features
 anima-acp = { path = "../../packages/core-rust/crates/anima-acp" }
 anima-process = { path = "../../packages/core-rust/crates/anima-process" }
 anima-schedule = { path = "../../packages/core-rust/crates/anima-schedule" }
+anima-steward = { path = "../../packages/core-rust/crates/anima-steward" }
 anima-swarm = { path = "../../packages/core-rust/crates/anima-swarm" }
 anima-worktree = { path = "../../packages/core-rust/crates/anima-worktree" }
 atomicwrites = "0.4.4"

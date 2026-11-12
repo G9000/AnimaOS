@@ -4,11 +4,10 @@ import pc from 'picocolors';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { dump } from 'js-yaml';
-import type { AgencyConfig, AgentDefinition } from '../agency/types.js';
+import type { AgentDefinition, WorkspaceFile } from '../agency/types.js';
 import {
   agentSlug,
-  renderOrgChart,
-  renderAgencyBrief,
+  renderWorkspaceBrief,
   renderAgentProfile,
 } from '../agency/diagram.js';
 import {
@@ -140,7 +139,7 @@ export function buildSingleAgentConfig(input: {
   provider: string;
   model: string;
   system?: string;
-}): AgencyConfig {
+}): WorkspaceFile {
   const description = input.description.trim();
   const system =
     input.system?.trim() ||
@@ -157,11 +156,9 @@ export function buildSingleAgentConfig(input: {
     ],
     model: input.model,
     provider: input.provider,
-    strategy: 'supervisor',
-    orchestrator: {
+    agents: [
+      {
       name: input.name,
-      position: 'Agent',
-      role: 'orchestrator',
       bio: description,
       lore: 'Created as a single-agent workspace with animaos create agent.',
       adjectives: ['focused', 'curious', 'direct'],
@@ -171,14 +168,13 @@ export function buildSingleAgentConfig(input: {
       system,
       model: input.model,
       tools: [],
-      collaboratesWith: [],
-    },
-    agents: [],
+      },
+    ],
   };
 }
 
 function writeWorkspace(
-  config: AgencyConfig,
+  config: WorkspaceFile,
   allAgentDefs: AgentDefinition[]
 ): WrittenWorkspace {
   const dirName = workspaceSlug(config.name);
@@ -193,8 +189,7 @@ function writeWorkspace(
     dump(config, { lineWidth: 120, noRefs: true })
   );
 
-  writeFileSync(join(dirPath, 'org-chart.mmd'), renderOrgChart(config));
-  writeFileSync(join(dirPath, 'README.md'), renderAgencyBrief(config));
+  writeFileSync(join(dirPath, 'README.md'), renderWorkspaceBrief(config));
 
   const agentsRoot = join(dirPath, 'agents');
   mkdirSync(agentsRoot, { recursive: true });
@@ -219,9 +214,8 @@ function logWorkspaceResult(workspace: WrittenWorkspace) {
   clack.log.success(`Agent saved to ${pc.green(workspace.dirName + '/')}`);
   clack.log.message(
     `  ${pc.dim('•')} ${pc.green('anima.yaml')}     ${pc.dim('- runtime config')}\n` +
-      `  ${pc.dim('•')} ${pc.green('org-chart.mmd')}  ${pc.dim('- mermaid diagram')}\n` +
       `  ${pc.dim('•')} ${pc.green('README.md')}      ${pc.dim(
-        '- mission, values, roster'
+        '- mission, values, agents'
       )}\n` +
       `  ${pc.dim('•')} ${pc.green('agents/')}        ${pc.dim(
         '- personnel folders (' + workspace.agentCount + ')'
@@ -300,10 +294,7 @@ async function runCreateAgent(nameArg: string | undefined, opts: CreateOptions) 
     model: opts.model,
     system: opts.system,
   });
-  const allAgentDefs: AgentDefinition[] = [
-    { ...config.orchestrator, role: 'orchestrator' },
-  ];
-  const workspace = writeWorkspace(config, allAgentDefs);
+  const workspace = writeWorkspace(config, config.agents);
   logWorkspaceResult(workspace);
 }
 

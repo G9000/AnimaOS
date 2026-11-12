@@ -214,7 +214,7 @@ fn bootstrap_body(root: &std::path::Path) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn bootstrap_creates_workspace_agency_file_and_agent() {
+async fn bootstrap_creates_workspace_file_agent_and_steward() {
     let app = test_app();
     let root = std::env::temp_dir().join(format!("anima-boot-{}", std::process::id()));
     let (status, body) = send_json_request(
@@ -227,7 +227,7 @@ async fn bootstrap_creates_workspace_agency_file_and_agent() {
     let body: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(status, 201, "body: {body}");
     assert_eq!(body["workspace"]["companyName"], "Northwind Research");
-    assert_eq!(body["workers"], serde_json::json!([]));
+    assert!(body.get("workers").is_none(), "{body}");
     assert_eq!(
         body["agent"]["state"]["config"]["bio"],
         "A vigilant chief of staff."
@@ -236,8 +236,19 @@ async fn bootstrap_creates_workspace_agency_file_and_agent() {
         body["agent"]["state"]["config"]["adjectives"],
         serde_json::json!(["vigilant", "concise", "proactive"])
     );
+    // No agent ranks above another: the first agent carries no role.
+    assert!(body["agent"]["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
+    // The steward comes with the workspace. A mock model is no model, so it
+    // runs on the rules.
+    let steward = &body["steward"]["state"];
+    assert_eq!(steward["name"], "Steward", "{body}");
+    assert_eq!(
+        steward["config"]["settings"]["additional"]["agentKind"],
+        "steward"
+    );
+    assert_eq!(steward["config"]["provider"], "steward");
 
-    // anima.yaml exists at the root and describes a single orchestrator.
+    // anima.yaml lists the agent as an equal; the steward is not listed.
     let yaml_path = root.join("anima.yaml");
     assert!(yaml_path.is_file());
     assert!(
@@ -247,10 +258,12 @@ async fn bootstrap_creates_workspace_agency_file_and_agent() {
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
     assert_eq!(yaml["name"], "Northwind Research");
-    assert_eq!(yaml["orchestrator"]["name"], "Anima");
-    assert_eq!(yaml["orchestrator"]["bio"], "A vigilant chief of staff.");
+    assert_eq!(yaml["agents"][0]["name"], "Anima");
+    assert_eq!(yaml["agents"][0]["bio"], "A vigilant chief of staff.");
+    assert_eq!(yaml["agents"].as_sequence().unwrap().len(), 1);
+    assert!(yaml["orchestrator"].is_null());
+    assert!(yaml["strategy"].is_null());
     assert_eq!(yaml["provider"], "deterministic");
-    assert_eq!(yaml["strategy"], "supervisor");
 
     // Workspace config is live.
     let (_, workspace) = send_json_request(&app, "GET", "/api/workspace", "").await;
@@ -263,6 +276,12 @@ async fn bootstrap_creates_workspace_agency_file_and_agent() {
         .unwrap();
     let read_file = tools.iter().find(|t| t["name"] == "read_file").unwrap();
     assert!(read_file["description"].as_str().unwrap().len() > 0);
+
+    // The steward cannot be deleted.
+    let steward_id = steward["id"].as_str().unwrap();
+    let (status, body) = delete_agent(&app, steward_id).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body.contains("steward cannot be deleted"), "{body}");
 
     std::fs::remove_dir_all(&root).ok();
 }
@@ -349,14 +368,18 @@ async fn bootstrap_conflicts_when_already_bootstrapped() {
 
     let (_, agents) = send_json_request(&app, "GET", "/api/agents", "").await;
     let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
-    assert_eq!(agents["agents"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        agents["agents"].as_array().unwrap().len(),
+        2,
+        "the first agent and the steward: {agents}"
+    );
 
     std::fs::remove_dir_all(&root).ok();
     std::fs::remove_dir_all(&other_root).ok();
 }
 
 #[tokio::test]
-async fn bootstrap_rolls_back_when_agency_yaml_write_fails() {
+async fn bootstrap_rolls_back_when_workspace_file_write_fails() {
     let app = test_app();
     let root = std::env::temp_dir().join(format!("anima-boot-iofail-{}", std::process::id()));
     // Force the anima.yaml write to fail: pre-create the target path as a
@@ -378,13 +401,13 @@ async fn bootstrap_rolls_back_when_agency_yaml_write_fails() {
         "tmp file must be removed on rollback"
     );
 
-    // Full rollback: no agent, no live workspace configuration.
+    // Full rollback: no agent, no steward, no live workspace configuration.
     let (_, agents) = send_json_request(&app, "GET", "/api/agents", "").await;
     let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
     assert_eq!(
         agents["agents"].as_array().unwrap().len(),
         0,
-        "agent must be rolled back"
+        "agent and steward must be rolled back"
     );
     let (_, workspace) = send_json_request(&app, "GET", "/api/workspace", "").await;
     let workspace: serde_json::Value = serde_json::from_str(&workspace).unwrap();
@@ -404,20 +427,18 @@ fn inspect_uri(root: &std::path::Path) -> String {
     )
 }
 
-const VALID_AGENCY_YAML: &str = r#"name: Northwind Research
+const VALID_WORKSPACE_YAML: &str = r#"name: Northwind Research
 description: Continuous equity research
 mission: Continuous equity research
 values: [cite sources]
 model: kimi-k2
 provider: moonshot
-strategy: supervisor
-orchestrator:
-  name: Anima
-  bio: A vigilant chief of staff.
-  system: You are Anima.
-  model: kimi-k2
-  tools: [read_file]
 agents:
+  - name: Anima
+    bio: A vigilant chief of staff.
+    system: You are Anima.
+    model: kimi-k2
+    tools: [read_file]
   - name: Scout
     bio: A scout.
     system: You are Scout.
@@ -432,13 +453,13 @@ async fn inspect_returns_found_false_without_yaml() {
     assert!(body.contains("\"found\":false"), "{body}");
     let body: serde_json::Value = serde_json::from_str(&body).expect("body is json");
     assert!(body.get("companyName").is_none(), "{body}");
-    assert!(body.get("orchestrator").is_none(), "{body}");
+    assert!(body.get("agents").is_none(), "{body}");
 }
 
 #[tokio::test]
 async fn inspect_returns_preview_for_valid_yaml() {
     let root = support::use_temp_workspace_root("inspect-valid");
-    std::fs::write(root.path().join("anima.yaml"), VALID_AGENCY_YAML).expect("yaml writes");
+    std::fs::write(root.path().join("anima.yaml"), VALID_WORKSPACE_YAML).expect("yaml writes");
     let app = test_app();
     let (status, body) = send_empty_request(&app, "GET", &inspect_uri(root.path())).await;
     assert_eq!(status, 200, "{body}");
@@ -452,24 +473,21 @@ async fn inspect_returns_preview_for_valid_yaml() {
         serde_json::json!(["cite sources"]),
         "{body}"
     );
+    assert!(body.get("orchestrator").is_none(), "{body}");
 
-    let orchestrator = &body["orchestrator"];
-    assert_eq!(orchestrator["name"], "Anima", "{body}");
-    assert_eq!(orchestrator["bio"], "A vigilant chief of staff.", "{body}");
-    assert_eq!(orchestrator["provider"], "moonshot", "{body}");
-    assert_eq!(orchestrator["model"], "kimi-k2", "{body}");
-
-    let workers = body["workers"].as_array().expect("workers is an array");
-    assert_eq!(workers.len(), 1, "{body}");
-    assert_eq!(workers[0]["name"], "Scout", "{body}");
-    assert_eq!(workers[0]["model"], "kimi-k2", "{body}");
+    // Every agent is previewed the same way.
+    let agents = body["agents"].as_array().expect("agents is an array");
+    assert_eq!(agents.len(), 2, "{body}");
+    assert_eq!(agents[0]["name"], "Anima", "{body}");
+    assert_eq!(agents[0]["bio"], "A vigilant chief of staff.", "{body}");
+    assert_eq!(agents[0]["provider"], "moonshot", "{body}");
+    assert_eq!(agents[0]["model"], "kimi-k2", "{body}");
+    assert_eq!(agents[1]["name"], "Scout", "{body}");
+    assert_eq!(agents[1]["bio"], "A scout.", "{body}");
+    assert_eq!(agents[1]["model"], "kimi-k2", "{body}");
     assert!(
-        workers[0].get("bio").is_none(),
-        "worker previews omit bio: {body}"
-    );
-    assert!(
-        workers[0].get("system").is_none(),
-        "worker previews omit system: {body}"
+        agents[1].get("system").is_none(),
+        "previews omit system: {body}"
     );
 
     assert!(
@@ -488,20 +506,23 @@ async fn inspect_rejects_malformed_yaml() {
 }
 
 #[tokio::test]
-async fn inspect_rejects_blank_orchestrator_bio() {
-    let root = support::use_temp_workspace_root("inspect-badfields");
-    let yaml = VALID_AGENCY_YAML.replace("  bio: A vigilant chief of staff.\n", "  bio: \"\"\n");
+async fn inspect_rejects_a_file_without_agents_such_as_an_orchestrator_file() {
+    let root = support::use_temp_workspace_root("inspect-no-agents");
+    let yaml = "name: Old\nmission: Old\norchestrator:\n  name: Boss\n  bio: b\n  system: s\n";
     std::fs::write(root.path().join("anima.yaml"), yaml).expect("yaml writes");
     let app = test_app();
     let (status, body) = send_empty_request(&app, "GET", &inspect_uri(root.path())).await;
     assert_eq!(status, 400, "{body}");
-    assert!(body.contains("orchestrator.bio"), "{body}");
+    assert!(
+        body.contains("agents must list at least one agent"),
+        "{body}"
+    );
 }
 
 #[tokio::test]
 async fn inspect_rejects_yaml_without_mission_or_description() {
     let root = support::use_temp_workspace_root("inspect-no-mission");
-    let yaml = VALID_AGENCY_YAML
+    let yaml = VALID_WORKSPACE_YAML
         .replace("description: Continuous equity research\n", "")
         .replace("mission: Continuous equity research\n", "");
     std::fs::write(root.path().join("anima.yaml"), yaml).expect("yaml writes");
@@ -535,35 +556,33 @@ async fn inspect_rejects_empty_root_path_param() {
 #[tokio::test]
 async fn inspect_defaults_provider_to_openai_when_yaml_omits_provider() {
     let root = support::use_temp_workspace_root("inspect-default-provider");
-    let yaml = VALID_AGENCY_YAML.replace("provider: moonshot\n", "");
+    let yaml = VALID_WORKSPACE_YAML.replace("provider: moonshot\n", "");
     std::fs::write(root.path().join("anima.yaml"), yaml).expect("yaml writes");
     let app = test_app();
     let (status, body) = send_empty_request(&app, "GET", &inspect_uri(root.path())).await;
     assert_eq!(status, 200, "{body}");
     let body: serde_json::Value = serde_json::from_str(&body).expect("body is json");
     assert_eq!(body["found"], true, "{body}");
-    assert_eq!(body["orchestrator"]["provider"], "openai", "{body}");
-    assert_eq!(body["workers"][0]["provider"], "openai", "{body}");
+    assert_eq!(body["agents"][0]["provider"], "openai", "{body}");
+    assert_eq!(body["agents"][1]["provider"], "openai", "{body}");
     assert!(
         body["providerAvailable"].is_boolean(),
         "providerAvailable present: {body}"
     );
 }
 
-const RESUME_AGENCY_YAML: &str = r#"name: Northwind Research
+const RESUME_WORKSPACE_YAML: &str = r#"name: Northwind Research
 description: Continuous equity research
 mission: Continuous equity research
 values: [cite sources]
 model: kimi-k2
 provider: moonshot
-strategy: supervisor
-orchestrator:
-  name: Anima
-  bio: A vigilant chief of staff.
-  system: You are Anima.
-  model: kimi-k2
-  tools: [read_file]
 agents:
+  - name: Anima
+    bio: A vigilant chief of staff.
+    system: You are Anima.
+    model: kimi-k2
+    tools: [read_file]
   - name: Scout
     bio: A scout.
     system: You are Scout.
@@ -573,10 +592,10 @@ agents:
 "#;
 
 #[tokio::test]
-async fn resume_adopts_workspace_with_orchestrator_and_workers() {
+async fn resume_adopts_every_agent_as_an_equal_and_adds_the_steward() {
     let root = support::use_temp_workspace_root("resume-adopt");
     let yaml_path = root.path().join("anima.yaml");
-    std::fs::write(&yaml_path, RESUME_AGENCY_YAML).expect("yaml writes");
+    std::fs::write(&yaml_path, RESUME_WORKSPACE_YAML).expect("yaml writes");
     let yaml_before = std::fs::read(&yaml_path).expect("yaml reads");
     let app = test_app();
 
@@ -593,24 +612,32 @@ async fn resume_adopts_workspace_with_orchestrator_and_workers() {
         body["workspace"]["companyName"], "Northwind Research",
         "{body}"
     );
-    assert_eq!(body["orchestrator"]["state"]["name"], "Anima", "{body}");
     assert_eq!(
         body["skipped"],
         serde_json::json!([]),
         "fresh adopt without collisions skips nothing: {body}"
     );
-    let workers = body["workers"].as_array().expect("workers is an array");
-    assert_eq!(workers.len(), 2, "{body}");
-    assert_eq!(workers[0]["state"]["name"], "Scout", "{body}");
-    assert_eq!(workers[1]["state"]["name"], "Scribe", "{body}");
+    let agents = body["agents"].as_array().expect("agents is an array");
+    assert_eq!(
+        agents
+            .iter()
+            .map(|agent| agent["state"]["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["Anima", "Scout", "Scribe"],
+        "{body}"
+    );
+    for agent in agents {
+        assert!(agent["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
+    }
+    assert_eq!(body["steward"]["state"]["name"], "Steward", "{body}");
 
-    // Workspace config is live and the whole roster exists.
+    // Workspace config is live and the whole roster exists, plus the steward.
     let (_, workspace) = send_json_request(&app, "GET", "/api/workspace", "").await;
     let workspace: serde_json::Value = serde_json::from_str(&workspace).unwrap();
     assert_eq!(workspace["configured"], true, "{workspace}");
     let (_, agents) = send_json_request(&app, "GET", "/api/agents", "").await;
     let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
-    assert_eq!(agents["agents"].as_array().unwrap().len(), 3, "{agents}");
+    assert_eq!(agents["agents"].as_array().unwrap().len(), 4, "{agents}");
 
     // Resume never owns the yaml: it must be byte-identical afterwards.
     let yaml_after = std::fs::read(&yaml_path).expect("yaml reads");
@@ -620,9 +647,9 @@ async fn resume_adopts_workspace_with_orchestrator_and_workers() {
 #[tokio::test]
 async fn resume_rejects_unknown_tool_without_side_effects() {
     let root = support::use_temp_workspace_root("resume-badtool");
-    // The WORKER carries the unknown tool, so the orchestrator is created
-    // first and the mid-batch failure must roll it back.
-    let yaml = RESUME_AGENCY_YAML.replace(
+    // Scout carries the unknown tool, so Anima is created first and the
+    // mid-batch failure must roll it back.
+    let yaml = RESUME_WORKSPACE_YAML.replace(
         "  - name: Scout\n    bio: A scout.\n    system: You are Scout.\n",
         "  - name: Scout\n    bio: A scout.\n    system: You are Scout.\n    tools: [not_a_real_tool]\n",
     );
@@ -643,8 +670,8 @@ async fn resume_rejects_unknown_tool_without_side_effects() {
         "error names the failing agent: {body}"
     );
 
-    // The orchestrator was created before the worker failed, so an empty
-    // roster proves the in-guard batch rollback ran.
+    // Anima was created before Scout failed, so an empty roster proves the
+    // in-guard batch rollback ran.
     let (_, agents) = send_json_request(&app, "GET", "/api/agents", "").await;
     let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
     assert_eq!(
@@ -675,7 +702,7 @@ async fn resume_without_yaml_returns_400() {
 #[tokio::test]
 async fn inspect_reports_provider_unavailable_without_moonshot_keys() {
     let root = support::use_temp_workspace_root("inspect-provider-keys");
-    std::fs::write(root.path().join("anima.yaml"), VALID_AGENCY_YAML).expect("yaml writes");
+    std::fs::write(root.path().join("anima.yaml"), VALID_WORKSPACE_YAML).expect("yaml writes");
     // Pin the environment: moonshot reports configured only when one of its
     // API-key env vars is set, so clear them all for a deterministic result.
     // Serialized with the other inspect tests via the workspace-root lock
@@ -709,24 +736,21 @@ async fn inspect_reports_provider_unavailable_without_moonshot_keys() {
     assert_eq!(body["providerAvailable"], false, "{body}");
 }
 
-// --- Task 4: resume conflict, idempotency, and rollback semantics ----------
+// --- resume conflict, idempotency, and rollback semantics -----------------
 
-/// Two-agent fixture (orchestrator "Anima" + worker "Scout") for the
-/// idempotency tests.
+/// Two-agent fixture (Anima and Scout) for the idempotency tests.
 const RESUME_RESTORE_YAML: &str = r#"name: Northwind Research
 description: Continuous equity research
 mission: Continuous equity research
 values: [cite sources]
 model: kimi-k2
 provider: moonshot
-strategy: supervisor
-orchestrator:
-  name: Anima
-  bio: A vigilant chief of staff.
-  system: You are Anima.
-  model: kimi-k2
-  tools: [read_file]
 agents:
+  - name: Anima
+    bio: A vigilant chief of staff.
+    system: You are Anima.
+    model: kimi-k2
+    tools: [read_file]
   - name: Scout
     bio: A scout.
     system: You are Scout.
@@ -738,12 +762,10 @@ const OTHER_ROOT_YAML: &str = r#"name: Contoso
 description: Sales
 mission: Sales
 model: kimi-k2
-strategy: supervisor
-orchestrator:
-  name: Atlas
-  bio: A tireless lead.
-  system: You are Atlas.
 agents:
+  - name: Atlas
+    bio: A tireless agent.
+    system: You are Atlas.
   - name: Scout
     system: You are Scout.
 "#;
@@ -786,6 +808,10 @@ fn roster(body: &str) -> Vec<(String, String)> {
         .collect::<Vec<_>>();
     agents.sort_by(|left, right| left.1.cmp(&right.1));
     agents
+}
+
+fn names(body: &str) -> Vec<String> {
+    roster(body).into_iter().map(|(_, name)| name).collect()
 }
 
 struct EnvVarGuard {
@@ -841,16 +867,9 @@ async fn resume_conflicts_when_configured_for_different_root() {
         "conflict names the configured root: {body}"
     );
 
-    // Nothing from root B's yaml was created: only the bootstrap agent exists.
+    // Nothing from root B's yaml was created.
     let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(
-        roster(&agents)
-            .iter()
-            .map(|(_, name)| name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["Anima"],
-        "{agents}"
-    );
+    assert_eq!(names(&agents), vec!["Anima", "Steward"], "{agents}");
 }
 
 #[tokio::test]
@@ -862,17 +881,21 @@ async fn resume_same_root_restores_missing_agents_only() {
     let (status, body) = resume_workspace(&app, root.path()).await;
     assert_eq!(status, 201, "{body}");
     let first: serde_json::Value = serde_json::from_str(&body).expect("body is json");
-    let orchestrator_id = first["orchestrator"]["state"]["id"]
+    let anima_id = first["agents"][0]["state"]["id"]
         .as_str()
-        .expect("orchestrator id")
+        .expect("anima id")
         .to_string();
-    let scout_id = first["workers"][0]["state"]["id"]
+    let scout_id = first["agents"][1]["state"]["id"]
         .as_str()
-        .expect("worker id")
+        .expect("scout id")
+        .to_string();
+    let steward_id = first["steward"]["state"]["id"]
+        .as_str()
+        .expect("steward id")
         .to_string();
 
-    // The worker disappears (crash, owner cleanup, ...); a re-resume of the
-    // same root must restore exactly it.
+    // Scout disappears (crash, owner cleanup, ...); a re-resume of the same
+    // root must restore exactly it.
     let (status, body) = delete_agent(&app, &scout_id).await;
     assert_eq!(status, 200, "{body}");
 
@@ -880,34 +903,35 @@ async fn resume_same_root_restores_missing_agents_only() {
     assert_eq!(status, 201, "{body}");
     let second: serde_json::Value = serde_json::from_str(&body).expect("body is json");
 
-    // The response reports the PRE-EXISTING orchestrator, not a new one.
+    // Every listed agent is reported: the kept Anima and a fresh Scout.
     assert_eq!(
-        second["orchestrator"]["state"]["id"].as_str(),
-        Some(orchestrator_id.as_str()),
+        second["agents"][0]["state"]["id"].as_str(),
+        Some(anima_id.as_str()),
         "{second}"
     );
     assert_eq!(
         second["skipped"],
         serde_json::json!(["Anima"]),
-        "the kept orchestrator is reported as skipped: {second}"
+        "the kept agent is reported as skipped: {second}"
     );
-    let workers = second["workers"].as_array().expect("workers is an array");
-    assert_eq!(workers.len(), 1, "{second}");
-    assert_eq!(workers[0]["state"]["name"], "Scout", "{second}");
+    assert_eq!(second["agents"][1]["state"]["name"], "Scout", "{second}");
     assert_ne!(
-        workers[0]["state"]["id"].as_str(),
+        second["agents"][1]["state"]["id"].as_str(),
         Some(scout_id.as_str()),
-        "the restored worker is a fresh agent: {second}"
+        "the restored agent is a fresh agent: {second}"
+    );
+    // The existing steward is kept, not duplicated.
+    assert_eq!(
+        second["steward"]["state"]["id"].as_str(),
+        Some(steward_id.as_str()),
+        "{second}"
     );
 
-    // The orchestrator was not duplicated and the roster is whole again.
     let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    let roster = roster(&agents);
-    assert_eq!(roster.len(), 2, "{agents}");
     assert_eq!(
-        roster.iter().filter(|(_, name)| name == "Anima").count(),
-        1,
-        "orchestrator must not be duplicated: {agents}"
+        names(&agents),
+        vec!["Anima", "Scout", "Steward"],
+        "{agents}"
     );
 
     let (_, workspace) = send_empty_request(&app, "GET", "/api/workspace").await;
@@ -921,7 +945,7 @@ async fn resume_fresh_adopt_skips_persisted_agent_name_collisions() {
     std::fs::write(root.path().join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
     let app = test_app();
 
-    // A standalone agent that happens to share the orchestrator's name.
+    // A standalone agent that happens to share a listed agent's name.
     let (status, body) = send_json_request(
         &app,
         "POST",
@@ -936,10 +960,10 @@ async fn resume_fresh_adopt_skips_persisted_agent_name_collisions() {
     assert_eq!(status, 201, "{body}");
     let body: serde_json::Value = serde_json::from_str(&body).expect("body is json");
 
-    // The persisted agent is kept and reported as the orchestrator; only the
-    // missing worker is created.
+    // The persisted agent is kept and reported in its place; only the
+    // missing agent is created.
     assert_eq!(
-        body["orchestrator"]["state"]["id"].as_str(),
+        body["agents"][0]["state"]["id"].as_str(),
         Some(existing_id.as_str()),
         "{body}"
     );
@@ -948,16 +972,17 @@ async fn resume_fresh_adopt_skips_persisted_agent_name_collisions() {
         serde_json::json!(["Anima"]),
         "the name collision is reported as skipped: {body}"
     );
-    let workers = body["workers"].as_array().expect("workers is an array");
-    assert_eq!(workers.len(), 1, "{body}");
-    assert_eq!(workers[0]["state"]["name"], "Scout", "{body}");
+    assert_eq!(body["agents"][1]["state"]["name"], "Scout", "{body}");
 
     let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    let roster = roster(&agents);
-    assert_eq!(roster.len(), 2, "{agents}");
+    let live = roster(&agents);
+    assert_eq!(
+        names(&agents),
+        vec!["Anima", "Scout", "Steward"],
+        "{agents}"
+    );
     assert!(
-        roster
-            .iter()
+        live.iter()
             .any(|(id, name)| id == &existing_id && name == "Anima"),
         "pre-existing agent kept with its id: {agents}"
     );
@@ -986,7 +1011,7 @@ async fn resume_all_agents_exist_returns_409() {
     );
 
     let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 2, "{agents}");
+    assert_eq!(roster(&agents).len(), 3, "{agents}");
 }
 
 #[tokio::test]
@@ -1005,15 +1030,14 @@ async fn resume_rolls_back_when_persist_fails() {
             .expect("app configures persistence");
 
         // Force the next control-plane save to fail: replace the snapshot file
-        // with a directory so the atomic rename cannot replace it (mirrors the
-        // bootstrap rollback test's anima.yaml technique).
+        // with a directory so the atomic rename cannot replace it.
         std::fs::remove_file(&control_plane_path).expect("startup snapshot exists");
         std::fs::create_dir(&control_plane_path).expect("sabotage directory created");
 
         let (status, body) = resume_workspace(&app, &adopt_root).await;
         assert_eq!(status, 503, "{body}");
 
-        // Full rollback: no agents, no live workspace configuration.
+        // Full rollback: no agents, no steward, no live workspace.
         let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
         assert_eq!(
             roster(&agents).len(),
@@ -1034,7 +1058,10 @@ async fn resume_rolls_back_when_persist_fails() {
 async fn resume_rejects_yaml_internal_duplicate_names() {
     let root = support::use_temp_workspace_root("resume-dup-names");
     let yaml = RESUME_RESTORE_YAML.replace("  - name: Scout\n", "  - name: Anima\n");
-    assert!(yaml.contains("  - name: Anima\n"), "fixture edit applied");
+    assert!(
+        yaml.matches("  - name: Anima\n").count() == 2,
+        "fixture edit applied"
+    );
     std::fs::write(root.path().join("anima.yaml"), yaml).expect("yaml writes");
     let app = test_app();
 
@@ -1053,7 +1080,7 @@ async fn resume_rejects_yaml_internal_duplicate_names() {
 }
 
 #[tokio::test]
-async fn resume_rejects_whitespace_worker_system() {
+async fn resume_rejects_whitespace_agent_system() {
     let root = support::use_temp_workspace_root("resume-blank-system");
     let yaml = RESUME_RESTORE_YAML.replace("    system: You are Scout.\n", "    system: \" \"\n");
     assert!(yaml.contains("system: \" \""), "fixture edit applied");
@@ -1089,8 +1116,6 @@ async fn resumed_agents_survive_restart() {
     })
     .await;
 
-    // Respawn against the same control-plane file (mirrors
-    // control_plane_store_recovers_agents_and_swarms_after_restart).
     let second_root = workspace.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
         let second_app = support::configured_loopback_test_app(DaemonConfig::default())
@@ -1098,11 +1123,8 @@ async fn resumed_agents_survive_restart() {
             .expect("second app should configure persistence");
         let (_, agents) = send_empty_request(&second_app, "GET", "/api/agents").await;
         assert_eq!(
-            roster(&agents)
-                .iter()
-                .map(|(_, name)| name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["Anima", "Scout"],
+            names(&agents),
+            vec!["Anima", "Scout", "Steward"],
             "resumed roster restored after restart: {agents}"
         );
         let (_, workspace_body) = send_empty_request(&second_app, "GET", "/api/workspace").await;
@@ -1116,15 +1138,6 @@ async fn resumed_agents_survive_restart() {
         );
     })
     .await;
-}
-
-fn team_bootstrap_body(root: &std::path::Path) -> serde_json::Value {
-    let mut body = bootstrap_body(root);
-    let mut worker = body["agent"].clone();
-    worker["name"] = serde_json::json!("Researcher");
-    worker["system"] = serde_json::json!("Research and cite evidence.");
-    body["workers"] = serde_json::json!([worker]);
-    body
 }
 
 async fn send_workspace_files_request(
@@ -1327,14 +1340,12 @@ async fn workspace_files_reject_directory_links_outside_the_configured_root() {
 }
 
 #[tokio::test]
-async fn team_model_overrides_survive_yaml_resume_and_restart() {
+async fn model_overrides_survive_yaml_resume_and_restart() {
     let root = support::use_temp_workspace_root("team-model-overrides");
     let control_plane_path = root.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
-    let mut request = team_bootstrap_body(root.path());
+    let mut request = bootstrap_body(root.path());
     request["agent"]["model"] = serde_json::json!("setup-model");
-    request["workers"][0]["provider"] = serde_json::json!("ollama");
-    request["workers"][0]["model"] = serde_json::json!("worker-model");
     let app = test_app();
     let (status, body) = send_json_request(
         &app,
@@ -1347,16 +1358,12 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(root.path().join("anima.yaml")).unwrap())
             .unwrap();
-    assert_eq!(yaml["orchestrator"]["model"], "setup-model");
-    assert_eq!(yaml["orchestrator"]["provider"], "deterministic");
-    assert_eq!(yaml["agents"][0]["model"], "worker-model");
-    assert_eq!(yaml["agents"][0]["provider"], "ollama");
+    assert_eq!(yaml["agents"][0]["model"], "setup-model");
+    assert_eq!(yaml["agents"][0]["provider"], "deterministic");
     let (status, body) = send_empty_request(&app, "GET", &inspect_uri(root.path())).await;
     assert_eq!(status, 200, "{body}");
     let inspected: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(inspected["orchestrator"]["model"], "setup-model");
-    assert_eq!(inspected["workers"][0]["provider"], "ollama");
-    assert_eq!(inspected["workers"][0]["model"], "worker-model");
+    assert_eq!(inspected["agents"][0]["model"], "setup-model");
     let first_root = root.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
         let fresh = support::configured_loopback_test_app(DaemonConfig::default())
@@ -1364,7 +1371,7 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
             .unwrap();
         let (status, body) = resume_workspace(&fresh, &first_root).await;
         assert_eq!(status, 201, "{body}");
-        assert_team_model_overrides(&fresh).await;
+        assert_model_overrides(&fresh).await;
         drop(fresh);
     })
     .await;
@@ -1373,26 +1380,22 @@ async fn team_model_overrides_survive_yaml_resume_and_restart() {
         let restarted = support::configured_loopback_test_app(DaemonConfig::default())
             .await
             .unwrap();
-        assert_team_model_overrides(&restarted).await;
+        assert_model_overrides(&restarted).await;
     })
     .await;
 }
 
-async fn assert_team_model_overrides(app: &axum::Router) {
+async fn assert_model_overrides(app: &axum::Router) {
     let (_, body) = send_empty_request(app, "GET", "/api/agents").await;
     let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let agents = body["agents"].as_array().unwrap();
-    for (name, model, provider) in [
-        ("Anima", "setup-model", "deterministic"),
-        ("Researcher", "worker-model", "ollama"),
-    ] {
-        let agent = agents
-            .iter()
-            .find(|agent| agent["state"]["name"] == name)
-            .unwrap();
-        assert_eq!(agent["state"]["config"]["model"], model);
-        assert_eq!(agent["state"]["config"]["provider"], provider);
-    }
+    let agent = body["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["state"]["name"] == "Anima")
+        .unwrap();
+    assert_eq!(agent["state"]["config"]["model"], "setup-model");
+    assert_eq!(agent["state"]["config"]["provider"], "deterministic");
 }
 
 #[tokio::test]
@@ -1401,9 +1404,9 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
     let control_plane_path = root.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let yaml_path = root.path().join("anima.yaml");
-    let mut original: serde_yaml::Value = serde_yaml::from_str(VALID_AGENCY_YAML).unwrap();
+    let mut original: serde_yaml::Value = serde_yaml::from_str(VALID_WORKSPACE_YAML).unwrap();
     original["custom"] = serde_yaml::from_str("retained: [one, two]").unwrap();
-    original["agents"][0]["customAgent"] = serde_yaml::Value::String("retain me".into());
+    original["agents"][1]["customAgent"] = serde_yaml::Value::String("retain me".into());
     std::fs::write(&yaml_path, serde_yaml::to_string(&original).unwrap()).unwrap();
     let first_root = root.path().to_path_buf();
     support::run_in_joined_runtime(move || async move {
@@ -1414,59 +1417,59 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
         assert_eq!(status, 201, "{body}");
         let (_, body) = send_empty_request(&app, "GET", "/api/agents").await;
         let roster = roster(&body);
-        let lead = &roster.iter().find(|(_, name)| name == "Anima").unwrap().0;
-        let worker = &roster.iter().find(|(_, name)| name == "Scout").unwrap().0;
+        let anima = &roster.iter().find(|(_, name)| name == "Anima").unwrap().0;
+        let scout = &roster.iter().find(|(_, name)| name == "Scout").unwrap().0;
         let (status, body) = send_json_request(
             &app,
             "PATCH",
-            &format!("/api/agents/{lead}"),
-            r#"{"model":"lead-new","provider":"ollama"}"#,
+            &format!("/api/agents/{anima}"),
+            r#"{"model":"anima-new","provider":"ollama"}"#,
         )
         .await;
         assert_eq!(status, 200, "{body}");
-        let after_lead: serde_yaml::Value =
+        let after_anima: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
-        assert_eq!(after_lead["orchestrator"]["model"], "lead-new");
-        assert_eq!(after_lead["orchestrator"]["provider"], "ollama");
-        assert_eq!(after_lead["agents"], original["agents"]);
-        assert_eq!(after_lead["provider"], "moonshot");
-        assert_eq!(after_lead["model"], "kimi-k2");
+        assert_eq!(after_anima["agents"][0]["model"], "anima-new");
+        assert_eq!(after_anima["agents"][0]["provider"], "ollama");
+        assert_eq!(after_anima["agents"][1], original["agents"][1]);
+        assert_eq!(after_anima["provider"], "moonshot");
+        assert_eq!(after_anima["model"], "kimi-k2");
         let inherited = test_app();
         let (status, body) = resume_workspace(&inherited, &first_root).await;
         assert_eq!(status, 201, "{body}");
         let (_, body) = send_empty_request(&inherited, "GET", "/api/agents").await;
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let inherited_worker = body["agents"]
+        let inherited_scout = body["agents"]
             .as_array()
             .unwrap()
             .iter()
             .find(|agent| agent["state"]["name"] == "Scout")
             .unwrap();
-        assert_eq!(inherited_worker["state"]["config"]["provider"], "moonshot");
-        assert_eq!(inherited_worker["state"]["config"]["model"], "kimi-k2");
+        assert_eq!(inherited_scout["state"]["config"]["provider"], "moonshot");
+        assert_eq!(inherited_scout["state"]["config"]["model"], "kimi-k2");
         let (status, body) = send_json_request(
             &app,
             "PATCH",
-            &format!("/api/agents/{worker}"),
-            r#"{"name":"Scout renamed","model":"worker-new","provider":"openai"}"#,
+            &format!("/api/agents/{scout}"),
+            r#"{"name":"Scout renamed","model":"scout-new","provider":"openai"}"#,
         )
         .await;
         assert_eq!(status, 200, "{body}");
         let (status, body) = send_json_request(
             &app,
             "PATCH",
-            &format!("/api/agents/{worker}"),
-            r#"{"model":"worker-final"}"#,
+            &format!("/api/agents/{scout}"),
+            r#"{"model":"scout-final"}"#,
         )
         .await;
         assert_eq!(status, 200, "{body}");
         let updated: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
         assert_eq!(updated["custom"], original["custom"]);
-        assert_eq!(updated["agents"][0]["customAgent"], "retain me");
-        assert_eq!(updated["agents"][0]["name"], "Scout renamed");
-        assert_eq!(updated["agents"][0]["provider"], "openai");
-        assert_eq!(updated["agents"][0]["model"], "worker-final");
+        assert_eq!(updated["agents"][1]["customAgent"], "retain me");
+        assert_eq!(updated["agents"][1]["name"], "Scout renamed");
+        assert_eq!(updated["agents"][1]["provider"], "openai");
+        assert_eq!(updated["agents"][1]["model"], "scout-final");
         drop(app);
     })
     .await;
@@ -1483,8 +1486,8 @@ async fn settings_model_updates_preserve_yaml_fields_and_survive_resume_and_rest
             let (_, body) = send_empty_request(instance, "GET", "/api/agents").await;
             let body: serde_json::Value = serde_json::from_str(&body).unwrap();
             for (name, model, provider) in [
-                ("Anima", "lead-new", "ollama"),
-                ("Scout renamed", "worker-final", "openai"),
+                ("Anima", "anima-new", "ollama"),
+                ("Scout renamed", "scout-final", "openai"),
             ] {
                 let agent = body["agents"]
                     .as_array()
@@ -1514,12 +1517,16 @@ async fn settings_yaml_and_persistence_failures_leave_runtime_unchanged() {
             &app,
             "POST",
             "/api/workspace/bootstrap",
-            &team_bootstrap_body(&workspace_root).to_string(),
+            &bootstrap_body(&workspace_root).to_string(),
         )
         .await;
         assert_eq!(status, 201, "{body}");
         let (_, before) = send_empty_request(&app, "GET", "/api/agents").await;
-        let id = roster(&before)[0].0.clone();
+        let id = roster(&before)
+            .into_iter()
+            .find(|(_, name)| name == "Anima")
+            .unwrap()
+            .0;
         let yaml_path = workspace_root.join("anima.yaml");
         let yaml = std::fs::read_to_string(&yaml_path).unwrap();
         for failure in ["malformed", "unwritable", "persistence"] {
@@ -1566,37 +1573,28 @@ async fn settings_yaml_and_persistence_failures_leave_runtime_unchanged() {
 #[tokio::test]
 async fn settings_concurrent_updates_preserve_both_agents_and_reject_name_collisions() {
     let root = support::use_temp_workspace_root("settings-yaml-concurrency");
+    std::fs::write(root.path().join("anima.yaml"), RESUME_RESTORE_YAML).expect("yaml writes");
     let app = test_app();
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &team_bootstrap_body(root.path()).to_string(),
-    )
-    .await;
+    let (status, body) = resume_workspace(&app, root.path()).await;
     assert_eq!(status, 201, "{body}");
     let (_, before) = send_empty_request(&app, "GET", "/api/agents").await;
     let agents = roster(&before);
-    let lead = &agents.iter().find(|(_, name)| name == "Anima").unwrap().0;
-    let worker = &agents
-        .iter()
-        .find(|(_, name)| name == "Researcher")
-        .unwrap()
-        .0;
-    let lead_uri = format!("/api/agents/{lead}");
-    let worker_uri = format!("/api/agents/{worker}");
+    let anima = &agents.iter().find(|(_, name)| name == "Anima").unwrap().0;
+    let scout = &agents.iter().find(|(_, name)| name == "Scout").unwrap().0;
+    let anima_uri = format!("/api/agents/{anima}");
+    let scout_uri = format!("/api/agents/{scout}");
     let (first, second) = tokio::join!(
         send_json_request(
             &app,
             "PATCH",
-            &lead_uri,
-            r#"{"model":"lead-concurrent","provider":"ollama"}"#
+            &anima_uri,
+            r#"{"model":"anima-concurrent","provider":"ollama"}"#
         ),
         send_json_request(
             &app,
             "PATCH",
-            &worker_uri,
-            r#"{"model":"worker-concurrent","provider":"openai"}"#
+            &scout_uri,
+            r#"{"model":"scout-concurrent","provider":"openai"}"#
         ),
     );
     assert_eq!(first.0, 200, "{}", first.1);
@@ -1604,12 +1602,12 @@ async fn settings_concurrent_updates_preserve_both_agents_and_reject_name_collis
     let yaml_path = root.path().join("anima.yaml");
     let before_collision = std::fs::read_to_string(&yaml_path).unwrap();
     let yaml: serde_yaml::Value = serde_yaml::from_str(&before_collision).unwrap();
-    assert_eq!(yaml["orchestrator"]["model"], "lead-concurrent");
-    assert_eq!(yaml["agents"][0]["model"], "worker-concurrent");
+    assert_eq!(yaml["agents"][0]["model"], "anima-concurrent");
+    assert_eq!(yaml["agents"][1]["model"], "scout-concurrent");
     let (status, body) = send_json_request(
         &app,
         "PATCH",
-        &worker_uri,
+        &scout_uri,
         r#"{"name":"Anima","model":"collision"}"#,
     )
     .await;
@@ -1618,31 +1616,27 @@ async fn settings_concurrent_updates_preserve_both_agents_and_reject_name_collis
         std::fs::read_to_string(&yaml_path).unwrap(),
         before_collision
     );
-    let (status, body) = send_json_request(&app, "PATCH", &worker_uri, r#"{"provider":""}"#).await;
+    let (status, body) = send_json_request(&app, "PATCH", &scout_uri, r#"{"provider":""}"#).await;
     assert_eq!(status, 200, "{body}");
-    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(
-        body["agent"]["state"]["config"]["provider"],
-        "deterministic"
-    );
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(&yaml_path).unwrap()).unwrap();
-    assert!(yaml["agents"][0]["provider"].is_null());
-    assert_eq!(yaml["orchestrator"]["provider"], "ollama");
+    assert!(yaml["agents"][1]["provider"].is_null());
+    assert_eq!(yaml["agents"][0]["provider"], "ollama");
 }
 
 #[tokio::test]
-async fn legacy_yaml_agents_inherit_global_model_and_provider() {
+async fn agents_without_their_own_model_inherit_the_workspace_defaults() {
     let root = support::use_temp_workspace_root("legacy-team-provider");
-    std::fs::write(root.path().join("anima.yaml"), VALID_AGENCY_YAML).unwrap();
+    std::fs::write(root.path().join("anima.yaml"), VALID_WORKSPACE_YAML).unwrap();
     let app = test_app();
     let (status, body) = resume_workspace(&app, root.path()).await;
     assert_eq!(status, 201, "{body}");
     let (_, body) = send_empty_request(&app, "GET", "/api/agents").await;
     let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // The steward follows the first agent's model, with the rules behind it.
     for agent in body["agents"].as_array().unwrap() {
-        assert_eq!(agent["state"]["config"]["provider"], "moonshot");
-        assert_eq!(agent["state"]["config"]["model"], "kimi-k2");
+        assert_eq!(agent["state"]["config"]["provider"], "moonshot", "{agent}");
+        assert_eq!(agent["state"]["config"]["model"], "kimi-k2", "{agent}");
     }
 }
 
@@ -1650,14 +1644,14 @@ async fn legacy_yaml_agents_inherit_global_model_and_provider() {
 async fn inspect_checks_every_effective_provider() {
     let root = support::use_temp_workspace_root("inspect-team-providers");
     let _key = EnvVarGuard::set("MOONSHOT_API_KEY", std::path::Path::new("test-inspect-key"));
-    for (lead_provider, worker_provider, expected) in [
+    for (first_provider, second_provider, expected) in [
         ("moonshot", "missing-provider", false),
         ("missing-provider", "moonshot", false),
         ("  ", "moonshot", true),
     ] {
-        let mut yaml: serde_yaml::Value = serde_yaml::from_str(VALID_AGENCY_YAML).unwrap();
-        yaml["orchestrator"]["provider"] = serde_yaml::Value::String(lead_provider.into());
-        yaml["agents"][0]["provider"] = serde_yaml::Value::String(worker_provider.into());
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(VALID_WORKSPACE_YAML).unwrap();
+        yaml["agents"][0]["provider"] = serde_yaml::Value::String(first_provider.into());
+        yaml["agents"][1]["provider"] = serde_yaml::Value::String(second_provider.into());
         std::fs::write(
             root.path().join("anima.yaml"),
             serde_yaml::to_string(&yaml).unwrap(),
@@ -1668,52 +1662,37 @@ async fn inspect_checks_every_effective_provider() {
         assert_eq!(status, 200, "{body}");
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["providerAvailable"], expected, "{body}");
-        if lead_provider.trim().is_empty() {
-            assert_eq!(body["orchestrator"]["provider"], "moonshot");
+        if first_provider.trim().is_empty() {
+            assert_eq!(body["agents"][0]["provider"], "moonshot");
         }
     }
 }
 
 #[tokio::test]
-async fn bootstrap_team_persists_yaml_and_can_resume() {
-    let root = support::use_temp_workspace_root("bootstrap-team");
+async fn bootstrap_then_resume_on_a_fresh_daemon_keeps_one_steward() {
+    let root = support::use_temp_workspace_root("bootstrap-resume-steward");
     let app = test_app();
     let (status, body) = send_json_request(
         &app,
         "POST",
         "/api/workspace/bootstrap",
-        &team_bootstrap_body(root.path()).to_string(),
+        &bootstrap_body(root.path()).to_string(),
     )
     .await;
     assert_eq!(status, 201, "{body}");
-    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(body["workers"][0]["state"]["name"], "Researcher");
-    // No agent ranks above another: neither carries a workspace role.
-    assert!(body["agent"]["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
-    assert!(
-        body["workers"][0]["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null()
-    );
-    let yaml: serde_yaml::Value =
-        serde_yaml::from_str(&std::fs::read_to_string(root.path().join("anima.yaml")).unwrap())
-            .unwrap();
-    assert_eq!(yaml["agents"][0]["name"], "Researcher");
     let fresh = test_app();
     let (status, body) = resume_workspace(&fresh, root.path()).await;
     assert_eq!(status, 201, "{body}");
     let resumed: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert!(
-        resumed["orchestrator"]["state"]["config"]["settings"]["additional"]["workspaceRole"]
-            .is_null()
-    );
+    assert_eq!(resumed["steward"]["state"]["name"], "Steward", "{resumed}");
     let (_, agents) = send_empty_request(&fresh, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 2);
+    assert_eq!(names(&agents), vec!["Anima", "Steward"], "{agents}");
 }
 
 #[tokio::test]
-async fn bootstrap_team_validates_all_workers_before_mutation() {
-    let root = support::use_temp_workspace_root("bootstrap-team-invalid");
+async fn bootstrap_validates_the_agent_before_mutation() {
+    let root = support::use_temp_workspace_root("bootstrap-invalid");
     for (field, value) in [
-        ("name", serde_json::json!(" anima ")),
         ("name", serde_json::json!(" ")),
         ("system", serde_json::json!(" ")),
         ("bio", serde_json::json!(" ")),
@@ -1724,8 +1703,8 @@ async fn bootstrap_team_validates_all_workers_before_mutation() {
     ] {
         let app = test_app();
         let candidate = root.path().join(field);
-        let mut request = team_bootstrap_body(&candidate);
-        request["workers"][0][field] = value;
+        let mut request = bootstrap_body(&candidate);
+        request["agent"][field] = value;
         let (status, body) = send_json_request(
             &app,
             "POST",
@@ -1734,32 +1713,18 @@ async fn bootstrap_team_validates_all_workers_before_mutation() {
         )
         .await;
         assert_eq!(status, 400, "{field}: {body}");
-        assert!(!candidate.exists(), "invalid team must not create root");
+        assert!(
+            !candidate.exists(),
+            "an invalid agent must not create the root"
+        );
         let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
         assert_eq!(roster(&agents).len(), 0);
     }
 }
 
 #[tokio::test]
-async fn bootstrap_team_rolls_back_every_agent_on_yaml_failure() {
-    let root = support::use_temp_workspace_root("bootstrap-team-rollback");
-    std::fs::create_dir(root.path().join("anima.yaml")).unwrap();
-    let app = test_app();
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &team_bootstrap_body(root.path()).to_string(),
-    )
-    .await;
-    assert_eq!(status, 503, "{body}");
-    let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 0);
-}
-
-#[tokio::test]
-async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
-    let workspace = support::use_temp_workspace_root("bootstrap-team-persist");
+async fn bootstrap_survives_restart_and_persist_failure_rolls_back() {
+    let workspace = support::use_temp_workspace_root("bootstrap-persist");
     let control_plane_path = workspace.control_plane_path();
     let _guard = EnvVarGuard::set("ANIMAOS_RS_CONTROL_PLANE_FILE", &control_plane_path);
     let root = workspace.path().join("team");
@@ -1775,7 +1740,7 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
             &app,
             "POST",
             "/api/workspace/bootstrap",
-            &team_bootstrap_body(&first_root).to_string(),
+            &bootstrap_body(&first_root).to_string(),
         )
         .await;
         assert_eq!(status, 503, "{body}");
@@ -1802,7 +1767,7 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
             &fresh,
             "POST",
             "/api/workspace/bootstrap",
-            &team_bootstrap_body(&bootstrap_root).to_string(),
+            &bootstrap_body(&bootstrap_root).to_string(),
         )
         .await;
         assert_eq!(status, 201, "{body}");
@@ -1815,45 +1780,16 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
             .await
             .unwrap();
         let (_, agents) = send_empty_request(&restored, "GET", "/api/agents").await;
-        assert_eq!(roster(&agents).len(), 2, "{agents}");
-        assert!(roster(&agents).iter().any(|(_, name)| name == "Researcher"));
-        let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
-        let first = agents["agents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|agent| agent["state"]["name"] == "Anima")
-            .unwrap();
-        assert!(first["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
+        assert_eq!(names(&agents), vec!["Anima", "Steward"], "{agents}");
     })
     .await;
 }
 
 #[tokio::test]
-async fn bootstrap_team_limit_and_concurrent_requests() {
-    let root = support::use_temp_workspace_root("bootstrap-team-race");
+async fn concurrent_bootstraps_create_one_workspace() {
+    let root = support::use_temp_workspace_root("bootstrap-race");
     let app = test_app();
-    let mut request = team_bootstrap_body(root.path());
-    let worker = request["workers"][0].clone();
-    request["workers"] = serde_json::Value::Array(
-        (0..10)
-            .map(|i| {
-                let mut worker = worker.clone();
-                worker["name"] = serde_json::json!(format!("Worker {i}"));
-                worker
-            })
-            .collect(),
-    );
-    let (status, body) = send_json_request(
-        &app,
-        "POST",
-        "/api/workspace/bootstrap",
-        &request.to_string(),
-    )
-    .await;
-    assert_eq!(status, 400, "{body}");
-    request["workers"].as_array_mut().unwrap().pop();
-    let request = request.to_string();
+    let request = bootstrap_body(root.path()).to_string();
     let (first, second) = tokio::join!(
         send_json_request(&app, "POST", "/api/workspace/bootstrap", &request),
         send_json_request(&app, "POST", "/api/workspace/bootstrap", &request)
@@ -1862,5 +1798,5 @@ async fn bootstrap_team_limit_and_concurrent_requests() {
     statuses.sort();
     assert_eq!(statuses, [201, 409], "{first:?} {second:?}");
     let (_, agents) = send_empty_request(&app, "GET", "/api/agents").await;
-    assert_eq!(roster(&agents).len(), 10);
+    assert_eq!(names(&agents), vec!["Anima", "Steward"], "{agents}");
 }

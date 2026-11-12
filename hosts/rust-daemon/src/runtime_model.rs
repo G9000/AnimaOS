@@ -69,10 +69,12 @@ fn provider_config_from_env() -> ProviderAdapterConfig {
 /// alias, any case).
 pub(crate) fn is_routable_provider(provider: &str) -> bool {
     let provider = provider.trim().to_ascii_lowercase();
-    matches!(provider.as_str(), "deterministic" | "test" | "chatgpt")
-        || provider_definitions().iter().any(|definition| {
-            definition.id == provider || definition.aliases.contains(&provider.as_str())
-        })
+    matches!(
+        provider.as_str(),
+        "deterministic" | "test" | "chatgpt" | crate::steward::STEWARD_PROVIDER
+    ) || provider_definitions().iter().any(|definition| {
+        definition.id == provider || definition.aliases.contains(&provider.as_str())
+    })
 }
 
 /// `provider` as the id it routes to: trimmed, lower case, and an alias such
@@ -453,6 +455,11 @@ impl ModelAdapter for RuntimeModelAdapter {
                         .generate_controlled(config, request, context)
                         .await
                 }
+                crate::steward::STEWARD_PROVIDER => {
+                    crate::steward::StewardRulesAdapter
+                        .generate_controlled(config, request, context)
+                        .await
+                }
                 "chatgpt" => {
                     let (token, account) = context
                         .bounded(self.chatgpt_auth.usable_credential())
@@ -500,6 +507,11 @@ impl ModelAdapter for RuntimeModelAdapter {
                         .stream_controlled(config, request, sink, context)
                         .await
                 }
+                crate::steward::STEWARD_PROVIDER => {
+                    crate::steward::StewardRulesAdapter
+                        .stream_controlled(config, request, sink, context)
+                        .await
+                }
                 "chatgpt" => {
                     let (token, account) = context
                         .bounded(self.chatgpt_auth.usable_credential())
@@ -543,6 +555,11 @@ impl ModelAdapter for RuntimeModelAdapter {
             match provider.as_str() {
                 "deterministic" | "test" => {
                     DeterministicModelAdapter.generate(config, request).await
+                }
+                crate::steward::STEWARD_PROVIDER => {
+                    crate::steward::StewardRulesAdapter
+                        .generate(config, request)
+                        .await
                 }
                 "chatgpt" => {
                     let (access_token, account_id) = self.chatgpt_auth.usable_credential().await?;

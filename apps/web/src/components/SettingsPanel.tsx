@@ -713,18 +713,23 @@ export function SettingsPanel({
           },
         ]
       : []),
-    {
-      id: 'delete',
-      icon: 'x-circle-fill',
-      title: `Delete ${agent.name}`,
-      help: `Removes ${agent.name}, its chats and memories. Other agents stay.`,
-      open: 'Delete…',
-      confirmTitle: `Delete ${agent.name}?`,
-      confirmCopy:
-        'This permanently removes the agent and its conversations. This cannot be undone.',
-      confirm: 'Delete agent',
-      run: deleteAgent,
-    },
+    // The steward belongs to the workspace and cannot be deleted.
+    ...(agent.isSteward
+      ? []
+      : [
+          {
+            id: 'delete' as const,
+            icon: 'x-circle-fill' as const,
+            title: `Delete ${agent.name}`,
+            help: `Removes ${agent.name}, its chats and memories. Other agents stay.`,
+            open: 'Delete…',
+            confirmTitle: `Delete ${agent.name}?`,
+            confirmCopy:
+              'This permanently removes the agent and its conversations. This cannot be undone.',
+            confirm: 'Delete agent',
+            run: deleteAgent,
+          },
+        ]),
   ];
   const confirming =
     dangerActions.find((action) => action.id === confirmDanger) ?? null;

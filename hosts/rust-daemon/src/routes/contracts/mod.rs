@@ -5,7 +5,6 @@ mod microsoft_files;
 pub(crate) use microsoft_files::*;
 mod discord;
 pub(crate) use discord::*;
-mod agencies;
 pub(crate) mod agent_files;
 mod agents;
 mod approvals;
@@ -36,10 +35,6 @@ mod workspace;
 pub(crate) use speech::*;
 pub(crate) use voice::*;
 
-pub(crate) use agencies::{
-    AgencyCreateRequest, AgencyCreateResponse, AgencyGenerateRequest, AgencyGenerateResponse,
-    AgentDefinitionResponse,
-};
 pub(crate) use agents::{
     AgentConfigRequest, AgentEnvelope, AgentProfileEnvelope, AgentProfileResponse,
     AgentRecentMemoriesQuery, AgentRunEnvelope, AgentRuntimeSnapshotResponse,

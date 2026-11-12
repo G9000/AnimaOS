@@ -5,7 +5,6 @@ import { ImagesClient } from './images.js';
 import { VoiceClient } from './voice.js';
 import { SpeechClient } from './speech.js';
 import { GoalsClient } from './goals.js';
-import { AgenciesClient } from './agencies.js';
 import { WorkspaceClient } from './workspace.js';
 import { ChatGptClient } from './chatgpt.js';
 import { ConnectorsClient } from './connectors.js';
@@ -86,7 +85,6 @@ export class DaemonClient {
   readonly images: ImagesClient;
   readonly voice: VoiceClient;
   readonly speech: SpeechClient;
-  readonly agencies: AgenciesClient;
   readonly workspace: WorkspaceClient;
   readonly chatgpt: ChatGptClient;
   readonly agents: AgentsClient;
@@ -146,7 +144,6 @@ export class DaemonClient {
     this.images = new ImagesClient(this);
     this.voice = new VoiceClient(this);
     this.speech = new SpeechClient(this);
-    this.agencies = new AgenciesClient(this);
     this.workspace = new WorkspaceClient(this);
     this.agents = new AgentsClient(this);
     this.goals = new GoalsClient(this);

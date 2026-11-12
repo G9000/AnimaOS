@@ -70,7 +70,7 @@ async fn rejects_private_store_workspace(operation: Operation, relation: Relatio
     if matches!(operation, Operation::Resume) {
         std::fs::write(
             target.join("anima.yaml"),
-            "name: Boundary fixture\nmission: Keep private storage separate\nmodel: boundary-test\nprovider: deterministic\norchestrator:\n  name: Boundary lead\n  bio: Isolated fixture\n  system: Work only on the fixture\n  tools: [read_file]\n",
+            "name: Boundary fixture\nmission: Keep private storage separate\nmodel: boundary-test\nprovider: deterministic\nagents:\n  - name: Boundary agent\n    bio: Isolated fixture\n    system: Work only on the fixture\n    tools: [read_file]\n",
         )
         .unwrap();
     }
@@ -278,7 +278,7 @@ async fn metadata_workspace_change(operation: Operation, excludes_metadata: bool
     if matches!(operation, Operation::Resume) {
         std::fs::write(
             target.join("anima.yaml"),
-            "name: Metadata boundary fixture\nmission: Keep private reviews separate\nmodel: boundary-test\nprovider: deterministic\norchestrator:\n  name: Boundary lead\n  bio: Isolated fixture\n  system: Work only on the fixture\n  tools: [read_file]\n",
+            "name: Metadata boundary fixture\nmission: Keep private reviews separate\nmodel: boundary-test\nprovider: deterministic\nagents:\n  - name: Boundary agent\n    bio: Isolated fixture\n    system: Work only on the fixture\n    tools: [read_file]\n",
         )
         .unwrap();
     }

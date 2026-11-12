@@ -291,17 +291,21 @@ fn metadata(name: &str) -> (&'static str, Vec<&'static str>) {
             "memory",
             vec!["Agent memory access. Persistence depends on the configured memory storage."],
         ),
-        "spawn_helper" => (
+        "spawn_helper" | "dissolve_helpers" => (
             "team",
             vec![
-                "A direct companion run. Reuses idle helpers, up to four busy helpers, with current companion tool permissions except shell/background-process tools and no recursive communication. Execution deadlines do not roll back completed effects.",
+                "An agent's own run. Its temporary helper team reuses idle helpers, up to four busy helpers, with the agent's current tool permissions except shell/background-process tools and no recursive communication; dissolve_helpers removes the idle ones. Execution deadlines do not roll back completed effects.",
             ],
         ),
         "list_workspace_agents" | "delegate_to_agent" | "send_message" | "broadcast_message" => (
             "team",
             vec![
-                "Existing workspace agents and permitted communication. Delegation is bounded by the manager's current authority.",
+                "Other agents that also talk with agents. Requests are bounded by the sender's current authority.",
             ],
+        ),
+        "set_agent_talk" => (
+            "team",
+            vec!["A direct owner chat. Turns one agent's talk-with-agents grant on or off."],
         ),
         "web_fetch" => (
             "research",

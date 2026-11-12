@@ -53,7 +53,8 @@ export interface SwarmStats {
 /** An agent's full profile — used for the agents panel and editing */
 export interface AgentProfile {
   name: string
-  role?: "orchestrator" | "worker"
+  /** In a launch, the lead coordinates that launch only; the rest are members. */
+  role?: "lead" | "member"
   bio?: string
   lore?: string
   adjectives?: string[]

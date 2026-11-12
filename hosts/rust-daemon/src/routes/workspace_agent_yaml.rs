@@ -30,12 +30,15 @@ impl WorkspaceAgentYamlUpdate {
         };
         // Validate the supported contract, but mutate the generic value so custom
         // fields and unrelated agents survive serialization.
-        serde_yaml::from_str::<super::agencies::AgencyYamlConfig>(&before).map_err(sync_error)?;
+        serde_yaml::from_str::<super::workspace_file::WorkspaceFile>(&before)
+            .map_err(sync_error)?;
         let mut yaml: Value = serde_yaml::from_str(&before).map_err(sync_error)?;
         let mut matches = Vec::new();
         let mut names = Vec::new();
-        for (index, agent) in std::iter::once(&yaml["orchestrator"])
-            .chain(yaml["agents"].as_sequence().into_iter().flatten())
+        for (index, agent) in yaml["agents"]
+            .as_sequence()
+            .into_iter()
+            .flatten()
             .enumerate()
         {
             let name = agent["name"].as_str().unwrap_or_default().trim();
@@ -70,11 +73,7 @@ impl WorkspaceAgentYamlUpdate {
             .filter(|provider| !provider.is_empty())
             .unwrap_or("openai")
             .to_string();
-        let agent = if index == 0 {
-            &mut yaml["orchestrator"]
-        } else {
-            &mut yaml["agents"][index - 1]
-        };
+        let agent = &mut yaml["agents"][index];
         if let Some(name) = &patch.name {
             agent["name"] = Value::String(name.clone());
         }

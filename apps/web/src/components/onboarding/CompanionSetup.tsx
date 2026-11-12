@@ -637,7 +637,7 @@ export function CompanionSetup({
     setError(null);
     try {
       const result = await daemon.resumeWorkspace(preview.rootPath);
-      if (mounted.current) onCreated(result.orchestrator);
+      if (mounted.current) onCreated(result.agents[0]!);
     } catch (caught) {
       if (mounted.current) setError(errorText(caught));
     } finally {

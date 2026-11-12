@@ -290,7 +290,7 @@ export function AgentsPanel({
           {profiles.map((p, i) => {
             const active = i === agentIdx;
             const matched = matchIndexes.includes(i);
-            const prefix = p.role === 'orchestrator' ? '★' : '•';
+            const prefix = p.role === 'lead' ? '★' : '•';
             return (
               <Box key={p.name}>
                 <Text
@@ -302,7 +302,7 @@ export function AgentsPanel({
                 </Text>
                 <Text color="gray">
                   {'  '}
-                  {p.role ?? 'worker'}
+                  {p.role ?? 'member'}
                 </Text>
                 {p.adjectives && p.adjectives.length > 0 ? (
                   <Text color="gray">
@@ -335,7 +335,7 @@ export function AgentsPanel({
           </Text>
           <Text color="gray">
             {'  '}
-            {p.role ?? 'worker'}
+            {p.role ?? 'member'}
           </Text>
         </Box>
         {p.bio ? (

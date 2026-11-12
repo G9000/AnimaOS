@@ -1,6 +1,5 @@
 export interface AgentDefinition {
   name: string;
-  position?: string;
   bio: string;
   lore?: string;
   knowledge?: string[];
@@ -8,26 +7,43 @@ export interface AgentDefinition {
   adjectives?: string[];
   style?: string;
   system: string;
-  role?: 'orchestrator' | 'worker';
   model?: string;
-  /** Overrides the agency provider; omitted values inherit the agency default. */
+  /** Overrides the workspace provider; omitted values inherit the workspace default. */
   provider?: string;
   tools?: string[];
-  /** Names of other agents this one frequently collaborates with — drives the org chart edges. */
-  collaboratesWith?: string[];
 }
 
-export interface AgencyConfig {
+/** `anima.yaml`: the workspace and its agents. Every agent is an equal. */
+export interface WorkspaceFile {
   name: string;
   description: string;
-  /** One-sentence north star the whole team shares. */
+  /** One-sentence north star for the workspace. */
   mission?: string;
-  /** 3-5 cultural principles every agent operates under. */
+  /** 3-5 principles the agents work by. */
   values?: string[];
   model: string;
   provider: string;
-  strategy: 'supervisor' | 'dynamic' | 'round-robin';
-  maxParallelDelegations?: number;
-  orchestrator: AgentDefinition;
   agents: AgentDefinition[];
+}
+
+export type LaunchStrategy = 'supervisor' | 'dynamic' | 'round-robin';
+
+/**
+ * A temporary agency formed from the workspace's agents for one launch. The
+ * lead coordinates only for that launch; the team is gone when it ends and
+ * the agents in `anima.yaml` stay equals.
+ */
+export interface AgencyConfig {
+  name: string;
+  description: string;
+  mission?: string;
+  values?: string[];
+  model: string;
+  provider: string;
+  strategy: LaunchStrategy;
+  maxParallelDelegations?: number;
+  lead: AgentDefinition;
+  members: AgentDefinition[];
+  /** The workspace file the agency was formed from. */
+  workspace: WorkspaceFile;
 }

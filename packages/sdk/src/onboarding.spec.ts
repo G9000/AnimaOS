@@ -2,39 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { createDaemonClient, DaemonHttpError } from './index.js';
 
 describe('onboarding HTTP contracts', () => {
-  it('posts exact and automatic generation inputs without transforming nullable output', async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const response = { name: 'Lab', mission: null, values: null, agents: [] };
-    const client = createDaemonClient({
-      baseUrl: '',
-      fetch: async (url, init) => {
-        calls.push({ url: String(url), init });
-        return Response.json(response);
-      },
-    });
-    const base = {
-      name: 'Lab',
-      description: 'Research',
-      provider: 'openai',
-      model: 'model',
-      modelPool: ['model'],
-    };
-    expect(await client.agencies.generate({ ...base, teamSize: 3 })).toEqual(
-      response,
-    );
-    await client.agencies.generate({ ...base, maxTeamSize: 5 });
-    expect(
-      calls.map(({ url, init }) => [
-        url,
-        init?.method,
-        JSON.parse(String(init?.body)),
-      ]),
-    ).toEqual([
-      ['/api/agencies/generate', 'POST', { ...base, teamSize: 3 }],
-      ['/api/agencies/generate', 'POST', { ...base, maxTeamSize: 5 }],
-    ]);
-  });
-
   it('uses workspace endpoints, forces validation, encodes paths and preserves explicit tools and providers', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const client = createDaemonClient({
@@ -55,18 +22,14 @@ describe('onboarding HTTP contracts', () => {
       values: [],
     };
     const agent = {
-      name: 'Manager',
+      name: 'Ada',
       presetId: 'custom',
-      system: 'Coordinate',
+      system: 'Help out',
       provider: 'openai',
       model: 'model',
       tools: [],
     };
-    const bootstrap = {
-      workspace,
-      agent,
-      workers: [{ ...agent, name: 'Worker', tools: ['read_file'] }],
-    };
+    const bootstrap = { workspace, agent };
     expect((await client.workspace.get()).workspace).toBeNull();
     await client.workspace.put(workspace);
     await client.workspace.validate({ ...workspace, validateOnly: false });
@@ -108,14 +71,5 @@ describe('onboarding HTTP contracts', () => {
     await expect(client.workspace.resume('C:\\Lab')).rejects.toBeInstanceOf(
       DaemonHttpError,
     );
-    await expect(
-      client.agencies.generate({
-        name: 'Lab',
-        description: 'Research',
-        provider: 'openai',
-        model: 'model',
-        teamSize: 3,
-      }),
-    ).rejects.toMatchObject({ status: 409 });
   });
 });

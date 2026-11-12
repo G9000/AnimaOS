@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 pub(crate) struct WorkspaceInspectAgentPreview {
     pub(crate) name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) bio: Option<String>, // orchestrator only; workers omit bio/system
+    pub(crate) bio: Option<String>,
     pub(crate) provider: String,
     pub(crate) model: String,
 }
@@ -21,10 +21,9 @@ pub(crate) struct WorkspaceInspectResponse {
     pub(crate) mission: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) values: Option<Vec<String>>,
+    /// The agents the file lists, all equals.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) orchestrator: Option<WorkspaceInspectAgentPreview>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) workers: Option<Vec<WorkspaceInspectAgentPreview>>,
+    pub(crate) agents: Option<Vec<WorkspaceInspectAgentPreview>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) provider_available: Option<bool>,
 }
@@ -101,8 +100,6 @@ pub(crate) struct BootstrapAgentRequest {
 pub(crate) struct WorkspaceBootstrapRequest {
     pub(crate) workspace: WorkspaceConfigRequest,
     pub(crate) agent: BootstrapAgentRequest,
-    #[serde(default)]
-    pub(crate) workers: Vec<BootstrapAgentRequest>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -110,7 +107,8 @@ pub(crate) struct WorkspaceBootstrapRequest {
 pub(crate) struct WorkspaceBootstrapResponse {
     pub(crate) workspace: WorkspaceConfigResponse,
     pub(crate) agent: super::AgentRuntimeSnapshotResponse,
-    pub(crate) workers: Vec<super::AgentRuntimeSnapshotResponse>,
+    /// The workspace's system agent, created with it.
+    pub(crate) steward: super::AgentRuntimeSnapshotResponse,
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
@@ -123,8 +121,10 @@ pub(crate) struct WorkspaceResumeRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspaceResumeResponse {
     pub(crate) workspace: WorkspaceConfigResponse,
-    pub(crate) orchestrator: super::AgentRuntimeSnapshotResponse,
-    pub(crate) workers: Vec<super::AgentRuntimeSnapshotResponse>,
+    /// Every agent the file lists, in file order, whether new or kept.
+    pub(crate) agents: Vec<super::AgentRuntimeSnapshotResponse>,
+    /// The workspace's system agent; created when the workspace had none.
+    pub(crate) steward: super::AgentRuntimeSnapshotResponse,
     /// Names kept because agents with those names already existed (skip rule).
     pub(crate) skipped: Vec<String>,
 }

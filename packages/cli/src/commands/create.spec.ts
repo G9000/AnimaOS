@@ -84,14 +84,9 @@ describe('create command flow helpers', () => {
       name: 'medicine-helper',
       provider: 'deterministic',
       model: 'local-model',
-      strategy: 'supervisor',
-      agents: [],
-      orchestrator: {
-        name: 'medicine-helper',
-        role: 'orchestrator',
-        model: 'local-model',
-      },
+      agents: [{ name: 'medicine-helper', model: 'local-model' }],
     });
-    expect(config.orchestrator.system).toContain('testing a medicine');
+    expect(config).not.toHaveProperty('orchestrator');
+    expect(config.agents[0].system).toContain('testing a medicine');
   });
 });

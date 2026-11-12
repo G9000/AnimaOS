@@ -14,7 +14,7 @@ pub(crate) struct UsageRecordResponse {
     pub(crate) session_id: Option<String>,
     pub(crate) run_id: Option<String>,
     /// `chat`, `telegram`, `automation`, `job`, `helper`, `api`, `title`,
-    /// `compaction`, `profile`, or `agency`.
+    /// `compaction`, or `profile`.
     pub(crate) source: String,
     pub(crate) provider: String,
     pub(crate) model: String,

@@ -7,7 +7,7 @@ function createAgentProfile(
 ): AgentProfile {
   return {
     name: 'manager',
-    role: 'orchestrator',
+    role: 'lead',
     ...overrides,
   };
 }
@@ -33,7 +33,7 @@ describe('displayed agent helpers', () => {
     const displayedAgents = buildDisplayedAgents(
       [
         createAgentProfile(),
-        createAgentProfile({ name: 'researcher_1', role: 'worker' }),
+        createAgentProfile({ name: 'researcher_1', role: 'member' }),
       ],
       [
         createAgentEntry({

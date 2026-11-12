@@ -12,7 +12,6 @@ export type UsageSource =
   | 'title'
   | 'compaction'
   | 'profile'
-  | 'agency'
   | 'approval'
   | 'side_question'
   | 'skill_evaluation'

@@ -105,6 +105,7 @@ impl RunToolCatalog {
                             | "compact_chat"
                             | "export_chat"
                             | "change_look"
+                            | "set_agent_talk"
                             | "manage_mcp"
                             | "import_github_skill"
                             | "manage_skill_runtime"
@@ -138,6 +139,7 @@ impl RunToolCatalog {
                             | "broadcast_message"
                             | "delegate_to_agent"
                             | "spawn_helper"
+                            | "dissolve_helpers"
                     ) =>
                     {
                         Origin::HostDerived
@@ -599,6 +601,7 @@ impl RunToolCatalog {
             "compact_chat",
             "export_chat",
             "change_look",
+            "set_agent_talk",
             "manage_mcp",
             "import_github_skill",
             "manage_skill_runtime",

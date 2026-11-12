@@ -44,9 +44,9 @@ await client.workspace.put({
 | `get()` | The configured workspace, or `configured: false` plus the `defaultRoot` |
 | `put(config)` | Save the workspace (`rootPath`, `companyName`, `mission`, optional `values`) |
 | `validate(config)` | Same body with `validateOnly`; reports `rootPathExists` without saving |
-| `inspect(rootPath)` | Whether the folder holds an Anima `anima.yaml`, with a preview of its orchestrator and workers |
+| `inspect(rootPath)` | Whether the folder holds an Anima `anima.yaml`, with a preview of its `agents` |
 | `resume(rootPath)` | Bring back the agents saved in that folder's `anima.yaml` |
-| `bootstrap({ workspace, agent, workers? })` | Create the workspace and its first agent (and optional workers) in one call |
+| `bootstrap({ workspace, agent })` | Create the workspace, its first agent and the workspace steward in one call |
 | `pickFolder()` | Open a native folder picker on the daemon's machine (`rootPath` is `null` if cancelled) |
 
 An existing folder can be used as a workspace: setup keeps its files and adds `anima.yaml`. If the folder already has one, `inspect()` reports it and `resume()` restores its saved agents.

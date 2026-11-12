@@ -1876,3 +1876,19 @@ describe('reusable work permissions', () => {
     );
   });
 });
+
+describe('the workspace steward', () => {
+  it('offers no delete action for the steward, but does for other agents', () => {
+    const { unmount } = renderPanel(agent(), { sections: ['profile'] });
+    expect(
+      screen.getByRole('heading', { name: 'Delete Nova' }),
+    ).toBeInTheDocument();
+    unmount();
+    renderPanel(agent({ name: 'Steward', isSteward: true }), {
+      sections: ['profile'],
+    });
+    expect(
+      screen.queryByRole('heading', { name: 'Delete Steward' }),
+    ).not.toBeInTheDocument();
+  });
+});

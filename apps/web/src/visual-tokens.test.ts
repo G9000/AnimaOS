@@ -152,14 +152,6 @@ describe('Anima operator visual contract', () => {
     expect(appFrame).toContain('padding-right: var(--safe-area-right)');
     expect(appFrame).toContain('padding-bottom: var(--safe-area-bottom)');
     expect(appFrame).toContain('padding-left: var(--safe-area-left)');
-    const onboardingShell = cssRule(
-      read('components/onboarding/onboarding-layout.css'),
-      '.setup-shell',
-    );
-    expect(onboardingShell).toContain('flex: 1');
-    expect(onboardingShell).toContain('min-height: 0');
-    expect(onboardingShell).toContain('overflow-y: auto');
-    expect(onboardingShell).not.toContain('--safe-area-');
     expect(read('components/SettingsNavigation.tsx')).not.toContain(
       'safe-bottom-dock',
     );
@@ -258,16 +250,4 @@ describe('Anima operator visual contract', () => {
     expect(suggestions).not.toMatch(/255,\s*57,\s*127/);
   });
 
-  it('keeps onboarding decorative copy neutral', () => {
-    const onboarding = read('components/onboarding/OnboardingLayout.tsx');
-    const header = between(onboarding, '<header', '</header>');
-
-    expect(header).toContain('setup-shell__context');
-    const context = cssRule(
-      read('components/onboarding/onboarding-layout.css'),
-      '.setup-shell__context',
-    );
-    expect(context).toContain('color: var(--color-ink-3)');
-    expect(context).not.toContain('--color-accent');
-  });
 });

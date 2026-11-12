@@ -1,26 +1,26 @@
 ---
-title: Agency Workflow
-description: Create, edit, and launch agent workspaces from the animaos CLI
+title: Workspace Workflow
+description: Create and edit agent workspaces, then form temporary agencies from them with the animaos CLI
 ---
 
 import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
 
-This page covers the workflow that starts on disk: scaffold an agent workspace (or hand-write an `anima.yaml`), edit it like project files, then launch it on the daemon.
+This page covers the workflow that starts on disk: scaffold an agent workspace (or hand-write an `anima.yaml`), edit it like project files, then launch a temporary agency from it on the daemon. Every agent in a workspace is an equal; a launch picks a lead for that one task, and the team is gone when the launch ends.
 
 ## Core Split
 
 - `animaos create` is local. It writes files and does not need the daemon.
-- `animaos launch` is daemon-backed. It reads `anima.yaml`, creates a swarm on the daemon (an orchestrator as manager, the `agents` as workers), and runs tasks through it.
+- `animaos launch` is daemon-backed. It reads `anima.yaml`, forms a temporary agency on the daemon (the lead you choose coordinates, the other agents are members), and runs tasks through it.
 
 <CardGrid>
   <Card title="Create">
-    Scaffold a single-agent workspace with `animaos create agent`, or write an `anima.yaml` by hand for a team.
+    Scaffold a single-agent workspace with `animaos create agent`, or list several agents in `anima.yaml` by hand.
   </Card>
   <Card title="Refine">
     Edit `anima.yaml`, agent profiles and optional seed memories before running.
   </Card>
   <Card title="Launch">
-    Run it with `animaos launch`, in the TUI or in plain text.
+    Form a temporary agency with `animaos launch`, in the TUI or in plain text.
   </Card>
 </CardGrid>
 
@@ -35,14 +35,13 @@ animaos create agent medicine-helper \
   -d "Research medical literature and summarize risks clearly"
 ```
 
-`create` makes no model call. See the [CLI overview](/cli/#animaos-create) for its flags. It only scaffolds a single agent; for a multi-agent team, write `anima.yaml` yourself.
+`create` makes no model call. See the [CLI overview](/cli/#animaos-create) for its flags. It only scaffolds a single agent; to add more agents, list them in `anima.yaml` yourself.
 
 ## Workspace Shape
 
 ```text
 medicine-helper/
 ├── anima.yaml
-├── org-chart.mmd
 ├── README.md
 └── agents/
     └── medicine-helper/
@@ -54,7 +53,7 @@ medicine-helper/
 - `anima.yaml` is the runtime config `launch` reads.
 - `agents/<slug>/profile.md` is a human-readable profile. The slug is the agent name lowercased and kebab-cased.
 - `agents/<slug>/memory/seed.json` holds optional starting memories. Add it by hand; `create` does not generate it.
-- `org-chart.mmd` and `README.md` are generated documentation; `launch` does not read them.
+- `README.md` is generated documentation; `launch` does not read it.
 
 ## `anima.yaml`
 
@@ -63,14 +62,11 @@ name: content-team
 description: Researches topics and writes articles
 model: gpt-4o-mini
 provider: openai
-strategy: supervisor
-maxParallelDelegations: 2
-orchestrator:
-  name: editor
-  bio: Senior editor who plans and reviews the work
-  system: Break the task into steps, delegate to the team, and combine the results.
-  tools: [memory_search, web_fetch]
 agents:
+  - name: editor
+    bio: Senior editor who plans and reviews the work
+    system: Plan the work, check it, and combine the results.
+    tools: [memory_search, web_fetch]
   - name: researcher
     bio: Finds and checks facts
     system: Research the assigned topic and return concise findings.
@@ -83,18 +79,16 @@ agents:
 
 | Top-level key | Required | Default | Description |
 |---------------|----------|---------|-------------|
-| `name` | yes | | Agency name |
-| `orchestrator` | yes | | The manager agent; needs `name`, `bio` and `system` |
-| `agents` | no | `[]` | Worker agents |
+| `name` | yes | | Workspace name |
+| `agents` | yes | | The agents, all equals; at least one, each with `name` and `system` |
 | `description` | no | empty | Free text |
 | `model` | no | `gpt-4o` | Default model for every agent |
 | `provider` | no | `openai` | Default provider (see [Providers](/cli/providers/)) |
-| `strategy` | no | `supervisor` | `supervisor`, `dynamic` or `round-robin` |
-| `maxParallelDelegations` | no | | Passed to the swarm when set to a non-zero number |
+| `mission`, `values` | no | | Shown in the generated README |
 
-Each agent (orchestrator or worker) accepts `name`, `bio`, `system`, `lore`, `adjectives`, `topics`, `knowledge`, `style`, `model` (overrides the agency model), `provider` (overrides the agency provider) and `tools`. A missing `name` becomes `unnamed`; names matter because seed memories are matched to agents by name.
+Each agent accepts `name`, `bio`, `system`, `lore`, `adjectives`, `topics`, `knowledge`, `style`, `model` (overrides the workspace model), `provider` (overrides the workspace provider) and `tools`. A missing `name` becomes `unnamed`; names matter because seed memories are matched to agents by name.
 
-`create` also writes `mission`, `values`, `position`, `role` and `collaboratesWith`, which feed the generated README and org chart. `launch` does not read them, so saving changes from the TUI's `/agents` panel rewrites `anima.yaml` without them.
+An old file with an `orchestrator` key and no `agents` is refused. There is no strategy in the file: how a team works is chosen per launch.
 
 ### Tools
 
@@ -110,22 +104,29 @@ animaos launch "Summarize the latest research"   # TUI, one task
 animaos launch --no-tui "Summarize the latest research"   # plain text
 ```
 
-See the [CLI overview](/cli/#animaos-launch) for flags (`-d, --dir`, `--api-key`, `--no-tui`).
+```bash
+animaos launch --lead researcher "Find three sources"          # researcher leads this task
+animaos launch -s round-robin "Draft and review the intro"    # take turns instead
+animaos launch --max-parallel 2 "Split the research"          # supervisor: two members at once
+```
 
-How launch builds the swarm:
+See the [CLI overview](/cli/#animaos-launch) for flags (`-d, --dir`, `--api-key`, `--no-tui`, `--lead`, `-s, --strategy`, `--max-parallel`).
 
-- The orchestrator becomes the swarm manager and each entry in `agents` becomes a worker.
-- Each agent's model is its own `model`, otherwise the agency `model`; its provider is its own `provider`, otherwise the agency `provider`.
-- `--api-key` applies to the agency provider only. Provider credentials are otherwise taken from your environment.
-- The swarm is created on the first task and reused for the session. After an error, or after you save an agent in the TUI, the next task builds a fresh swarm.
+How launch forms the temporary agency:
+
+- `--lead` names the agent that coordinates this launch (default: the first agent in `anima.yaml`); every other agent joins as a member. The lead has no special standing outside this launch.
+- `-s, --strategy` picks how the team works: `supervisor` (default; the lead hands out work), `dynamic` (the lead picks who speaks next) or `round-robin` (members take turns).
+- Each agent's model is its own `model`, otherwise the workspace `model`; its provider is its own `provider`, otherwise the workspace `provider`.
+- `--api-key` applies to the workspace provider only. Provider credentials are otherwise taken from your environment.
+- The team is formed on the first task and reused for the session. After an error, or after you save an agent in the TUI, the next task forms a fresh one. Saving in the TUI writes the agent back to `anima.yaml`; the team itself is never saved.
 
 <Aside type="tip">
-  Use `launch` when you care about a durable workspace, team composition, saved history or the TUI. Use [`run`](/cli/daemon/) for a one-off result without a workspace.
+  Use `launch` when you want several agents on one task, saved history or the TUI. Use [`run`](/cli/daemon/) for a one-off result without a workspace.
 </Aside>
 
 ## Seed Memories
 
-If an agent has `agents/<slug>/memory/seed.json`, `launch` posts those memories to the daemon after it creates the swarm, so the team starts with a baseline. The file is a JSON array (or a single object) of entries:
+If an agent has `agents/<slug>/memory/seed.json`, `launch` posts those memories to the daemon after it forms the agency, so the agents start with a baseline. The file is a JSON array (or a single object) of entries:
 
 ```json
 [

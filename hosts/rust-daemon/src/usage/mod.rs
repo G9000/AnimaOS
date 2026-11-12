@@ -1,6 +1,6 @@
 //! Usage records (spec §11): one row per model call, priced when written.
 //! Run-step rows are derived from the terminal run record; secondary calls
-//! (titles, compaction, profile, agency) are recorded by their callers.
+//! (titles, compaction, profile) are recorded by their callers.
 
 pub(crate) mod metered;
 pub(crate) mod pricing;
@@ -38,7 +38,6 @@ pub(crate) enum UsageSource {
     Title,
     Compaction,
     Profile,
-    Agency,
     /// The autonomy smart check judging a risky command.
     Approval,
     SideQuestion,
@@ -62,7 +61,6 @@ impl UsageSource {
             Self::Title => "title",
             Self::Compaction => "compaction",
             Self::Profile => "profile",
-            Self::Agency => "agency",
             Self::Approval => "approval",
             Self::SideQuestion => "side_question",
             Self::SkillEvaluation => "skill_evaluation",

@@ -15,7 +15,7 @@ The daemon does the thinking; the CLI creates agents or swarms over HTTP, sends 
 ## Mental Model
 
 - `animaos create` scaffolds a local single-agent workspace (`anima.yaml` plus profile files). It does not need the daemon.
-- `animaos launch` runs an `anima.yaml` workspace as a swarm on the daemon. With no `--no-tui` it opens the [TUI](/tui/).
+- `animaos launch` forms a temporary agency from the agents in `anima.yaml` on the daemon. With no `--no-tui` it opens the [TUI](/tui/).
 - `animaos run` sends one task to a temporary agent or swarm and prints plain text.
 - `animaos chat` opens a plain-text REPL with a new daemon agent.
 - `animaos agents` lists and shows the agents the daemon holds.
@@ -39,7 +39,7 @@ bun run animaos --help
 
 ## In This Section
 
-- [Agency Workflow](/cli/workspaces/) covers `create`, the `anima.yaml` format, seed memories, `launch` and history files.
+- [Workspace Workflow](/cli/workspaces/) covers `create`, the `anima.yaml` format, seed memories, `launch` and history files.
 - [Daemon Commands](/cli/daemon/) covers `run`, `chat`, `agents`, `assistant` and targeting a daemon.
 - [Providers & Environment](/cli/providers/) covers provider names, credentials and environment variables.
 
@@ -84,7 +84,7 @@ animaos create agent medicine-helper \
   -d "Research medical literature and summarize risks clearly"
 ```
 
-`create` makes no model call. It writes the workspace from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider that has credentials in your environment, otherwise `deterministic`. Multi-agent agencies are not generated; write `anima.yaml` by hand for those (see [Agency Workflow](/cli/workspaces/#animayaml)) and run them with `animaos launch`. `animaos create agency` is refused with that message.
+`create` makes no model call. It writes the workspace from a template and records the provider in `anima.yaml`: the one you pass with `-p`, otherwise the first remote provider that has credentials in your environment, otherwise `deterministic`. Only one agent is scaffolded; list more agents in `anima.yaml` by hand (see [Workspace Workflow](/cli/workspaces/#animayaml)) and form a temporary team from them with `animaos launch`. `animaos create agency` is refused with that message.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -100,7 +100,6 @@ The directory name is the agent name, lowercased and kebab-cased. It contains:
 ```text
 medicine-helper/
 ├── anima.yaml        # config used by launch
-├── org-chart.mmd     # Mermaid org chart
 ├── README.md         # mission, values, roster
 └── agents/
     └── medicine-helper/
@@ -111,7 +110,7 @@ medicine-helper/
 
 ### `animaos launch`
 
-Run a workspace's `anima.yaml` as a swarm on the daemon.
+Form a temporary agency from the agents in `anima.yaml` for one task. Agents are equals; `--lead` picks who coordinates this launch only, and the team is gone when the launch ends.
 
 ```bash
 cd content-team
@@ -125,8 +124,11 @@ animaos launch --no-tui                           # plain-text prompt
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-d, --dir <dir>` | `.` | Directory containing `anima.yaml` |
-| `--api-key <key>` | | API key for the agency's provider, for this run |
+| `--api-key <key>` | | API key for the workspace provider, for this run |
 | `--no-tui` | | Plain text instead of the Ink TUI |
+| `--lead <name>` | first agent | Agent that coordinates this launch only |
+| `-s, --strategy <strategy>` | `supervisor` | `supervisor`, `dynamic` or `round-robin` |
+| `--max-parallel <n>` | | Supervisor only: members the lead may run at once |
 
 Without `anima.yaml` in the directory, `launch` fails with `No anima.yaml found ... Run "animaos create" first`. Before sending a task it checks `GET /health` and warns when the daemon is unreachable.
 

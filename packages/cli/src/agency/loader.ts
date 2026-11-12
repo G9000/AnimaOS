@@ -1,16 +1,23 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { load } from 'js-yaml';
-import type { AgencyConfig } from './types.js';
+import type {
+  AgencyConfig,
+  AgentDefinition,
+  LaunchStrategy,
+  WorkspaceFile,
+} from './types.js';
+
+const STRATEGIES: readonly LaunchStrategy[] = ['supervisor', 'dynamic', 'round-robin'];
 
 /**
- * Check whether an `anima.yaml` config file exists in the given directory.
+ * Check whether an `anima.yaml` workspace file exists in the given directory.
  */
-export function agencyExists(dir: string): boolean {
+export function workspaceExists(dir: string): boolean {
   return existsSync(join(dir, 'anima.yaml'));
 }
 
-function loadAgent(a: Record<string, unknown>) {
+function loadAgent(a: Record<string, unknown>): AgentDefinition {
   return {
     name: (a.name as string) ?? 'unnamed',
     bio: (a.bio as string) ?? '',
@@ -31,59 +38,88 @@ function loadAgent(a: Record<string, unknown>) {
 }
 
 /**
- * Load and validate an `anima.yaml` config file from the given directory.
+ * Load and validate an `anima.yaml` workspace file from the given directory.
  *
- * Applies sensible defaults for optional fields that are missing:
- * - `description` defaults to empty string
- * - `model` defaults to `"gpt-4o"`
- * - `provider` defaults to `"openai"`
- * - `strategy` defaults to `"supervisor"`
- * - `agents` defaults to empty array
+ * Requires a name and at least one agent with a name and system prompt.
+ * `description` defaults to empty, `model` to `"gpt-4o"`, `provider` to
+ * `"openai"`.
  */
-export function loadAgency(dir: string): AgencyConfig {
+export function loadWorkspace(dir: string): WorkspaceFile {
   const filePath = join(dir, 'anima.yaml');
 
   if (!existsSync(filePath)) {
-    throw new Error(`Agency config not found: ${filePath}`);
+    throw new Error(`Workspace file not found: ${filePath}`);
   }
 
   const raw = readFileSync(filePath, 'utf-8');
   const parsed = load(raw) as Record<string, unknown>;
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error(
-      `Invalid agency config: ${filePath} is not a valid YAML object`
-    );
+    throw new Error(`Invalid workspace file: ${filePath} is not a valid YAML object`);
   }
 
   if (!parsed.name || typeof parsed.name !== 'string') {
-    throw new Error('Agency config missing required field: name');
+    throw new Error('Workspace file missing required field: name');
   }
 
-  if (!parsed.orchestrator || typeof parsed.orchestrator !== 'object') {
-    throw new Error('Agency config missing required field: orchestrator');
+  const agents = Array.isArray(parsed.agents)
+    ? (parsed.agents as Record<string, unknown>[]).map(loadAgent)
+    : [];
+  if (agents.length === 0) {
+    throw new Error('Workspace file must list at least one agent under agents');
   }
-
-  const orchestrator = parsed.orchestrator as Record<string, unknown>;
-  if (!orchestrator.name || !orchestrator.bio || !orchestrator.system) {
-    throw new Error(
-      'Agency config orchestrator must have name, bio, and system fields'
-    );
+  for (const agent of agents) {
+    if (!agent.name.trim() || !agent.system.trim()) {
+      throw new Error('Every agent in the workspace file needs a name and a system prompt');
+    }
   }
-
-  const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
 
   return {
     name: parsed.name as string,
     description: (parsed.description as string) ?? '',
+    mission: typeof parsed.mission === 'string' ? parsed.mission : undefined,
+    values: Array.isArray(parsed.values) ? (parsed.values as string[]) : undefined,
     model: (parsed.model as string) ?? 'gpt-4o',
     provider: (parsed.provider as string) ?? 'openai',
-    strategy: (parsed.strategy as AgencyConfig['strategy']) ?? 'supervisor',
-    maxParallelDelegations:
-      typeof parsed.maxParallelDelegations === 'number'
-        ? parsed.maxParallelDelegations
-        : undefined,
-    orchestrator: loadAgent(orchestrator),
-    agents: agents.map((a: Record<string, unknown>) => loadAgent(a)),
+    agents,
+  };
+}
+
+/**
+ * Forms a temporary agency for one launch. `lead` names the agent that
+ * coordinates this launch only (default: the first agent); everyone else
+ * joins as a member.
+ */
+export function formAgency(
+  workspace: WorkspaceFile,
+  options: { lead?: string; strategy?: string; maxParallelDelegations?: number } = {}
+): AgencyConfig {
+  const strategy = (options.strategy ?? 'supervisor') as LaunchStrategy;
+  if (!STRATEGIES.includes(strategy)) {
+    throw new Error(`Unknown strategy "${options.strategy}". Use one of: ${STRATEGIES.join(', ')}`);
+  }
+  const wanted = options.lead?.trim().toLowerCase();
+  const lead = wanted
+    ? workspace.agents.find((agent) => agent.name.toLowerCase() === wanted)
+    : workspace.agents[0];
+  if (!lead) {
+    throw new Error(
+      `No agent named "${options.lead}". Agents: ${workspace.agents.map((a) => a.name).join(', ')}`
+    );
+  }
+  return {
+    name: workspace.name,
+    description: workspace.description,
+    mission: workspace.mission,
+    values: workspace.values,
+    model: workspace.model,
+    provider: workspace.provider,
+    strategy,
+    ...(options.maxParallelDelegations
+      ? { maxParallelDelegations: options.maxParallelDelegations }
+      : {}),
+    lead,
+    members: workspace.agents.filter((agent) => agent !== lead),
+    workspace,
   };
 }

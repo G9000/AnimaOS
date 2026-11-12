@@ -60,7 +60,7 @@ function createAgentProfile(
 ): AgentProfile {
   return {
     name: 'manager',
-    role: 'orchestrator',
+    role: 'lead',
     bio: 'Keeps the swarm aligned.',
     adjectives: ['sharp', 'methodical'],
     topics: ['coordination', 'trace'],
@@ -2478,7 +2478,7 @@ describe('App interactions', () => {
         interactive
         agentProfiles={[
           createAgentProfile(),
-          createAgentProfile({ name: 'researcher_1', role: 'worker' }),
+          createAgentProfile({ name: 'researcher_1', role: 'member' }),
         ]}
       />,
     );
@@ -2894,7 +2894,7 @@ describe('App interactions', () => {
           createAgentProfile(),
           createAgentProfile({
             name: 'writer',
-            role: 'worker',
+            role: 'member',
             adjectives: ['concise', 'fast'],
           }),
         ]}
