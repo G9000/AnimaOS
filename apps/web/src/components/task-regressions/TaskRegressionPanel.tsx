@@ -102,33 +102,35 @@ function TaskRegressionEntry({
   const [opened, setOpened] = useState(false);
   const panelId = useId();
   return (
-    <section className="settings-group" aria-label="Saved task comparisons">
-      <div className="settings-list">
-        <button
-          type="button"
-          className="settings-item"
-          disabled={disabled}
-          aria-label="Compare on saved tasks"
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={() => {
-            setOpened(true);
-            setExpanded((value) => !value);
-          }}
-        >
-          <span className="settings-item-text">
-            <strong>Compare on saved tasks</strong>
-            <small>
-              Check a change against tasks it has already done well
-            </small>
-          </span>
-          <span className="settings-item-action profile-row-open">
-            {expanded ? 'Close' : 'Open'}
-          </span>
-        </button>
-      </div>
+    <div
+      className="task-regression-entry"
+      role="group"
+      aria-label="Saved task comparisons"
+    >
+      <button
+        type="button"
+        className="settings-item"
+        disabled={disabled}
+        aria-label="Compare on saved tasks"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => {
+          setOpened(true);
+          setExpanded((value) => !value);
+        }}
+      >
+        <span className="settings-item-text">
+          <strong>Compare on saved tasks</strong>
+          <small>
+            Check a change against tasks it has already done well
+          </small>
+        </span>
+        <span className="settings-item-action profile-row-open">
+          {expanded ? 'Close' : 'Open'}
+        </span>
+      </button>
       {opened && (
-        <div id={panelId} className="mt-4" hidden={!expanded}>
+        <div id={panelId} className="task-regression-body" hidden={!expanded}>
           <TaskRegressionForm
             agentId={agentId}
             disabled={disabled}
@@ -136,7 +138,7 @@ function TaskRegressionEntry({
           />
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

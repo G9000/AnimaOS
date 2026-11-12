@@ -759,7 +759,12 @@
 :root
   .scenic-shell.friendly-shell
   .settings-window
-  :is(.sk-row-title, .settings-item-text strong, .settings-item-text h3) {
+  :is(
+    .sk-row-title,
+    .settings-item-text > strong,
+    .settings-item-text > label,
+    .settings-item-text > h3
+  ) {
   font-size: 14px;
   font-weight: 500;
   line-height: 1.45;
@@ -825,7 +830,8 @@
   text-transform: none;
 }
 
-/* M.O.T.H.E.R reads as one row in Identity, like SOUL.md below it. */
+/* M.O.T.H.E.R reads as one row in Identity: status, one sentence, and its
+ * two small actions on the right. */
 :root .scenic-shell.friendly-shell .settings-window .workspace-context-row {
   align-items: flex-start;
 }
@@ -837,6 +843,14 @@
   .settings-item-text
   > p {
   margin: 2px 0 0;
+  max-width: 62ch;
+}
+
+:root .scenic-shell.friendly-shell .settings-window .workspace-context-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 :root
@@ -849,12 +863,87 @@
   color: var(--friendly-ink);
 }
 
+:root .scenic-shell.friendly-shell .settings-window .workspace-context-state {
+  padding: 1px 6px;
+  border: 1px solid var(--friendly-border);
+  border-radius: 2px;
+  font: 500 10.5px/1.5 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--friendly-muted);
+}
+
 :root
   .scenic-shell.friendly-shell
   .settings-window
-  .workspace-context-row
-  .workspace-context-detach {
-  margin-top: 10px;
+  .workspace-context-state[data-state='connected'] {
+  border-color: color-mix(in srgb, var(--color-mint) 45%, transparent);
+  color: var(--color-mint);
+}
+
+:root .scenic-shell.friendly-shell .settings-window .workspace-context-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+/* The personality styles read as choices, not as disabled text. */
+:root
+  .scenic-shell.friendly-shell
+  .settings-profile
+  .personality-preset-group-inline {
+  border-color: var(--friendly-border);
+  border-radius: var(--settings-control-radius);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-profile
+  .personality-preset-group-inline
+  label
+  span {
+  border-radius: 2px;
+  color: var(--friendly-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-profile
+  .personality-preset-group-inline
+  label:hover
+  span {
+  color: var(--friendly-ink);
+}
+
+:root
+  .scenic-shell.friendly-shell
+  .settings-profile
+  .personality-preset-group-inline
+  label.is-selected
+  span {
+  background: var(--friendly-raised);
+  color: var(--friendly-ink);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+/* Saved-task comparison is the last Identity row; its form opens under it. */
+:root
+  .scenic-shell.friendly-shell
+  .settings-window
+  .task-regression-entry
+  > .settings-item {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+:root .scenic-shell.friendly-shell .settings-window .task-regression-body {
+  padding: 4px 0 16px;
 }
 
 :root .scenic-shell.friendly-shell .settings-mobile-navigation {

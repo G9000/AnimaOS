@@ -47,7 +47,7 @@ describe('per-agent workspace context settings', () => {
     expect(await screen.findByText('Connection needs attention')).toBeVisible();
     expect(screen.queryByText('Independent agent')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Use this agent independently' }),
+      screen.getByRole('button', { name: 'Unlink' }),
     ).toBeEnabled();
   });
   it('explains same-chat fallback and disables only the selected agent with revision checking', async () => {
@@ -63,7 +63,7 @@ describe('per-agent workspace context settings', () => {
     expect(screen.getByText(/same chat/)).toBeVisible();
     expect(screen.getByText(/Primary memory/)).toBeVisible();
     fireEvent.click(
-      screen.getByRole('button', { name: 'Use this agent independently' }),
+      screen.getByRole('button', { name: 'Unlink' }),
     );
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith('a', {
@@ -116,14 +116,14 @@ describe('per-agent workspace context settings', () => {
     );
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Use this agent independently',
+        name: 'Unlink',
       }),
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /Reload to check/,
     );
     expect(
-      screen.getByRole('button', { name: 'Use this agent independently' }),
+      screen.getByRole('button', { name: 'Unlink' }),
     ).toBeDisabled();
     expect(save).toHaveBeenCalledTimes(1);
   });

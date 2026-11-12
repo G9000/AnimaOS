@@ -211,7 +211,11 @@ export function PersonalityEditor({
           </span>
           <div className="settings-item-text">
             <strong id="personality-profile-title">Personality</strong>
-            <small>How it talks and how much it takes the lead</small>
+            <small>
+              {saved && currentPreset === null
+                ? 'Custom, written in SOUL.md. Picking a style replaces how it talks.'
+                : 'How it talks and how much it takes the lead'}
+            </small>
           </div>
           {saved && (
             <fieldset

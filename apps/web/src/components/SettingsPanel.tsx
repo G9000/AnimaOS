@@ -1076,9 +1076,13 @@ export function SettingsPanel({
                   Edit
                 </span>
               </button>
+              <TaskRegressionPanel
+                agentId={agent.id}
+                disabled={controlsDisabled}
+                hasUnsavedChanges={dirty}
+              />
             </div>
           </section>
-          <TaskRegressionPanel agentId={agent.id} disabled={controlsDisabled} hasUnsavedChanges={dirty} />
           {!shows('model') && (
             <section
               className="settings-group"
