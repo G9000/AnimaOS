@@ -271,6 +271,52 @@ function revealFoldedControls(container: HTMLElement) {
 const withoutRecall = (tools: readonly string[]) =>
   tools.filter((tool) => tool !== 'read_conversation_window');
 
+describe('talking with other agents', () => {
+  const talkTools = [
+    'list_workspace_agents',
+    'send_message',
+    'broadcast_message',
+    'delegate_to_agent',
+  ];
+  const talkToggle = () =>
+    screen.getByRole('checkbox', { name: 'Allow talking with other agents' });
+
+  it('is off for every access level and grants the whole peer set', async () => {
+    const original = ['read_file', 'legacy_custom'];
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: original }), {
+      saveSettings,
+      sections: ['access', 'builtins'],
+    });
+    expect(talkToggle()).not.toBeChecked();
+    fireEvent.click(talkToggle());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({
+        tools: [...original, ...talkTools],
+      }),
+    );
+    for (const profile of ['observe', 'collaborate', 'operate'] as const) {
+      for (const tool of talkTools)
+        expect(toolNamesForProfile(profile)).not.toContain(tool);
+    }
+  });
+
+  it('revokes the peer set and keeps unrelated grants', async () => {
+    const saveSettings = vi.fn(async (_patch: AgentUpdateInput) => true);
+    renderPanel(agent({ toolNames: ['read_file', ...talkTools] }), {
+      saveSettings,
+      sections: ['access', 'builtins'],
+    });
+    expect(talkToggle()).toBeChecked();
+    fireEvent.click(talkToggle());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ tools: ['read_file'] }),
+    );
+  });
+});
+
 describe('workflow chat permissions', () => {
   const workflowTools = ['create_workflow', 'list_workflows'];
   const workflowToggle = () =>

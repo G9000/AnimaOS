@@ -3,7 +3,7 @@ import type { AgentTask } from '@animaos/sdk';
 import { daemon, type DaemonSchedule } from '../lib/daemon-api';
 import type { AgentDetail } from '../lib/types';
 import { AgentAvatar } from './AgentAvatar';
-import { selectMainAgent } from '../lib/agent-access';
+import { selectDefaultAgent } from '../lib/agent-access';
 import { useResetOnChange } from '../hooks/useResetOnChange';
 
 type Snapshot = {
@@ -134,7 +134,7 @@ export function WorkspaceDashboard({
     !snapshot || snapshot.errors.some((error) => error.endsWith(':schedules'));
   const manager = managerId
     ? agents.find((agent) => agent.id === managerId)
-    : selectMainAgent(agents);
+    : selectDefaultAgent(agents);
   const marker =
     'Prepared first assignment (do not start until the owner asks):\n';
   const assignment =

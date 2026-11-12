@@ -601,7 +601,7 @@ async fn m68_download_refuses_windows_hidden_file_metadata() {
 
 #[tokio::test]
 async fn m68_normal_write_file_receipt_then_owner_files_and_download_are_exact() {
-    use crate::agent_runs::test_support::{chat_request, lead_config, ScriptedModel, Step};
+    use crate::agent_runs::test_support::{chat_request, companion_config, ScriptedModel, Step};
     use crate::control_plane_store::{load_control_plane_snapshot, ControlPlaneStoreConfig};
     use crate::runs::{ActionStatus, RunStatus};
     use anima_core::{DataValue, MessageRole, ToolCall};
@@ -635,7 +635,7 @@ async fn m68_normal_write_file_receipt_then_owner_files_and_download_are_exact()
     });
     let store = ControlPlaneStoreConfig::Json(private.path().join("control-plane.json"));
     daemon.set_control_plane_store(Some(store.clone()));
-    let mut config = lead_config("M68 report companion");
+    let mut config = companion_config("M68 report companion");
     config.tools = Some(
         daemon
             .tool_registry

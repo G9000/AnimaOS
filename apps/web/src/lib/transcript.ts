@@ -251,7 +251,7 @@ export function previewSummary(preview: string): string {
   }
 }
 
-const DELEGATED_TASK_PREFIX = 'Task delegated by workspace manager ';
+const DELEGATED_TASK_PREFIX = 'Task requested by agent ';
 
 /** A delegated task without its routing preamble (the daemon's
  *  `delegated_task_text`). */

@@ -15,8 +15,8 @@ use futures::future::BoxFuture;
 use tokio::sync::Semaphore;
 
 use super::test_support::{
-    accept, accept_web, add_chat, calculate_call, chat_request, coordinator_with, events_until,
-    is_terminal, lead_config, quiet_for, wait_for, Gate, ScriptedModel, Step,
+    accept, accept_web, add_chat, calculate_call, chat_request, companion_config, coordinator_with,
+    events_until, is_terminal, quiet_for, wait_for, Gate, ScriptedModel, Step,
 };
 use super::{
     AcceptedRun, AgentRunCoordinator, QueuedRunStart, QueuedStartError, ACCEPTED_AT_METADATA_KEY,
@@ -273,7 +273,7 @@ async fn stopping_a_run_stops_the_helpers_it_started() {
         .state
         .write()
         .await
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;
@@ -369,7 +369,7 @@ async fn stopping_a_helpers_own_run_leaves_its_companion_running() {
         .state
         .write()
         .await
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;
@@ -439,7 +439,7 @@ async fn a_helper_started_after_its_companions_stop_never_calls_its_model() {
         .state
         .write()
         .await
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;

@@ -1,5 +1,5 @@
 import type { AgentDetail } from './types';
-import { selectMainAgent } from './agent-access';
+import { selectDefaultAgent } from './agent-access';
 
 const STORAGE_KEY = 'anima.activeAgent';
 
@@ -34,6 +34,6 @@ export function selectActiveAgent(
 ): AgentDetail | null {
   return (
     companionAgents(agents).find((agent) => agent.id === preferredId) ??
-    selectMainAgent(agents)
+    selectDefaultAgent(agents)
   );
 }

@@ -41,7 +41,7 @@ pub(crate) fn profile_relative(agent_id: &str) -> String {
 pub(crate) fn soul(scope: &AgentFileScope) -> Option<String> {
     if scope.profile_enabled {
         Some(path(&profile_relative(&scope.agent_id), "SOUL.md"))
-    } else if scope.companion {
+    } else if scope.standalone {
         Some("SOUL.md".into())
     } else {
         None

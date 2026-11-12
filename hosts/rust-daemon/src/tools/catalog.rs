@@ -220,12 +220,7 @@ impl RunToolCatalog {
         }
         if let Some(parent) = &self.delegated_parent {
             let config = state.agents.get(parent).ok_or(REFUSED)?.config();
-            if config
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.additional.get("workspaceRole"))
-                != Some(&DataValue::String("lead".into()))
-            {
+            if !crate::agent_runs::is_standalone_config(config) {
                 return Err(REFUSED);
             }
         }

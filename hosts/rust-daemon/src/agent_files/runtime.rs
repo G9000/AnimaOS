@@ -24,8 +24,7 @@ pub(crate) fn capture_scope(
     let settings = agent.config().settings.as_ref();
     let profile_enabled = settings.and_then(|settings| settings.additional.get(PROFILE_SETTING))
         == Some(&DataValue::Bool(true));
-    let companion = settings.and_then(|settings| settings.additional.get("workspaceRole"))
-        == Some(&DataValue::String("lead".into()));
+    let standalone = crate::agent_runs::is_standalone_config(agent.config());
     Some(AgentFileScope {
         agent_id: agent_id.into(),
         session_id: session_id.into(),
@@ -33,7 +32,7 @@ pub(crate) fn capture_scope(
         workspace_root: workspace.root_path.clone(),
         project_relative: String::new(),
         profile_enabled,
-        companion,
+        standalone,
         config_revision: config_revision(agent.config()),
     })
 }
@@ -78,8 +77,7 @@ fn freeze_scope(scope: &mut AgentFileScope, config: &AgentConfig) {
     let additional = config.settings.as_ref().map(|s| &s.additional);
     scope.profile_enabled =
         additional.and_then(|s| s.get(PROFILE_SETTING)) == Some(&DataValue::Bool(true));
-    scope.companion =
-        additional.and_then(|s| s.get("workspaceRole")) == Some(&DataValue::String("lead".into()));
+    scope.standalone = crate::agent_runs::is_standalone_config(config);
     scope.config_revision = config_revision(config);
 }
 

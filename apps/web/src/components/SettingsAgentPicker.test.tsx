@@ -9,7 +9,7 @@ import { SettingsAgentPicker } from './SettingsAgentPicker';
 function agent(
   id: string,
   name: string,
-  workspaceRole: AgentDetail['workspaceRole'] = 'lead',
+  workspaceRole?: AgentDetail['workspaceRole'],
 ): AgentDetail {
   return {
     id,
@@ -21,7 +21,7 @@ function agent(
     status: 'Idle',
     token_usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     messages: [],
-    workspaceRole,
+    ...(workspaceRole ? { workspaceRole } : {}),
   };
 }
 

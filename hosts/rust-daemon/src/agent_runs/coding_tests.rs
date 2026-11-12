@@ -2,7 +2,9 @@
 //! synthetic model steps, no provider or autonomous-quality claim. The single
 //! real-shell case is explicitly ignored until root's shell ownership GREEN.
 //! Existing core budget, steer, Stop/helper and receipt matrices remain reused.
-use super::test_support::{accept, add_chat, chat_request, lead_config, Gate, ScriptedModel, Step};
+use super::test_support::{
+    accept, add_chat, chat_request, companion_config, Gate, ScriptedModel, Step,
+};
 use super::{AcceptedRun, AgentRunCoordinator, SessionRunMode};
 use crate::approvals::{ApprovalPolicy, PolicyAction, RiskClass};
 use crate::control_plane_store::{
@@ -153,7 +155,7 @@ impl Fixture {
             values: vec![],
         });
         state.set_control_plane_store(Some(store.clone()));
-        let mut config = lead_config("M47 coding companion");
+        let mut config = companion_config("M47 coding companion");
         config.tools = Some(
             state
                 .tool_registry

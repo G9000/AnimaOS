@@ -477,17 +477,18 @@ async fn tool_discovery_helpers_never_reintroduce_filtered_parent_capabilities()
 }
 
 async fn origin_discovery_run(helper: bool) {
-    use test_support::{calculate_call, companion_config, lead_config};
+    use test_support::{calculate_call, companion_config};
     let model = ScriptedModel::new(vec![
         Step::Tools(vec![call("find", "search_tools", "query", "calculate")]),
         Step::Tools(vec![calculate_call("effect", "2+2")]),
         Step::Text(vec!["settled"]),
     ]);
     let (coordinator, source) = coordinator_with(model.clone()).await;
+    // A peer request needs the owner's talk grant on both agents.
     let source_config = if helper {
-        lead_config("source")
-    } else {
         companion_config("source")
+    } else {
+        test_support::talking(companion_config("source"))
     };
     coordinator
         .state
@@ -504,7 +505,7 @@ async fn origin_discovery_run(helper: bool) {
     let mut target_config = if helper {
         super::helper_config(&sender, "target".into())
     } else {
-        companion_config("target")
+        test_support::talking(companion_config("target"))
     };
     target_config
         .settings
@@ -583,7 +584,8 @@ async fn tool_discovery_peer_revocation_filters_search_and_blocks_hidden_target(
         gate.clone(),
     );
     let (coordinator, source) = coordinator_with(model.clone()).await;
-    let mut target_config = companion_config("target");
+    test_support::grant_talk(&coordinator, &source).await;
+    let mut target_config = test_support::talking(companion_config("target"));
     target_config
         .settings
         .as_mut()

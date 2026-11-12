@@ -2,7 +2,7 @@
 //! Existing M47/M3 rejection, Stop, budget and Windows shell ownership matrices
 //! remain authoritative; only the distinct fixture/Ask integration is added here.
 use super::test_support::{
-    accept, add_chat, decision, lead_config, pending_approvals, Gate, ScriptedModel, Step,
+    accept, add_chat, companion_config, decision, pending_approvals, Gate, ScriptedModel, Step,
 };
 use super::{AcceptedRun, AgentRunCoordinator};
 use crate::approvals::{ApprovalDecisionKind, ApprovalPolicy, PolicyAction, RiskClass};
@@ -177,7 +177,7 @@ impl Fixture {
             values: vec![],
         });
         state.set_control_plane_store(Some(store.clone()));
-        let mut config = lead_config("M52 task companion");
+        let mut config = companion_config("M52 task companion");
         config.provider = Some("chatgpt".into());
         config.model = "synthetic-provider-task-model".into();
         config.tools = Some(
@@ -194,6 +194,8 @@ impl Fixture {
                 ])
                 .unwrap(),
         );
+        // The denied peer calls below need the owner's talk grant to be offered.
+        let mut config = super::test_support::talking(config);
         let settings = config.settings.as_mut().unwrap();
         settings.max_tool_iterations = Some(4);
         settings.max_retries = Some(0);

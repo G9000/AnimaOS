@@ -1,5 +1,7 @@
 //! Provider-spy coverage for immutable admission and durable privacy boundaries.
-use super::test_support::{calculate_call, chat_request, lead_config, Gate, ScriptedModel, Step};
+use super::test_support::{
+    calculate_call, chat_request, companion_config, Gate, ScriptedModel, Step,
+};
 use super::AgentRunCoordinator;
 use crate::skills::test_support::{temp_workspace, with_workspace};
 use crate::state::DaemonState;
@@ -27,7 +29,7 @@ async fn files_replace_persona_keep_host_guidance_and_survive_tools_without_pers
         "Project sentinel alpha; use concise explanations.",
     )
     .unwrap();
-    let mut config = lead_config("companion");
+    let mut config = companion_config("companion");
     config.system = Some("Legacy persona sentinel".into());
     config.bio = Some("Legacy biography sentinel".into());
     let mut state = with_workspace(DaemonState::with_model_adapter(model.clone()), &root);
@@ -104,7 +106,7 @@ fn file_reserve_is_counted_once_and_empty_snapshot_preserves_legacy_selection() 
     use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
     let mut state = DaemonState::new();
     let id = state
-        .create_agent(lead_config("companion"))
+        .create_agent(companion_config("companion"))
         .unwrap()
         .state
         .id;
@@ -144,7 +146,7 @@ async fn cancelled_blocked_admission_drops_loader_and_never_reaches_provider() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let model = ScriptedModel::new(vec![Step::Text(vec!["must not run"])]);
     let root = temp_workspace("agent-files-cancel");
-    let config = lead_config("companion");
+    let config = companion_config("companion");
     let mut state = with_workspace(DaemonState::with_model_adapter(model.clone()), &root);
     let id = state.create_agent(config.clone()).unwrap().state.id;
     let coordinator = AgentRunCoordinator::new(
@@ -224,7 +226,7 @@ async fn root_changes_retry_once_with_frozen_config_and_original_deadline() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let model = ScriptedModel::new(vec![]);
     let root = temp_workspace("agent-files-stale");
-    let frozen = lead_config("companion");
+    let frozen = companion_config("companion");
     let mut state = with_workspace(DaemonState::with_model_adapter(model), &root);
     let id = state.create_agent(frozen.clone()).unwrap().state.id;
     let coordinator = AgentRunCoordinator::new(
@@ -305,7 +307,7 @@ async fn admission_reserves_retained_summary_before_long_soul() {
     use anima_service_adapters::ServiceTokenEstimator as TokenEstimator;
     let root = temp_workspace("agent-files-summary-budget");
     std::fs::write(root.join("SOUL.md"), "Speak clearly. ".repeat(1000)).unwrap();
-    let mut config = lead_config("companion");
+    let mut config = companion_config("companion");
     let settings = config.settings.as_mut().unwrap();
     settings.max_tokens = Some(50);
     settings

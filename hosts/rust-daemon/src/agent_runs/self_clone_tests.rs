@@ -1,5 +1,7 @@
 //! Self-delegation through native helper tools and recorded model requests.
-use super::test_support::{calculate_call, chat_request, lead_config, Gate, ScriptedModel, Step};
+use super::test_support::{
+    calculate_call, chat_request, companion_config, Gate, ScriptedModel, Step,
+};
 use super::AgentRunCoordinator;
 use crate::skills::test_support::{temp_workspace, with_workspace};
 use crate::state::DaemonState;
@@ -24,7 +26,7 @@ fn assignment(id: &str, playbook: &str) -> ToolCall {
 
 #[test]
 fn self_clone_keeps_the_model_but_omits_legacy_personality_and_owner_knowledge() {
-    let mut parent = lead_config("Companion");
+    let mut parent = companion_config("Companion");
     parent.bio = Some("Identity: calm, curious companion".into());
     parent.lore = Some("Backstory: built for this owner".into());
     parent.style = Some("Speak plainly".into());
@@ -77,7 +79,7 @@ async fn self_clone_omits_main_soul_and_uses_its_own_playbook_through_the_native
         "Active inherited personality sentinel: warm and precise",
     )
     .unwrap();
-    let mut config = lead_config("Companion");
+    let mut config = companion_config("Companion");
     config.bio = Some("Obsolete biography sentinel".into());
     config.system = Some("Obsolete legacy sentinel".into());
     let mut state = with_workspace(DaemonState::with_model_adapter(model.clone()), &root);
@@ -142,7 +144,7 @@ async fn self_clone_omits_main_profile_and_isolates_playbooks_when_reused() {
         "Workspace identity that must not replace the profile",
     )
     .unwrap();
-    let mut config = lead_config("Companion");
+    let mut config = companion_config("Companion");
     config.bio = Some("Obsolete family biography sentinel".into());
     config.settings.as_mut().unwrap().additional.insert(
         crate::agent_files::runtime::PROFILE_SETTING.into(),

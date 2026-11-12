@@ -8,7 +8,7 @@ use anima_core::{AgentState, Content, DataValue, Message, MessageRole, ToolCall,
 use serde_json::Value;
 use tokio::sync::{RwLock, Semaphore};
 
-use super::test_support::{add_chat, lead_config, wait_for, ScriptedModel, Step};
+use super::test_support::{add_chat, companion_config, wait_for, ScriptedModel, Step};
 use super::AgentRunCoordinator;
 use crate::runs::{RunLink, RunRecord, RunSource, RunStart, RunStatus};
 use crate::state::DaemonState;
@@ -77,7 +77,7 @@ impl Harness {
         let mut parent = state
             .write()
             .await
-            .create_agent(lead_config("Companion"))
+            .create_agent(companion_config("Companion"))
             .unwrap()
             .state;
         // Explicit native grants in an authenticated host context. Keeping the

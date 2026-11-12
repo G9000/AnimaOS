@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use super::test_support::{
-    calculate_call, chat_request, coordinator_with, events_until, lead_config, next_event, Gate,
-    ScriptedModel, Step,
+    calculate_call, chat_request, companion_config, coordinator_with, events_until, next_event,
+    Gate, ScriptedModel, Step,
 };
 use super::InFlightRunGuard;
 use crate::live::{run_status_event, LiveRun};
@@ -265,7 +265,7 @@ async fn a_helpers_run_reaches_its_companions_stream() {
         .state
         .write()
         .await
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;
@@ -697,7 +697,7 @@ async fn a_helper_deleted_mid_run_is_announced_failed_on_its_companions_stream()
         .state
         .write()
         .await
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;

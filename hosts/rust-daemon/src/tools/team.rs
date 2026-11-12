@@ -54,7 +54,7 @@ pub(super) fn broadcast_message(
         }
         let mut deliveries = vec![];
         for target in coordinator
-            .peer_ids()
+            .peer_ids(&agent.id)
             .await
             .into_iter()
             .filter(|id| !route.participants().contains(id))
@@ -90,7 +90,7 @@ pub(super) fn broadcast_message(
 
 pub(super) fn list_workspace_agents(
     context: ToolExecutionContext,
-    _agent: AgentState,
+    agent: AgentState,
     _message: Message,
     _call: ToolCall,
 ) -> BoxFuture<'static, TaskResult<Content>> {
@@ -103,7 +103,7 @@ pub(super) fn list_workspace_agents(
         };
         TaskResult::success(
             Content {
-                text: coordinator.team_roster().await,
+                text: coordinator.team_roster(&agent.id).await,
                 attachments: None,
                 metadata: None,
             },
@@ -121,7 +121,7 @@ pub(super) fn delegate_to_agent(
     Box::pin(async move {
         if !context.can_delegate {
             return TaskResult::error(
-                "Only the workspace manager can delegate; recursive delegation is not allowed",
+                "Delegation is only available in an agent's own run; recursive delegation is not allowed",
                 0,
             );
         }
@@ -200,7 +200,7 @@ pub(super) fn spawn_helper(
     Box::pin(async move {
         if !context.can_delegate {
             return TaskResult::error(
-                "Only the companion can spawn helpers; recursive or peer spawning is not allowed",
+                "Only an agent's own run can spawn helpers; recursive or peer spawning is not allowed",
                 0,
             );
         }
@@ -312,7 +312,7 @@ fn async_helper_operation_for(
 ) -> BoxFuture<'static, TaskResult<Content>> {
     Box::pin(async move {
         if !context.can_delegate {
-            return TaskResult::error("Only the companion's ordinary run can manage helpers", 0);
+            return TaskResult::error("Only an agent's ordinary run can manage helpers", 0);
         }
         let (Some(coordinator), Some(parent)) = (context.team, context.run_link) else {
             return TaskResult::error(

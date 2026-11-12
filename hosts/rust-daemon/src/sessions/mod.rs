@@ -41,7 +41,7 @@ pub(crate) const MAX_SESSION_CREATIONS_PER_MINUTE: usize = 60;
 /// Workspace check-ins run in `schedule:<id>` (spec §3.1, §9.2).
 pub(crate) const SCHEDULE_ROOM_PREFIX: &str = "schedule:";
 const SESSION_CREATION_WINDOW_MS: u64 = 60_000;
-const DELEGATED_TASK_PREFIX: &str = "Task delegated by workspace manager ";
+const DELEGATED_TASK_PREFIX: &str = "Task requested by agent ";
 
 /// What a session is (spec §3.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -562,7 +562,7 @@ pub(crate) fn delegated_task_text(text: &str) -> &str {
     }
 }
 
-/// The manager id in a delegated task's preamble ("… manager <name> (<id>). …").
+/// The requesting agent id in a delegated task's preamble ("… agent <name> (<id>). …").
 pub(crate) fn delegating_agent_id(text: &str) -> Option<&str> {
     let rest = text.strip_prefix(DELEGATED_TASK_PREFIX)?;
     let (head, _) = rest.split_once("). ")?;
@@ -1347,7 +1347,7 @@ mod tests {
             session_title(SessionKind::Helper, SessionOrigin::Peer, &peer).0,
             "Messages from Beta"
         );
-        let task = "Task delegated by workspace manager Anima (agent-7). Return the result and any blockers. Do not delegate further.\n\nCompare vendors";
+        let task = "Task requested by agent Anima (agent-7). Return the result and any blockers. Do not pass it on.\n\nCompare vendors";
         let delegated = TitleContext {
             first_user_text: Some(task),
             ..empty_context()

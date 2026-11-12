@@ -123,7 +123,7 @@ mod tests {
         let reservation = coordinator.try_reserve_room(&agent, "chat:main").unwrap();
         let parent = {
             let mut state = coordinator.state.write().await;
-            let mut config = super::super::test_support::lead_config("Companion");
+            let mut config = super::super::test_support::companion_config("Companion");
             config.tools.as_mut().unwrap().push(
                 crate::tools::ToolRegistry::new()
                     .descriptor("spawn_helper_async")

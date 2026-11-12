@@ -1688,10 +1688,8 @@ async fn bootstrap_team_persists_yaml_and_can_resume() {
     assert_eq!(status, 201, "{body}");
     let body: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["workers"][0]["state"]["name"], "Researcher");
-    assert_eq!(
-        body["agent"]["state"]["config"]["settings"]["additional"]["workspaceRole"],
-        "lead"
-    );
+    // No agent ranks above another: neither carries a workspace role.
+    assert!(body["agent"]["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
     assert!(
         body["workers"][0]["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null()
     );
@@ -1703,9 +1701,9 @@ async fn bootstrap_team_persists_yaml_and_can_resume() {
     let (status, body) = resume_workspace(&fresh, root.path()).await;
     assert_eq!(status, 201, "{body}");
     let resumed: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(
-        resumed["orchestrator"]["state"]["config"]["settings"]["additional"]["workspaceRole"],
-        "lead"
+    assert!(
+        resumed["orchestrator"]["state"]["config"]["settings"]["additional"]["workspaceRole"]
+            .is_null()
     );
     let (_, agents) = send_empty_request(&fresh, "GET", "/api/agents").await;
     assert_eq!(roster(&agents).len(), 2);
@@ -1820,16 +1818,13 @@ async fn bootstrap_team_survives_restart_and_persist_failure_rolls_back() {
         assert_eq!(roster(&agents).len(), 2, "{agents}");
         assert!(roster(&agents).iter().any(|(_, name)| name == "Researcher"));
         let agents: serde_json::Value = serde_json::from_str(&agents).unwrap();
-        let lead = agents["agents"]
+        let first = agents["agents"]
             .as_array()
             .unwrap()
             .iter()
             .find(|agent| agent["state"]["name"] == "Anima")
             .unwrap();
-        assert_eq!(
-            lead["state"]["config"]["settings"]["additional"]["workspaceRole"],
-            "lead"
-        );
+        assert!(first["state"]["config"]["settings"]["additional"]["workspaceRole"].is_null());
     })
     .await;
 }

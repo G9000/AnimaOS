@@ -282,7 +282,7 @@ impl AgentRunCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runs::test_support::{lead_config, ScriptedModel};
+    use crate::agent_runs::test_support::{companion_config, ScriptedModel};
     use crate::runs::{
         AsyncHelper, AsyncHelperBounds, DelegationOrigin, RunRecord, RunSource, RunStart,
     };
@@ -291,7 +291,7 @@ mod tests {
     fn fp05_origin_authority_known_failed_child_overrides_earlier_queued_wait_without_model_work() {
         let model = ScriptedModel::new(vec![]);
         let mut state = crate::state::DaemonState::with_model_adapter(model.clone());
-        let mut config = lead_config("Ordered source");
+        let mut config = companion_config("Ordered source");
         config.tools = Some(
             crate::tools::ToolRegistry::new()
                 .resolve_descriptors(["spawn_helper_async"])

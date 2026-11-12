@@ -13,12 +13,12 @@ use crate::state::DaemonState;
 fn unavailable(state: &DaemonState, child: &RunRecord) -> Option<&'static str> {
     let helper = child.async_helper.as_ref()?;
     let Some(owner) = state.agents.get(&helper.owner_agent_id) else {
-        return Some("The owning companion is missing");
+        return Some("The owning agent is missing");
     };
-    if !super::super::is_workspace_manager(&owner.state())
+    if !super::super::is_standalone(&owner.state())
         || !owner.config().allows_tool("spawn_helper_async")
     {
-        return Some("The companion no longer grants automatic helper work");
+        return Some("The agent no longer grants automatic helper work");
     }
     let Some(parent) = state.runs.get(&helper.parent_run_id) else {
         return Some("The launching run is missing");
@@ -33,7 +33,7 @@ fn unavailable(state: &DaemonState, child: &RunRecord) -> Option<&'static str> {
         || parent.async_helper.is_some()
         || parent.helper_completion.is_some()
     {
-        return Some("The launching run no longer has the original companion lineage");
+        return Some("The launching run no longer has the original agent lineage");
     }
     if child.stop.is_some() {
         return Some("The helper assignment was stopped");

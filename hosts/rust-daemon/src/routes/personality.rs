@@ -100,7 +100,7 @@ fn make_view(
                 &scope.workspace_root,
                 &scope.agent_id,
                 scope.profile_enabled,
-                scope.companion,
+                scope.standalone,
             )
         }),
         config_revision(config),

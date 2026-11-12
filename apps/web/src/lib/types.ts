@@ -22,7 +22,7 @@ export interface ChatMessage {
 }
 
 export interface AgentDetail {
-  workspaceRole?: 'lead' | 'helper';
+  workspaceRole?: 'helper';
   id: string;
   name: string;
   bio?: string | null;

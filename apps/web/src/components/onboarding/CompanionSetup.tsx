@@ -718,10 +718,7 @@ export function CompanionSetup({
         ],
       };
       const result = workspace?.configured
-        ? await daemon.createAgent({
-            ...config,
-            settings: { additional: { workspaceRole: 'lead' } },
-          })
+        ? await daemon.createAgent(config)
         : await daemon.bootstrapWorkspace({
             workspace: {
               rootPath: selectedRoot,

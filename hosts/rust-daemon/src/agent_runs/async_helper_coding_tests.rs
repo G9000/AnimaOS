@@ -199,7 +199,7 @@ async fn coding_acceptance(compiler: Option<std::path::PathBuf>) {
             private.path().join("control-plane.json"),
         ),
     ));
-    let mut config = lead_config("Offline Rust coding companion");
+    let mut config = companion_config("Offline Rust coding companion");
     config.tools = Some(
         ToolRegistry::new()
             .resolve_descriptors(["spawn_helper_async", "read_file", "write_file", "bash"])

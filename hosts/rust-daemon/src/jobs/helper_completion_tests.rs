@@ -1,7 +1,7 @@
 //! Runtime source/budget/review contracts. Recording models, isolated files,
 //! exact native service boundaries; no provider, transport or compiler.
 use super::*;
-use crate::agent_runs::test_support::{lead_config, Gate, ScriptedModel};
+use crate::agent_runs::test_support::{companion_config, Gate, ScriptedModel};
 use crate::approvals::{ApprovalPolicy, PolicyAction, RiskClass};
 use crate::control_plane_store::ControlPlaneStoreConfig;
 use crate::runs::DelegationOutputBinding;
@@ -72,7 +72,7 @@ async fn fixture(model: Arc<dyn ModelAdapter>) -> (JobService, String, Store) {
     let file = Store::new();
     let mut state = DaemonState::with_model_adapter(model);
     state.set_control_plane_store(Some(ControlPlaneStoreConfig::Json(file.0.clone())));
-    let mut config = lead_config("Origin companion");
+    let mut config = companion_config("Origin companion");
     config.tools = Some(
         crate::tools::ToolRegistry::new()
             .resolve_descriptors([

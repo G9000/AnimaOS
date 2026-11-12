@@ -2,6 +2,7 @@ import { useResetOnChange } from '../hooks/useResetOnChange';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BROWSER_TOOL_ACCESS,
+  AGENT_TALK_TOOL_ACCESS,
   BACKGROUND_HELPER_TOOL_ACCESS,
   isBrowserTool,
   PROGRAMMATIC_TOOL_ACCESS,
@@ -304,6 +305,9 @@ export function SettingsPanel({
   const hasBackgroundHelpers = BACKGROUND_HELPER_TOOL_ACCESS.tools.every(
     (tool) => agent.toolNames.includes(tool),
   );
+  const hasAgentTalk = AGENT_TALK_TOOL_ACCESS.tools.every((tool) =>
+    agent.toolNames.includes(tool),
+  );
   const hasWorkflowTemplates = WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.every(
     (tool) => agent.toolNames.includes(tool),
   );
@@ -322,6 +326,7 @@ export function SettingsPanel({
         tool !== 'web_fetch' &&
         !WORKFLOW_TOOL_ACCESS.tools.some((name) => name === tool) &&
         !BACKGROUND_HELPER_TOOL_ACCESS.tools.some((name) => name === tool) &&
+        !AGENT_TALK_TOOL_ACCESS.tools.some((name) => name === tool) &&
         !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some((name) => name === tool) &&
         tool !== TOOL_RESULT_ACCESS.name &&
         tool !== 'execute_code',
@@ -368,6 +373,8 @@ export function SettingsPanel({
     useState(hasBackgroundHelpers);
   const [backgroundHelpersChanged, setBackgroundHelpersChanged] =
     useState(false);
+  const [allowAgentTalk, setAllowAgentTalk] = useState(hasAgentTalk);
+  const [agentTalkChanged, setAgentTalkChanged] = useState(false);
   const [allowWorkflowTemplates, setAllowWorkflowTemplates] =
     useState(hasWorkflowTemplates);
   const [templatesChanged, setTemplatesChanged] = useState(false);
@@ -433,6 +440,7 @@ export function SettingsPanel({
       hasToolChains,
       hasWorkflows,
       hasBackgroundHelpers,
+      hasAgentTalk,
       hasWorkflowTemplates,
       hasToolResultRead,
       derivedAccess,
@@ -465,6 +473,8 @@ export function SettingsPanel({
       setWorkflowsChanged(false);
       setAllowBackgroundHelpers(hasBackgroundHelpers);
       setBackgroundHelpersChanged(false);
+      setAllowAgentTalk(hasAgentTalk);
+      setAgentTalkChanged(false);
       setAllowWorkflowTemplates(hasWorkflowTemplates);
       setTemplatesChanged(false);
       setAllowToolResultRead(hasToolResultRead);
@@ -505,6 +515,10 @@ export function SettingsPanel({
     (backgroundHelpersChanged &&
       BACKGROUND_HELPER_TOOL_ACCESS.tools.some(
         (tool) => agent.toolNames.includes(tool) !== allowBackgroundHelpers,
+      )) ||
+    (agentTalkChanged &&
+      AGENT_TALK_TOOL_ACCESS.tools.some(
+        (tool) => agent.toolNames.includes(tool) !== allowAgentTalk,
       )) ||
     (templatesChanged &&
       WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
@@ -583,6 +597,9 @@ export function SettingsPanel({
             !BACKGROUND_HELPER_TOOL_ACCESS.tools.some(
               (name) => name === tool,
             )) &&
+          (!agentTalkChanged ||
+            allowAgentTalk ||
+            !AGENT_TALK_TOOL_ACCESS.tools.some((name) => name === tool)) &&
           (!templatesChanged ||
             allowWorkflowTemplates ||
             !WORKFLOW_TEMPLATE_TOOL_ACCESS.tools.some(
@@ -631,6 +648,14 @@ export function SettingsPanel({
         if (
           (allowBackgroundHelpers ||
             (!backgroundHelpersChanged && agent.toolNames.includes(tool))) &&
+          !patch.tools.includes(tool)
+        )
+          patch.tools.push(tool);
+      }
+      for (const tool of AGENT_TALK_TOOL_ACCESS.tools) {
+        if (
+          (allowAgentTalk ||
+            (!agentTalkChanged && agent.toolNames.includes(tool))) &&
           !patch.tools.includes(tool)
         )
           patch.tools.push(tool);
@@ -715,6 +740,17 @@ export function SettingsPanel({
       },
       disabled: agent.workspaceRole === 'helper',
       help: 'Allows this agent to launch focused background helpers and collect, steer or stop their work. Helpers stay within existing tool permissions and approval rules.',
+    },
+    {
+      id: 'agent-talk',
+      label: AGENT_TALK_TOOL_ACCESS.label,
+      checked: allowAgentTalk,
+      setChecked: (checked: boolean) => {
+        setAllowAgentTalk(checked);
+        setAgentTalkChanged(true);
+      },
+      disabled: agent.workspaceRole === 'helper',
+      help: 'Each agent works on its own. With this on, it can message or ask other agents that also have this on; agents without it stay out of reach and out of its list.',
     },
     {
       id: 'workflows',

@@ -341,16 +341,40 @@ pub(crate) fn companion_config(name: &str) -> AgentConfig {
     }
 }
 
-/// `companion_config` as the workspace lead, which may spawn helpers.
-pub(crate) fn lead_config(name: &str) -> AgentConfig {
-    let mut config = companion_config(name);
-    config
-        .settings
-        .as_mut()
+/// `config` with the owner's talk-with-agents grant added.
+pub(crate) fn talking(mut config: AgentConfig) -> AgentConfig {
+    let mut tools = config.tools.take().unwrap_or_default();
+    for tool in crate::tools::ToolRegistry::new()
+        .resolve_descriptors(crate::agent_runs::PEER_TOOLS)
         .unwrap()
-        .additional
-        .insert("workspaceRole".into(), DataValue::String("lead".into()));
+    {
+        if !tools.iter().any(|held| held.name == tool.name) {
+            tools.push(tool);
+        }
+    }
+    config.tools = Some(tools);
     config
+}
+
+/// Adds the talk-with-agents grant to an existing agent.
+pub(crate) async fn grant_talk(coordinator: &AgentRunCoordinator, agent_id: &str) {
+    let config = talking(
+        coordinator.state.read().await.agents[agent_id]
+            .config()
+            .clone(),
+    );
+    coordinator
+        .state
+        .write()
+        .await
+        .update_agent(
+            agent_id,
+            anima_core::AgentConfigUpdate {
+                tools: config.tools,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 }
 
 /// A coordinator over a fresh daemon whose one agent (`companion_config`)

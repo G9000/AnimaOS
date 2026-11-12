@@ -90,7 +90,9 @@ async fn regular_chat_recalls_actual_incoming_agent_requests_without_merging_tra
         .state
         .write()
         .await
-        .create_agent(super::test_support::lead_config("Anima"))
+        .create_agent(super::test_support::talking(
+            super::test_support::companion_config("Anima"),
+        ))
         .unwrap()
         .state
         .id;
@@ -98,7 +100,7 @@ async fn regular_chat_recalls_actual_incoming_agent_requests_without_merging_tra
         .state
         .write()
         .await
-        .create_agent(companion_config("Mom"))
+        .create_agent(super::test_support::talking(companion_config("Mom")))
         .unwrap()
         .state;
     let caller = coordinator.state.read().await.agents[&sender].state();
@@ -129,10 +131,10 @@ async fn regular_chat_recalls_actual_incoming_agent_requests_without_merging_tra
     assert!(system.contains("Tell me what you know about Julio"));
     assert!(system.contains("completed"));
     assert!(system.contains("read_conversation_window"));
-    assert!(requests[1].messages.iter().all(|message| !message
-        .content
-        .text
-        .contains("Task delegated by workspace manager")));
+    assert!(requests[1]
+        .messages
+        .iter()
+        .all(|message| !message.content.text.contains("Task requested by agent")));
 }
 
 #[tokio::test]

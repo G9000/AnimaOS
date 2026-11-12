@@ -1066,7 +1066,6 @@ export const daemon = {
     tools: string[];
     provider?: string;
     system?: string;
-    settings?: { additional?: { workspaceRole?: 'lead' } };
   }) =>
     request<{ agent: DaemonSnapshot }>('/agents', {
       method: 'POST',
@@ -1328,11 +1327,9 @@ function mapStatus(status: string): AgentDetail['status'] {
 export function toAgentDetail(snapshot: DaemonSnapshot): AgentDetail {
   const { state } = snapshot;
   return {
-    ...(state.config.settings?.additional?.workspaceRole === 'lead'
-      ? { workspaceRole: 'lead' as const }
-      : state.config.settings?.additional?.workspaceRole === 'helper'
-        ? { workspaceRole: 'helper' as const }
-        : {}),
+    ...(state.config.settings?.additional?.workspaceRole === 'helper'
+      ? { workspaceRole: 'helper' as const }
+      : {}),
     id: state.id,
     name: state.name,
     ...(state.config.bio ? { bio: state.config.bio } : {}),

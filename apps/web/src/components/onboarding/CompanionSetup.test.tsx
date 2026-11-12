@@ -1190,11 +1190,7 @@ describe('CompanionSetup', () => {
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(bootstrap).not.toHaveBeenCalled();
     expect(daemon.inspectWorkspace).not.toHaveBeenCalled();
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        settings: { additional: { workspaceRole: 'lead' } },
-      }),
-    );
+    expect(create.mock.calls[0][0]).not.toHaveProperty('settings');
     expect(create.mock.calls[0][0].system).toContain(
       'Workspace context: Keep me',
     );

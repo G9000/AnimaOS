@@ -93,12 +93,17 @@ pub(crate) fn select(
             }
         }
     }
+    // Talking with other agents is an owner grant on both sides; a helper
+    // never talks with agents.
+    let talks = super::talks_with_agents(config);
     tools.retain(|tool| {
-        !matches!(tool.name.as_str(), "delegate_to_agent" | "spawn_helper")
+        tool.name != "spawn_helper"
+            && (talks || !super::PEER_TOOLS.contains(&tool.name.as_str()))
             && (scope.can_delegate
                 || !matches!(
                     tool.name.as_str(),
-                    "spawn_helper_async"
+                    "delegate_to_agent"
+                        | "spawn_helper_async"
                         | "spawn_helpers"
                         | "wait_helper_runs"
                         | "list_helper_runs"
@@ -140,11 +145,8 @@ pub(crate) fn select(
     {
         add(&["core_memory"]);
     }
-    if !scope.delegated && !scope.helper_completion && !scope.workflow_job {
-        add(&["list_workspace_agents", "send_message", "broadcast_message"]);
-    }
     if scope.can_delegate {
-        add(&["list_workspace_agents", "delegate_to_agent", "spawn_helper"]);
+        add(&["spawn_helper"]);
     }
     if discovery(config, scope) {
         add(&["search_tools", "describe_tool"]);
@@ -247,7 +249,7 @@ impl super::AgentRunCoordinator {
                 d.agent_id == agent_id && d.session_id.as_deref().is_none_or(|id| id == session_id)
             });
         let scope = Scope {
-            can_delegate: super::is_workspace_manager(&runtime.state()),
+            can_delegate: super::is_standalone(&runtime.state()),
             owner_chat,
             owner_main: owner_chat && session.main_chat && session.has_main_chat_identity(),
             mcp_available: self.mcp.is_some(),
@@ -330,6 +332,71 @@ impl super::AgentRunCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(tools: &[ToolDescriptor]) -> Vec<&str> {
+        tools.iter().map(|tool| tool.name.as_str()).collect()
+    }
+
+    #[test]
+    fn every_standalone_agent_runs_its_own_helpers_and_talks_only_when_granted() {
+        let registry = crate::tools::ToolRegistry::new();
+        let own_run = Scope {
+            can_delegate: true,
+            ..Scope::default()
+        };
+        // No role setting at all: a plain agent still gets its own helpers.
+        let mut config = crate::agent_runs::test_support::companion_config("solo");
+        config.settings = None;
+        let solo = select(&config, &[], own_run);
+        assert!(names(&solo).contains(&"spawn_helper"));
+        for peer in crate::agent_runs::PEER_TOOLS {
+            assert!(
+                !names(&solo).contains(&peer),
+                "{peer} offered without a grant"
+            );
+        }
+
+        config.tools = Some(
+            registry
+                .resolve_descriptors(crate::agent_runs::PEER_TOOLS)
+                .unwrap(),
+        );
+        let talking = select(&config, &[], own_run);
+        for peer in crate::agent_runs::PEER_TOOLS {
+            assert!(
+                names(&talking).contains(&peer),
+                "{peer} missing after the grant"
+            );
+        }
+        // Answering a peer or a delegated task never hands the work on again.
+        for scope in [
+            Scope {
+                peers: true,
+                ..Scope::default()
+            },
+            Scope {
+                delegated: true,
+                ..Scope::default()
+            },
+        ] {
+            let tools = select(&config, &[], scope);
+            assert!(!names(&tools).contains(&"delegate_to_agent"));
+            assert!(!names(&tools).contains(&"spawn_helper"));
+        }
+
+        let mut helper = config.clone();
+        helper.settings = Some(anima_core::AgentSettings {
+            additional: std::collections::BTreeMap::from([(
+                "workspaceRole".into(),
+                DataValue::String("helper".into()),
+            )]),
+            ..Default::default()
+        });
+        let helper_tools = select(&helper, &[], Scope::default());
+        for peer in crate::agent_runs::PEER_TOOLS {
+            assert!(!names(&helper_tools).contains(&peer), "helper got {peer}");
+        }
+    }
 
     #[test]
     fn general_setup_controls_are_derived_for_owners_and_never_smuggled_through_saved_grants() {
@@ -471,7 +538,7 @@ mod tests {
                 runtime.config(),
                 &[],
                 Scope {
-                    can_delegate: super::super::is_workspace_manager(&runtime.state()),
+                    can_delegate: super::super::is_standalone(&runtime.state()),
                     owner_chat: true,
                     ..Scope::default()
                 },

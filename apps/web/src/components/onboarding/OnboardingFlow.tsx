@@ -961,7 +961,6 @@ export function OnboardingFlow({
         // Note: createAgent's wire type carries no bio/adjectives/style, so
         // those profile fields are folded into `system` only.
         const response = await daemon.createAgent({
-          settings: { additional: { workspaceRole: 'lead' } },
           name,
           ...(draft.provider ? { provider: draft.provider } : {}),
           model: resolvedModel,

@@ -20,7 +20,7 @@ impl Fixture {
             workspace_root: self.0.clone(),
             project_relative: String::new(),
             profile_enabled: false,
-            companion: true,
+            standalone: true,
             config_revision: "r".into(),
         }
     }
@@ -90,7 +90,7 @@ fn profile_isolation_and_upload_names_are_not_instruction_authority() {
     assert_eq!(root.manifest.identity_source, IdentitySource::WorkspaceSoul);
     assert!(root.rendered.project_context.is_empty());
     let mut scope = f.scope();
-    scope.companion = false;
+    scope.standalone = false;
     let specialist = load_scope(
         &scope,
         budget(),

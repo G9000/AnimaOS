@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, Semaphore};
 
 use super::{
-    test_support::{chat_request, lead_config, ScriptedModel, Step},
+    test_support::{chat_request, companion_config, ScriptedModel, Step},
     AgentRunCoordinator, RunRoom,
 };
 use crate::{
@@ -67,7 +67,7 @@ impl Fixture {
             values: vec![],
         });
         state.set_control_plane_store(Some(store.clone()));
-        let mut config = lead_config("M67 document companion");
+        let mut config = companion_config("M67 document companion");
         config.tools = Some(
             state
                 .tool_registry

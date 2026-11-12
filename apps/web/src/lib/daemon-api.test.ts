@@ -162,10 +162,13 @@ afterEach(() => {
 });
 
 describe('toAgentDetail', () => {
-  it('maps the durable agency lead role', () => {
-    const lead = snapshot();
-    lead.state.config.settings = { additional: { workspaceRole: 'lead' } };
-    expect(toAgentDetail(lead).workspaceRole).toBe('lead');
+  it('maps only the helper role; standalone agents carry no rank', () => {
+    const helper = snapshot();
+    helper.state.config.settings = { additional: { workspaceRole: 'helper' } };
+    expect(toAgentDetail(helper).workspaceRole).toBe('helper');
+    const old = snapshot();
+    old.state.config.settings = { additional: { workspaceRole: 'lead' } };
+    expect(toAgentDetail(old).workspaceRole).toBeUndefined();
   });
   it('maps canonical tool descriptors to ordered names and keeps message filtering', () => {
     const detail = toAgentDetail(snapshot());

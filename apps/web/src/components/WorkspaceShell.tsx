@@ -834,7 +834,7 @@ export function WorkspaceShell({
                       ) : page === 'agents' ? (
                         <AgentsView
                           agents={agents}
-                          mainAgent={mainAgent}
+                          activeAgentId={mainAgent.id}
                           onSelectAgent={(id) => {
                             onSelectAgent?.(id);
                             openConversation();

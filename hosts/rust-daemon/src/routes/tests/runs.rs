@@ -1710,7 +1710,7 @@ async fn stopping_a_run_only_the_history_store_holds_answers_it_as_it_is() {
 /// stopped through the helper's own route; its companion's run goes on.
 #[tokio::test]
 async fn a_helpers_run_is_stopped_through_the_helpers_route() {
-    use crate::agent_runs::test_support::lead_config;
+    use crate::agent_runs::test_support::companion_config;
     use anima_core::ToolCall;
 
     let spawn = ToolCall {
@@ -1728,7 +1728,7 @@ async fn a_helpers_run_is_stopped_through_the_helpers_route() {
     ]);
     let mut daemon = DaemonState::with_model_adapter(model.clone());
     let companion = daemon
-        .create_agent(lead_config("Companion"))
+        .create_agent(companion_config("Companion"))
         .unwrap()
         .state
         .id;

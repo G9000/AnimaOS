@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCESS_PROFILES,
   deriveAccessProfile,
-  selectMainAgent,
+  selectDefaultAgent,
   toolNamesForProfile,
 } from './agent-access';
 import type { AgentDetail } from './types';
@@ -211,20 +211,20 @@ describe('workspace access profiles', () => {
   });
 });
 
-describe('selectMainAgent', () => {
+describe('selectDefaultAgent', () => {
   it('never promotes a generated helper into the companion identity', () => {
     const helper = { ...agent('helper', 1), workspaceRole: 'helper' as const };
-    expect(selectMainAgent([helper])).toBeNull();
+    expect(selectDefaultAgent([helper])).toBeNull();
     const companion = agent('companion', 2);
-    expect(selectMainAgent([helper, companion])).toBe(companion);
+    expect(selectDefaultAgent([helper, companion])).toBe(companion);
   });
-  it('prefers the persisted agency lead over creation-time ties or older workers', () => {
-    const worker = agent('a-worker', 10);
-    const lead = { ...agent('z-lead', 20), workspaceRole: 'lead' as const };
-    expect(selectMainAgent([worker, lead])).toBe(lead);
+  it('ranks no agent above another: the oldest opens first', () => {
+    const older = agent('z-older', 10);
+    const newer = agent('a-newer', 20);
+    expect(selectDefaultAgent([newer, older])).toBe(older);
   });
   it('returns null when no agents exist', () => {
-    expect(selectMainAgent([])).toBeNull();
+    expect(selectDefaultAgent([])).toBeNull();
   });
 
   it('returns the oldest persisted agent without mutating the input', () => {
@@ -232,7 +232,7 @@ describe('selectMainAgent', () => {
     const newer = agent('newer', 20);
     const agents = [newer, oldest];
 
-    expect(selectMainAgent(agents)).toBe(oldest);
+    expect(selectDefaultAgent(agents)).toBe(oldest);
     expect(agents).toEqual([newer, oldest]);
   });
 
@@ -240,6 +240,6 @@ describe('selectMainAgent', () => {
     const second = agent('b-agent', 10);
     const first = agent('a-agent', 10);
 
-    expect(selectMainAgent([second, first])).toBe(first);
+    expect(selectDefaultAgent([second, first])).toBe(first);
   });
 });

@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 
 use super::test_support::{
     approving_coordinator, ask_before_writes, calculate_call, chat_request, companion_config,
-    decision, events_until, gated_context, lead_config, ledger_run, patient, pending_approvals,
-    quiet_for, remember_call, tool_input, tool_results, Gate, ScriptedModel, Step,
+    decision, events_until, gated_context, ledger_run, patient, pending_approvals, quiet_for,
+    remember_call, tool_input, tool_results, Gate, ScriptedModel, Step,
 };
 use super::AgentRunCoordinator;
 use crate::approvals::{
@@ -557,7 +557,7 @@ async fn an_approved_call_is_checked_again_before_it_runs() {
     .await;
     let (lead_id, specialist) = {
         let mut guard = coordinator.state.write().await;
-        let mut lead = lead_config("Lead");
+        let mut lead = companion_config("Lead");
         lead.tools = Some(
             crate::tools::ToolRegistry::new()
                 .resolve_descriptors(["memory_add"])
@@ -963,9 +963,9 @@ async fn a_tool_the_agent_lost_during_the_wait_does_not_run() {
 }
 
 #[tokio::test]
-async fn an_approved_tool_the_run_added_to_the_agent_runs() {
-    // `broadcast_message` is not in the companion's own configuration; every
-    // run that is not delegated adds it.
+async fn an_approved_peer_broadcast_runs_once_the_owner_allows_it() {
+    // Talking with agents is an owner grant; with no other agent opted in the
+    // broadcast reaches nobody.
     let broadcast = anima_core::ToolCall {
         id: "call-1".into(),
         name: "broadcast_message".into(),
@@ -979,9 +979,7 @@ async fn an_approved_tool_the_run_added_to_the_agent_runs() {
         ApprovalPolicy::default().with(RiskClass::Delegate, PolicyAction::Ask);
     let (coordinator, agent_id) =
         approving_coordinator(model, ask_before_delegating, patient()).await;
-    assert!(!coordinator.state.read().await.agents[&agent_id]
-        .config()
-        .allows_tool("broadcast_message"));
+    super::test_support::grant_talk(&coordinator, &agent_id).await;
     let running = spawn_run(
         &coordinator,
         chat_request(&agent_id, "chat:ask", "say hello"),

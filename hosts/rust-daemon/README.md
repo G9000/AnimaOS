@@ -1498,6 +1498,22 @@ leave newer history rows that reappear later. Do not edit snapshot versions or
 apply historical pre-M2 SQL instructions to an M9/M10 rollback. See
 [VPS backup and acceptance procedures](../../deploy/vps/README.md).
 
+## Standalone agents
+
+Every agent that is not a helper is standalone: there is no main agent, lead or
+teammate rank. Each standalone agent may run its own short-lived helpers
+(`spawn_helper`, and the background helper tools when granted); a helper belongs
+to the agent that started it and only that agent can reuse, steer or stop it.
+
+Agents talk with each other only when the owner enables it on both sides. The
+grant is the tool set `list_workspace_agents`, `send_message`,
+`broadcast_message` and `delegate_to_agent`; an agent counts as talking with
+agents when it holds `send_message`. Without it, those tools are not offered,
+its roster lists only itself and its own helpers, and peer messages or requests
+to it are refused (`That agent does not take messages from other agents`).
+With it, the roster and broadcasts reach only other agents that also talk with
+agents. A peer or delegated run never hands the work on again.
+
 ## Standard Markdown agent files
 
 Anima's long-running Rust agent uses standard Markdown identity and instructions.
@@ -1505,9 +1521,9 @@ Selected upstream helpers from revision `f3ef9db68332063a3625661f3a9b259f60abdb4
 `HERMES-NOTICE` and the core crate notice. This supports familiar instruction files;
 behavioral differences and prompt-screening limits are documented below.
 
-Place UTF-8 `SOUL.md` in the configured workspace root to define the companion's
-identity. The companion is the agent with `settings.workspaceRole: lead`. Other
-agents and helpers do not inherit that root identity. An accepted SOUL replaces
+Place UTF-8 `SOUL.md` in the configured workspace root to define the default
+identity for standalone agents. Every agent that is not a helper is standalone;
+no agent ranks above another. Helpers do not inherit that root identity. An accepted SOUL replaces
 legacy bio, lore, adjectives, topics, style and `system` persona for the isolated
 run; knowledge and the daemon's mandatory role/delegation/origin guidance remain.
 Missing, empty, blocked or excluded SOUL retains the complete legacy persona.
@@ -1517,7 +1533,7 @@ An optional boolean `settings.agentFilesProfileEnabled: true` selects only that
 agent's `.animaos-swarm/agent-profiles/<hex-agent-id>/SOUL.md`. Encode each UTF-8 byte
 of the server-generated agent ID as two lowercase hexadecimal digits. The fake ID
 `demo` would use `.animaos-swarm/agent-profiles/64656d6f/SOUL.md`. Profile mode does
-not fall back to root SOUL even for the companion. Configure this through the
+not fall back to root SOUL. Configure this through the
 existing agent creation/workspace configuration flow; the existing agent PATCH
 route does not edit settings, and the console preview has no profile toggle.
 Enabling the setting creates no directories or files. Loading never writes or

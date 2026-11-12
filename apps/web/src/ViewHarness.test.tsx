@@ -4900,7 +4900,7 @@ it('keeps agent conversations out of the chat header and opens their exchange fr
   );
   vi.mocked(daemon.sessionMessages).mockImplementation(async (_agentId, sessionId) => ({
     messages: sessionId === 'room:incoming' ? [
-      { id: 'request', role: 'user', text: 'Task delegated by workspace manager Anima (anima). Return the result and any blockers. Do not delegate further.\n\nWhat do you know about Julio?', attachments: [], metadata: {}, createdAtMs: 2 },
+      { id: 'request', role: 'user', text: 'Task requested by agent Anima (anima). Return the result and any blockers. Do not pass it on.\n\nWhat do you know about Julio?', attachments: [], metadata: {}, createdAtMs: 2 },
       { id: 'reply', role: 'assistant', text: 'I know Julio prefers a warm and direct tone.', attachments: [], metadata: {}, createdAtMs: 3 },
     ] : [],
     nextBefore: null,
@@ -4950,7 +4950,7 @@ it('opens a helper session by its agent and credits its task to the companion', 
               {
                 id: 't1',
                 role: 'user',
-                text: 'Task delegated by workspace manager Nova (agent-main). Return the result and any blockers. Do not delegate further.\n\nCompare vendors',
+                text: 'Task requested by agent Nova (agent-main). Return the result and any blockers. Do not pass it on.\n\nCompare vendors',
                 attachments: [],
                 metadata: {},
                 createdAtMs: 2,
@@ -4980,7 +4980,7 @@ it('opens a helper session by its agent and credits its task to the companion', 
   expect(within(conversation).getByText('From Nova')).toBeVisible();
   expect(within(conversation).getByText('Compare vendors')).toBeVisible();
   expect(
-    screen.queryByText(/Task delegated by workspace manager/),
+    screen.queryByText(/Task requested by agent/),
   ).not.toBeInTheDocument();
   expect(screen.getByRole('note')).toHaveTextContent(
     'Helper sessions are read-only.',

@@ -1087,7 +1087,6 @@ describe('OnboardingFlow', () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created));
     expect(createAgent).toHaveBeenCalledTimes(1);
     expect(createAgent).toHaveBeenCalledWith({
-      settings: { additional: { workspaceRole: 'lead' } },
       name: 'Nova',
       provider: 'openai',
       model: 'gpt-4o',

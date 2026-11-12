@@ -825,7 +825,7 @@ describe('buildTranscript', () => {
         message(
           'u1',
           'User',
-          'Task delegated by workspace manager Nova (agent-main). Return the result and any blockers. Do not delegate further.\n\nCompare vendors',
+          'Task requested by agent Nova (agent-main). Return the result and any blockers. Do not pass it on.\n\nCompare vendors',
         ),
         message('a1', 'Assistant', 'Draft one', { revised: true }),
         message('a2', 'Assistant', 'Final comparison'),

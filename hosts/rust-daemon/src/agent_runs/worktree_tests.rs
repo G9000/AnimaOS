@@ -12,7 +12,7 @@ use anima_core::{
 use serde_json::Value;
 use tokio::sync::{RwLock, Semaphore};
 
-use super::test_support::{accept_web, add_chat, lead_config, wait_for};
+use super::test_support::{accept_web, add_chat, companion_config, wait_for};
 use super::AgentRunCoordinator;
 use crate::approvals::{ApprovalPolicy, PolicyAction, RiskClass};
 use crate::runs::RunStatus;
@@ -212,7 +212,7 @@ async fn fixture(tool: &str, helper_writes: bool, init_git: bool) -> Fixture {
             private.path().join("control-plane.json"),
         ),
     ));
-    let mut config = lead_config("Worktree companion");
+    let mut config = companion_config("Worktree companion");
     let mut tools = vec!["read_file", "write_file", "todo_write"];
     if tool == "spawn_helper_async" {
         tools.push("spawn_helper_async");
@@ -390,7 +390,7 @@ fn run_root_only_trusts_helper_worktree_roots() {
         id: "lead".into(),
         name: "Lead".into(),
         status: anima_core::AgentStatus::Idle,
-        config: lead_config("Lead"),
+        config: companion_config("Lead"),
         created_at_ms: 0,
         token_usage: Default::default(),
     };

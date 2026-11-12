@@ -1011,7 +1011,7 @@ async fn async_helper_completion_two_helpers_two_continuations_exactly_six_recor
         requests: Default::default(),
     });
     let mut state = DaemonState::with_model_adapter(model.clone());
-    let mut config = lead_config("Six-call companion");
+    let mut config = companion_config("Six-call companion");
     config.tools = Some(
         ToolRegistry::new()
             .resolve_descriptors([

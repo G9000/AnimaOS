@@ -241,13 +241,13 @@ async fn independent_agents_exchange_attributed_messages_in_separate_rooms() {
     let alice = state
         .write()
         .await
-        .create_agent(test_config("Alice"))
+        .create_agent(talking_config("Alice"))
         .unwrap()
         .state;
     let bob = state
         .write()
         .await
-        .create_agent(test_config("Bob"))
+        .create_agent(talking_config("Bob"))
         .unwrap()
         .state;
     let coordinator = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(4)));
@@ -637,7 +637,7 @@ async fn helper_process_tools_are_denied_even_when_explicitly_configured() {
 }
 
 #[tokio::test]
-async fn spawn_helper_rejects_non_lead_recursive_and_saturated_calls_without_creating_agents() {
+async fn spawn_helper_rejects_helper_recursive_and_saturated_calls_without_creating_agents() {
     let adapter = Arc::new(HelperModelAdapter {
         configs: StdMutex::new(vec![]),
     });
@@ -646,16 +646,25 @@ async fn spawn_helper_rejects_non_lead_recursive_and_saturated_calls_without_cre
     )));
     let coordinator = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(1)));
     let lead = helper_lead(&coordinator).await;
+    // Every standalone agent runs its own helpers; a helper never does.
+    let mut helper_config = test_config("Worker");
+    helper_config.settings.as_mut().unwrap().additional = BTreeMap::from([
+        ("workspaceRole".into(), DataValue::String("helper".into())),
+        ("parentAgentId".into(), DataValue::String(lead.id.clone())),
+    ]);
     let worker = state
         .write()
         .await
-        .create_agent(test_config("Worker"))
+        .create_agent(helper_config)
         .unwrap()
         .state;
     let recursive = execute_helper_tool(&coordinator, &lead, false, "Recursive").await;
     assert!(recursive.error.unwrap().contains("recursive"));
     let denied = execute_helper_tool(&coordinator, &worker, true, "Escalation").await;
-    assert!(denied.error.unwrap().contains("companion"));
+    assert!(denied
+        .error
+        .unwrap()
+        .contains("Helpers cannot spawn helpers"));
     let _permit = coordinator.try_admit().unwrap();
     let busy = execute_helper_tool(&coordinator, &lead, true, "Saturated").await;
     assert!(busy.error.unwrap().contains("concurrent"));
@@ -1330,9 +1339,11 @@ async fn manager_delegates_real_work_and_restores_config() {
         .await
         .set_control_plane_store(Some(store.clone()));
     let mut manager = test_config("Manager");
-    manager.tools = Some(vec![crate::tools::ToolRegistry::new()
-        .descriptor("send_message")
-        .unwrap()]);
+    manager.tools = Some(
+        crate::tools::ToolRegistry::new()
+            .resolve_descriptors(super::PEER_TOOLS)
+            .unwrap(),
+    );
     manager
         .settings
         .as_mut()
@@ -1400,7 +1411,7 @@ async fn manager_delegates_real_work_and_restores_config() {
 }
 
 #[tokio::test]
-async fn delegation_rejects_self_missing_target_escalation_and_non_manager() {
+async fn delegation_rejects_self_missing_busy_and_escalating_targets() {
     let captures = Arc::new(StdMutex::new(vec![]));
     let (coordinator, worker_id) = coordinator_with_agent(
         Arc::new(CapturingModelAdapter {
@@ -1409,13 +1420,9 @@ async fn delegation_rejects_self_missing_target_escalation_and_non_manager() {
         2,
     )
     .await;
-    let mut config = test_config("Manager");
-    config
-        .settings
-        .as_mut()
-        .unwrap()
-        .additional
-        .insert("workspaceRole".into(), DataValue::String("lead".into()));
+    // Both agents talk with agents, so every refusal below has its own cause.
+    super::test_support::grant_talk(&coordinator, &worker_id).await;
+    let config = talking_config("Manager");
     let manager = coordinator
         .state
         .write()
@@ -1423,19 +1430,8 @@ async fn delegation_rejects_self_missing_target_escalation_and_non_manager() {
         .create_agent(config)
         .unwrap()
         .state;
-    let worker = coordinator
-        .state
-        .read()
-        .await
-        .get_agent(&worker_id)
-        .unwrap()
-        .state;
     assert!(coordinator
         .delegate(&manager, manager.id.clone(), "self".into(), None)
-        .await
-        .is_err());
-    assert!(coordinator
-        .delegate(&worker, manager.id.clone(), "reverse".into(), None)
         .await
         .is_err());
     assert!(coordinator
@@ -1464,9 +1460,14 @@ async fn delegation_rejects_self_missing_target_escalation_and_non_manager() {
             .parent_allows_tool(&manager.id, "write_file")
             .await
     );
-    let tool = crate::tools::ToolRegistry::new()
-        .descriptor("write_file")
+    let mut tools = crate::tools::ToolRegistry::new()
+        .resolve_descriptors(super::PEER_TOOLS)
         .unwrap();
+    tools.push(
+        crate::tools::ToolRegistry::new()
+            .descriptor("write_file")
+            .unwrap(),
+    );
     coordinator
         .state
         .write()
@@ -1474,7 +1475,7 @@ async fn delegation_rejects_self_missing_target_escalation_and_non_manager() {
         .update_agent(
             &worker_id,
             AgentConfigUpdate {
-                tools: Some(vec![tool]),
+                tools: Some(tools),
                 ..Default::default()
             },
         )
@@ -3295,9 +3296,11 @@ async fn a_delegated_run_links_its_parent_run_and_session() {
         adapter.clone(),
     )));
     let mut manager = test_config("Manager");
-    manager.tools = Some(vec![crate::tools::ToolRegistry::new()
-        .descriptor("send_message")
-        .unwrap()]);
+    manager.tools = Some(
+        crate::tools::ToolRegistry::new()
+            .resolve_descriptors(super::PEER_TOOLS)
+            .unwrap(),
+    );
     manager
         .settings
         .as_mut()
@@ -3459,10 +3462,11 @@ async fn a_peer_request_is_a_helper_session_of_the_recipient() {
         .state
         .write()
         .await
-        .create_agent(test_config("Recipient"))
+        .create_agent(talking_config("Recipient"))
         .unwrap()
         .state
         .id;
+    super::test_support::grant_talk(&coordinator, &sender).await;
 
     coordinator
         .send_peer(
@@ -3841,13 +3845,13 @@ async fn send_message_through_the_tool_path_links_the_peer_session_to_the_callin
     let alice = state
         .write()
         .await
-        .create_agent(test_config("Alice"))
+        .create_agent(talking_config("Alice"))
         .unwrap()
         .state;
     state
         .write()
         .await
-        .create_agent(test_config("Bob"))
+        .create_agent(talking_config("Bob"))
         .unwrap();
     let coordinator = AgentRunCoordinator::new(state.clone(), Arc::new(Semaphore::new(4)));
     let mut direct = request(&alice.id, "Ask Bob for a review");
@@ -4087,4 +4091,61 @@ async fn a_side_post_is_saved_with_its_commit_and_removed_without_it() {
         .expect("the commit stands");
     entered.acquire().await.unwrap().forget();
     assert_eq!(posted(&coordinator).await, vec!["p3".to_string()]);
+}
+
+fn talking_config(name: &str) -> AgentConfig {
+    let mut config = test_config(name);
+    config.tools = Some(
+        crate::tools::ToolRegistry::new()
+            .resolve_descriptors(super::PEER_TOOLS)
+            .unwrap(),
+    );
+    config
+}
+
+#[tokio::test]
+async fn agents_only_see_and_reach_each_other_when_both_opted_in() {
+    let captures = Arc::new(StdMutex::new(vec![]));
+    let (coordinator, quiet_id) = coordinator_with_agent(
+        Arc::new(CapturingModelAdapter {
+            requests: captures.clone(),
+        }),
+        2,
+    )
+    .await;
+    let (ada, bo) = {
+        let mut guard = coordinator.state.write().await;
+        (
+            guard.create_agent(talking_config("Ada")).unwrap().state,
+            guard.create_agent(talking_config("Bo")).unwrap().state,
+        )
+    };
+    let quiet = coordinator
+        .state
+        .read()
+        .await
+        .get_agent(&quiet_id)
+        .unwrap()
+        .state;
+
+    let ada_roster = coordinator.team_roster(&ada.id).await;
+    assert!(ada_roster.contains(&bo.id), "{ada_roster}");
+    assert!(!ada_roster.contains(&quiet.id), "{ada_roster}");
+    let quiet_roster = coordinator.team_roster(&quiet.id).await;
+    assert!(quiet_roster.contains(&quiet.id));
+    assert!(!quiet_roster.contains(&ada.id) && !quiet_roster.contains(&bo.id));
+    assert!(!ada_roster.contains("workspace_manager"));
+
+    assert_eq!(coordinator.peer_ids(&ada.id).await, vec![bo.id.clone()]);
+
+    let refused = coordinator
+        .delegate(&ada, quiet.id.clone(), "help".into(), None)
+        .await
+        .unwrap_err();
+    assert!(refused.contains("does not take requests"), "{refused}");
+    let refused = coordinator
+        .delegate(&quiet, ada.id.clone(), "help".into(), None)
+        .await
+        .unwrap_err();
+    assert!(refused.contains("talking with agents"), "{refused}");
 }

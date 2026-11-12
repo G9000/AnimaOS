@@ -13,8 +13,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::{
-    helper_parent, is_workspace_manager, AgentRunCoordinator, AgentRunRequest, RunRoom,
-    HELPER_MAX_RUNS,
+    helper_parent, is_standalone, AgentRunCoordinator, AgentRunRequest, RunRoom, HELPER_MAX_RUNS,
 };
 use crate::live::{run_status_event, LiveEventBody};
 use crate::runs::{
@@ -79,8 +78,7 @@ pub(super) fn active_caller(
     parent: &RunLink,
     tool: &str,
 ) -> Result<AgentState, String> {
-    let unavailable =
-        || "Helper operation requires the current companion run and grant".to_string();
+    let unavailable = || "Helper operation requires the current agent run and grant".to_string();
     let agent = state.agents.get(owner).ok_or_else(unavailable)?.state();
     let run = state.runs.get(&parent.run_id).ok_or_else(unavailable)?;
     if parent.agent_id != owner
@@ -90,7 +88,7 @@ pub(super) fn active_caller(
         || run.stop.is_some()
         || run.async_helper.is_some()
         || run.helper_completion.is_some()
-        || !is_workspace_manager(&agent)
+        || !is_standalone(&agent)
         || !agent.config.allows_tool(tool)
         || !state
             .live

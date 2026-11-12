@@ -1,6 +1,6 @@
 //! M48 synthetic coordinator request evidence. Default cases never construct
 //! subscription auth or contact a provider. Real diagnostic execution is held.
-use super::test_support::{accept_web, add_chat, lead_config, ScriptedModel, Step};
+use super::test_support::{accept_web, add_chat, companion_config, ScriptedModel, Step};
 use super::AgentRunCoordinator;
 use crate::control_plane_store::WorkspaceConfig;
 use crate::runs::RunStatus;
@@ -33,11 +33,8 @@ const SELECTED: &[&str] = &[
     "spawn_helper",
     "bash",
 ];
+// Peer tools are an owner grant, not something every run adds.
 const AUGMENTED: &[&str] = &[
-    "list_workspace_agents",
-    "send_message",
-    "broadcast_message",
-    "delegate_to_agent",
     "rename_chat",
     "import_github_skill",
     "manage_skill_runtime",
@@ -70,7 +67,7 @@ async fn synthetic_first_request() -> Value {
         mission: "Offline request capture only".into(),
         values: vec![],
     });
-    let mut config = lead_config("M48 synthetic manager");
+    let mut config = companion_config("M48 synthetic manager");
     config.model = "gpt-5.5".into();
     config.provider = Some("chatgpt".into());
     config.system = Some(CONTEXT.into());

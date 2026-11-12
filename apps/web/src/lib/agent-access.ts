@@ -28,6 +28,18 @@ export const BACKGROUND_HELPER_TOOL_ACCESS = {
   label: 'Allow background helpers',
 } as const;
 
+/** Agents stand alone; the owner lets one talk with other agents that also
+ *  have this on. */
+export const AGENT_TALK_TOOL_ACCESS = {
+  tools: [
+    'list_workspace_agents',
+    'send_message',
+    'broadcast_message',
+    'delegate_to_agent',
+  ],
+  label: 'Allow talking with other agents',
+} as const;
+
 export const WORKFLOW_TEMPLATE_TOOL_ACCESS = {
   tools: [
     'save_workflow_template',
@@ -174,19 +186,16 @@ export function deriveAccessProfile(
   return 'custom';
 }
 
-export function selectMainAgent(
+/** Every agent stands on its own; with none picked, the oldest one opens. */
+export function selectDefaultAgent(
   agents: readonly AgentDetail[],
 ): AgentDetail | null {
-  const companions = agents.filter((agent) => agent.workspaceRole !== 'helper');
-  if (companions.length === 0) {
+  const standalone = agents.filter((agent) => agent.workspaceRole !== 'helper');
+  if (standalone.length === 0) {
     return null;
   }
 
-  return [...companions].sort((left, right) => {
-    const leadOrder =
-      Number(right.workspaceRole === 'lead') -
-      Number(left.workspaceRole === 'lead');
-    if (leadOrder !== 0) return leadOrder;
+  return [...standalone].sort((left, right) => {
     const creationOrder = left.created_at_ms - right.created_at_ms;
     if (creationOrder !== 0) {
       return creationOrder;

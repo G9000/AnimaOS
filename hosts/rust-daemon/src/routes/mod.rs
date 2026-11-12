@@ -4076,8 +4076,18 @@ mod tests {
     #[tokio::test]
     async fn peer_message_api_and_direct_rooms_keep_histories_separate() {
         let mut daemon = DaemonState::new();
-        let sender = daemon.create_agent(test_config("Alice")).unwrap().state.id;
-        let recipient = daemon.create_agent(test_config("Bob")).unwrap().state.id;
+        // Both agents have the owner's talk-with-agents grant.
+        let talking = |name: &str| {
+            let mut config = test_config(name);
+            config.tools = Some(
+                crate::tools::ToolRegistry::new()
+                    .resolve_descriptors(crate::agent_runs::PEER_TOOLS)
+                    .unwrap(),
+            );
+            config
+        };
+        let sender = daemon.create_agent(talking("Alice")).unwrap().state.id;
+        let recipient = daemon.create_agent(talking("Bob")).unwrap().state.id;
         let state = Arc::new(RwLock::new(daemon));
         let app = router(state.clone(), DaemonConfig::default());
         for text in ["first direct message", "second direct message"] {

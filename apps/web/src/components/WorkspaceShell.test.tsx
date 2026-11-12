@@ -298,7 +298,7 @@ describe('WorkspaceShell', () => {
       screen.getByRole('button', { name: 'Nova, switch agent' }),
     );
     await user.click(screen.getByRole('menuitem', { name: 'Manage agents' }));
-    expect(screen.getByRole('heading', { name: 'Team' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Agents' })).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Chat with Nova' }),
     ).toBeVisible();

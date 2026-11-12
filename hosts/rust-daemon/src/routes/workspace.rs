@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use anima_core::{AgentConfig, AgentRuntimeSnapshot, AgentSettings, DataValue, ToolDescriptor};
+use anima_core::{AgentConfig, AgentRuntimeSnapshot, ToolDescriptor};
 use atomicwrites::{AllowOverwrite, AtomicFile};
 
 use super::agencies::{load_agency_yaml, AgencyYamlAgent, AgencyYamlConfig};
@@ -306,16 +306,6 @@ fn validate_document_workspace(
     )
 }
 
-fn workspace_lead_settings() -> AgentSettings {
-    AgentSettings {
-        additional: BTreeMap::from([(
-            "workspaceRole".to_string(),
-            DataValue::String("lead".to_string()),
-        )]),
-        ..AgentSettings::default()
-    }
-}
-
 fn prepare_bootstrap_agent(
     agent: super::contracts::BootstrapAgentRequest,
 ) -> Result<(AgentConfig, AgencyYamlAgent), ApiError> {
@@ -442,8 +432,6 @@ pub(crate) async fn handle_bootstrap_workspace(
         .chain(request.workers)
         .map(prepare_bootstrap_agent)
         .collect::<Result<Vec<_>, _>>()?;
-    // Persist identity independently of creation time: a team can share timestamps.
-    team[0].0.settings = Some(workspace_lead_settings());
     let provider = team[0].0.provider.clone();
     for (config, yaml) in &mut team {
         if !names.insert(config.name.to_lowercase()) {
@@ -705,7 +693,7 @@ pub(crate) async fn handle_resume_workspace(
                         .collect::<Vec<_>>()
                 }),
                 plugins: None,
-                settings: is_orchestrator.then(workspace_lead_settings),
+                settings: None,
                 fallbacks: Vec::new(),
             })
         };

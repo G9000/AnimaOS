@@ -794,7 +794,7 @@ mod tests {
                 65,
             ),
         ];
-        let delegated = "Task delegated by workspace manager Anima (companion-1). Return the result and any blockers. Do not delegate further.\n\nCompare vendors";
+        let delegated = "Task requested by agent Anima (companion-1). Return the result and any blockers. Do not pass it on.\n\nCompare vendors";
         let specialist_messages = vec![
             message("s1", "room-70-2", MessageRole::User, delegated, &[], 70),
             message(

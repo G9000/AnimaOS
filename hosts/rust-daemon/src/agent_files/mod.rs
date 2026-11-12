@@ -36,7 +36,7 @@ pub(crate) struct AgentFileScope {
     pub workspace_root: PathBuf,
     pub project_relative: String,
     pub profile_enabled: bool,
-    pub companion: bool,
+    pub standalone: bool,
     pub config_revision: String,
 }
 #[derive(Clone, Debug)]

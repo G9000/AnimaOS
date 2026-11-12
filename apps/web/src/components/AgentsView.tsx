@@ -1,6 +1,9 @@
 import { AgentAvatar } from './AgentAvatar';
 import { useState } from 'react';
-import { deriveAccessProfile } from '../lib/agent-access';
+import {
+  AGENT_TALK_TOOL_ACCESS,
+  deriveAccessProfile,
+} from '../lib/agent-access';
 import { formatTokens } from './ui-bits';
 import type { AgentDetail } from '../lib/types';
 import { ShieldIcon, SparkIcon } from './icons';
@@ -11,13 +14,11 @@ function titleCase(value: string) {
 
 export function AgentsView({
   agents,
-  mainAgent,
-  activeAgentId = mainAgent.id,
+  activeAgentId,
   onSelectAgent,
 }: {
   agents: readonly AgentDetail[];
-  mainAgent: AgentDetail;
-  activeAgentId?: string;
+  activeAgentId: string;
   onSelectAgent?: (agentId: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -35,13 +36,13 @@ export function AgentsView({
         <div className="flex items-end justify-between gap-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-              ASSIGNMENT OWNERS
+              STANDALONE AGENTS
             </p>
             <h2
               id="agents-view-heading"
               className="studio-page-title mt-3 text-ink"
             >
-              Team
+              Agents
             </h2>
           </div>
           <span className="font-mono text-[11px] text-ink-3">
@@ -49,7 +50,8 @@ export function AgentsView({
           </span>
         </div>
         <p className="studio-page-intro">
-          Inspect your agents, their access, and current activity.
+          Each agent works on its own. Inspect their access and current
+          activity.
         </p>
 
         <div className="studio-agent-search">
@@ -80,7 +82,10 @@ export function AgentsView({
         )}
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           {visibleAgents.map((agent) => {
-            const isMain = agent.id === mainAgent.id;
+            const isActive = agent.id === activeAgentId;
+            const talks = AGENT_TALK_TOOL_ACCESS.tools.every((tool) =>
+              agent.toolNames.includes(tool),
+            );
             const access = titleCase(deriveAccessProfile(agent.toolNames));
             return (
               <article
@@ -92,7 +97,7 @@ export function AgentsView({
                   <div className="flex min-w-0 items-center gap-3">
                     <div
                       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                        isMain
+                        isActive
                           ? 'bg-accent/15 text-accent'
                           : 'bg-white/[0.04] text-ink-2'
                       }`}
@@ -111,8 +116,15 @@ export function AgentsView({
                       </p>
                     </div>
                   </div>
-                  <span className="rounded-full border border-line bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-2">
-                    {isMain ? 'Main' : 'Teammate'}
+                  <span
+                    className="rounded-full border border-line bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-2"
+                    title={
+                      talks
+                        ? 'Can talk with other agents that also allow it'
+                        : 'Works alone; other agents cannot reach it'
+                    }
+                  >
+                    {talks ? 'Talks with agents' : 'Solo'}
                   </span>
                 </div>
                 <div className="studio-agent-usage">
@@ -141,7 +153,7 @@ export function AgentsView({
                     onClick={() => onSelectAgent(agent.id)}
                     aria-label={`Chat with ${agent.name}`}
                   >
-                    {agent.id === activeAgentId ? 'Continue chat' : 'Open chat'}
+                    {isActive ? 'Continue chat' : 'Open chat'}
                   </button>
                 )}
               </article>
