@@ -83,6 +83,12 @@ const shownTools = () =>
 // The controller journeys exercise the real child panel against an offline preview.
 // Error and stale-response behavior is covered in AgentFilesPanel.test.tsx.
 beforeEach(() => {
+  vi.spyOn(daemon, 'workspaceContext').mockResolvedValue({
+    revision: 'offline-workspace-context',
+    status: 'independent',
+    binding: null,
+    connections: [],
+  });
   vi.spyOn(daemon, 'agentPersonality').mockResolvedValue({
     source: 'agent_config',
     path: null,
