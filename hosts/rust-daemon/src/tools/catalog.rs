@@ -35,6 +35,7 @@ enum Origin {
     MainChatClear,
     OwnerChatControl,
     DiscordThreadControl,
+    DiscordGuildControl,
     Mcp(crate::mcp::McpDispatchStamp),
 }
 /// A captured ceiling over the final, filtered run descriptors. Its only
@@ -51,6 +52,7 @@ pub(crate) struct RunToolCatalog {
     delegated_parent: Option<String>,
     peer_sources: Vec<String>,
     discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
+    discord_guild: Option<crate::connectors::discord::guild_tools::DiscordGuildScope>,
 }
 impl RunToolCatalog {
     pub(crate) fn new(
@@ -97,6 +99,15 @@ impl RunToolCatalog {
                     ) =>
                     {
                         Origin::DiscordThreadControl
+                    }
+                    _ if matches!(
+                        descriptor.name.as_str(),
+                        "list_discord_channels"
+                            | "create_discord_channel"
+                            | "update_discord_channel"
+                    ) =>
+                    {
+                        Origin::DiscordGuildControl
                     }
                     _ if descriptor.name == "clear_main_chat" => Origin::MainChatClear,
                     _ if matches!(
@@ -171,6 +182,7 @@ impl RunToolCatalog {
             delegated_parent: None,
             peer_sources: Vec::new(),
             discord_thread: None,
+            discord_guild: None,
         }
     }
 
@@ -185,6 +197,14 @@ impl RunToolCatalog {
         scope: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
     ) -> Self {
         self.discord_thread = scope;
+        self
+    }
+
+    pub(crate) fn with_discord_guild(
+        mut self,
+        scope: Option<crate::connectors::discord::guild_tools::DiscordGuildScope>,
+    ) -> Self {
+        self.discord_guild = scope;
         self
     }
 
@@ -285,6 +305,17 @@ impl RunToolCatalog {
                     || !self.peer_sources.is_empty()
                     || !self
                         .discord_thread
+                        .as_ref()
+                        .is_some_and(|scope| scope.valid_for(state, &self.run))
+                {
+                    return Err(REFUSED);
+                }
+            }
+            Origin::DiscordGuildControl => {
+                if self.delegated_parent.is_some()
+                    || !self.peer_sources.is_empty()
+                    || !self
+                        .discord_guild
                         .as_ref()
                         .is_some_and(|scope| scope.valid_for(state, &self.run))
                 {
@@ -598,6 +629,9 @@ impl RunToolCatalog {
             "rename_discord_thread",
             "send_discord_file",
             "read_discord_thread",
+            "list_discord_channels",
+            "create_discord_channel",
+            "update_discord_channel",
             "compact_chat",
             "export_chat",
             "change_look",

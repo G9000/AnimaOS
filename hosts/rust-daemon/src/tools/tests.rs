@@ -773,6 +773,17 @@ fn registry_defines_every_registered_tool_schema() {
         ),
         ("rename_chat", &["title"][..], &[][..]),
         ("rename_discord_thread", &["title"][..], &[][..]),
+        ("list_discord_channels", &[][..], &[][..]),
+        (
+            "create_discord_channel",
+            &["name", "type"][..],
+            &["topic", "parent_id"][..],
+        ),
+        (
+            "update_discord_channel",
+            &["channel_id"][..],
+            &["name", "topic", "parent_id"][..],
+        ),
         ("send_discord_file", &["path"][..], &["caption"][..]),
         (
             "read_discord_thread",

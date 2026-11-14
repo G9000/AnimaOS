@@ -17,6 +17,7 @@ pub(crate) mod connected_search;
 mod conversations;
 pub(crate) mod credential_paths;
 mod discord;
+mod discord_channels;
 mod doctor;
 mod document_edits;
 mod drive;
@@ -160,6 +161,7 @@ pub(crate) struct ToolExecutionContext {
         Option<crate::document_edits::approval::DocumentEditOwnerApproval>,
     pub(super) image_approval: Option<crate::images::approval::ImageOwnerApproval>,
     pub(super) discord_thread: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
+    pub(super) discord_guild: Option<crate::connectors::discord::guild_tools::DiscordGuildScope>,
     #[cfg(test)]
     pub(crate) web_search: Option<Arc<web_search::SearchExecutor>>,
     /// Host-owned task scope; ordinary contexts use the runtime agent ID.
@@ -296,6 +298,7 @@ impl ToolExecutionContext {
             document_edit_approval: None,
             image_approval: None,
             discord_thread: None,
+            discord_guild: None,
             #[cfg(test)]
             web_search: None,
             todo_owner_id: None,
@@ -378,6 +381,14 @@ impl ToolExecutionContext {
         scope: Option<crate::connectors::discord::thread_tools::DiscordThreadScope>,
     ) -> Self {
         self.discord_thread = scope;
+        self
+    }
+
+    pub(crate) fn with_discord_guild(
+        mut self,
+        scope: Option<crate::connectors::discord::guild_tools::DiscordGuildScope>,
+    ) -> Self {
+        self.discord_guild = scope;
         self
     }
 
@@ -1454,6 +1465,7 @@ impl ToolRegistry {
         chat_controls::register(&mut registry);
         agent_team::register(&mut registry);
         discord::register(&mut registry);
+        discord_channels::register(&mut registry);
         chat_results::register(&mut registry);
         images::register(&mut registry);
         mcp_management::register(&mut registry);

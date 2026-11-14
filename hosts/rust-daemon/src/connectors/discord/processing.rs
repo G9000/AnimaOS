@@ -328,6 +328,7 @@ impl DiscordManager {
         )
         .await
         .map_err(|_| DiscordManagerError::Persistence)?;
+        let guild_scope = self.guild_scope(&c, inbound.as_ref(), epoch).await;
         let request = AgentRunRequest {
             agent_id: c.agent_id.clone(),
             content: crate::agent_runs::attachments::attachment_content(
@@ -339,6 +340,12 @@ impl DiscordManager {
                 RunRoom::DiscordThread {
                     room_id: c.room_id.clone(),
                     scope: self.thread_scope(&c, epoch),
+                    guild_scope,
+                }
+            } else if let Some(scope) = guild_scope {
+                RunRoom::DiscordGuild {
+                    room_id: c.room_id.clone(),
+                    scope,
                 }
             } else {
                 RunRoom::Stable(c.room_id.clone())
