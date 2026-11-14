@@ -6,6 +6,30 @@ const LIST: &str = "list_discord_channels";
 const CREATE: &str = "create_discord_channel";
 const UPDATE: &str = "update_discord_channel";
 
+#[path = "channel_admin_tests.rs"]
+mod admin_tests;
+
+#[test]
+fn complete_discord_channel_management_registers_owner_admin_tools() {
+    let registry = crate::tools::ToolRegistry::new();
+    for name in [
+        "get_discord_channel",
+        "delete_discord_channel",
+        "reorder_discord_channels",
+        "set_discord_channel_permissions",
+        "delete_discord_channel_permission",
+        "get_discord_channel_permissions",
+        "list_discord_threads",
+        "create_discord_thread",
+        "update_discord_thread",
+        "manage_discord_thread_members",
+        "set_discord_voice_status",
+        "follow_discord_announcement",
+    ] {
+        assert!(registry.descriptor(name).is_some(), "missing {name}");
+    }
+}
+
 #[test]
 fn discord_channel_management_registers_narrow_tools_without_guild_selection() {
     let registry = crate::tools::ToolRegistry::new();
@@ -263,7 +287,7 @@ async fn discord_channel_management_rejects_invalid_and_cross_server_targets_bef
             UPDATE,
             &[
                 ("channel_id", DataValue::String("88".into())),
-                ("name", DataValue::String("unsupported".into())),
+                ("parent_id", DataValue::String("77".into())),
             ],
         ),
         call(

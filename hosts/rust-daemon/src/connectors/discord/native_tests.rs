@@ -1,4 +1,6 @@
 use super::*;
+#[path = "channel_admin_native_tests.rs"]
+mod channel_admin_tests;
 use axum::{
     body::{to_bytes, Body},
     extract::State,
@@ -327,7 +329,27 @@ async fn native_application_check_uses_verified_bot_and_only_accepted_team_owner
     assert_eq!(check.bot.id, "11");
     assert!(check.message_content_enabled);
     assert_eq!(check.management_owner_user_id, None);
-    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237746704&integration_type=0");
+    let invite = Url::parse(&check.invite_url).unwrap();
+    let query: std::collections::HashMap<_, _> = invite.query_pairs().collect();
+    assert_eq!(invite.origin().ascii_serialization(), "https://discord.com");
+    assert_eq!(invite.path(), "/oauth2/authorize");
+    assert_eq!(query["client_id"], "11");
+    assert_eq!(query["scope"], "bot");
+    assert_eq!(query["integration_type"], "0");
+    let permissions: u64 = query["permissions"].parse().unwrap();
+    // Channel administration, readable history, uploads and public/private thread use.
+    for bit in [4, 10, 11, 15, 16, 28, 29, 34, 35, 36, 38, 48] {
+        assert_ne!(
+            permissions & (1u64 << bit),
+            0,
+            "missing permission bit {bit}"
+        );
+    }
+    assert_eq!(
+        permissions & (1u64 << 3),
+        0,
+        "must not request Administrator"
+    );
     assert!(!serde_json::to_string(&check)
         .unwrap()
         .contains("check-fixture"));

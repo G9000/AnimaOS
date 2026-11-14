@@ -95,17 +95,13 @@ impl RunToolCatalog {
                 match explicit {
                     _ if matches!(
                         descriptor.name.as_str(),
-                        "rename_discord_thread" | "send_discord_file" | "read_discord_thread"
+                        "send_discord_file" | "read_discord_thread"
                     ) =>
                     {
                         Origin::DiscordThreadControl
                     }
-                    _ if matches!(
-                        descriptor.name.as_str(),
-                        "list_discord_channels"
-                            | "create_discord_channel"
-                            | "update_discord_channel"
-                    ) =>
+                    _ if descriptor.name == "rename_discord_thread"
+                        || super::discord_channels::NAMES.contains(&descriptor.name.as_str()) =>
                     {
                         Origin::DiscordGuildControl
                     }
@@ -314,6 +310,11 @@ impl RunToolCatalog {
             Origin::DiscordGuildControl => {
                 if self.delegated_parent.is_some()
                     || !self.peer_sources.is_empty()
+                    || (name == "rename_discord_thread"
+                        && !self
+                            .discord_thread
+                            .as_ref()
+                            .is_some_and(|scope| scope.valid_for(state, &self.run)))
                     || !self
                         .discord_guild
                         .as_ref()
@@ -629,9 +630,6 @@ impl RunToolCatalog {
             "rename_discord_thread",
             "send_discord_file",
             "read_discord_thread",
-            "list_discord_channels",
-            "create_discord_channel",
-            "update_discord_channel",
             "compact_chat",
             "export_chat",
             "change_look",
@@ -647,6 +645,11 @@ impl RunToolCatalog {
         ] {
             if self.entry_current(guard, name).is_ok() {
                 names.insert(name.into());
+            }
+        }
+        for name in super::discord_channels::NAMES {
+            if self.entry_current(guard, name).is_ok() {
+                names.insert((*name).into());
             }
         }
         names.retain(|name| {

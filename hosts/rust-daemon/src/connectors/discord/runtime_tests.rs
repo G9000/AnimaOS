@@ -79,6 +79,10 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    admin_requests: StdMutex<Vec<channel_admin_model::DiscordChannelAdminRequest>>,
+    admin_responses: StdMutex<VecDeque<Result<serde_json::Value, DiscordTransportError>>>,
+    admin_write_responses: StdMutex<VecDeque<Result<serde_json::Value, DiscordTransportError>>>,
+    admin_channels: StdMutex<HashMap<String, serde_json::Value>>,
     guild_channels: StdMutex<Vec<DiscordGuildChannel>>,
     guild_list_gate: AtomicBool,
     guild_list_entered: SemaphoreHolder,
@@ -143,6 +147,270 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn channel_admin(
+        &self,
+        token: &DiscordBotToken,
+        request: &channel_admin_model::DiscordChannelAdminRequest,
+    ) -> Result<serde_json::Value, DiscordTransportError> {
+        use channel_admin_model::{
+            DiscordChannelAdminMethod as Method, DiscordChannelAdminRoute as Route,
+        };
+        use serde_json::{json, Value};
+        self.admin_requests.lock().unwrap().push(request.clone());
+        if let Some(response) = self.admin_responses.lock().unwrap().pop_front() {
+            return response;
+        }
+        if request.method != Method::Get {
+            if let Some(response) = self.admin_write_responses.lock().unwrap().pop_front() {
+                return response;
+            }
+        }
+        let current_channel = |id: &str| -> Result<Value, DiscordTransportError> {
+            if let Some(channel) = self.admin_channels.lock().unwrap().get(id).cloned() {
+                return Ok(channel);
+            }
+            let inventory_channel = self
+                .guild_channels
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|channel| channel.id == id)
+                .map(|channel| {
+                    let mut value = serde_json::to_value(channel).unwrap();
+                    value["permission_overwrites"] = json!([]);
+                    value
+                });
+            if let Some(channel) = inventory_channel {
+                return Ok(channel);
+            }
+            self.channels.lock().unwrap().get(id).map(|channel| {
+                let kind = if channel.kind == DiscordChannelKind::GuildThread { 11 } else { 0 };
+                json!({"id":channel.id,"guild_id":channel.guild_id,"name":channel.name,
+                    "type":kind,"parent_id":channel.parent_channel_id,"permission_overwrites":[],
+                    "thread_metadata":{"archived":false,"locked":false,"auto_archive_duration":1440}})
+            }).ok_or(DiscordTransportError::HttpStatus { status:404 })
+        };
+        match &request.route {
+            Route::Channel { channel_id } => {
+                let mut channel = current_channel(channel_id)?;
+                match request.method {
+                    Method::Get => Ok(channel),
+                    Method::Delete => {
+                        self.admin_channels.lock().unwrap().remove(channel_id);
+                        self.guild_channels
+                            .lock()
+                            .unwrap()
+                            .retain(|value| value.id != *channel_id);
+                        Ok(channel)
+                    }
+                    Method::Patch => {
+                        let legacy_rename = request
+                            .body
+                            .as_ref()
+                            .and_then(Value::as_object)
+                            .filter(|body| body.len() == 1)
+                            .and_then(|body| body.get("name"))
+                            .and_then(Value::as_str)
+                            .filter(|_| {
+                                self.channels.lock().unwrap().get(channel_id).is_some_and(
+                                    |channel| channel.kind == DiscordChannelKind::GuildThread,
+                                )
+                            });
+                        if let Some(name) = legacy_rename {
+                            let renamed = self.rename_thread(token, channel_id, name).await?;
+                            channel["id"] = json!(renamed.id);
+                            channel["guild_id"] = json!(renamed.guild_id);
+                            channel["name"] = json!(renamed.name);
+                            channel["parent_id"] = json!(renamed.parent_channel_id);
+                            self.admin_channels
+                                .lock()
+                                .unwrap()
+                                .insert(channel_id.clone(), channel.clone());
+                            return Ok(channel);
+                        }
+                        for (key, value) in request
+                            .body
+                            .as_ref()
+                            .and_then(Value::as_object)
+                            .ok_or(DiscordTransportError::InvalidInput)?
+                        {
+                            if matches!(
+                                key.as_str(),
+                                "archived" | "locked" | "auto_archive_duration" | "invitable"
+                            ) {
+                                channel["thread_metadata"][key] = value.clone();
+                            } else {
+                                channel[key] = value.clone();
+                            }
+                        }
+                        self.admin_channels
+                            .lock()
+                            .unwrap()
+                            .insert(channel_id.clone(), channel.clone());
+                        Ok(channel)
+                    }
+                    _ => Err(DiscordTransportError::InvalidInput),
+                }
+            }
+            Route::GuildChannels { guild_id } => {
+                let mut channel = request
+                    .body
+                    .clone()
+                    .ok_or(DiscordTransportError::InvalidInput)?;
+                channel["id"] = json!("990");
+                channel["guild_id"] = json!(guild_id);
+                channel["position"] = json!(0);
+                self.admin_channels
+                    .lock()
+                    .unwrap()
+                    .insert("990".into(), channel.clone());
+                Ok(channel)
+            }
+            Route::GuildPositions { guild_id } => {
+                let positions = request
+                    .body
+                    .as_ref()
+                    .and_then(Value::as_array)
+                    .ok_or(DiscordTransportError::InvalidInput)?;
+                for position in positions {
+                    let id = position["id"]
+                        .as_str()
+                        .ok_or(DiscordTransportError::InvalidInput)?;
+                    let mut channel = current_channel(id)?;
+                    if channel["guild_id"] != *guild_id {
+                        return Err(DiscordTransportError::InvalidInput);
+                    }
+                    for field in ["position", "parent_id"] {
+                        if let Some(value) = position.get(field) {
+                            channel[field] = value.clone();
+                        }
+                    }
+                    self.admin_channels
+                        .lock()
+                        .unwrap()
+                        .insert(id.into(), channel.clone());
+                }
+                Ok(Value::Null)
+            }
+            Route::Permission {
+                channel_id,
+                overwrite_id,
+            } => {
+                let mut channel = current_channel(channel_id)?;
+                if channel.get("permission_overwrites").is_none() {
+                    channel["permission_overwrites"] = json!([]);
+                }
+                let overwrites = channel["permission_overwrites"].as_array_mut().unwrap();
+                overwrites.retain(|overwrite| overwrite["id"] != *overwrite_id);
+                if request.method == Method::Put {
+                    let mut overwrite = request
+                        .body
+                        .clone()
+                        .ok_or(DiscordTransportError::InvalidInput)?;
+                    overwrite["id"] = json!(overwrite_id);
+                    overwrites.push(overwrite);
+                }
+                self.admin_channels
+                    .lock()
+                    .unwrap()
+                    .insert(channel_id.clone(), channel);
+                Ok(Value::Null)
+            }
+            Route::MemberPermissions {
+                channel_id,
+                user_id,
+            } => {
+                current_channel(channel_id)?;
+                Ok(json!({"channel_id":channel_id,"user_id":user_id,"permissions":"1024"}))
+            }
+            Route::RolePermissions {
+                channel_id,
+                role_id,
+            } => {
+                current_channel(channel_id)?;
+                Ok(json!({"channel_id":channel_id,"role_id":role_id,"permissions":"1024"}))
+            }
+            Route::ThreadStart {
+                channel_id,
+                message_id,
+            } => {
+                let parent = current_channel(channel_id)?;
+                let body = request
+                    .body
+                    .as_ref()
+                    .ok_or(DiscordTransportError::InvalidInput)?;
+                let id = message_id.as_deref().unwrap_or("991");
+                let kind = if parent["type"] == 5 {
+                    10
+                } else {
+                    body.get("type").and_then(Value::as_u64).unwrap_or(11)
+                };
+                let mut thread = json!({"id":id,"guild_id":parent["guild_id"],"parent_id":channel_id,
+                    "type":kind,"name":body["name"],"rate_limit_per_user":0,
+                    "thread_metadata":{"archived":false,"locked":false,"auto_archive_duration":1440}});
+                for field in ["rate_limit_per_user", "applied_tags"] {
+                    if let Some(value) = body.get(field) {
+                        thread[field] = value.clone();
+                    }
+                }
+                for field in ["auto_archive_duration", "invitable"] {
+                    if let Some(value) = body.get(field) {
+                        thread["thread_metadata"][field] = value.clone();
+                    }
+                }
+                if let Some(message) = body.get("message") {
+                    thread["message"] = message.clone();
+                    thread["message"]["id"] = json!("992");
+                    thread["message"]["channel_id"] = json!(id);
+                }
+                self.admin_channels
+                    .lock()
+                    .unwrap()
+                    .insert(id.into(), thread.clone());
+                Ok(thread)
+            }
+            Route::GuildThreads { guild_id } => {
+                let threads: Vec<_> = self
+                    .admin_channels
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .filter(|channel| {
+                        channel["guild_id"] == *guild_id
+                            && channel["parent_id"].is_string()
+                            && matches!(channel["type"].as_u64(), Some(10..=12))
+                    })
+                    .cloned()
+                    .collect();
+                Ok(json!({"threads":threads,"members":[],"has_more":false}))
+            }
+            Route::ArchivedThreads { channel_id, .. } => {
+                current_channel(channel_id)?;
+                Ok(json!({"threads":[],"members":[],"has_more":false}))
+            }
+            Route::ThreadMembers {
+                channel_id,
+                user_id,
+                ..
+            } => {
+                current_channel(channel_id)?;
+                if request.method == Method::Get {
+                    Ok(if let Some(user_id) = user_id {
+                        json!({"id":channel_id,"user_id":user_id,"join_timestamp":"2026-11-14T00:00:00Z","flags":0})
+                    } else {
+                        json!([])
+                    })
+                } else {
+                    Ok(Value::Null)
+                }
+            }
+            Route::VoiceStatus { channel_id } => {
+                current_channel(channel_id)?;
+                Ok(Value::Null)
+            }
+            Route::Follow { channel_id } => Ok(json!({"channel_id":channel_id,"webhook_id":"998"})),
+        }
+    }
     async fn list_guild_channels(
         &self,
         _: &DiscordBotToken,
@@ -152,7 +420,44 @@ impl DiscordTransport for FakeTransport {
         if self.guild_list_gate.load(Ordering::SeqCst) {
             self.guild_list_release.0.acquire().await.unwrap().forget();
         }
-        Ok(self.guild_channels.lock().unwrap().clone())
+        let inventory = self.guild_channels.lock().unwrap().clone();
+        if !inventory.is_empty() {
+            return Ok(inventory);
+        }
+        let channels = self.channels.lock().unwrap();
+        let mut inventory = Vec::new();
+        for channel in channels.values() {
+            let (id, name) = if channel.kind == DiscordChannelKind::GuildThread {
+                let Some(parent) = &channel.parent_channel_id else {
+                    continue;
+                };
+                (parent.clone(), format!("channel-{parent}"))
+            } else {
+                (
+                    channel.id.clone(),
+                    channel
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("channel-{}", channel.id)),
+                )
+            };
+            if inventory
+                .iter()
+                .any(|channel: &DiscordGuildChannel| channel.id == id)
+            {
+                continue;
+            }
+            inventory.push(DiscordGuildChannel {
+                id,
+                guild_id: channel.guild_id.clone(),
+                name,
+                kind: 0,
+                topic: None,
+                parent_id: None,
+                position: 0,
+            });
+        }
+        Ok(inventory)
     }
     async fn create_guild_channel(
         &self,

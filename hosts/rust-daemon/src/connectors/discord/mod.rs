@@ -1,5 +1,6 @@
 //! Native Discord channel and thread runtime. Adapted behavior: see HERMES-NOTICE.
 mod attachments;
+pub(crate) mod channel_admin_model;
 pub(crate) mod channel_model;
 pub(crate) mod client;
 pub(crate) mod credentials;

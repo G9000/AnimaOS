@@ -341,8 +341,40 @@ pub(super) async fn active_rename_scope(
 #[tokio::test]
 async fn discord_rename_tool_catalog_withdraws_the_exact_reconfigured_capability() {
     use anima_core::ModelToolSelector;
-    let (manager, _, c, _) = rename_fixture(rename_call("Take Two")).await;
-    let (link, scope, mut agent) = active_rename_scope(&manager, &c).await;
+    let (manager, transport, c, _) = rename_fixture(rename_call("Take Two")).await;
+    transport.rename_gate.store(true, Ordering::SeqCst);
+    request_rename(&manager, &c).await;
+    assert!(manager.process_one(c.id.clone()).await.unwrap());
+    within(transport.rename_entered.0.acquire())
+        .await
+        .unwrap()
+        .forget();
+    // Capture both capabilities from the actually admitted owner receipt while
+    // its native rename is pending, without resurrecting a completed run.
+    let thread = manager
+        .get(&c.agent_id, &c.id)
+        .await
+        .unwrap()
+        .destination_for_channel("101")
+        .unwrap();
+    let (link, receipt, mut agent) = {
+        let state = manager.state.read().await;
+        let receipt = state.discord_inbound[&(c.id.clone(), "201".into())].clone();
+        assert_eq!(receipt.sender.id, "44");
+        assert_eq!(receipt.processing_state, DiscordProcessingState::Processing);
+        let link = crate::runs::RunLink {
+            agent_id: c.agent_id.clone(),
+            session_id: thread.room_id.clone(),
+            run_id: receipt.run_id.clone().expect("admitted owner run"),
+        };
+        (link, receipt, state.get_agent(&c.agent_id).unwrap().state)
+    };
+    let epoch = manager.epoch(&c.id);
+    let scope = manager.thread_scope(&thread, epoch);
+    let guild_scope = manager
+        .guild_scope(&thread, Some(&receipt), epoch)
+        .await
+        .expect("verified owner guild capability");
     let mut original = agent.config.clone();
     original
         .settings
@@ -363,7 +395,8 @@ async fn discord_rename_tool_catalog_withdraws_the_exact_reconfigured_capability
         &agent,
         None,
     )
-    .with_discord_thread(Some(scope));
+    .with_discord_thread(Some(scope))
+    .with_discord_guild(Some(guild_scope));
     assert!(catalog.visible_tool_names().contains(RENAME));
     assert!(catalog.describe(&agent, &link, RENAME).await.is_ok());
     manager
@@ -382,6 +415,10 @@ async fn discord_rename_tool_catalog_withdraws_the_exact_reconfigured_capability
         .await
         .unwrap()
         .contains(RENAME));
+    transport.rename_release.0.add_permits(1);
+    // Reconfiguration intentionally withdraws this run's connector capability;
+    // its old receipt need not transition under the new configuration. Shutdown
+    // drains the released owned effect without asserting unrelated receipt state.
     manager.shutdown().await;
 }
 

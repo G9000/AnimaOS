@@ -160,29 +160,27 @@ pub(crate) fn select(
         tools.clear();
     }
     tools.retain(|tool| {
-        !matches!(
-            tool.name.as_str(),
-            "clear_main_chat"
-                | "rename_discord_thread"
-                | "send_discord_file"
-                | "read_discord_thread"
-                | "list_discord_channels"
-                | "create_discord_channel"
-                | "update_discord_channel"
-                | "rename_chat"
-                | "compact_chat"
-                | "export_chat"
-                | "change_look"
-                | "set_agent_talk"
-                | "manage_mcp"
-                | "import_github_skill"
-                | "manage_skill_runtime"
-                | "inspect_skill_source"
-                | "import_skill"
-                | "manage_skill_setup"
-                | "show_result"
-                | "list_results"
-        )
+        !crate::tools::discord_channels::NAMES.contains(&tool.name.as_str())
+            && !matches!(
+                tool.name.as_str(),
+                "clear_main_chat"
+                    | "rename_discord_thread"
+                    | "send_discord_file"
+                    | "read_discord_thread"
+                    | "rename_chat"
+                    | "compact_chat"
+                    | "export_chat"
+                    | "change_look"
+                    | "set_agent_talk"
+                    | "manage_mcp"
+                    | "import_github_skill"
+                    | "manage_skill_runtime"
+                    | "inspect_skill_source"
+                    | "import_skill"
+                    | "manage_skill_setup"
+                    | "show_result"
+                    | "list_results"
+            )
     });
     if scope.owner_chat {
         for name in [
@@ -216,7 +214,9 @@ pub(crate) fn select(
         && !scope.peers
         && !super::is_helper_config(config)
     {
-        tools.push(registry.descriptor("rename_discord_thread").unwrap());
+        if scope.discord_guild {
+            tools.push(registry.descriptor("rename_discord_thread").unwrap());
+        }
         tools.push(registry.descriptor("send_discord_file").unwrap());
         tools.push(registry.descriptor("read_discord_thread").unwrap());
     }
@@ -225,12 +225,10 @@ pub(crate) fn select(
         && !scope.delegated
         && !scope.peers
         && !scope.reminder_verification
+        && !scope.helper_completion
+        && !scope.workflow_job
     {
-        for name in [
-            "list_discord_channels",
-            "create_discord_channel",
-            "update_discord_channel",
-        ] {
+        for name in crate::tools::discord_channels::NAMES {
             tools.push(
                 registry
                     .descriptor(name)
@@ -363,6 +361,57 @@ mod tests {
 
     fn names(tools: &[ToolDescriptor]) -> Vec<&str> {
         tools.iter().map(|tool| tool.name.as_str()).collect()
+    }
+
+    #[test]
+    fn thread_rename_requires_both_owner_guild_and_current_thread_capabilities() {
+        let mut config = crate::agent_runs::test_support::companion_config("thread owner");
+        config.tools = Some(
+            crate::tools::ToolRegistry::new()
+                .resolve_descriptors([
+                    "rename_discord_thread",
+                    "send_discord_file",
+                    "read_discord_thread",
+                ])
+                .unwrap(),
+        );
+        for scope in [
+            Scope::default(),
+            Scope {
+                owner_chat: true,
+                ..Scope::default()
+            },
+            Scope {
+                discord_thread: true,
+                ..Scope::default()
+            },
+            Scope {
+                discord_guild: true,
+                ..Scope::default()
+            },
+        ] {
+            assert!(!names(&select(&config, &[], scope)).contains(&"rename_discord_thread"));
+        }
+        let participant_tools = select(
+            &config,
+            &[],
+            Scope {
+                discord_thread: true,
+                ..Scope::default()
+            },
+        );
+        assert!(names(&participant_tools).contains(&"read_discord_thread"));
+        assert!(names(&participant_tools).contains(&"send_discord_file"));
+        let owner_tools = select(
+            &config,
+            &[],
+            Scope {
+                discord_thread: true,
+                discord_guild: true,
+                ..Scope::default()
+            },
+        );
+        assert!(names(&owner_tools).contains(&"rename_discord_thread"));
     }
 
     #[test]

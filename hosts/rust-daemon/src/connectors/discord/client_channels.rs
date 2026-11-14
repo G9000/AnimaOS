@@ -138,7 +138,7 @@ impl DiscordClient {
             || edit
                 .topic
                 .as_deref()
-                .is_some_and(|topic| !valid_topic(topic, 1024))
+                .is_some_and(|topic| !valid_topic(topic, 4096))
         {
             return Err(DiscordTransportError::InvalidInput);
         }
@@ -158,7 +158,7 @@ impl DiscordClient {
             .await?;
         validate_channel(&channel, guild).map_err(|_| DiscordTransportError::Uncertain)?;
         if channel.id != channel_id
-            || !matches!(channel.kind, 0 | 2 | 4)
+            || !matches!(channel.kind, 0 | 2 | 4 | 5 | 13 | 15 | 16)
             || edit.name.as_ref().is_some_and(|name| &channel.name != name)
             || edit
                 .topic
@@ -168,7 +168,7 @@ impl DiscordClient {
                 .parent_id
                 .as_ref()
                 .is_some_and(|parent| &channel.parent_id != parent)
-            || (channel.kind != 0 && edit.topic.is_some())
+            || (!matches!(channel.kind, 0 | 5 | 15 | 16) && edit.topic.is_some())
             || (channel.kind == 4 && edit.parent_id.is_some())
         {
             return Err(DiscordTransportError::Uncertain);

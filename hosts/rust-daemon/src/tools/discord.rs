@@ -13,7 +13,7 @@ pub(super) fn register(registry: &mut ToolRegistry) {
     }
     let mut parameters = object_parameters(vec![required_parameter("title", title)]);
     parameters.insert("additionalProperties".into(), DataValue::Bool(false));
-    registry.register(tool_descriptor("rename_discord_thread", "Rename only the current Discord thread when a participant requests it. Can replace an existing/manual title. Takes no channel or connector ID. Call this tool and wait for renamed:true before confirming a title change. Errors and uncertain outcomes do not confirm a rename; do not retry uncertain effects automatically.", parameters), execute);
+    registry.register(tool_descriptor("rename_discord_thread", "Rename only the current Discord thread on the verified application owner's request. Can replace an existing/manual title. Takes no channel or connector ID. Requires both current-thread and owner-guild authority. Wait for renamed:true before confirming a title change; never retry uncertain effects automatically.", parameters), execute);
     let mut history_parameters = object_parameters(vec![
         optional_parameter(
             "limit",
@@ -139,11 +139,25 @@ fn execute(
                         && run.session_id == user.room_id
                 })
                 .ok_or("A live current-thread run is required")?;
-            let scope = context
+            let _thread = context
                 .discord_thread
                 .as_ref()
                 .ok_or("This run has no native Discord thread to rename")?;
-            let receipt = scope.rename(run, title, context.cancel.clone()).await?;
+            let title = title.trim();
+            if title.is_empty() || title.chars().any(char::is_control) || title.encode_utf16().count() > 80 {
+                return Err("title must be non-empty plain text without control characters, at most 80 UTF-16 units".into());
+            }
+            let scope = context.discord_guild.as_ref().ok_or("Discord thread renaming requires the verified application owner's current message")?;
+            let receipt = scope.execute_admin(
+                run,
+                "update_discord_thread",
+                serde_json::json!({"channel_id":scope.current_channel_id(), "name":title}),
+                context.cancel.clone(),
+            ).await?;
+            if receipt["updated"] != true {
+                return Err("Discord did not confirm the thread rename; inspect it before retrying".into());
+            }
+            let receipt = serde_json::json!({"renamed":true,"channelId":scope.current_channel_id(),"title":title});
             serde_json::to_string(&receipt).map_err(|e| e.to_string())
         }
         .await;

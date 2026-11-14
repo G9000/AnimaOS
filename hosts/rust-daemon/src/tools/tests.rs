@@ -777,12 +777,81 @@ fn registry_defines_every_registered_tool_schema() {
         (
             "create_discord_channel",
             &["name", "type"][..],
-            &["topic", "parent_id"][..],
+            &["topic", "parent_id", "settings"][..],
         ),
         (
             "update_discord_channel",
             &["channel_id"][..],
-            &["name", "topic", "parent_id"][..],
+            &["name", "topic", "parent_id", "settings"][..],
+        ),
+        ("get_discord_channel", &["channel_id"][..], &[][..]),
+        (
+            "delete_discord_channel",
+            &["channel_id", "expected_name"][..],
+            &[][..],
+        ),
+        ("reorder_discord_channels", &["positions"][..], &[][..]),
+        (
+            "set_discord_channel_permissions",
+            &["channel_id", "target_id", "target_type", "allow", "deny"][..],
+            &[][..],
+        ),
+        (
+            "delete_discord_channel_permission",
+            &["channel_id", "target_id"][..],
+            &[][..],
+        ),
+        (
+            "get_discord_channel_permissions",
+            &["channel_id", "target_id", "target_type"][..],
+            &[][..],
+        ),
+        (
+            "list_discord_threads",
+            &["scope"][..],
+            &["channel_id", "before", "limit"][..],
+        ),
+        (
+            "create_discord_thread",
+            &["channel_id", "name"][..],
+            &[
+                "type",
+                "message_id",
+                "auto_archive_duration",
+                "invitable",
+                "rate_limit_per_user",
+                "applied_tags",
+                "starter_message",
+            ][..],
+        ),
+        (
+            "update_discord_thread",
+            &["channel_id"][..],
+            &[
+                "name",
+                "archived",
+                "locked",
+                "auto_archive_duration",
+                "invitable",
+                "rate_limit_per_user",
+                "applied_tags",
+                "flags",
+            ][..],
+        ),
+        (
+            "manage_discord_thread_members",
+            &["channel_id", "action"][..],
+            &["user_id", "after", "limit"][..],
+        ),
+        (
+            "set_discord_voice_status",
+            &["channel_id", "status"][..],
+            &[][..],
+        ),
+        (
+            "follow_discord_announcement",
+            &["channel_id", "target_channel_id"][..],
+            &[][..],
         ),
         ("send_discord_file", &["path"][..], &["caption"][..]),
         (

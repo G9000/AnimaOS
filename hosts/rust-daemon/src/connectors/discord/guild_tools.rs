@@ -3,6 +3,9 @@ use super::*;
 use crate::runs::{RunLink, RunSource};
 use anima_core::CancelSignal;
 
+#[path = "guild_admin.rs"]
+mod admin;
+
 const REFUSED: &str =
     "Discord channel management requires a live message from the verified application owner";
 
@@ -66,6 +69,10 @@ impl DiscordManager {
 }
 
 impl DiscordGuildScope {
+    pub(crate) fn current_channel_id(&self) -> &str {
+        &self.destination.channel.id
+    }
+
     pub(crate) fn valid_for(&self, state: &DaemonState, link: &RunLink) -> bool {
         let c = &self.destination;
         c.agent_id == link.agent_id
@@ -311,10 +318,17 @@ fn validate_create(request: &DiscordChannelCreate) -> Result<(), String> {
     Ok(())
 }
 fn validate_edit(target: &DiscordGuildChannel, request: &DiscordChannelEdit) -> Result<(), String> {
-    if !matches!(target.kind, 0 | 2 | 4)
+    if !matches!(target.kind, 0 | 2 | 4 | 5 | 13 | 15 | 16)
         || request.name.as_ref().is_some_and(|v| !valid_name(v))
         || request.topic.as_ref().is_some_and(|v| {
-            target.kind != 0 || v.encode_utf16().count() > 1024 || v.contains('\0')
+            !matches!(target.kind, 0 | 5 | 15 | 16)
+                || v.encode_utf16().count()
+                    > if matches!(target.kind, 15 | 16) {
+                        4096
+                    } else {
+                        1024
+                    }
+                || v.contains('\0')
         })
         || (target.kind == 4 && request.parent_id.is_some())
         || (request.name.is_none() && request.topic.is_none() && request.parent_id.is_none())

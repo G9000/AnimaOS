@@ -17,7 +17,7 @@ pub(crate) mod connected_search;
 mod conversations;
 pub(crate) mod credential_paths;
 mod discord;
-mod discord_channels;
+pub(crate) mod discord_channels;
 mod doctor;
 mod document_edits;
 mod drive;

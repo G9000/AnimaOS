@@ -17,6 +17,7 @@ pub(crate) struct DiscordGuildChannel {
     pub(crate) topic: Option<String>,
     #[serde(default)]
     pub(crate) parent_id: Option<String>,
+    #[serde(default)]
     pub(crate) position: u32,
 }
 

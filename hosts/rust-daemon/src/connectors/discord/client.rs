@@ -1,5 +1,6 @@
 //! Bounded native Discord REST transport. Mention/recovery source map: HERMES-NOTICE.
 use super::{
+    channel_admin_model::DiscordChannelAdminRequest,
     channel_model::{DiscordChannelCreate, DiscordChannelEdit, DiscordGuildChannel},
     credentials::DiscordBotToken,
     model::*,
@@ -29,6 +30,8 @@ const RESPONSE_LIMIT: usize = 1024 * 1024;
 pub(crate) const MAX_INBOUND_TEXT_CHARS: usize = 65_536;
 #[path = "client_attachments.rs"]
 mod attachments;
+#[path = "client_channel_admin.rs"]
+mod channel_admin;
 #[path = "client_channels.rs"]
 mod channels;
 pub(super) use attachments::valid_attachment_url;
@@ -82,6 +85,13 @@ impl fmt::Display for DiscordTransportError {
 impl std::error::Error for DiscordTransportError {}
 #[async_trait]
 pub(crate) trait DiscordTransport: Send + Sync {
+    async fn channel_admin(
+        &self,
+        _token: &DiscordBotToken,
+        _request: &DiscordChannelAdminRequest,
+    ) -> Result<serde_json::Value, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn list_guild_channels(
         &self,
         _token: &DiscordBotToken,
@@ -287,7 +297,20 @@ impl DiscordClient {
         body: Option<serde_json::Value>,
         multipart: Option<(Vec<u8>, String)>,
     ) -> Result<T, DiscordTransportError> {
-        let sending = method == Method::POST || method == Method::PATCH;
+        self.request_body_expected(token, method, path, body, multipart, false)
+            .await
+    }
+
+    async fn request_body_expected<T: DeserializeOwned>(
+        &self,
+        token: &DiscordBotToken,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+        multipart: Option<(Vec<u8>, String)>,
+        empty_ack: bool,
+    ) -> Result<T, DiscordTransportError> {
+        let sending = method != Method::GET;
         let key: [u8; 32] = Sha256::digest(token.expose().as_bytes()).into();
         self.pace(key).await?;
         let url = self
@@ -382,7 +405,10 @@ impl DiscordClient {
                 _ => DiscordTransportError::HttpStatus { status },
             });
         }
-        // Discord's ephemeral typing endpoint acknowledges success with an empty 204.
+        if empty_ack && (status != 204 || !bytes.is_empty()) {
+            return Err(DiscordTransportError::Uncertain);
+        }
+        // Discord acknowledges typing and several administration endpoints with an empty 204.
         let bytes = if status == 204 && bytes.is_empty() {
             b"null".as_slice()
         } else {
@@ -508,14 +534,19 @@ impl WireChannel {
 }
 
 pub(crate) fn invite_url(application: &str) -> String {
-    // Channel management, conversation history, public threads, and native file uploads.
+    // User-reviewed channel administration, history, uploads and thread permissions.
     let permissions = (1u64 << 4)
         | (1u64 << 10)
         | (1u64 << 11)
         | (1u64 << 15)
         | (1u64 << 16)
+        | (1u64 << 28)
+        | (1u64 << 29)
+        | (1u64 << 34)
         | (1u64 << 35)
-        | (1u64 << 38);
+        | (1u64 << 36)
+        | (1u64 << 38)
+        | (1u64 << 48);
     format!("https://discord.com/oauth2/authorize?client_id={application}&scope=bot&permissions={permissions}&integration_type=0")
 }
 #[derive(Deserialize)]
@@ -573,6 +604,13 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn channel_admin(
+        &self,
+        token: &DiscordBotToken,
+        request: &DiscordChannelAdminRequest,
+    ) -> Result<serde_json::Value, DiscordTransportError> {
+        self.admin_request(token, request).await
+    }
     async fn list_guild_channels(
         &self,
         token: &DiscordBotToken,
