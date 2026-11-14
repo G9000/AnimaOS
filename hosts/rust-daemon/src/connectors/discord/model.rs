@@ -109,6 +109,9 @@ pub(crate) struct DiscordBotCheck {
     pub(crate) application_id: String,
     pub(crate) bot: DiscordBotIdentity,
     pub(crate) owner_user_ids: Vec<String>,
+    /// Unique application owner; accepted team members do not gain guild management.
+    #[serde(default)]
+    pub(crate) management_owner_user_id: Option<String>,
     pub(crate) message_content_enabled: bool,
     pub(crate) invite_url: String,
 }

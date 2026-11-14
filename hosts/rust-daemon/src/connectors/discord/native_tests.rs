@@ -15,8 +15,14 @@ struct Fixture {
     calls: StdMutex<Vec<Call>>,
     user_agents: StdMutex<Vec<Option<String>>>,
     raw_bodies: StdMutex<Vec<(String, Vec<u8>)>>,
+    methods: StdMutex<Vec<String>>,
 }
 async fn handler(State(fixture): State<Arc<Fixture>>, request: Request<Body>) -> Response {
+    fixture
+        .methods
+        .lock()
+        .unwrap()
+        .push(request.method().to_string());
     fixture.user_agents.lock().unwrap().push(
         request
             .headers()
@@ -69,6 +75,7 @@ async fn fixture(
         calls: StdMutex::new(Vec::new()),
         user_agents: StdMutex::new(Vec::new()),
         raw_bodies: StdMutex::new(Vec::new()),
+        methods: StdMutex::new(Vec::new()),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -319,7 +326,8 @@ async fn native_application_check_uses_verified_bot_and_only_accepted_team_owner
     assert_eq!(check.owner_user_ids, vec!["44"]);
     assert_eq!(check.bot.id, "11");
     assert!(check.message_content_enabled);
-    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237746688&integration_type=0");
+    assert_eq!(check.management_owner_user_id, None);
+    assert_eq!(check.invite_url,"https://discord.com/oauth2/authorize?client_id=11&scope=bot&permissions=309237746704&integration_type=0");
     assert!(!serde_json::to_string(&check)
         .unwrap()
         .contains("check-fixture"));
@@ -734,6 +742,400 @@ fn discord_snowflakes_are_canonical_exact_u64_and_rate_delays_never_clamp_down()
     assert_eq!(seconds_ms(0.0001), Some(1));
     assert_eq!(seconds_ms(f64::MAX), Some(u64::MAX));
     assert_eq!(seconds_ms(f64::INFINITY), None);
+}
+
+fn guild_channel(id: &str, kind: u8) -> serde_json::Value {
+    serde_json::json!({"id":id,"guild_id":"7","name":"planning","type":kind,
+        "topic":null,"parent_id":null,"position":0})
+}
+
+#[tokio::test]
+async fn native_guild_inventory_validates_bounds_guild_and_unique_canonical_ids() {
+    let token = DiscordBotToken::parse("guild-inventory-fixture").unwrap();
+    let inventory: Vec<_> = [0, 2, 4, 5, 10, 11, 12, 13, 14, 15, 16]
+        .into_iter()
+        .enumerate()
+        .map(|(i, kind)| guild_channel(&(100 + i).to_string(), kind))
+        .collect();
+    let (client, capture, task) = fixture(vec![json(serde_json::json!(inventory))]).await;
+    let channels = client.list_guild_channels(&token, "7").await.unwrap();
+    assert_eq!(channels.len(), 11);
+    assert_eq!(
+        capture.calls.lock().unwrap()[0].0,
+        "/api/v10/guilds/7/channels"
+    );
+    assert_eq!(capture.methods.lock().unwrap().as_slice(), ["GET"]);
+    task.abort();
+    for invalid in [
+        serde_json::json!([guild_channel("42", 0), guild_channel("42", 0)]),
+        serde_json::json!((100..601)
+            .map(|id| guild_channel(&id.to_string(), 0))
+            .collect::<Vec<_>>()),
+        {
+            let mut c = guild_channel("42", 0);
+            c["guild_id"] = "8".into();
+            serde_json::json!([c])
+        },
+        serde_json::json!([guild_channel("01", 0)]),
+        serde_json::json!([guild_channel("42", 1)]),
+        {
+            let mut c = guild_channel("42", 0);
+            c["parent_id"] = "42".into();
+            serde_json::json!([c])
+        },
+    ] {
+        let (client, capture, task) = fixture(vec![json(invalid)]).await;
+        assert_eq!(
+            client.list_guild_channels(&token, "7").await.unwrap_err(),
+            DiscordTransportError::InvalidResponse
+        );
+        assert_eq!(capture.calls.lock().unwrap().len(), 1);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_guild_create_and_edit_send_only_requested_fields_and_validate_acknowledgements() {
+    let token = DiscordBotToken::parse("guild-mutations-fixture").unwrap();
+    let mut created = guild_channel("42", 0);
+    created["topic"] = "Roadmap".into();
+    created["parent_id"] = "40".into();
+    let mut edited = guild_channel("42", 0);
+    edited["name"] = "shipping".into();
+    let (client, capture, task) = fixture(vec![json(created), json(edited)]).await;
+    let create = super::super::DiscordChannelCreate {
+        name: "planning".into(),
+        kind: 0,
+        topic: Some("Roadmap".into()),
+        parent_id: Some("40".into()),
+    };
+    assert_eq!(
+        client
+            .create_guild_channel(&token, "7", &create)
+            .await
+            .unwrap()
+            .id,
+        "42"
+    );
+    let edit = super::super::DiscordChannelEdit {
+        name: Some("shipping".into()),
+        topic: None,
+        parent_id: Some(None),
+    };
+    assert_eq!(
+        client
+            .edit_guild_channel(&token, "7", "42", &edit)
+            .await
+            .unwrap()
+            .name,
+        "shipping"
+    );
+    let calls = capture.calls.lock().unwrap();
+    assert_eq!(calls[0].0, "/api/v10/guilds/7/channels");
+    assert_eq!(
+        calls[0].2,
+        serde_json::json!({"name":"planning","type":0,"topic":"Roadmap","parent_id":"40"})
+    );
+    assert_eq!(calls[1].0, "/api/v10/channels/42");
+    assert_eq!(
+        calls[1].2,
+        serde_json::json!({"name":"shipping","parent_id":null})
+    );
+    assert_eq!(
+        capture.methods.lock().unwrap().as_slice(),
+        ["POST", "PATCH"]
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn native_guild_topic_clearing_accepts_null_or_empty_but_nonempty_topics_match_exactly() {
+    let token = DiscordBotToken::parse("guild-topic-clearing-fixture").unwrap();
+    for (requested, actual, confirmed) in [
+        ("", None, true),
+        ("", Some(""), true),
+        ("", Some("leftover"), false),
+        ("Roadmap", None, false),
+        ("Roadmap", Some(""), false),
+        ("Roadmap", Some("Other"), false),
+        ("Roadmap", Some("Roadmap"), true),
+    ] {
+        let mut ack = guild_channel("42", 0);
+        ack["topic"] = serde_json::json!(actual);
+        let (client, capture, task) = fixture(vec![json(ack.clone()), json(ack)]).await;
+        let create = super::super::DiscordChannelCreate {
+            name: "planning".into(),
+            kind: 0,
+            topic: Some(requested.into()),
+            parent_id: None,
+        };
+        let created = client.create_guild_channel(&token, "7", &create).await;
+        let edit = super::super::DiscordChannelEdit {
+            topic: Some(requested.into()),
+            ..Default::default()
+        };
+        let edited = client.edit_guild_channel(&token, "7", "42", &edit).await;
+        for result in [created, edited] {
+            if confirmed {
+                assert_eq!(result.unwrap().topic.as_deref(), actual);
+            } else {
+                assert_eq!(result.unwrap_err(), DiscordTransportError::Uncertain);
+            }
+        }
+        let calls = capture.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].2["topic"], requested);
+        assert_eq!(calls[1].2, serde_json::json!({"topic":requested}));
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_guild_mutations_do_not_retry_or_claim_mismatched_success() {
+    let token = DiscordBotToken::parse("guild-ack-fixture").unwrap();
+    let create = super::super::DiscordChannelCreate {
+        name: "planning".into(),
+        kind: 0,
+        topic: None,
+        parent_id: None,
+    };
+    for response in [
+        {
+            let mut c = guild_channel("42", 0);
+            c["guild_id"] = "8".into();
+            json(c)
+        },
+        {
+            let mut c = guild_channel("42", 0);
+            c["name"] = "other".into();
+            json(c)
+        },
+        json(guild_channel("42", 2)),
+        {
+            let mut c = guild_channel("42", 0);
+            c["parent_id"] = "40".into();
+            json(c)
+        },
+        (500, "upstream secret".into(), vec![]),
+        (200, "malformed".into(), vec![]),
+    ] {
+        let (client, capture, task) = fixture(vec![response]).await;
+        assert_eq!(
+            client
+                .create_guild_channel(&token, "7", &create)
+                .await
+                .unwrap_err(),
+            DiscordTransportError::Uncertain
+        );
+        assert_eq!(
+            capture.calls.lock().unwrap().len(),
+            1,
+            "writes must never be retried"
+        );
+        task.abort();
+    }
+    for ack in [
+        guild_channel("43", 0),
+        {
+            let mut c = guild_channel("42", 0);
+            c["guild_id"] = "8".into();
+            c
+        },
+        {
+            let mut c = guild_channel("42", 0);
+            c["topic"] = "other".into();
+            c
+        },
+        {
+            let mut c = guild_channel("42", 0);
+            c["parent_id"] = "40".into();
+            c
+        },
+    ] {
+        let (client, capture, task) = fixture(vec![json(ack)]).await;
+        let edit = super::super::DiscordChannelEdit {
+            name: None,
+            topic: Some(String::new()),
+            parent_id: Some(None),
+        };
+        assert_eq!(
+            client
+                .edit_guild_channel(&token, "7", "42", &edit)
+                .await
+                .unwrap_err(),
+            DiscordTransportError::Uncertain
+        );
+        assert_eq!(capture.calls.lock().unwrap().len(), 1);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_guild_patch_provider_failures_remain_truthful_and_never_retry() {
+    let edit = super::super::DiscordChannelEdit {
+        name: Some("shipping".into()),
+        ..Default::default()
+    };
+    for (index, (status, body, expected)) in [
+        (
+            403,
+            "denied".to_string(),
+            DiscordTransportError::PermissionDenied,
+        ),
+        (
+            500,
+            "secret upstream body".to_string(),
+            DiscordTransportError::Uncertain,
+        ),
+        (
+            200,
+            "malformed".to_string(),
+            DiscordTransportError::Uncertain,
+        ),
+        (
+            200,
+            "x".repeat(RESPONSE_LIMIT + 1),
+            DiscordTransportError::Uncertain,
+        ),
+        (
+            429,
+            r#"{"retry_after":1,"global":false}"#.to_string(),
+            DiscordTransportError::RateLimited {
+                retry_after_ms: 1000,
+                global: false,
+            },
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let token = DiscordBotToken::parse(&format!("guild-patch-error-fixture-{index}")).unwrap();
+        let (client, capture, task) = fixture(vec![(status, body, vec![])]).await;
+        assert_eq!(
+            client
+                .edit_guild_channel(&token, "7", "42", &edit)
+                .await
+                .unwrap_err(),
+            expected
+        );
+        assert_eq!(capture.calls.lock().unwrap().len(), 1);
+        assert_eq!(capture.methods.lock().unwrap().as_slice(), ["PATCH"]);
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_guild_invalid_requests_never_dispatch() {
+    let token = DiscordBotToken::parse("guild-invalid-fixture").unwrap();
+    let (client, capture, task) = fixture(vec![]).await;
+    for (name, kind, topic, parent) in [
+        ("".into(), 0, None, None),
+        (" ".into(), 0, None, None),
+        ("🦀".repeat(51), 0, None, None),
+        ("bad\nname".into(), 0, None, None),
+        ("forum".into(), 15, None, None),
+        ("voice".into(), 2, Some("topic".into()), None),
+        ("category".into(), 4, None, Some("40".into())),
+        ("text".into(), 0, Some("x".repeat(1025)), None),
+        ("text".into(), 0, None, Some("01".into())),
+    ] {
+        let create = super::super::DiscordChannelCreate {
+            name,
+            kind,
+            topic,
+            parent_id: parent,
+        };
+        assert_eq!(
+            client
+                .create_guild_channel(&token, "7", &create)
+                .await
+                .unwrap_err(),
+            DiscordTransportError::InvalidInput
+        );
+    }
+    let edit = super::super::DiscordChannelEdit {
+        name: None,
+        topic: None,
+        parent_id: None,
+    };
+    assert_eq!(
+        client
+            .edit_guild_channel(&token, "7", "42", &edit)
+            .await
+            .unwrap_err(),
+        DiscordTransportError::InvalidInput
+    );
+    let edit = super::super::DiscordChannelEdit {
+        parent_id: Some(Some("42".into())),
+        ..edit
+    };
+    assert_eq!(
+        client
+            .edit_guild_channel(&token, "7", "42", &edit)
+            .await
+            .unwrap_err(),
+        DiscordTransportError::InvalidInput
+    );
+    assert_eq!(
+        client
+            .list_guild_channels(&token, "7/evil")
+            .await
+            .unwrap_err(),
+        DiscordTransportError::InvalidInput
+    );
+    assert!(capture.calls.lock().unwrap().is_empty());
+    task.abort();
+}
+
+#[tokio::test]
+async fn native_management_owner_is_only_the_personal_or_team_owner() {
+    let token = DiscordBotToken::parse("management-owner-fixture").unwrap();
+    for (ownership, expected) in [
+        (serde_json::json!({"owner":{"id":"44"}}), Some("44")),
+        (
+            serde_json::json!({"owner":{"id":"99"},"team":{"owner_user_id":"55","members":[{"membership_state":2,"user":{"id":"44"}}]}}),
+            Some("55"),
+        ),
+        (
+            serde_json::json!({"team":{"members":[{"membership_state":2,"user":{"id":"44"}}]}}),
+            None,
+        ),
+    ] {
+        let mut application = ownership;
+        application["id"] = "11".into();
+        let (client, _, task) = fixture(vec![
+            json(application),
+            json(serde_json::json!({"id":"11","bot":true})),
+        ])
+        .await;
+        assert_eq!(
+            client
+                .check_application(&token)
+                .await
+                .unwrap()
+                .management_owner_user_id
+                .as_deref(),
+            expected
+        );
+        task.abort();
+    }
+    for ownership in [
+        serde_json::json!({"owner":{"id":"01"}}),
+        serde_json::json!({"team":{"owner_user_id":"0","members":[]}}),
+    ] {
+        let mut application = ownership;
+        application["id"] = "11".into();
+        let (client, _, task) = fixture(vec![
+            json(application),
+            json(serde_json::json!({"id":"11","bot":true})),
+        ])
+        .await;
+        assert_eq!(
+            client.check_application(&token).await.unwrap_err(),
+            DiscordTransportError::InvalidResponse
+        );
+        task.abort();
+    }
 }
 
 #[tokio::test]

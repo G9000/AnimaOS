@@ -49,6 +49,7 @@ pub(crate) struct Scope {
     pub owner_chat: bool,
     pub owner_main: bool,
     pub discord_thread: bool,
+    pub discord_guild: bool,
     pub mcp_available: bool,
     pub automatic_mcp: bool,
 }
@@ -165,6 +166,9 @@ pub(crate) fn select(
                 | "rename_discord_thread"
                 | "send_discord_file"
                 | "read_discord_thread"
+                | "list_discord_channels"
+                | "create_discord_channel"
+                | "update_discord_channel"
                 | "rename_chat"
                 | "compact_chat"
                 | "export_chat"
@@ -215,6 +219,24 @@ pub(crate) fn select(
         tools.push(registry.descriptor("rename_discord_thread").unwrap());
         tools.push(registry.descriptor("send_discord_file").unwrap());
         tools.push(registry.descriptor("read_discord_thread").unwrap());
+    }
+    if scope.discord_guild
+        && !super::is_helper_config(config)
+        && !scope.delegated
+        && !scope.peers
+        && !scope.reminder_verification
+    {
+        for name in [
+            "list_discord_channels",
+            "create_discord_channel",
+            "update_discord_channel",
+        ] {
+            tools.push(
+                registry
+                    .descriptor(name)
+                    .expect("registered Discord channel tool"),
+            );
+        }
     }
     tools
 }

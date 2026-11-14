@@ -1,5 +1,6 @@
 //! Bounded native Discord REST transport. Mention/recovery source map: HERMES-NOTICE.
 use super::{
+    channel_model::{DiscordChannelCreate, DiscordChannelEdit, DiscordGuildChannel},
     credentials::DiscordBotToken,
     model::*,
     text::{stable_nonce, valid_chunk},
@@ -28,6 +29,8 @@ const RESPONSE_LIMIT: usize = 1024 * 1024;
 pub(crate) const MAX_INBOUND_TEXT_CHARS: usize = 65_536;
 #[path = "client_attachments.rs"]
 mod attachments;
+#[path = "client_channels.rs"]
+mod channels;
 pub(super) use attachments::valid_attachment_url;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +82,30 @@ impl fmt::Display for DiscordTransportError {
 impl std::error::Error for DiscordTransportError {}
 #[async_trait]
 pub(crate) trait DiscordTransport: Send + Sync {
+    async fn list_guild_channels(
+        &self,
+        _token: &DiscordBotToken,
+        _guild: &str,
+    ) -> Result<Vec<DiscordGuildChannel>, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
+    async fn create_guild_channel(
+        &self,
+        _token: &DiscordBotToken,
+        _guild: &str,
+        _create: &DiscordChannelCreate,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
+    async fn edit_guild_channel(
+        &self,
+        _token: &DiscordBotToken,
+        _guild: &str,
+        _channel: &str,
+        _edit: &DiscordChannelEdit,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        Err(DiscordTransportError::Configuration)
+    }
     async fn send_file(
         &self,
         _token: &DiscordBotToken,
@@ -260,7 +287,7 @@ impl DiscordClient {
         body: Option<serde_json::Value>,
         multipart: Option<(Vec<u8>, String)>,
     ) -> Result<T, DiscordTransportError> {
-        let sending = method == Method::POST;
+        let sending = method == Method::POST || method == Method::PATCH;
         let key: [u8; 32] = Sha256::digest(token.expose().as_bytes()).into();
         self.pace(key).await?;
         let url = self
@@ -481,9 +508,14 @@ impl WireChannel {
 }
 
 pub(crate) fn invite_url(application: &str) -> String {
-    // Conversation history, public threads, and native file uploads.
-    let permissions =
-        (1u64 << 10) | (1u64 << 11) | (1u64 << 15) | (1u64 << 16) | (1u64 << 35) | (1u64 << 38);
+    // Channel management, conversation history, public threads, and native file uploads.
+    let permissions = (1u64 << 4)
+        | (1u64 << 10)
+        | (1u64 << 11)
+        | (1u64 << 15)
+        | (1u64 << 16)
+        | (1u64 << 35)
+        | (1u64 << 38);
     format!("https://discord.com/oauth2/authorize?client_id={application}&scope=bot&permissions={permissions}&integration_type=0")
 }
 #[derive(Deserialize)]
@@ -541,6 +573,30 @@ impl WireMessage {
 }
 #[async_trait]
 impl DiscordTransport for DiscordClient {
+    async fn list_guild_channels(
+        &self,
+        token: &DiscordBotToken,
+        guild: &str,
+    ) -> Result<Vec<DiscordGuildChannel>, DiscordTransportError> {
+        self.guild_channels(token, guild).await
+    }
+    async fn create_guild_channel(
+        &self,
+        token: &DiscordBotToken,
+        guild: &str,
+        create: &DiscordChannelCreate,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        self.create_channel(token, guild, create).await
+    }
+    async fn edit_guild_channel(
+        &self,
+        token: &DiscordBotToken,
+        guild: &str,
+        channel: &str,
+        edit: &DiscordChannelEdit,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        self.edit_channel(token, guild, channel, edit).await
+    }
     async fn read_thread_history(
         &self,
         token: &DiscordBotToken,
@@ -593,6 +649,21 @@ impl DiscordTransport for DiscordClient {
         {
             return Err(DiscordTransportError::InvalidResponse);
         }
+        let management_owner = if let Some(team) = value.get("team").filter(|v| !v.is_null()) {
+            team.get("owner_user_id")
+        } else {
+            value.get("owner").and_then(|owner| owner.get("id"))
+        };
+        let management_owner_user_id = match management_owner {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => {
+                let id = value
+                    .as_str()
+                    .ok_or(DiscordTransportError::InvalidResponse)?;
+                provider_id(id)?;
+                Some(id.to_owned())
+            }
+        };
         let mut owners = Vec::new();
         if let Some(team) = value.get("team").filter(|v| !v.is_null()) {
             let members = team
@@ -629,6 +700,7 @@ impl DiscordTransport for DiscordClient {
             application_id: application_id.into(),
             bot,
             owner_user_ids: owners,
+            management_owner_user_id,
             message_content_enabled: flags & ((1 << 18) | (1 << 19)) != 0,
             invite_url: invite_url(application_id),
         })

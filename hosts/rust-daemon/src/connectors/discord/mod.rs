@@ -1,9 +1,11 @@
 //! Native Discord channel and thread runtime. Adapted behavior: see HERMES-NOTICE.
 mod attachments;
+pub(crate) mod channel_model;
 pub(crate) mod client;
 pub(crate) mod credentials;
 mod delivery;
 pub(crate) mod gateway;
+pub(crate) mod guild_tools;
 mod inbound;
 mod interactions;
 mod lifecycle;
@@ -25,6 +27,7 @@ use crate::state::DaemonState;
 use anima_service_adapters::connectors::{
     ConnectorReceiveRequest, ConnectorSendRequest, ConnectorTransport,
 };
+pub(crate) use channel_model::*;
 use client::{DiscordTransport, DiscordTransportError};
 use credentials::{DiscordBotToken, DiscordCredentialStore};
 pub(crate) use model::*;

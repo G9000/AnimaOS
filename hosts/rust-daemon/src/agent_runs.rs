@@ -317,6 +317,11 @@ pub(crate) enum RunRoom {
     DiscordThread {
         room_id: String,
         scope: crate::connectors::discord::thread_tools::DiscordThreadScope,
+        guild_scope: Option<crate::connectors::discord::guild_tools::DiscordGuildScope>,
+    },
+    DiscordGuild {
+        room_id: String,
+        scope: crate::connectors::discord::guild_tools::DiscordGuildScope,
     },
     Delegated {
         parent_id: String,
@@ -338,6 +343,7 @@ impl RunRoom {
             Self::Stable(room_id)
             | Self::DelegatedIn { room_id, .. }
             | Self::DiscordThread { room_id, .. } => room_id.clone(),
+            Self::DiscordGuild { room_id, .. } => room_id.clone(),
             Self::Peer { route } => {
                 let participants = route.participants();
                 format!("peer:{}:{}", participants[participants.len() - 2], agent_id)
@@ -1208,7 +1214,7 @@ impl AgentRunCoordinator {
     {
         // The run executes in the ticket's room; a stable request room must name it.
         debug_assert!(
-            !matches!(&request.room, RunRoom::Stable(room) | RunRoom::DelegatedIn { room_id: room, .. } | RunRoom::DiscordThread { room_id: room, .. } if room.as_str() != ticket.room_id()),
+            !matches!(&request.room, RunRoom::Stable(room) | RunRoom::DelegatedIn { room_id: room, .. } | RunRoom::DiscordThread { room_id: room, .. } | RunRoom::DiscordGuild { room_id: room, .. } if room.as_str() != ticket.room_id()),
             "a ticketed run must use the room its ticket locked"
         );
         let coordinator = self.clone();
@@ -2384,6 +2390,29 @@ impl AgentRunCoordinator {
             }
             _ => None,
         };
+        let discord_guild = match &room {
+            RunRoom::DiscordThread {
+                guild_scope: Some(scope),
+                ..
+            }
+            | RunRoom::DiscordGuild { scope, .. }
+                if source == RunSource::Discord
+                    && parent.is_none()
+                    && delegated_parent.is_none()
+                    && peer_sources.is_empty()
+                    && scope.valid_for(
+                        &*self.state.read().await,
+                        &crate::runs::RunLink {
+                            agent_id: agent_id.clone(),
+                            session_id: session_id.clone(),
+                            run_id: run_id.clone(),
+                        },
+                    ) =>
+            {
+                Some(scope.clone())
+            }
+            _ => None,
+        };
         let scope = tool_scope::Scope {
             can_delegate,
             helper_completion: is_helper_completion,
@@ -2394,6 +2423,7 @@ impl AgentRunCoordinator {
             owner_chat,
             owner_main,
             discord_thread: discord_thread.is_some(),
+            discord_guild: discord_guild.is_some(),
             mcp_available: self.mcp.is_some(),
             automatic_mcp: self.mcp.as_ref().is_some_and(|manager| {
                 manager.tool_access(&agent_id) == crate::mcp::McpToolAccess::Automatic
@@ -2586,7 +2616,8 @@ impl AgentRunCoordinator {
                     mcp_for_run.clone(),
                 )
                 .with_origins(delegated_parent.clone(), peer_sources.clone())
-                .with_discord_thread(discord_thread.clone()),
+                .with_discord_thread(discord_thread.clone())
+                .with_discord_guild(discord_guild.clone()),
             )
         });
         let tool_refresh = (owner_chat && !crate::workspace_context::configured(&original_config))
@@ -2617,6 +2648,7 @@ impl AgentRunCoordinator {
         let tool_context = tool_context
             .with_workspace_context(workspace_context)
             .with_discord_thread(discord_thread)
+            .with_discord_guild(discord_guild)
             .with_standing_owner_turn(standing_admission.local_owner)
             .with_tool_catalog(tool_catalog)
             .with_tool_refresh(tool_refresh)

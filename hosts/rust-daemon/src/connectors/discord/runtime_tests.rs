@@ -1,5 +1,7 @@
 //! Native runtime regressions use injected transport and vault; never live Discord.
 use super::*;
+#[path = "channel_tests.rs"]
+mod channel_tests;
 #[test]
 fn uncertainty_review_retains_receipts_and_audit_and_only_suppresses_unsent_tail() {
     let connector = fixture_connector();
@@ -77,6 +79,18 @@ use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, Semaphore};
 #[derive(Default)]
 struct FakeTransport {
+    guild_channels: StdMutex<Vec<DiscordGuildChannel>>,
+    guild_list_gate: AtomicBool,
+    guild_list_entered: SemaphoreHolder,
+    guild_list_release: SemaphoreHolder,
+    guild_create_calls: AtomicUsize,
+    guild_edit_calls: AtomicUsize,
+    guild_error: StdMutex<Option<DiscordTransportError>>,
+    guild_response: StdMutex<Option<DiscordGuildChannel>>,
+    guild_gate: AtomicBool,
+    guild_entered: SemaphoreHolder,
+    guild_release: SemaphoreHolder,
+    application_check: StdMutex<Option<Result<DiscordBotCheck, DiscordTransportError>>>,
     history_messages: StdMutex<Vec<DiscordMessage>>,
     history_calls: StdMutex<Vec<(String, Option<String>, usize)>>,
     history_gate: AtomicBool,
@@ -129,6 +143,84 @@ impl Default for SemaphoreHolder {
 }
 #[async_trait::async_trait]
 impl DiscordTransport for FakeTransport {
+    async fn list_guild_channels(
+        &self,
+        _: &DiscordBotToken,
+        _: &str,
+    ) -> Result<Vec<DiscordGuildChannel>, DiscordTransportError> {
+        self.guild_list_entered.0.add_permits(1);
+        if self.guild_list_gate.load(Ordering::SeqCst) {
+            self.guild_list_release.0.acquire().await.unwrap().forget();
+        }
+        Ok(self.guild_channels.lock().unwrap().clone())
+    }
+    async fn create_guild_channel(
+        &self,
+        _: &DiscordBotToken,
+        guild: &str,
+        request: &DiscordChannelCreate,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        let count = self.guild_create_calls.fetch_add(1, Ordering::SeqCst);
+        self.guild_entered.0.add_permits(1);
+        if self.guild_gate.load(Ordering::SeqCst) {
+            self.guild_release.0.acquire().await.unwrap().forget();
+        }
+        if let Some(error) = *self.guild_error.lock().unwrap() {
+            return Err(error);
+        }
+        let channel = DiscordGuildChannel {
+            id: (900 + count).to_string(),
+            guild_id: guild.into(),
+            name: request.name.clone(),
+            kind: request.kind,
+            topic: request.topic.clone(),
+            parent_id: request.parent_id.clone(),
+            position: 0,
+        };
+        self.guild_channels.lock().unwrap().push(channel.clone());
+        Ok(self
+            .guild_response
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(channel))
+    }
+    async fn edit_guild_channel(
+        &self,
+        _: &DiscordBotToken,
+        _: &str,
+        id: &str,
+        request: &DiscordChannelEdit,
+    ) -> Result<DiscordGuildChannel, DiscordTransportError> {
+        self.guild_edit_calls.fetch_add(1, Ordering::SeqCst);
+        self.guild_entered.0.add_permits(1);
+        if self.guild_gate.load(Ordering::SeqCst) {
+            self.guild_release.0.acquire().await.unwrap().forget();
+        }
+        if let Some(error) = *self.guild_error.lock().unwrap() {
+            return Err(error);
+        }
+        let mut channels = self.guild_channels.lock().unwrap();
+        let channel = channels
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(DiscordTransportError::InvalidInput)?;
+        if let Some(name) = &request.name {
+            channel.name = name.clone();
+        }
+        if let Some(topic) = &request.topic {
+            channel.topic = Some(topic.clone());
+        }
+        if let Some(parent) = &request.parent_id {
+            channel.parent_id = parent.clone();
+        }
+        Ok(self
+            .guild_response
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| channel.clone()))
+    }
     async fn read_thread_history(
         &self,
         _: &DiscordBotToken,
@@ -210,10 +302,14 @@ impl DiscordTransport for FakeTransport {
         &self,
         _: &DiscordBotToken,
     ) -> Result<DiscordBotCheck, DiscordTransportError> {
+        if let Some(result) = self.application_check.lock().unwrap().clone() {
+            return result;
+        }
         Ok(DiscordBotCheck {
             application_id: "11".into(),
             bot: fixture_connector().bot,
             owner_user_ids: vec!["44".into()],
+            management_owner_user_id: Some("44".into()),
             message_content_enabled: true,
             invite_url: client::invite_url("11"),
         })
