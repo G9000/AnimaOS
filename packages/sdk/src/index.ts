@@ -1,7 +1,7 @@
 export { AgentsClient, agent } from './agents.js';
 export { AgentFilesClient } from './agent-files.js';
 export type { AgentPersonality, SaveAgentPersonality } from './agent-files.js';
-export type { WorkspaceContextBinding, WorkspaceContextView, SaveWorkspaceContext } from './agent-files.js';
+export type { WorkspaceContextBinding, MemoryProviderBinding, WorkspaceContextView, SaveWorkspaceContext } from './agent-files.js';
 export { AttachmentsClient } from './attachments.js';
 export { ImagesClient } from './images.js';
 export { DocumentInspectionsClient } from './document-inspections.js';
@@ -630,3 +630,4 @@ export * from './conversation-shares.js';
 
 export * from './console-session.js';
 export * from './task-regressions.js';
+export type { MemoryPublication, MemoryPublicationState, MemoryPublicationsView, ShareMemory, ControlMemoryPublication } from './memory-publications.js';

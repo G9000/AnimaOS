@@ -1,8 +1,9 @@
 //! The plug-in point for an external memory service.
 //!
-//! The local memory store is always on. At most one external provider runs
-//! beside it: it adds recall results to a run's context, receives finished
-//! owner turns, and mirrors local memory writes. Provider `none` (the default,
+//! A host can add external recall beside its local memory store. Providers may
+//! be agent/run-bound; optional turn and write callbacks default to no-ops.
+//! A selected-publication provider must not automatically upload turns or mirror
+//! local writes. Provider `none` (the default,
 //! [`NoExternalMemory`]) does nothing, so behaviour is identical to having no
 //! provider. A host registers an id for each provider it can build.
 
@@ -92,7 +93,7 @@ pub enum ProviderStatus {
 ///
 /// # Contract
 ///
-/// - **Instances:** one per daemon, built at boot. No method may block; each
+/// - **Instances:** host-scoped or agent/run-bound. No method may block; each
 ///   call gets a deadline from the host and is abandoned after it.
 /// - **Untrusted input:** everything a provider returns is untrusted data. The
 ///   host scans it, bounds it and labels it, and never runs it as
@@ -101,7 +102,8 @@ pub enum ProviderStatus {
 ///   directly. It only receives events ([`Self::sync_turn`],
 ///   [`Self::on_memory_write`]).
 ///
-/// - **Ordering and loss:** the host sends `sync_turn` and `on_memory_write`
+/// - **Legacy ordering and loss:** when the host enables automatic callbacks,
+///   it sends `sync_turn` and `on_memory_write`
 ///   calls one at a time, in the order the changes were saved, so an `Add`
 ///   always arrives before a later `Remove` of the same memory. Each call has
 ///   its own timeout. The queue behind them is bounded: when it is full the

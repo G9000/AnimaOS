@@ -109,12 +109,14 @@ pub(crate) async fn save_memory_manager(
 pub(crate) struct MemoryMutation<'a> {
     manager: &'a mut MemoryManager,
     previous: Option<MemoryManagerSnapshot>,
+    legacy_write_policy: Option<std::collections::BTreeSet<String>>,
 }
 
 impl<'a> MemoryMutation<'a> {
     pub(crate) fn new(manager: &'a mut MemoryManager) -> Self {
         Self {
             previous: Some(manager.snapshot()),
+            legacy_write_policy: crate::memory_provider::capture_legacy_write_policy(),
             manager,
         }
     }
@@ -139,10 +141,11 @@ impl<'a> MemoryMutation<'a> {
             // none the diff never runs.
             if let Some(previous) = &self.previous {
                 let manager = &*self.manager;
-                crate::memory_provider::mirror_persisted_with_owner(
+                crate::memory_provider::mirror_persisted_selected(
                     &previous.memories,
                     || manager.snapshot().memories,
                     owner,
+                    self.legacy_write_policy.clone(),
                 );
             }
         }

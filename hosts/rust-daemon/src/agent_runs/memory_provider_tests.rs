@@ -9,6 +9,61 @@ use std::sync::Arc;
 const ROOM: &str = "chat:provider";
 
 #[tokio::test(flavor = "current_thread")]
+async fn memory_provider_additive_offline_keeps_native_memory_without_uploading_turns() {
+    let fake = Arc::new(FakeProvider::new("fake"));
+    let _active = inject(fake.clone());
+    let model = ScriptedModel::new(vec![Step::Text(vec!["native answer"])]);
+    let (coordinator, agent) = coordinator_with(model.clone()).await;
+    {
+        let mut state = coordinator.state.write().await;
+        let mut config = state.agents[&agent].config().clone();
+        config.tools = Some(
+            crate::tools::ToolRegistry::new()
+                .resolve_descriptors(["memory_add", "memory_search"])
+                .unwrap(),
+        );
+        config.settings.as_mut().unwrap().additional.insert(
+            "memoryProvider".into(),
+            serde_json::from_value::<crate::memory_provider::binding::MemoryProviderBinding>(
+                serde_json::json!({
+                    "version":1,"provider":"mother","connectionId":"offline",
+                    "workspaceId":"workspace","generation":"generation","subject":agent,
+                    "publication":"selected","personaSource":"local","accessMode":"companion"
+                }),
+            )
+            .unwrap()
+            .portable(),
+        );
+        state.restore_agent_config(&agent, config);
+    }
+    add_chat(&coordinator, &agent, ROOM).await;
+    coordinator
+        .run(chat_request(&agent, ROOM, "hello"))
+        .await
+        .unwrap();
+    tokio::task::yield_now().await;
+    assert!(model.requests()[0]
+        .system
+        .contains("Shared garden unavailable"));
+    assert!(model.configs()[0].allows_tool("memory_add"));
+    assert!(fake.turns.lock().unwrap().is_empty());
+    assert!(fake.recall_requests.lock().unwrap().is_empty());
+    assert!(fake.writes.lock().unwrap().is_empty());
+    let memory = coordinator.state.read().await.memory_handle();
+    assert!(
+        !memory
+            .read()
+            .await
+            .get_recent(anima_memory::RecentMemoryOptions {
+                agent_id: Some(agent),
+                ..Default::default()
+            })
+            .is_empty(),
+        "native task-result capture must remain active"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_completed_owner_turn_sends_one_sync_turn_and_a_check_in_sends_none() {
     let fake = Arc::new(FakeProvider::new("fake"));
     let _active = inject(fake.clone());
@@ -124,8 +179,13 @@ async fn workspace_context_helpers_never_inherit_binding_or_remote_tools() {
             DataValue::String("companion".into()),
         )])),
     );
+    parent.config.settings.as_mut().unwrap().additional.insert(
+        "memoryProvider".into(),
+        DataValue::String("must not be inherited".into()),
+    );
     let child = super::helper_config_base(&parent, "bounded helper".into());
     assert!(!crate::workspace_context::configured(&child));
+    assert!(!crate::memory_provider::binding::configured(&child));
     assert!(child
         .tools
         .iter()

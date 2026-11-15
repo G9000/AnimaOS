@@ -1798,6 +1798,9 @@ pub(crate) struct DaemonState {
     pub(crate) mcp_registry: crate::mcp::McpRegistry,
     pub(crate) mcp_publication: crate::mcp::SharedMcpPublication,
     pub(crate) mcp_manager: Option<crate::mcp::McpManager>,
+    pub(crate) memory_publications:
+        Option<Arc<crate::memory_provider::publication::PublicationService>>,
+    pub(crate) memory_publications_unavailable: Option<String>,
     pub(crate) community_bundles: Vec<crate::community_bundles::BundleRecord>,
     pub(crate) community_generation: u64,
     pub(crate) community_reviews: HashMap<String, crate::community_bundles::ReviewReceipt>,
@@ -2698,6 +2701,8 @@ impl DaemonState {
             plan_first: std::collections::HashSet::new(),
             mcp_publication: crate::mcp::McpRegistry::default().published(),
             mcp_manager: None,
+            memory_publications: None,
+            memory_publications_unavailable: None,
             control_plane_store: None,
             profile_owner: None,
             control_plane_revision: 0,

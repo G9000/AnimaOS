@@ -910,6 +910,7 @@ impl AgentRunCoordinator {
         Ok(answer.to_string())
     }
     pub(crate) fn new(state: SharedDaemonState, run_limiter: Arc<Semaphore>) -> Self {
+        crate::memory_provider::bind_legacy_dispatch_state(&state);
         let control_plane_transactions = Arc::new(Mutex::new(()));
         let learning = crate::learning::LearningService::new(
             Arc::clone(&state),
@@ -1007,6 +1008,12 @@ impl AgentRunCoordinator {
 
     pub(crate) fn mcp_manager(&self) -> Option<crate::mcp::McpManager> {
         self.mcp.clone()
+    }
+
+    pub(crate) async fn memory_publications(
+        &self,
+    ) -> Option<Arc<crate::memory_provider::publication::PublicationService>> {
+        self.state.read().await.memory_publications.clone()
     }
 
     #[cfg(test)]
@@ -2430,24 +2437,27 @@ impl AgentRunCoordinator {
             }),
         };
         let mut tools = tool_scope::select(&original_config, &ready_mcp, scope);
-        let workspace_context = if crate::workspace_context::configured(&original_config)
+        let workspace_context = if crate::workspace_context::any_configured(&original_config)
             && delegated_parent.is_none()
             && peer_sources.is_empty()
             && !is_helper_config(&original_config)
             && !is_helper_completion
         {
             Some(
-                Box::pin(crate::workspace_context::WorkspaceRunContext::load(
-                    self.state.clone(),
-                    self.mcp_manager(),
-                    &runtime.state(),
-                    &crate::runs::RunLink {
-                        agent_id: agent_id.clone(),
-                        session_id: session_id.clone(),
-                        run_id: run_id.clone(),
-                    },
-                    live_run.control().cancel,
-                ))
+                Box::pin(
+                    crate::workspace_context::WorkspaceRunContext::load_for_query(
+                        self.state.clone(),
+                        self.mcp_manager(),
+                        &runtime.state(),
+                        &crate::runs::RunLink {
+                            agent_id: agent_id.clone(),
+                            session_id: session_id.clone(),
+                            run_id: run_id.clone(),
+                        },
+                        live_run.control().cancel,
+                        content.text.clone(),
+                    ),
+                )
                 .await,
             )
         } else {
@@ -2463,7 +2473,14 @@ impl AgentRunCoordinator {
         if !workspace_context_ready {
             if let Some(context) = &workspace_context {
                 let blocked = Box::pin(context.blocked_aliases()).await;
-                let malformed = crate::workspace_context::binding(&original_config).is_none();
+                let malformed = if crate::memory_provider::binding::configured(&original_config) {
+                    crate::memory_provider::binding::binding(&original_config)
+                        .ok()
+                        .flatten()
+                        .is_none()
+                } else {
+                    crate::workspace_context::binding(&original_config).is_none()
+                };
                 tools.retain(|tool| {
                     !(malformed && tool.name.starts_with("mcp_")) && !blocked.contains(&tool.name)
                 });
@@ -2620,23 +2637,24 @@ impl AgentRunCoordinator {
                 .with_discord_guild(discord_guild.clone()),
             )
         });
-        let tool_refresh = (owner_chat && !crate::workspace_context::configured(&original_config))
-            .then(|| mcp_for_run.clone())
-            .flatten()
-            .map(|manager| {
-                Arc::new(crate::tools::mcp_refresh::McpToolRefresh::new(
-                    self.state.clone(),
-                    crate::runs::RunLink {
-                        run_id: run_id.clone(),
-                        session_id: session_id.clone(),
-                        agent_id: agent_id.clone(),
-                    },
-                    live_run.control().cancel,
-                    original_config.clone(),
-                    manager,
-                    tool_catalog.clone(),
-                ))
-            });
+        let tool_refresh = (owner_chat
+            && !crate::workspace_context::any_configured(&original_config))
+        .then(|| mcp_for_run.clone())
+        .flatten()
+        .map(|manager| {
+            Arc::new(crate::tools::mcp_refresh::McpToolRefresh::new(
+                self.state.clone(),
+                crate::runs::RunLink {
+                    run_id: run_id.clone(),
+                    session_id: session_id.clone(),
+                    agent_id: agent_id.clone(),
+                },
+                live_run.control().cancel,
+                original_config.clone(),
+                manager,
+                tool_catalog.clone(),
+            ))
+        });
         if let Some(refresh) = &tool_refresh {
             runtime.set_tool_refresher(Some(refresh.clone()));
             if discovery_enabled {
@@ -3163,7 +3181,10 @@ impl AgentRunCoordinator {
 
         // The same owner turns that count toward a conversation review also go
         // to the external memory provider, in the background (a no-op for none).
-        if turn_counted && !workspace_primary_memory {
+        if turn_counted
+            && !workspace_primary_memory
+            && !crate::memory_provider::binding::configured(&original_config)
+        {
             let profile_owner = self.state.read().await.profile_owner();
             crate::memory_provider::sync_turn_with_owner(profile_owner, || {
                 anima_memory::TurnRecord {

@@ -1,8 +1,105 @@
-# A companion backed by an independent workspace
+# Native memory with an independent shared garden
 
-An agent can use an MCP workspace as its personality and primary durable memory. This is optional and configured separately for each agent. M.O.T.H.E.R provides the workspace, persona and access policy; AnimaOS remains the host running the conversation.
+AnimaOS can use M.O.T.H.E.R as an additive memory provider for one selected agent. AnimaOS keeps native memory tools, recall, task-result capture and learning. M.O.T.H.E.R holds shared context contributed by permitted harnesses. Choosing where personality comes from is independent of choosing additive memory.
 
-## Connect with M.O.T.H.E.R
+## Additive mode and explicit conversion
+
+In **Profile → M.O.T.H.E.R**, convert an existing Companion or Shared-context binding to the shared garden. Review the selected connection and access role before confirming. Conversion preserves chats, local data and remote grants; it resumes local capture and recall for a legacy Companion. The default personality choice preserves the existing source. A Companion grant can use either local or workspace personality; a Shared grant cannot read workspace personality.
+
+Existing installations keep their saved legacy behavior until this explicit conversion. An ordinary upgrade does not silently reinterpret it. Native-only M.O.T.H.E.R has retired its old pairing application and `mother connect animaos` command; the historical setup section below is not an installation guide for that release.
+
+Additive recall uses only the selected agent's reviewed MCP connection. Before each model request, the host validates workspace identity, restore generation, role and subject, searches for relevant records and fetches full current records. Each response is bounded to 16 KiB; automatic recall selects at most four records within an 8 KiB total. Oversized or flagged records are omitted, never presented as complete truncated records. This selection is not exhaustive. Returned records retain IDs, revisions, timestamps and attribution and are treated as untrusted reference data.
+
+If the garden is unavailable, revoked, restored or incompatible, the same chat continues with the saved local personality and native memory. The source's tools are withheld for that run; another agent's connection is unaffected. A fresh turn can attempt recovery. A restored generation requires explicit rebinding.
+
+Ordinary local writes and full conversation turns are **not automatically uploaded**. Explicit `memory_share` selections enter a durable local queue; `memory_share_status` reports their current outcome. A queue acknowledgement confirms local storage only. Proposals remain pending until M.O.T.H.E.R owner review, and direct writes require their existing grants. Native memory saving and garden sharing are separate outcomes.
+
+Disabling the provider removes automatic shared recall and persona loading. It does not revoke the MCP key or remove separately granted tools. Manage those separately when access should be removed entirely.
+
+## Additive API contract
+
+Owner-only `GET` and `PUT /api/agents/{agentId}/workspace-context` expose credential-free metadata and revision-checked updates. `providerBinding` uses this versioned schema:
+
+```json
+{"version":1,"provider":"mother","connectionId":"reviewed-connection","workspaceId":"workspace-id","generation":"restore-generation","subject":"agent-id","publication":"selected","personaSource":"local","accessMode":"companion"}
+```
+
+It is stored in `settings.additional.memoryProvider`. Conversion sends the current `expectedRevision`, `binding: null` and the complete `providerBinding` together. Omitting `providerBinding` preserves it for older clients; explicitly setting it to null removes it. Legacy and additive bindings cannot coexist. Saving the setting does not grant execution rights or prove a live read succeeded. After an unconfirmed save, reread owner metadata before attempting a different change.
+
+### Native-only Mother pairing maintenance
+
+Use the installed native executable with `mcp --config <owner-private-client-config>` on the selected agent's MCP connection. Reuse an existing compatible credential without changing its scopes. Connect, review the current discovered descriptors and grant the intended tools before saving the additive binding. Use the workspace, generation and agent subject from a fresh authorized context read; old pairing metadata can describe a retired generation.
+
+For reviewed selected sharing, the installed pairing uses the six read tools (`mother_get_context`, `mother_search_context`, `mother_get_record`, `mother_get_record_history`, `mother_get_receipt`, `mother_get_proposal`) and `mother_propose_memory`. History requires a companion grant. This selection does not grant direct writes or owner approval. The additive setting uses `publication: "selected"` and `personaSource: "local"`; `accessMode: "companion"` describes the credential's access role and does not make Mother the agent's primary memory.
+
+AnimaOS limits the MCP registry to four connections. When replacing an obsolete entry, first inspect selected-sharing outcomes and archive its metadata; do not discard pending or uncertain publications. Replace only the identified obsolete connection within that limit, preserving other connections and credentials. Verify the saved binding, ready connection, current and historical reads, and native memory/history after repair. A connected protocol session does not establish model-generated recall or owner approval acceptance.
+
+## Selected sharing and review
+
+`memory_share` selects one current native fact owned by the selected agent in the
+`Shared` memory scope. Private, room-scoped, core-memory and projected provider
+records are ineligible. Selection includes a stable publication UUID, local ID,
+exact expected content, title, attribution and basis. Proposal delivery is the
+default. An explicit correction also supplies the canonical target ID and its
+expected revision; direct delivery must be selected explicitly and permitted by
+both AnimaOS and M.O.T.H.E.R. There is no automatic transcript extraction or
+publication on ordinary memory writes.
+
+The private SQLite queue belongs to the daemon profile and is derived from its
+configured persistence path. Without persistent storage, admission is unavailable.
+Admission commits the selection, frozen request, source digest and operation UUID
+before returning. A repeated UUID with the same selection returns its existing
+state; changed input with that UUID conflicts. If a response is lost, read that ID
+before taking another action. Queue bounds reject new selections visibly rather
+than discarding acknowledged work. Defaults retain at most 10,000 records within
+a 128 MiB database/journal budget; reserved outcome space can reject admission
+earlier. A selected request must fit 6 KiB.
+If persisting a delivery outcome fails, sharing reports storage unavailable and
+stops admitting or dispatching new work. The original request remains retained
+for startup recovery; the daemon does not guess whether the remote action saved.
+
+The background worker checks current profile ownership, the exact agent binding,
+workspace and generation, reviewed descriptors and current tool permissions.
+`Ask` blocks delivery until the owner grants the tool permission and resumes;
+`Deny` blocks delivery. An earlier chat approval is not background authority.
+Paired-node connections are not supported for durable publication. Removing the
+provider or changing its binding preserves queued work and blocks dispatch.
+Resuming does not retarget old work to a new connection or restored generation.
+
+States distinguish `queued`, `sending`, `unknown`, `submitted_for_review`, `saved`,
+`conflict`, `blocked`, `dismissed` and `cancelled`. Interrupted sends recover as
+uncertain and look up the same operation receipt before retrying the identical
+request. Known proposals are polled for review outcomes, never submitted again.
+Only a validated canonical write or approval receipt creates a saved mapping;
+owner-edited approval content and its exact canonical revision are retained.
+An unreadable approval remains unconfirmed, including when a shared allowlist
+does not expose a newly approved record. Access is never widened automatically.
+
+Changes to a selected source block its unsent snapshot. Deleting a source cancels
+work that has never been claimed for sending. Once a send might have happened,
+reconciliation preserves that uncertainty. Removing local memory never retracts
+shared knowledge. Corrections require a fresh explicit selection and revision.
+
+The agent's M.O.T.H.E.R panel has **Show selected shares** with counts, current
+outcomes, manual refresh, resume and cancellation of never-sent work. Owner-only
+API routes expose summaries without raw selected content:
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | `/api/agents/{agentId}/memory-publications` | Bounded status list, counts and omissions. |
+| POST | `/api/agents/{agentId}/memory-publications` | Durable selection admission; not a remote save acknowledgement. |
+| GET | `/api/agents/{agentId}/memory-publications/{publicationId}` | Reread one current outcome after an uncertain response. |
+| POST | `/api/agents/{agentId}/memory-publications/{publicationId}/control` | Revision-checked `resume` or `cancel`. |
+
+The SDK exposes these as `agentFiles.memoryPublications`, `memoryPublication`,
+`shareMemory` and `controlMemoryPublication`. API and UI controls do not approve
+M.O.T.H.E.R proposals; owner review remains in M.O.T.H.E.R.
+
+## Historical legacy companion setup
+
+Legacy Companion uses the MCP workspace as its personality and primary durable memory. The following describes the older pairing application and existing unconverted bindings. Its dashboard and setup commands are retired in native-only M.O.T.H.E.R; use the native pairing maintenance contract above for that release.
+
+### Connect with M.O.T.H.E.R
 
 Personal onboarding and **Add companion** offer **Memory and context → M.O.T.H.E.R**. This is optional; the default keeps memory in AnimaOS. Your chosen local personality remains the offline fallback.
 
@@ -26,7 +123,7 @@ Review the agent, role and records before confirming. Setup creates a separate p
 
 In AnimaOS, the agent's **Profile → M.O.T.H.E.R** panel shows its configured mode and connection state. **Use this agent independently** removes the identity/memory binding; its ordinary MCP connection and key remain separately managed under Tools and in M.O.T.H.E.R. Remove or revoke those too if the agent should have no access at all.
 
-## Offline and recovery
+### Legacy offline and recovery
 
 Before a reply, AnimaOS checks the current connection, workspace, generation, granted role and agent subject. Companion identity is loaded transiently; your configured local personality is not overwritten.
 
@@ -36,7 +133,7 @@ Companion mode keeps durable memory in M.O.T.H.E.R, including during fallback: A
 
 Closing M.O.T.H.E.R's dashboard does not necessarily stop its MCP service. Availability depends on the actual configured connection. Access changes cannot erase context already received in an existing conversation.
 
-## Adapter contract
+### Legacy adapter contract
 
 The host integration is generic MCP. It pins `settings.additional.workspaceContext` with a connection ID, remote reader name, mode, workspace ID, generation and subject. Owner-only `GET` and `PUT /api/agents/{agentId}/workspace-context` expose credential-free metadata and revision-checked updates. Saving a binding does not grant MCP execution rights or prove the next conversation has read it.
 

@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 use super::credentials::{InMemoryMcpCredentialStore, McpBearerToken, McpCredentialStore};
 #[path = "oauth.rs"]
 mod oauth;
+#[path = "publication.rs"]
+mod publication;
 use super::records::*;
 use super::transport::{
     McpCall, McpDiscovery, McpTransportError, McpTransportFactory, McpTransportSession,
@@ -27,6 +29,7 @@ use super::transport::{
 use crate::runs::{RunLink, RunStatus};
 use crate::state::DaemonState;
 pub(crate) use oauth::{McpOAuthStart, McpOAuthStatus};
+use publication::{InvocationStamp, PublicationAuthority};
 
 const DISCOVERY_TIME: Duration = Duration::from_secs(5);
 const CALL_TIME: Duration = Duration::from_secs(20);
@@ -51,6 +54,7 @@ pub(crate) struct McpManager {
     inner: Arc<Inner>,
     management_run: Option<RunLink>,
     context_run: Option<Arc<WorkspaceReconnectScope>>,
+    publication_scope: Option<Arc<PublicationAuthority>>,
 }
 
 struct WorkspaceReconnectScope {
@@ -60,6 +64,7 @@ struct WorkspaceReconnectScope {
     version: u64,
     tool: ReviewedMcpTool,
     binding: Option<anima_core::DataValue>,
+    binding_key: &'static str,
 }
 struct Inner {
     state: Weak<RwLock<DaemonState>>,
@@ -178,6 +183,7 @@ impl McpManager {
         Self {
             management_run: None,
             context_run: None,
+            publication_scope: None,
             inner: Arc::new(Inner {
                 state,
                 transactions,
@@ -202,10 +208,15 @@ impl McpManager {
             inner: self.inner.clone(),
             management_run: Some(run),
             context_run: None,
+            publication_scope: None,
         }
     }
 
     fn management_scope(&self, state: &DaemonState, agent: &str) -> Result<(), McpServiceError> {
+        if let Some(scope) = &self.publication_scope {
+            self.publication_scope(state, scope)
+                .map_err(|_| McpServiceError::Revoked)?;
+        }
         if let Some(scope) = &self.context_run {
             let run = &scope.run;
             if scope.cancel.is_cancelled()
@@ -228,7 +239,7 @@ impl McpManager {
             if canonical
                 .settings
                 .as_ref()
-                .and_then(|s| s.additional.get(crate::workspace_context::SETTING))
+                .and_then(|s| s.additional.get(scope.binding_key))
                 != scope.binding.as_ref()
             {
                 return Err(McpServiceError::Revoked);
@@ -1456,6 +1467,11 @@ impl McpManager {
             }) {
                 return Err(McpServiceError::Unavailable);
             }
+            let binding_key = if crate::memory_provider::binding::configured(&agent.config) {
+                crate::memory_provider::binding::SETTING
+            } else {
+                crate::workspace_context::SETTING
+            };
             WorkspaceReconnectScope {
                 run: run.clone(),
                 cancel: cancel.clone(),
@@ -1466,8 +1482,9 @@ impl McpManager {
                     .config
                     .settings
                     .as_ref()
-                    .and_then(|s| s.additional.get(crate::workspace_context::SETTING))
+                    .and_then(|s| s.additional.get(binding_key))
                     .cloned(),
+                binding_key,
             }
         };
         let scope = Arc::new(scope);
@@ -1475,6 +1492,7 @@ impl McpManager {
             inner: self.inner.clone(),
             management_run: None,
             context_run: Some(scope.clone()),
+            publication_scope: None,
         };
         tokio::select! {
             result=tokio::time::timeout(DISCOVERY_TIME,manager.connect(&agent.id,connection,scope.version))=>match result {Ok(value)=>value.map(|_|()),Err(_)=>{let _=self.retire(connection,Some(McpServiceError::TimedOut));Err(McpServiceError::TimedOut)}},
@@ -1526,6 +1544,11 @@ impl McpManager {
         let transaction = tokio::time::timeout_at(deadline, self.inner.transactions.lock())
             .await
             .map_err(|_| McpServiceError::TimedOut)?;
+        if let Some(scope) = &self.publication_scope {
+            self.publication_current(scope)
+                .await
+                .map_err(|_| McpServiceError::Revoked)?;
+        }
         let record = tokio::time::timeout_at(deadline, self.record(agent, id, Some(expected)))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
@@ -1616,12 +1639,21 @@ impl McpManager {
         };
         // Vault loading may await after the transaction was admitted. An owner
         // Stop during that wait must not start a new transport afterward.
-        if self.management_run.is_some() || self.context_run.is_some() {
+        if self.management_run.is_some()
+            || self.context_run.is_some()
+            || self.publication_scope.is_some()
+        {
             let state = self.state()?;
             let current = self.management_scope(&*state.read().await, agent);
             if let Err(error) = current {
                 self.retire_if_generation(id, generation, Some(error))?;
                 return Err(error);
+            }
+        }
+        if let Some(scope) = &self.publication_scope {
+            if self.publication_current(scope).await.is_err() {
+                self.retire_if_generation(id, generation, Some(McpServiceError::Revoked))?;
+                return Err(McpServiceError::Revoked);
             }
         }
         let session = match session {
@@ -1713,6 +1745,12 @@ impl McpManager {
                 return Err(error);
             }
         };
+        if let Some(scope) = &self.publication_scope {
+            if self.publication_current(scope).await.is_err() {
+                self.retire_if_generation(id, generation, Some(McpServiceError::Revoked))?;
+                return Err(McpServiceError::Revoked);
+            }
+        }
         if let Err(error) = validate_discovery(&discovery) {
             tracing::warn!(phase = "discovery_validation", category = ?error, "MCP discovery validation failed");
             self.retire_if_generation(id, generation, Some(error))?;
@@ -2286,19 +2324,24 @@ impl McpManager {
         };
         let manager = self.clone();
         let result = self
-            .owned(async move { manager.invoke_owned(stamp, args, cancel).await })
+            .owned(async move {
+                manager
+                    .invoke_owned(InvocationStamp::Run(stamp), args, cancel)
+                    .await
+            })
             .await;
         abandoned.armed = false;
         result
     }
     async fn invoke_owned(
         &self,
-        stamp: McpDispatchStamp,
+        authority: InvocationStamp,
         args: Value,
         cancel: CancelSignal,
     ) -> Result<Content, McpServiceError> {
+        let stamp = authority.identity();
         let deadline = Instant::now() + CALL_TIME;
-        let binding = tokio::time::timeout_at(deadline, self.dispatch_binding(&stamp))
+        let binding = tokio::time::timeout_at(deadline, self.invocation_binding(&authority))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
         validate_external_arguments(&binding.tool.descriptor, &args)
@@ -2339,7 +2382,7 @@ impl McpManager {
         let permits = tokio::select! {result=tokio::time::timeout_at(deadline,acquire)=>result.map_err(|_|McpServiceError::TimedOut)??,
         _=cancel.cancelled()=>return Err(McpServiceError::Cancelled),_=connection.cancel.cancelled()=>return Err(McpServiceError::Revoked)};
         drop(waiting);
-        let binding = tokio::time::timeout_at(deadline, self.dispatch_binding(&stamp))
+        let binding = tokio::time::timeout_at(deadline, self.invocation_binding(&authority))
             .await
             .map_err(|_| McpServiceError::TimedOut)??;
         if cancel.is_cancelled() || Instant::now() >= deadline {
@@ -2365,9 +2408,18 @@ impl McpManager {
                         manifest_digest: device.manifest_digest.clone(),
                         generation: device.generation,
                         agent_id: stamp.agent_id.clone(),
-                        run_id: stamp.run_id.clone(),
-                        session_id: stamp.session_id.clone(),
-                        tool_call_id: stamp.tool_call_id.clone(),
+                        run_id: match &authority {
+                            InvocationStamp::Run(s) => s.run_id.clone(),
+                            _ => return Err(McpServiceError::Revoked),
+                        },
+                        session_id: match &authority {
+                            InvocationStamp::Run(s) => s.session_id.clone(),
+                            _ => return Err(McpServiceError::Revoked),
+                        },
+                        tool_call_id: match &authority {
+                            InvocationStamp::Run(s) => s.tool_call_id.clone(),
+                            _ => return Err(McpServiceError::Revoked),
+                        },
                         descriptor_digest: stamp.descriptor_digest.clone(),
                         deadline_unix_ms: crate::paired_devices::node::now_ms().saturating_add(
                             deadline
@@ -2376,6 +2428,14 @@ impl McpManager {
                                 .min(u64::MAX as u128) as u64,
                         ),
                     });
+            }
+        }
+        if matches!(&authority, InvocationStamp::Publication(_)) {
+            tokio::time::timeout_at(deadline, self.invocation_binding(&authority))
+                .await
+                .map_err(|_| McpServiceError::TimedOut)??;
+            if cancel.is_cancelled() {
+                return Err(McpServiceError::Cancelled);
             }
         }
         let operation = std::panic::AssertUnwindSafe(session.call_once(
@@ -2393,7 +2453,7 @@ impl McpManager {
         };
         let final_result = match result {
             Ok(result) if !cancel.is_cancelled() => {
-                tokio::time::timeout_at(deadline, self.dispatch_binding(&stamp))
+                tokio::time::timeout_at(deadline, self.invocation_binding(&authority))
                     .await
                     .unwrap_or(Err(McpServiceError::OutcomeUnknown))
                     .map(|_| result)

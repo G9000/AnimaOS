@@ -1462,7 +1462,7 @@ export function CompanionSetup({
               checked={memoryProvider === 'mother'}
               onChange={() => setMemoryProvider('mother')}
               title="M.O.T.H.E.R"
-              summary="Pair your independent workspace for personality, primary memory and context."
+              summary="Pair your workspace, then review additive memory in Profile. Current pairing starts in legacy mode."
             />
           </div>
           {memoryProvider === 'mother' && (

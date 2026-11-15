@@ -12,6 +12,7 @@ use super::{
 /// Tools that only read (spec §7.1). `load_skill` and `list_automations`
 /// arrive in M5 and M6.
 const READ_TOOLS: &[&str] = &[
+    "memory_share_status",
     "clarify",
     "search_tools",
     "describe_tool",
@@ -105,6 +106,7 @@ const WRITE_TOOLS: &[&str] = &[
     "todo_write",
     "todo_list",
     "memory_add",
+    "memory_share",
     "core_memory",
     "memory_update",
     "memory_remove",

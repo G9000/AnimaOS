@@ -28,6 +28,9 @@ mod autonomy_tests;
 #[path = "workspace_context_tests.rs"]
 mod workspace_context_tests;
 
+#[path = "graph_acceptance_tests.rs"]
+mod graph_acceptance_tests;
+
 #[path = "oauth_tests.rs"]
 mod oauth_tests;
 
@@ -39,6 +42,7 @@ fn candidate() -> anima_core::ExternalToolDescriptor {
 #[derive(Default)]
 struct FakeFactory {
     context_result: Arc<StdMutex<Option<serde_json::Value>>>,
+    garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
     connects: AtomicUsize,
     stdio_launches: StdMutex<Vec<(McpStdioSpec, String)>>,
     hold_calls: AtomicBool,
@@ -49,6 +53,7 @@ struct FakeFactory {
 struct FakeSession {
     fail_calls: AtomicBool,
     context_result: Arc<StdMutex<Option<serde_json::Value>>>,
+    garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
     changed_schema: AtomicBool,
     discoveries: AtomicUsize,
     calls: AtomicUsize,
@@ -66,6 +71,7 @@ impl FakeSession {
         Self {
             fail_calls: AtomicBool::new(false),
             context_result,
+            garden_records: Default::default(),
             changed_schema: AtomicBool::new(false),
             discoveries: AtomicUsize::new(0),
             calls: AtomicUsize::new(0),
@@ -106,10 +112,12 @@ impl McpTransportFactory for FakeFactory {
                 .unwrap()
                 .push((spec, connection_id));
         }
-        let session = Arc::new(FakeSession::new(
+        let mut session = FakeSession::new(
             self.hold_calls.load(Ordering::SeqCst),
             self.context_result.clone(),
-        ));
+        );
+        session.garden_records = self.garden_records.clone();
+        let session = Arc::new(session);
         self.sessions.lock().unwrap().push(session.clone());
         Box::pin(async move { Ok(session as Arc<dyn McpTransportSession>) })
     }
@@ -122,6 +130,7 @@ impl McpTransportSession for FakeSession {
         self.discoveries.fetch_add(1, Ordering::SeqCst);
         let changed = self.changed_schema.load(Ordering::SeqCst);
         let context = self.context_result.lock().unwrap().is_some();
+        let garden = self.garden_records.lock().unwrap().is_some();
         Box::pin(async move {
             let mut descriptor = if context {
                 prepare_external_tool(
@@ -143,9 +152,14 @@ impl McpTransportSession for FakeSession {
                 )
                 .unwrap();
             }
+            let mut tools = vec![descriptor];
+            if garden {
+                tools.push(prepare_external_tool("mother_search_context","Search synthetic garden",json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"mode":{"type":"string"}},"required":["query"],"additionalProperties":false}),None).unwrap());
+                tools.push(prepare_external_tool("mother_get_record","Read full synthetic record",json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),None).unwrap());
+            }
             Ok(McpDiscovery {
                 protocol_version: "2025-11-25".into(),
-                tools: vec![descriptor],
+                tools,
             })
         })
     }
@@ -159,6 +173,21 @@ impl McpTransportSession for FakeSession {
         let hold = self.hold_calls.load(Ordering::SeqCst);
         let fail = self.fail_calls.load(Ordering::SeqCst);
         let mut context = self.context_result.lock().unwrap().clone();
+        if let Some(records) = self.garden_records.lock().unwrap().as_ref() {
+            if call.remote_name == "mother_search_context" {
+                if let Some(context) = &mut context {
+                    context["records"] = json!(records
+                        .iter()
+                        .map(|r| json!({"id":r["id"],"excerpt":"preview only"}))
+                        .collect::<Vec<_>>());
+                }
+            } else if call.remote_name == "mother_get_record" {
+                context = records
+                    .iter()
+                    .find(|r| r["id"] == call.arguments["id"])
+                    .cloned();
+            }
+        }
         if let Some(value) = &mut context {
             if let Some(records) = value["records"].as_array_mut() {
                 if let Some(limit) = call.arguments["limit"].as_u64() {

@@ -617,6 +617,10 @@ async fn serve_with_state_and_voice(
     tokio::spawn(crate::agent_runs::worktrees::startup_sweep(Arc::clone(
         &browser_state,
     )));
+    let publications = browser_state.read().await.memory_publications.clone();
+    if let Some(service) = &publications {
+        service.start(agent_runs.work_admission_probe()).await;
+    }
     let browser = browser_state.read().await.browser_service.clone();
     let shutdown_live = live.clone();
     let durable_bridge = browser_state.read().await.engine_bridge.clone();
@@ -638,6 +642,9 @@ async fn serve_with_state_and_voice(
                         bridge.close_workers();
                     }
                     agent_runs.request_shutdown();
+                    if let Some(service) = &publications {
+                        service.request_shutdown();
+                    }
                     if let Some(browser) = &browser {
                         browser.request_shutdown();
                     }
@@ -653,6 +660,9 @@ async fn serve_with_state_and_voice(
                     discord.request_shutdown().await;
                 },
                 async {
+                    if let Some(service) = &publications {
+                        service.shutdown().await;
+                    }
                     agent_runs.shutdown().await;
                     maintenance_worker.shutdown().await;
                     let execution = browser_state.read().await.execution.clone();

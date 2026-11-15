@@ -73,20 +73,39 @@ function MotherPairing({
   }
 
   const binding = view?.binding;
+  const provider = view?.providerBinding;
+  const additive =
+    view?.status === 'configured' &&
+    !binding &&
+    provider?.version === 1 &&
+    provider.provider === 'mother' &&
+    provider.subject === agentId &&
+    !!provider.workspaceId &&
+    !!provider.generation &&
+    provider.publication === 'selected' &&
+    (provider.accessMode === 'companion' ||
+      (provider.accessMode === 'shared' && provider.personaSource === 'local'));
   const companion =
     view?.status === 'configured' &&
+    !provider &&
     binding?.mode === 'companion' &&
     binding.subject === agentId &&
     binding.tool === 'mother_get_context' &&
     !!binding.workspaceId &&
     !!binding.generation;
-  const connection = companion
+  const connection = additive
     ? view?.connections.find(
-        (row) => row.id === binding.connectionId && row.tool === binding.tool,
+        (row) =>
+          row.id === provider.connectionId && row.tool === 'mother_get_context',
       )
-    : undefined;
-  const ready = !busy && !error && companion && connection?.state === 'ready';
-  const independent = view?.status === 'independent' && !binding;
+    : companion
+      ? view?.connections.find(
+          (row) => row.id === binding.connectionId && row.tool === binding.tool,
+        )
+      : undefined;
+  const ready =
+    !busy && !error && (companion || additive) && connection?.state === 'ready';
+  const independent = view?.status === 'independent' && !binding && !provider;
 
   return (
     <section
@@ -120,6 +139,12 @@ function MotherPairing({
           personality, primary memory and context. Review and confirm in
           M.O.T.H.E.R.
         </li>
+        <li>
+          Current pairing creates a legacy connection. After pairing, choose
+          Review additive connection in Profile → M.O.T.H.E.R to keep Anima’s
+          native memory active alongside the shared garden. Conversion keeps the
+          existing personality source; you can change it separately later.
+        </li>
       </ol>
       <p className="onboarding__mono">Agent ID: {agentId}</p>
       <p className="onboarding__hint">
@@ -136,8 +161,22 @@ function MotherPairing({
         <div role="status">
           <strong>Saved connection ready</strong>
           <p className="onboarding__hint">
-            M.O.T.H.E.R is configured as this companion’s primary memory and
-            context provider.
+            {additive
+              ? 'Native memory, capture and learning remain active. M.O.T.H.E.R adds shared context; personality is a separate choice in Profile.'
+              : 'This is a legacy primary-memory connection. M.O.T.H.E.R is configured as this companion’s primary memory and context provider until you confirm conversion.'}
+          </p>
+        </div>
+      ) : additive ? (
+        <div role="status">
+          <strong>
+            {connection?.state === 'disconnected' ||
+            connection?.state === 'degraded'
+              ? 'M.O.T.H.E.R is offline'
+              : 'Connection needs attention'}
+          </strong>
+          <p className="onboarding__hint">
+            Native memory, capture and learning remain active. Shared context is
+            unavailable until the connection is ready.
           </p>
         </div>
       ) : companion ? (
@@ -187,7 +226,7 @@ function MotherPairing({
       </div>
       {!ready && (
         <button type="button" className="onboarding__link" onClick={finish}>
-          {companion
+          {companion || additive
             ? 'Finish setup with offline fallback'
             : 'Finish pairing later'}
         </button>

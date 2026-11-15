@@ -35,8 +35,121 @@ const independent: WorkspaceContextView = {
   binding: null,
   connections: [],
 };
+const additive: WorkspaceContextView = {
+  ...ready,
+  binding: null,
+  providerBinding: {
+    version: 1,
+    provider: 'mother',
+    connectionId: 'c1',
+    workspaceId: 'w',
+    generation: 'g',
+    subject: 'new',
+    publication: 'selected',
+    personaSource: 'workspace',
+    accessMode: 'companion',
+  },
+};
 
 describe('M.O.T.H.E.R onboarding pairing', () => {
+  it.each([
+    ['conflicting bindings', { ...additive, binding: ready.binding }],
+    [
+      'foreign subject',
+      {
+        ...additive,
+        providerBinding: { ...additive.providerBinding!, subject: 'other' },
+      },
+    ],
+    [
+      'shared workspace personality',
+      {
+        ...additive,
+        providerBinding: {
+          ...additive.providerBinding!,
+          accessMode: 'shared' as const,
+        },
+      },
+    ],
+    [
+      'unreviewed reader',
+      {
+        ...additive,
+        connections: [{ ...ready.connections[0], tool: 'mother_search' }],
+      },
+    ],
+    [
+      'offline provider',
+      {
+        ...additive,
+        connections: [{ ...ready.connections[0], state: 'disconnected' }],
+      },
+    ],
+  ])('never calls additive %s ready', async (_label, view) => {
+    render(
+      <MotherOnboarding
+        agentId="new"
+        name="Ari"
+        onDone={vi.fn()}
+        load={async () => view}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Check connection' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(
+      screen.queryByText('Saved connection ready'),
+    ).not.toBeInTheDocument();
+  });
+  it('recognizes an additive connection and keeps native memory active', async () => {
+    render(
+      <MotherOnboarding
+        agentId="new"
+        name="Ari"
+        onDone={vi.fn()}
+        load={async () => ({
+          ...ready,
+          binding: null,
+          providerBinding: {
+            version: 1,
+            provider: 'mother',
+            connectionId: 'c1',
+            workspaceId: 'w',
+            generation: 'g',
+            subject: 'new',
+            publication: 'selected',
+            personaSource: 'local',
+            accessMode: 'shared',
+          },
+        })}
+      />,
+    );
+    expect(await screen.findByText('Saved connection ready')).toBeVisible();
+    expect(
+      screen.getByText(/Native memory, capture and learning remain active/),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  });
+
+  it('identifies legacy pairing and points to explicit profile conversion', async () => {
+    render(
+      <MotherOnboarding
+        agentId="new"
+        name="Ari"
+        onDone={vi.fn()}
+        load={async () => ready}
+      />,
+    );
+    expect(
+      await screen.findByText(/This is a legacy primary-memory connection/),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Review additive connection in Profile/),
+    ).toBeVisible();
+  });
   it('shows setup for exactly the newly created companion and does not activate an unpaired selection', async () => {
     const load = vi.fn().mockResolvedValue(independent);
     const done = vi.fn();

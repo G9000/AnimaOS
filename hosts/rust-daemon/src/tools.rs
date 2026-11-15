@@ -37,6 +37,7 @@ pub(crate) mod mcp_refresh;
 #[cfg(test)]
 mod mcp_tests;
 mod memory;
+mod memory_publications;
 mod microsoft_files;
 mod output_safety;
 pub(crate) mod process;
@@ -1485,6 +1486,17 @@ impl ToolRegistry {
         registry.register(tool_descriptor("steer_helper", "Save additional untrusted task input for one exact Running or AwaitingApproval helper with an open inbox. At most eight accepted steer operations over the assignment lifetime; exact retries are free. Acceptance does not mean the model read the input.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle")), required_parameter("message", non_blank_string_parameter("Additional task input, at most 32768 bytes"))])), team::async_helper_operation);
         registry.register(tool_descriptor("stop_helper", "Save a stop and suppress this helper assignment's completion, including after the child finished. Stops any admitted continuation before signalling. This does not undo completed effects or promise completed cleanup.", object_parameters(vec![required_parameter("run_id", non_blank_string_parameter("Exact immutable child run handle"))])), team::async_helper_operation);
         helper_batch::register(&mut registry);
+        registry.register(tool_descriptor("memory_share", "Explicitly select one existing own shared-scope Fact for the configured Mother garden. Read its full current text with memory_search first. Private, room, core and imported garden memories are ineligible. Generate one publicationId UUID and preserve it across uncertain admission/retries. This queues a durable local selection; queued or submitted_for_review does not mean saved in Mother. Default delivery proposes for Mother owner review. Direct delivery needs its current explicit remote permission. Ordinary local writes are never automatically shared. Use memory_share_status to confirm outcomes; never create a replacement UUID for an uncertain share.", object_parameters(vec![
+            required_parameter("publicationId",non_blank_string_parameter("Stable selection UUID; reuse for exact retries")),
+            required_parameter("localId",non_blank_string_parameter("Own local memory ID from memory_search")),
+            required_parameter("expectedContent",non_blank_string_parameter("Exact complete current local memory text, not an excerpt")),
+            required_parameter("title",non_blank_string_parameter("Concise title for the selected fact")),
+            required_parameter("source",non_blank_string_parameter("Accurate short attribution, not a transcript or credential")),
+            required_parameter("basis",string_enum_parameter("Attribution basis; do not call model inference an owner statement", &["owner_statement","source","model_inference"])),
+            optional_parameter("delivery",string_enum_parameter("Defaults to proposal; direct still requires existing permission", &["proposal","direct"])),
+            optional_parameter("target",object_parameter(vec![required_parameter("id",non_blank_string_parameter("Exact existing garden record UUID being deliberately corrected")),required_parameter("expectedRevision",integer_parameter("Exact garden revision reviewed for this correction",1))])),
+        ])),memory_publications::share);
+        registry.register(tool_descriptor("memory_share_status", "Read this agent's durable selected-sharing outcome by publicationId. queued means local only; submitted_for_review awaits Mother owner review; only saved with a canonical ID/revision confirms a garden save. Unknown/blocked is not success. This tool never approves, publishes, or retries anything.",object_parameters(vec![required_parameter("publicationId",non_blank_string_parameter("Stable UUID from the selected share"))])),memory_publications::status);
         registry.register(
             tool_descriptor(
                 "memory_search",

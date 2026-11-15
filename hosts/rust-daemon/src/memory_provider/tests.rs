@@ -19,6 +19,50 @@ fn new_memory(content: &str) -> NewMemory {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn additive_local_write_cannot_be_uploaded_if_binding_is_removed_during_save() {
+    let fake = Arc::new(FakeProvider::new("fake"));
+    let _active = inject(fake.clone());
+    let state = Arc::new(tokio::sync::RwLock::new(crate::state::DaemonState::new()));
+    let mut config = crate::sessions::test_support::agent_config("garden agent");
+    config
+        .settings
+        .get_or_insert_with(Default::default)
+        .additional
+        .insert("memoryProvider".into(), anima_core::DataValue::Null);
+    let agent = state.write().await.create_agent(config).unwrap().state.id;
+    bind_legacy_dispatch_state(&state);
+    let mut manager = MemoryManager::new();
+    let mut mutation = MemoryMutation::new(&mut manager);
+    let mut memory = new_memory("selected-mode local fact must stay private");
+    memory.agent_id = agent.clone();
+    mutation.add(memory).unwrap();
+    {
+        let mut guard = state.write().await;
+        let mut config = guard.agents[&agent].config().clone();
+        config
+            .settings
+            .as_mut()
+            .unwrap()
+            .additional
+            .remove("memoryProvider");
+        guard.restore_agent_config(&agent, config);
+    }
+    mutation.persist(None).await.unwrap();
+    drop(mutation);
+    // A later native-mode event proves the worker passed the earlier slot.
+    let mut next = new_memory("later native fact");
+    next.agent_id = agent;
+    let mut mutation = MemoryMutation::new(&mut manager);
+    mutation.add(next).unwrap();
+    mutation.persist(None).await.unwrap();
+    fake.wait_until(|fake| !fake.writes.lock().unwrap().is_empty())
+        .await;
+    let writes = fake.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].content, "later native fact");
+}
+
 #[test]
 fn unset_empty_or_none_selects_the_none_provider() {
     for value in [None, Some(""), Some("  "), Some("none")] {

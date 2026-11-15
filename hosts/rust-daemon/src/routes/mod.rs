@@ -39,6 +39,7 @@ mod memories;
 mod memory_edits;
 mod memory_export;
 mod memory_maintenance;
+mod memory_publications;
 mod microsoft_files;
 mod multipart;
 #[cfg(test)]
@@ -203,6 +204,7 @@ use crate::runtime_model::provider_summaries_with_pool;
         agent_files::preview,
         personality::get, personality::put, personality::preview,
         workspace_context::get, workspace_context::put,
+        memory_publications::list, memory_publications::get, memory_publications::submit, memory_publications::control,
         put_agent_tasks_entry,
         put_agent_avatar_entry,
         delete_agent_avatar_entry,
@@ -1610,6 +1612,9 @@ fn router_with_services_with_policies_and_integrations(
             "/api/agents/{agent_id}/workspace-context",
             get(workspace_context::get).put(workspace_context::put),
         )
+        .route("/api/agents/{agent_id}/memory-publications", get(memory_publications::list).post(memory_publications::submit))
+        .route("/api/agents/{agent_id}/memory-publications/{publication_id}", get(memory_publications::get))
+        .route("/api/agents/{agent_id}/memory-publications/{publication_id}/control", axum::routing::post(memory_publications::control))
         .route(
             "/api/agents/{agent_id}/personality/preview",
             axum::routing::post(personality::preview),
@@ -3436,6 +3441,7 @@ mod tests {
     mod logs;
     mod memory_edits;
     mod memory_export;
+    mod memory_publications;
     mod owner_look;
     mod personality;
     mod provider_keys;

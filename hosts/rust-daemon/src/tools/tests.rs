@@ -1239,8 +1239,26 @@ fn registry_defines_every_registered_tool_schema() {
         ),
     ];
 
-    assert_eq!(registry.tool_names().len(), expectations.len());
-    for (name, required, optional) in expectations {
+    let publication_expectations = [
+        (
+            "memory_share",
+            &[
+                "publicationId",
+                "localId",
+                "expectedContent",
+                "title",
+                "source",
+                "basis",
+            ][..],
+            &["delivery", "target"][..],
+        ),
+        ("memory_share_status", &["publicationId"][..], &[][..]),
+    ];
+    assert_eq!(
+        registry.tool_names().len(),
+        expectations.len() + publication_expectations.len()
+    );
+    for (name, required, optional) in expectations.into_iter().chain(publication_expectations) {
         let descriptor = registry.descriptor(name).expect("registered descriptor");
         assert!(
             !descriptor.description.trim().is_empty(),

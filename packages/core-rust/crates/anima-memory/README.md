@@ -4,6 +4,16 @@
 
 ## Quick usage
 
+The Rust daemon can add agent-bound M.O.T.H.E.R recall alongside this engine.
+Native memory and learning continue independently; external records carry their
+own provenance. The adapter's automatic turn/write callbacks are no-ops, so
+ordinary local capture does not publish shared memories. Legacy primary-memory
+bindings retain their previous host behavior until explicitly converted. See
+[`docs/workspace-context.md`](../../../../docs/workspace-context.md) for setup and
+the durable selected-sharing queue and review reconciliation. The host owns that
+queue and its canonical mappings; they do not replace native memory. The core crate has no dependency on
+M.O.T.H.E.R or its storage.
+
 Hybrid recall supplies canonical-record, all `MemorySearchOptions` and caller
 visibility checks through the object-safe `MemoryVectorIndex::search_filtered`
 entry. Native or overriding indexes can apply them before candidate selection;

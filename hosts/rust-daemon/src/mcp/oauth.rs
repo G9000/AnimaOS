@@ -751,6 +751,7 @@ impl super::super::transport::McpAccessTokenProvider for OAuthProvider {
                 inner,
                 management_run: None,
                 context_run: None,
+                publication_scope: None,
             }
             .oauth_needs_sign_in(&self.id);
         }
@@ -775,6 +776,7 @@ impl super::super::transport::McpAccessTokenProvider for OAuthProvider {
                 inner,
                 management_run: None,
                 context_run: None,
+                publication_scope: None,
             };
             let owned = manager.clone();
             manager

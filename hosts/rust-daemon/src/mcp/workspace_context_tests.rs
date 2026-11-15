@@ -50,6 +50,496 @@ fn run(f: &Fixture) -> RunLink {
     }
 }
 
+async fn additive(f: &Fixture, persona: &str) -> (McpConnectionView, anima_core::AgentState) {
+    let view = configured(f).await;
+    let mut guard = f.state.write().await;
+    let mut config = guard.agents[&f.agent].config().clone();
+    let settings = config.settings.as_mut().unwrap();
+    settings.additional.remove("workspaceContext");
+    let binding: crate::memory_provider::binding::MemoryProviderBinding =
+        serde_json::from_value(json!({
+            "version":1,"provider":"mother","connectionId":view.record.id,
+            "workspaceId":"workspace","generation":"generation","subject":f.agent,
+            "accessMode":"companion","publication":"selected","personaSource":persona
+        }))
+        .unwrap();
+    settings
+        .additional
+        .insert("memoryProvider".into(), binding.portable());
+    guard.restore_agent_config(&f.agent, config);
+    let agent = guard.get_agent(&f.agent).unwrap().state;
+    (view, agent)
+}
+
+#[tokio::test]
+async fn memory_provider_mother_timeout_cancels_only_its_read_not_the_native_run() {
+    use anima_memory::ExternalMemoryProvider;
+    let f = Fixture::new().await;
+    let (_, agent) = additive(&f, "local").await;
+    let cancel = CancelSignal::new();
+    let provider = crate::memory_provider::mother::MotherProvider::new(
+        f.state.clone(),
+        f.manager.clone(),
+        crate::memory_provider::binding::binding(&agent.config)
+            .unwrap()
+            .unwrap(),
+        agent,
+        run(&f),
+        cancel.clone(),
+    );
+    f.factory.sessions.lock().unwrap()[0]
+        .hold_calls
+        .store(true, Ordering::SeqCst);
+    let result = provider
+        .recall(anima_memory::RecallRequest {
+            agent_id: f.agent.clone(),
+            query: "garden".into(),
+            limit: 4,
+            deadline: Duration::from_millis(30),
+        })
+        .await;
+    assert!(result.is_err());
+    assert!(
+        !cancel.is_cancelled(),
+        "garden timeout must leave native conversation running"
+    );
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn memory_provider_mother_additive_persona_is_independent_and_binding_changes_fail_closed() {
+    for persona in ["local", "workspace"] {
+        let f = Fixture::new().await;
+        let (_, agent) = additive(&f, persona).await;
+        let source = crate::workspace_context::WorkspaceRunContext::load(
+            f.state.clone(),
+            Some(f.manager.clone()),
+            &agent,
+            &run(&f),
+            CancelSignal::new(),
+        )
+        .await;
+        let result = source.current(&agent).await;
+        assert_eq!(result.identity.is_some(), persona == "workspace");
+        assert!(result.reference.contains("ADDITIVE memory provider"));
+        assert!(
+            !result.reference.contains("Workspace reference sentinel"),
+            "bootstrap previews must not bypass full-record recall"
+        );
+        assert!(!result.reference.contains("PRIMARY durable memory"));
+        assert!(!crate::workspace_context::primary_memory(&agent.config));
+        let mut config = agent.config.clone();
+        config
+            .settings
+            .as_mut()
+            .unwrap()
+            .additional
+            .remove("memoryProvider");
+        f.state.write().await.restore_agent_config(&f.agent, config);
+        let fallback = source.current(&agent).await;
+        assert!(fallback.identity.is_none());
+        assert!(fallback.reference.contains("Shared garden unavailable"));
+        assert!(!fallback.reference.contains("Workspace reference sentinel"));
+        f.manager.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn memory_provider_mother_full_recall_checks_revision_authority_and_keeps_local_identity() {
+    let f = Fixture::new().await;
+    let id = uuid::Uuid::new_v4().to_string();
+    *f.factory.garden_records.lock().unwrap() = Some(vec![
+        json!({"id":id,"revision":2,"content":"Full garden memory sentinel","status":"active","updatedAt":"2026-11-14T00:00:00.000Z","actor":"other-harness"}),
+    ]);
+    let (mut view, mut agent) = additive(&f, "local").await;
+    let candidates = view.candidates.clone();
+    for candidate in candidates
+        .iter()
+        .filter(|t| t.remote_name != "mother_get_context")
+    {
+        view = f
+            .manager
+            .review(
+                &f.agent,
+                &view.record.id,
+                ReviewMcpTool {
+                    expected_version: view.record.version,
+                    discovery_id: view.discovery_id.clone().unwrap(),
+                    descriptor_digest: candidate.descriptor_digest.clone(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    // Review mode explicitly grants every read tool, as ordinary owner setup does.
+    let tools = f
+        .state
+        .read()
+        .await
+        .mcp_registry
+        .connections
+        .values()
+        .next()
+        .unwrap()
+        .reviewed_tools
+        .iter()
+        .map(|t| t.tool_descriptor())
+        .collect();
+    agent.config.tools = Some(tools);
+    f.state
+        .write()
+        .await
+        .restore_agent_config(&f.agent, agent.config.clone());
+    let source = crate::workspace_context::WorkspaceRunContext::load_for_query(
+        f.state.clone(),
+        Some(f.manager.clone()),
+        &agent,
+        &run(&f),
+        CancelSignal::new(),
+        "garden".into(),
+    )
+    .await;
+    let result = source.current(&agent).await;
+    assert!(result.identity.is_none());
+    assert!(
+        result.reference.contains("Full garden memory sentinel"),
+        "{}",
+        result.reference
+    );
+    assert!(result.reference.contains("other-harness"));
+    assert!(result.reference.contains("revision"));
+    f.factory.context_result.lock().unwrap().as_mut().unwrap()["workspace"]["generation"] =
+        json!("restored");
+    let result = source.current(&agent).await;
+    assert!(result.reference.contains("Shared garden unavailable"));
+    assert!(!result.reference.contains("Full garden memory sentinel"));
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn memory_provider_additive_online_then_revoked_keeps_native_recall_and_capture_isolated() {
+    use crate::agent_runs::test_support::{chat_request, ScriptedModel, Step};
+    use crate::approvals::autonomy::{AgentAutonomy, AutonomyMode};
+    use crate::memory_provider::publication::{Basis, Delivery, PublicationService, Selection};
+    use crate::profile_owner::{ProfileOwner, ProfileResource};
+    use anima_memory::{ExternalMemoryProvider, MemoryScope, MemoryType, NewMemory};
+
+    let f = Fixture::new().await;
+    let remote_id = uuid::Uuid::new_v4().to_string();
+    *f.factory.garden_records.lock().unwrap() = Some(vec![json!({
+        "id":remote_id,"revision":3,"content":"Garden qualification attributed fact",
+        "status":"active","updatedAt":"2026-11-15T00:00:00.000Z","actor":"synthetic-other-harness"
+    })]);
+    let (mut view, _) = additive(&f, "local").await;
+    for candidate in view
+        .candidates
+        .clone()
+        .iter()
+        .filter(|candidate| candidate.remote_name != "mother_get_context")
+    {
+        view = f
+            .manager
+            .review(
+                &f.agent,
+                &view.record.id,
+                ReviewMcpTool {
+                    expected_version: view.record.version,
+                    discovery_id: view.discovery_id.clone().unwrap(),
+                    descriptor_digest: candidate.descriptor_digest.clone(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let journal = f.folder.join("qualification-publications.sqlite");
+    let owner = ProfileOwner::acquire_resources([
+        ProfileResource::Sqlite(journal.clone()),
+        ProfileResource::File(f.folder.join("control.json")),
+    ])
+    .unwrap();
+    let native_tools = crate::tools::ToolRegistry::new()
+        .resolve_descriptors(["memory_add", "memory_search"])
+        .unwrap();
+    let (agent, foreign_agent) = {
+        let mut state = f.state.write().await;
+        state.profile_owner = Some(owner.clone());
+        state.control_plane_store = Some(
+            state
+                .control_plane_store
+                .clone()
+                .unwrap()
+                .with_owner(owner.clone())
+                .unwrap(),
+        );
+        // The fixture explicitly supplies owner-reviewed publication metadata. No write is dispatched.
+        let row = state
+            .mcp_registry
+            .connections
+            .get_mut(&view.record.id)
+            .unwrap();
+        row.reviewed_tools.push(ReviewedMcpTool {
+            alias: "mcp_qualification_selected_proposal".into(),
+            descriptor: prepare_external_tool(
+                "mother_propose_memory",
+                "Synthetic selected proposal",
+                json!({"type":"object","additionalProperties":true}),
+                None,
+            )
+            .unwrap(),
+        });
+        let mut tools: Vec<_> = row
+            .reviewed_tools
+            .iter()
+            .map(ReviewedMcpTool::tool_descriptor)
+            .collect();
+        tools.extend(native_tools.clone());
+        let mut config = state.agents[&f.agent].config().clone();
+        config.tools = Some(tools);
+        state.restore_agent_config(&f.agent, config);
+        state.approvals.set_policy(
+            &f.agent,
+            crate::approvals::ApprovalPolicy {
+                exec: crate::approvals::PolicyAction::Allow,
+                ..Default::default()
+            },
+        );
+        // Explicit tool removal revokes authority in review mode; automatic mode uses enabled connections.
+        state.autonomy.set(AgentAutonomy {
+            agent_id: f.agent.clone(),
+            mode: AutonomyMode::Strict,
+            ..Default::default()
+        });
+        let foreign = state
+            .create_agent(crate::sessions::test_support::agent_config(
+                "Synthetic isolated qualification agent",
+            ))
+            .unwrap()
+            .state
+            .id;
+        (state.get_agent(&f.agent).unwrap().state, foreign)
+    };
+    f.manager
+        .refresh_agent_permissions(&*f.state.read().await, &f.agent)
+        .unwrap();
+    assert_eq!(f.manager.tool_access(&f.agent), McpToolAccess::Review);
+    let memory = f.state.read().await.memory_handle();
+    let mut selected = None;
+    for (agent_id, content, scope) in [
+        (
+            f.agent.clone(),
+            "Native qualification selected fact",
+            MemoryScope::Shared,
+        ),
+        (
+            foreign_agent.clone(),
+            "Foreign qualification private fact",
+            MemoryScope::Private,
+        ),
+    ] {
+        let fact = memory
+            .write()
+            .await
+            .add(NewMemory {
+                agent_id,
+                agent_name: "Synthetic qualification".into(),
+                memory_type: MemoryType::Fact,
+                content: content.into(),
+                importance: 0.9,
+                tags: None,
+                scope: Some(scope),
+                room_id: None,
+                world_id: None,
+                session_id: None,
+            })
+            .unwrap();
+        if fact.agent_id == f.agent {
+            selected = Some(fact);
+        }
+    }
+    let selected = selected.unwrap();
+    let provider = crate::memory_provider::mother::MotherProvider::new(
+        f.state.clone(),
+        f.manager.clone(),
+        crate::memory_provider::binding::binding(&agent.config)
+            .unwrap()
+            .unwrap(),
+        agent,
+        run(&f),
+        CancelSignal::new(),
+    );
+    let calls_before = f.factory.sessions.lock().unwrap()[0]
+        .calls
+        .load(Ordering::SeqCst);
+    assert!(provider
+        .recall(anima_memory::RecallRequest {
+            agent_id: foreign_agent.clone(),
+            query: "qualification".into(),
+            limit: 4,
+            deadline: Duration::from_secs(1),
+        })
+        .await
+        .is_err());
+    assert_eq!(
+        f.factory.sessions.lock().unwrap()[0]
+            .calls
+            .load(Ordering::SeqCst),
+        calls_before,
+        "another agent must be rejected before any garden transport call"
+    );
+    let publications = PublicationService::open(&f.state, owner, &journal)
+        .await
+        .unwrap();
+    f.state.write().await.memory_publications = Some(publications.clone());
+    let admitted = publications
+        .admit(
+            &f.agent,
+            Selection {
+                publication_id: uuid::Uuid::new_v4().to_string(),
+                local_id: selected.id.clone(),
+                expected_content: selected.content.clone(),
+                title: "Selected qualification fact".into(),
+                source: "Explicit synthetic owner selection".into(),
+                basis: Basis::OwnerStatement,
+                delivery: Delivery::Proposal,
+                target: None,
+            },
+        )
+        .await
+        .unwrap();
+    f.manager
+        .publication_preflight(&admitted, "mother_get_context", &json!({"limit":1}))
+        .await
+        .unwrap();
+    let search_call = |id: &str| ToolCall {
+        id: id.into(),
+        name: "memory_search".into(),
+        args: std::collections::BTreeMap::from([(
+            "query".into(),
+            DataValue::String("qualification".into()),
+        )]),
+    };
+    let model = ScriptedModel::new(vec![
+        Step::Tools(vec![search_call("online-native-search")]),
+        Step::Text(vec!["online complete"]),
+        Step::Tools(vec![search_call("revoked-native-search")]),
+        Step::Text(vec!["revoked complete"]),
+    ]);
+    f.state.write().await.model_adapter = model.clone();
+    let runs =
+        crate::agent_runs::AgentRunCoordinator::new(f.state.clone(), Arc::new(Semaphore::new(4)))
+            .with_mcp(f.manager.clone());
+    runs.run(chat_request(
+        &f.agent,
+        "chat:additive-qualification",
+        "qualification online",
+    ))
+    .await
+    .unwrap();
+    let requests = model.requests();
+    assert!(requests[0]
+        .system
+        .contains("Garden qualification attributed fact"));
+    assert!(requests[0].system.contains("synthetic-other-harness"));
+    assert!(requests[0].system.contains("Local system sentinel"));
+    assert!(
+        requests[1]
+            .messages
+            .iter()
+            .any(|message| message.content.text.contains(&selected.content)),
+        "online native memory_search must return the local source"
+    );
+    {
+        let mut state = f.state.write().await;
+        let mut config = state.agents[&f.agent].config().clone();
+        config.tools = Some(native_tools);
+        state.restore_agent_config(&f.agent, config);
+    }
+    f.manager.note_agent_permissions_changed(&f.agent);
+    let calls_before = f.factory.sessions.lock().unwrap()[0]
+        .calls
+        .load(Ordering::SeqCst);
+    assert!(
+        f.manager
+            .publication_preflight(&admitted, "mother_get_context", &json!({"limit":1}))
+            .await
+            .is_err(),
+        "selected sharing must recheck current owner grants"
+    );
+    runs.run(chat_request(
+        &f.agent,
+        "chat:additive-qualification",
+        "qualification revoked",
+    ))
+    .await
+    .unwrap();
+    let requests = model.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[2].system.contains("Shared garden unavailable"));
+    assert!(requests[2].system.contains("Local system sentinel"));
+    assert!(!requests[2]
+        .system
+        .contains("Garden qualification attributed fact"));
+    assert!(
+        requests[3]
+            .messages
+            .iter()
+            .any(|message| message.content.text.contains(&selected.content)),
+        "revoked garden grants must leave native memory_search available"
+    );
+    assert!(requests
+        .iter()
+        .flat_map(|request| &request.messages)
+        .all(|message| !message
+            .content
+            .text
+            .contains("Foreign qualification private fact")));
+    for config in model.configs() {
+        assert!(config.allows_tool("memory_add") && config.allows_tool("memory_search"));
+    }
+    assert_eq!(
+        f.factory.sessions.lock().unwrap()[0]
+            .calls
+            .load(Ordering::SeqCst),
+        calls_before,
+        "revoked reads and publication preflight must not contact the provider"
+    );
+    let records = memory
+        .read()
+        .await
+        .get_recent(anima_memory::RecentMemoryOptions {
+            agent_id: Some(f.agent.clone()),
+            ..Default::default()
+        });
+    assert!(
+        records
+            .iter()
+            .filter(|record| record.memory_type == MemoryType::TaskResult)
+            .count()
+            >= 2,
+        "both completed turns must retain native task-result capture"
+    );
+    assert_eq!(
+        memory.read().await.get(&selected.id).unwrap().content,
+        selected.content
+    );
+    assert!(publications
+        .get(&foreign_agent, &admitted.admission.publication_id)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        publications
+            .get(&f.agent, &admitted.admission.publication_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        crate::memory_provider::outbox::PublicationState::Queued
+    );
+    publications.shutdown().await;
+    f.manager.shutdown().await;
+}
+
 #[tokio::test]
 async fn workspace_context_mcp_pins_identity_and_rejects_wrong_authority_and_legacy() {
     let f = Fixture::new().await;

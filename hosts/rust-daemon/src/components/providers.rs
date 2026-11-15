@@ -1524,7 +1524,11 @@ impl Provider for RecentMemoriesProvider {
             core = core_memory::render(&user, &notes);
         }
         let mut local_contents = exclusions.contents.clone();
-        let external = crate::memory_provider::active().map(|active| active.provider().clone());
+        let external = if crate::memory_provider::binding::configured(runtime.config()) {
+            None
+        } else {
+            crate::memory_provider::active().map(|active| active.provider().clone())
+        };
         let search = select_context_bounded_with_query_until(
             Arc::clone(&self.memory),
             Arc::clone(&self.memory_embeddings),

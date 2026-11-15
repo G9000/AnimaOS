@@ -5,6 +5,7 @@ use super::{
 };
 use crate::{
     agent_files::runtime::config_revision,
+    memory_provider::binding::{self as provider, MemoryProviderBinding},
     workspace_context::{binding, WorkspaceContextBinding, SETTING},
 };
 use anima_core::DataValue;
@@ -24,9 +25,11 @@ pub(super) struct ContextConnection {
     tool: String,
 }
 #[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct WorkspaceContextView {
     revision: String,
     binding: Option<WorkspaceContextBinding>,
+    provider_binding: Option<MemoryProviderBinding>,
     status: String,
     connections: Vec<ContextConnection>,
 }
@@ -36,6 +39,16 @@ pub(super) struct SaveWorkspaceContext {
     expected_revision: String,
     #[serde(deserialize_with = "required_binding")]
     binding: Option<WorkspaceContextBinding>,
+    /// Omitted preserves the current provider; explicit null disables it.
+    #[serde(default, deserialize_with = "present_provider_binding")]
+    #[schema(value_type = Option<MemoryProviderBinding>, nullable)]
+    provider_binding: Option<Option<MemoryProviderBinding>>,
+}
+
+fn present_provider_binding<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<MemoryProviderBinding>>, D::Error> {
+    Option::deserialize(deserializer).map(Some)
 }
 
 fn required_binding<'de, D: serde::Deserializer<'de>>(
@@ -87,7 +100,8 @@ async fn view(state: &AppState, id: &str) -> Result<WorkspaceContextView, ApiErr
     Ok(WorkspaceContextView {
         revision: config_revision(&config),
         binding: binding(&config),
-        status: if crate::workspace_context::configured(&config) {
+        provider_binding: provider::binding(&config).ok().flatten(),
+        status: if crate::workspace_context::configured(&config) || provider::configured(&config) {
             "configured"
         } else {
             "independent"
@@ -172,6 +186,52 @@ async fn save(
             "Agent configuration changed; reload before saving",
         ));
     }
+    let provider_present = match &input.provider_binding {
+        Some(value) => value.is_some(),
+        None => provider::configured(&before),
+    };
+    if input.binding.is_some() && provider_present {
+        return Err(ApiError::bad_request(
+            "Legacy workspace context and additive memory cannot be enabled together",
+        ));
+    }
+    if let Some(Some(provider)) = &input.provider_binding {
+        provider.validate(id).map_err(ApiError::bad_request)?;
+        if crate::agent_runs::is_helper_config(&before) {
+            return Err(ApiError::bad_request(
+                "Helpers cannot bind a memory provider",
+            ));
+        }
+        let connection = guard
+            .mcp_registry
+            .connections
+            .get(&provider.connection_id)
+            .filter(|row| row.agent_id == id && row.enabled)
+            .ok_or_else(|| {
+                ApiError::bad_request("Select this agent's enabled reviewed MCP connection")
+            })?;
+        let tool = connection
+            .reviewed_tools
+            .iter()
+            .find(|tool| tool.descriptor.remote_name == provider::CONTEXT_READER)
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "M.O.T.H.E.R context reader must already be reviewed on this connection",
+                )
+            })?;
+        let call = anima_core::ToolCall {
+            id: "memory-provider-binding".into(),
+            name: tool.alias.clone(),
+            args: Default::default(),
+        };
+        if crate::approvals::evaluate(&guard.approvals.policy(id), &[], &[], &call)
+            == crate::approvals::Verdict::Deny
+        {
+            return Err(ApiError::bad_request(
+                "The selected context reader is denied by agent policy",
+            ));
+        }
+    }
     if let Some(binding) = &input.binding {
         binding.validate(id).map_err(ApiError::bad_request)?;
         if crate::agent_runs::is_helper_config(&before) {
@@ -206,6 +266,17 @@ async fn save(
         None => {
             settings.additional.remove(SETTING);
         }
+    }
+    match input.provider_binding {
+        Some(Some(binding)) => {
+            settings
+                .additional
+                .insert(provider::SETTING.into(), binding.portable());
+        }
+        Some(None) => {
+            settings.additional.remove(provider::SETTING);
+        }
+        None => {}
     }
     guard.restore_agent_config(id, config);
     let persist = guard.control_plane_persist_request();

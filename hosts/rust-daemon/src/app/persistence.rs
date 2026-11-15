@@ -30,6 +30,7 @@ pub(crate) struct PersistencePreflight {
     history: Option<PathBuf>,
     document_edits: Option<PathBuf>,
     project_knowledge: Option<PathBuf>,
+    memory_publications: Option<PathBuf>,
 }
 
 enum DocumentEditsStartup<'a> {
@@ -115,6 +116,22 @@ pub(crate) fn prepare_persistence_with_durable(
         }
         resources.extend(additions);
     }
+    let memory_publications = control_plane
+        .as_deref()
+        .or_else(|| match memory.as_ref() {
+            Some(MemoryStoreChoice::Json(path) | MemoryStoreChoice::Sqlite(path)) => {
+                Some(path.as_path())
+            }
+            _ => None,
+        })
+        .map(|path| {
+            let mut sibling = path.as_os_str().to_os_string();
+            sibling.push(".memory-publications.sqlite");
+            PathBuf::from(sibling)
+        });
+    if let Some(path) = &memory_publications {
+        resources.push(ProfileResource::Sqlite(path.clone()));
+    }
     let owner = ProfileOwner::acquire_resources(resources)?;
     Ok(PersistencePreflight {
         owner,
@@ -123,6 +140,7 @@ pub(crate) fn prepare_persistence_with_durable(
         history,
         document_edits,
         project_knowledge,
+        memory_publications,
     })
 }
 
@@ -138,6 +156,7 @@ pub(crate) async fn configure_persistence(
         history,
         document_edits,
         project_knowledge,
+        memory_publications,
     } = preflight;
     let postgres_pool = configure_database(state, config, &owner).await?;
     let memory_store = memory
@@ -154,6 +173,22 @@ pub(crate) async fn configure_persistence(
         .map(|store| store.with_owner(owner.clone()))
         .transpose()?;
     state.write().await.profile_owner = Some(owner.clone());
+    if let Some(path) = memory_publications {
+        match crate::memory_provider::publication::PublicationService::open(
+            state,
+            owner.clone(),
+            &path,
+        )
+        .await
+        {
+            Ok(service) => state.write().await.memory_publications = Some(service),
+            Err(_) => {
+                state.write().await.memory_publications_unavailable =
+                    Some("publication_storage_unavailable".into());
+                warn!("Selected memory publication storage unavailable; native memory remains available");
+            }
+        }
+    }
     let memory_store = configure_memory_store(state, memory_store).await?;
     configure_memory_embeddings(state, memory_store.as_ref(), owner.clone()).await?;
     configure_control_plane_and_history_with_document_edits(

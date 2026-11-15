@@ -26,9 +26,26 @@ export interface WorkspaceContextBinding {
   subject: string;
 }
 
+/** Additive, agent-bound shared memory. Credentials stay in the reviewed MCP connection. */
+export interface MemoryProviderBinding {
+  version: 1;
+  provider: 'mother';
+  connectionId: string;
+  workspaceId: string;
+  generation: string;
+  subject: string;
+  publication: 'selected';
+  /** Remote grant mode, independent of the personality choice. */
+  accessMode: 'companion' | 'shared';
+  /** Workspace personality requires a companion grant on this same workspace. */
+  personaSource: 'local' | 'workspace';
+}
+
 export interface WorkspaceContextView {
   revision: string;
   binding: WorkspaceContextBinding | null;
+  /** Absent on daemons predating additive providers. */
+  providerBinding?: MemoryProviderBinding | null;
   status: 'independent' | 'configured';
   connections: { id: string; label: string; state: string; tool: string }[];
 }
@@ -36,11 +53,29 @@ export interface WorkspaceContextView {
 export interface SaveWorkspaceContext {
   expectedRevision: string;
   binding: WorkspaceContextBinding | null;
+  /** Omitted preserves it; null disables it. Set with binding:null for atomic conversion. */
+  providerBinding?: MemoryProviderBinding | null;
 }
 
 /** Owner-only personality editing and instruction file previews. */
 export class AgentFilesClient {
   constructor(private readonly client: DaemonClient) {}
+
+  memoryPublications(agentId: string, options: { signal?: AbortSignal } = {}): Promise<import('./memory-publications.js').MemoryPublicationsView> {
+    return this.client.requestJson(`/api/agents/${encodeURIComponent(agentId)}/memory-publications`, { signal: options.signal });
+  }
+
+  memoryPublication(agentId: string, publicationId: string, options: { signal?: AbortSignal } = {}): Promise<import('./memory-publications.js').MemoryPublication> {
+    return this.client.requestJson(`/api/agents/${encodeURIComponent(agentId)}/memory-publications/${encodeURIComponent(publicationId)}`, { signal: options.signal });
+  }
+
+  shareMemory(agentId: string, input: import('./memory-publications.js').ShareMemory): Promise<import('./memory-publications.js').MemoryPublication> {
+    return this.client.requestJson(`/api/agents/${encodeURIComponent(agentId)}/memory-publications`, { method: 'POST', body: input });
+  }
+
+  controlMemoryPublication(agentId: string, publicationId: string, input: import('./memory-publications.js').ControlMemoryPublication): Promise<import('./memory-publications.js').MemoryPublication> {
+    return this.client.requestJson(`/api/agents/${encodeURIComponent(agentId)}/memory-publications/${encodeURIComponent(publicationId)}/control`, { method: 'POST', body: input });
+  }
 
   workspaceContext(
     agentId: string,

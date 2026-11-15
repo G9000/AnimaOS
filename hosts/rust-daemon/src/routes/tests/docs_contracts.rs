@@ -42,8 +42,8 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
         })
         .collect();
     let actual = inventory();
-    // The two persistent-agency routes were removed when agencies became temporary.
-    assert_eq!(actual.len(), 380, "complete registered operation count");
+    // Includes four owner-only durable selected-sharing operations.
+    assert_eq!(actual.len(), 384, "complete registered operation count");
     let task_verification_additions = [
         ("GET", "/api/agents/{agent_id}/runs/{run_id}/outcome"),
         (
@@ -738,11 +738,30 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
             "foreign session import operation must be registered"
         );
     }
+    let publication_additions = [
+        ("GET", "/api/agents/{agent_id}/memory-publications"),
+        ("POST", "/api/agents/{agent_id}/memory-publications"),
+        (
+            "GET",
+            "/api/agents/{agent_id}/memory-publications/{publication_id}",
+        ),
+        (
+            "POST",
+            "/api/agents/{agent_id}/memory-publications/{publication_id}/control",
+        ),
+    ];
+    for (method, path) in publication_additions {
+        assert!(
+            actual.contains(&(method.to_string(), path.to_string())),
+            "selected sharing operation must be registered"
+        );
+    }
     assert_eq!(
         actual
             .iter()
             .filter(|(method, path)| {
-                !connected_account_additions.contains(&(method.as_str(), path.as_str()))
+                !publication_additions.contains(&(method.as_str(), path.as_str()))
+                    && !connected_account_additions.contains(&(method.as_str(), path.as_str()))
                     && !task_verification_additions.contains(&(method.as_str(), path.as_str()))
                     && !image_additions.contains(&(method.as_str(), path.as_str()))
                     && !knowledge_additions.contains(&(method.as_str(), path.as_str()))
@@ -809,8 +828,9 @@ fn docs_contracts_readme_inventory_matches_actual_openapi() {
     assert_eq!(
         actual
             .iter()
-            .filter(|(method, path)| !connected_account_additions
+            .filter(|(method, path)| !publication_additions
                 .contains(&(method.as_str(), path.as_str()))
+                && !connected_account_additions.contains(&(method.as_str(), path.as_str()))
                 && !task_verification_additions.contains(&(method.as_str(), path.as_str()))
                 && !image_additions.contains(&(method.as_str(), path.as_str()))
                 && !knowledge_additions.contains(&(method.as_str(), path.as_str()))

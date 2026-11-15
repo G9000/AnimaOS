@@ -123,13 +123,7 @@ impl Limits {
                     5
                 })
             }
-            DataValue::Number(value) => {
-                if !value.is_finite() || (value.fract() == 0.0 && value.abs() > MAX_SAFE_INTEGER) {
-                    return Err(ARGUMENT_LIMIT);
-                }
-                let number = Number::from_f64(*value).ok_or(ARGUMENT_LIMIT)?;
-                self.add_bytes(number.to_string().len())
-            }
+            DataValue::Number(value) => self.add_bytes(wire_number(*value)?.to_string().len()),
             DataValue::String(value) => self.add_bytes(json_string_len(value)?),
             DataValue::Array(values) => {
                 self.add_bytes(2)?;
@@ -177,7 +171,7 @@ fn to_json(value: &DataValue) -> Result<Value, &'static str> {
     Ok(match value {
         DataValue::Null => Value::Null,
         DataValue::Bool(value) => Value::Bool(*value),
-        DataValue::Number(value) => Value::Number(Number::from_f64(*value).ok_or(ARGUMENT_LIMIT)?),
+        DataValue::Number(value) => Value::Number(wire_number(*value)?),
         DataValue::String(value) => Value::String(value.clone()),
         DataValue::Array(values) => {
             Value::Array(values.iter().map(to_json).collect::<Result<Vec<_>, _>>()?)
@@ -189,6 +183,23 @@ fn to_json(value: &DataValue) -> Result<Value, &'static str> {
                 .collect::<Result<Map<_, _>, &'static str>>()?,
         ),
     })
+}
+
+// DataValue has one numeric representation. Preserve exact whole numbers as
+// JSON integers for typed providers, using the same bytes during preflight.
+fn wire_number(value: f64) -> Result<Number, &'static str> {
+    if !value.is_finite() {
+        return Err(ARGUMENT_LIMIT);
+    }
+    if value.fract() == 0.0 {
+        if value.abs() > MAX_SAFE_INTEGER {
+            return Err(ARGUMENT_LIMIT);
+        }
+        // The checked exact-integer range is strictly inside i64's range.
+        Ok(Number::from(value as i64))
+    } else {
+        Number::from_f64(value).ok_or(ARGUMENT_LIMIT)
+    }
 }
 
 fn missing_context_error(
@@ -259,12 +270,38 @@ mod tests {
 
         assert_eq!(
             value,
-            json!({"enabled": true, "input": {"count": 3.0, "items": ["one", null]}})
+            json!({"enabled": true, "input": {"count": 3, "items": ["one", null]}})
         );
         assert!(
             value.get("Object").is_none(),
             "DataValue variants are not wire tags"
         );
+    }
+
+    #[test]
+    fn portable_numbers_preserve_typed_integer_requests_and_fractional_values() {
+        let input = arguments(&call(BTreeMap::from([
+            ("version".into(), DataValue::Number(2.0)),
+            ("negative".into(), DataValue::Number(-3.0)),
+            ("zero".into(), DataValue::Number(-0.0)),
+            ("fraction".into(), DataValue::Number(1.25)),
+            ("limit".into(), DataValue::Number(super::MAX_SAFE_INTEGER)),
+        ])))
+        .unwrap();
+        #[derive(serde::Deserialize)]
+        struct TypedRequest {
+            version: u32,
+            negative: i64,
+            zero: u64,
+            fraction: f64,
+            limit: u64,
+        }
+        let typed: TypedRequest = serde_json::from_value(input).expect("typed integer MCP request");
+        assert_eq!(typed.version, 2);
+        assert_eq!(typed.negative, -3);
+        assert_eq!(typed.zero, 0);
+        assert_eq!(typed.fraction, 1.25);
+        assert_eq!(typed.limit, 9_007_199_254_740_991);
     }
 
     #[test]

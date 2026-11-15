@@ -15,9 +15,45 @@ use anima_memory::{
 };
 use tracing::warn;
 
+pub(crate) mod binding;
+pub(crate) mod mapping;
+pub(crate) mod mother;
+pub(crate) mod outbox;
+pub(crate) mod publication;
+pub(crate) mod reconcile;
+
 pub(crate) type SharedExternalMemory = Arc<dyn ExternalMemoryProvider>;
+type DispatchState =
+    Arc<std::sync::Mutex<Option<std::sync::Weak<tokio::sync::RwLock<crate::state::DaemonState>>>>>;
 
 pub(crate) const MEMORY_PROVIDER_ENV: &str = "ANIMAOS_RS_MEMORY_PROVIDER";
+
+/// Capture upload eligibility before a local mutation can await persistence.
+/// A bound but unavailable state authorizes no legacy callbacks.
+pub(crate) fn capture_legacy_write_policy() -> Option<std::collections::BTreeSet<String>> {
+    let active = active()?;
+    let Ok(slot) = active.dispatch_state.lock() else {
+        return Some(Default::default());
+    };
+    let state = slot.as_ref()?;
+    let Some(state) = state.upgrade() else {
+        return Some(Default::default());
+    };
+    let Ok(guard) = state.try_read() else {
+        return Some(Default::default());
+    };
+    Some(
+        guard
+            .agents
+            .iter()
+            .filter(|(_, agent)| {
+                !binding::configured(agent.config())
+                    && !crate::workspace_context::primary_memory(agent.config())
+            })
+            .map(|(id, _)| id.clone())
+            .collect(),
+    )
+}
 const DEFAULT_PROVIDER: &str = "none";
 /// How long one background `sync_turn` or `on_memory_write` call may run.
 const BACKGROUND_CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -82,6 +118,7 @@ pub(crate) struct Active {
     queue: tokio::sync::mpsc::Sender<Job>,
     status_timeout: Duration,
     dropped: std::sync::atomic::AtomicUsize,
+    dispatch_state: DispatchState,
 }
 
 impl Active {
@@ -98,11 +135,22 @@ impl Active {
         };
         let (queue, mut jobs) = tokio::sync::mpsc::channel(capacity);
         let worker = Arc::clone(&provider);
+        let dispatch_state: DispatchState = Arc::new(std::sync::Mutex::new(None));
+        let worker_state = dispatch_state.clone();
         // The worker ends when the last sender (the `Active`) is dropped. It
         // holds the provider, not the `Active`, so there is no cycle. Each call
         // is guarded on its own, so a panicking one never stops the worker.
         runtime.spawn(async move {
             while let Some(Job { payload, owner }) = jobs.recv().await {
+                let state = worker_state.lock().ok().and_then(|slot| slot.clone());
+                if let Some(state) = state {
+                    let Some(state) = state.upgrade() else {continue;};
+                    let agent_id = match &payload {JobPayload::Turn(turn)=>&turn.agent_id,JobPayload::Write(event)=>&event.agent_id};
+                    let guard = state.read().await;
+                    // Selected sharing never enters the lossy legacy transcript/mirror queue.
+                    if !guard.agents.get(agent_id).is_some_and(|agent|
+                        !binding::configured(agent.config()) && !crate::workspace_context::primary_memory(agent.config())) {continue;}
+                }
                 if let Some(owner) = &owner {
                     if owner.verify_owned().await.is_err() {
                         warn!(provider = %worker.id(), "external memory job refused after profile ownership loss");
@@ -148,6 +196,7 @@ impl Active {
             queue,
             status_timeout,
             dropped: std::sync::atomic::AtomicUsize::new(0),
+            dispatch_state,
         }))
     }
 
@@ -158,8 +207,16 @@ impl Active {
     /// Queues `jobs` in order without waiting; whatever does not fit is
     /// dropped, counted, and logged by provider id and count only.
     fn enqueue(&self, jobs: impl IntoIterator<Item = Job>) {
+        let allowed = capture_legacy_write_policy();
         let mut dropped = 0;
         for job in jobs {
+            let agent_id = match &job.payload {
+                JobPayload::Turn(turn) => &turn.agent_id,
+                JobPayload::Write(event) => &event.agent_id,
+            };
+            if allowed.as_ref().is_some_and(|ids| !ids.contains(agent_id)) {
+                continue;
+            }
             if self.queue.try_send(job).is_err() {
                 dropped += 1;
             }
@@ -212,6 +269,15 @@ pub(crate) fn active() -> Option<Arc<Active>> {
         return Some(active);
     }
     ACTIVE.get().cloned()
+}
+
+/// Only a weak policy lookup for legacy callbacks; garden adapters are always agent/run-bound.
+pub(crate) fn bind_legacy_dispatch_state(state: &crate::app::SharedDaemonState) {
+    if let Some(active) = active() {
+        if let Ok(mut slot) = active.dispatch_state.lock() {
+            *slot = Some(Arc::downgrade(state));
+        }
+    }
 }
 
 /// The readiness route's view of the provider. A provider that does not
@@ -269,16 +335,34 @@ pub(crate) fn mirror_persisted_with_owner(
     current: impl FnOnce() -> Vec<Memory>,
     owner: Option<crate::profile_owner::ProfileOwner>,
 ) {
+    mirror_persisted_selected(previous, current, owner, capture_legacy_write_policy());
+}
+
+pub(crate) fn mirror_persisted_selected(
+    previous: &[Memory],
+    current: impl FnOnce() -> Vec<Memory>,
+    owner: Option<crate::profile_owner::ProfileOwner>,
+    allowed: Option<std::collections::BTreeSet<String>>,
+) {
     let Some(active) = active() else {
         return;
     };
     #[cfg(test)]
     SNAPSHOT_DIFFS.with(|count| count.set(count.get() + 1));
     let events = memory_write_events(previous, &current());
-    active.enqueue(events.into_iter().map(|event| Job {
-        payload: JobPayload::Write(event),
-        owner: owner.clone(),
-    }));
+    active.enqueue(
+        events
+            .into_iter()
+            .filter(|event| {
+                allowed
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&event.agent_id))
+            })
+            .map(|event| Job {
+                payload: JobPayload::Write(event),
+                owner: owner.clone(),
+            }),
+    );
 }
 
 /// Adds, updates (content changed) and removes between two snapshots, by id.

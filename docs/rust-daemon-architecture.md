@@ -209,6 +209,24 @@ Creating an agent is straightforward:
 
 Running an agent is more subtle because the daemon wants to avoid holding the state lock while the model is working.
 
+An optional `settings.additional.memoryProvider` binding adds M.O.T.H.E.R recall
+for that agent and run. `memory_provider/mother.rs` uses the reviewed MCP manager
+to fetch current bounded records; `WorkspaceRunContext` refreshes shared context
+before model requests and keeps persona choice separate from native memory.
+Native recall, tools, task capture and learning continue when shared reads fail.
+Ordinary native writes and turns are excluded from automatic external upload;
+`memory_share` explicitly selects own shared native facts into a profile-owned
+SQLite journal. Admission freezes the source, request and operation UUID before
+acknowledgement. A bounded background worker uses separately fenced MCP authority,
+current persistent permissions and receipt/proposal reconciliation. Approval
+receipts atomically establish canonical mappings; pending proposals do not.
+Neither task-run identity nor a prior session approval authorizes the worker.
+`memory_share_status` and owner API/UI metadata expose queued, uncertain,
+review-pending and saved outcomes. Legacy
+`workspaceContext` Companion mode retains its primary-memory behavior until an
+owner revision-checked conversion. See [workspace context](workspace-context.md)
+for the binding, publication contract and current limitations.
+
 ```mermaid
 sequenceDiagram
     participant C as Client

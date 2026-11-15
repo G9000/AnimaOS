@@ -598,6 +598,10 @@ export const daemon = {
     setupClient.agentFiles.personality(id, options),
   workspaceContext: (id: string, options: { signal?: AbortSignal } = {}) =>
     setupClient.agentFiles.workspaceContext(id, options),
+  memoryPublications: (id: string, options: { signal?: AbortSignal } = {}) =>
+    setupClient.agentFiles.memoryPublications(id, options),
+  controlMemoryPublication: (id: string, publicationId: string, input: import('@animaos/sdk').ControlMemoryPublication) =>
+    setupClient.agentFiles.controlMemoryPublication(id, publicationId, input),
   saveWorkspaceContext: (id: string, input: import('@animaos/sdk').SaveWorkspaceContext) =>
     setupClient.agentFiles.saveWorkspaceContext(id, input),
   saveAgentPersonality: (

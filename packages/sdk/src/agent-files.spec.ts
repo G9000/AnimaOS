@@ -3,9 +3,50 @@ import {
   createDaemonClient,
   DaemonHttpError,
   type AgentFilesPreview,
+  type MemoryProviderBinding,
 } from './index.js';
 
 describe('agent file preview client', () => {
+  it('converts the legacy binding and rereads an uncertain save without retrying it', async () => {
+    const providerBinding: MemoryProviderBinding = {
+      version: 1, provider: 'mother', connectionId: 'garden', workspaceId: 'workspace',
+      generation: 'generation', subject: 'agent', publication: 'selected',
+      personaSource: 'local', accessMode: 'companion',
+    };
+    const requests: { method: string; body?: unknown }[] = [];
+    const saved = { revision: 'after', binding: null, providerBinding, status: 'configured', connections: [] };
+    const client = createDaemonClient({
+      baseUrl: '',
+      fetch: async (_url, init) => {
+        requests.push({ method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        if (init?.method === 'PUT') throw new TypeError('Synthetic lost acknowledgement');
+        return Response.json(saved);
+      },
+    });
+    await expect(client.agentFiles.saveWorkspaceContext('agent', {
+      expectedRevision: 'before', binding: null, providerBinding,
+    })).rejects.toBeDefined();
+    expect(await client.agentFiles.workspaceContext('agent')).toEqual(saved);
+    expect(requests).toEqual([
+      { method: 'PUT', body: { expectedRevision: 'before', binding: null, providerBinding } },
+      { method: 'GET', body: undefined },
+    ]);
+  });
+
+  it('distinguishes omitted additive settings from an explicit provider disable', async () => {
+    const bodies: unknown[] = [];
+    const client = createDaemonClient({ baseUrl: '', fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({});
+    } });
+    await client.agentFiles.saveWorkspaceContext('agent', { expectedRevision: 'r1', binding: null });
+    await client.agentFiles.saveWorkspaceContext('agent', { expectedRevision: 'r2', binding: null, providerBinding: null });
+    expect(bodies).toEqual([
+      { expectedRevision: 'r1', binding: null },
+      { expectedRevision: 'r2', binding: null, providerBinding: null },
+    ]);
+  });
+
   it('reads and disables a workspace binding with the exact owner revision', async () => {
     const requests: { url: string; method?: string; body?: unknown }[] = [];
     const view = {

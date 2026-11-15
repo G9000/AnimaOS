@@ -17,6 +17,11 @@ const MAX_DESCRIPTOR_BYTES: usize = 32 * 1024;
 const MAX_WIRE_BYTES: usize = 256 * 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_NODES: usize = 1024;
+// Raw documents and runtime payloads retain their JSON bounds. Following a
+// local reference is schema work, not another nesting level in the payload.
+// Count repeated paths too, so acyclic expansion bombs remain bounded.
+const MAX_SCHEMA_REFERENCE_DEPTH: usize = 64;
+const MAX_SCHEMA_WORK: usize = 8192;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
@@ -91,7 +96,7 @@ fn safe_schema(schema: &Value) -> Result<(), ExternalToolError> {
         schema_position: bool,
     ) -> bool {
         *nodes += 1;
-        if depth > MAX_DEPTH || *nodes > MAX_NODES {
+        if depth > MAX_SCHEMA_REFERENCE_DEPTH || *nodes > MAX_SCHEMA_WORK {
             return false;
         }
         let address = v as *const Value as usize;
@@ -123,7 +128,12 @@ fn safe_schema(schema: &Value) -> Result<(), ExternalToolError> {
                 let reference_ok = object.get("$ref").is_none_or(|reference| {
                     reference
                         .as_str()
-                        .filter(|reference| reference.starts_with("#/$defs/"))
+                        // The compiler URI-decodes fragments before pointer lookup.
+                        // Reject encoded forms so both stages inspect the exact same
+                        // target; ordinary JSON-pointer ~0/~1 escapes still work.
+                        .filter(|reference| {
+                            reference.starts_with("#/$defs/") && !reference.contains('%')
+                        })
                         .and_then(|reference| root.pointer(&reference[1..]))
                         .is_some_and(|target| walk(target, root, depth + 1, nodes, active, true))
                 });
@@ -164,8 +174,8 @@ fn safe_schema(schema: &Value) -> Result<(), ExternalToolError> {
                         );
                         if schemas && value.is_array() {
                             *nodes += 1;
-                            depth < MAX_DEPTH
-                                && *nodes <= MAX_NODES
+                            depth < MAX_SCHEMA_REFERENCE_DEPTH
+                                && *nodes <= MAX_SCHEMA_WORK
                                 && value
                                     .as_array()
                                     .unwrap()
@@ -173,8 +183,8 @@ fn safe_schema(schema: &Value) -> Result<(), ExternalToolError> {
                                     .all(|v| walk(v, root, depth + 2, nodes, active, true))
                         } else if map && value.is_object() {
                             *nodes += 1;
-                            depth < MAX_DEPTH
-                                && *nodes <= MAX_NODES
+                            depth < MAX_SCHEMA_REFERENCE_DEPTH
+                                && *nodes <= MAX_SCHEMA_WORK
                                 && value.as_object().unwrap().values().all(|v| {
                                     walk(
                                         v,
@@ -212,6 +222,7 @@ fn compile(schema: &Value) -> Result<Validator, ExternalToolError> {
     safe_schema(schema)?;
     jsonschema::options()
         .with_draft(Draft::Draft202012)
+        .offline()
         .build(schema)
         .map_err(|_| ExternalToolError::SchemaRejected)
 }
@@ -257,13 +268,8 @@ pub fn prepare_external_tool(
     }
     let input_schema = normalize_schema(input)?;
     let output_schema = output.map(normalize_schema).transpose()?;
-    if serde_json::to_vec(&json!([input_schema, output_schema]))
-        .map_err(|_| ExternalToolError::SchemaRejected)?
-        .len()
-        > MAX_EXTERNAL_BYTES
-    {
-        return Err(ExternalToolError::DescriptorBounds);
-    }
+    // Each schema is independently bounded above. Their combined metadata is
+    // bounded by the complete serialized descriptor, not by the argument cap.
     let descriptor_digest = external_descriptor_digest(
         remote_name,
         description,
@@ -397,6 +403,155 @@ pub fn bound_external_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn full_mother_graph_catalog_is_admitted_with_exact_constraints() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/mother-garden-tools-v2.json"
+        ))
+        .unwrap();
+        let mut admitted = Vec::new();
+        for tool in fixture["tools"].as_array().unwrap() {
+            let mut input = tool["inputSchema"].clone();
+            let mut output = tool["outputSchema"].clone();
+            input["type"] = json!("object");
+            output["type"] = json!("object");
+            let name = tool["name"].as_str().unwrap();
+            let descriptor = prepare_external_tool(
+                name,
+                "Synthetic graph compatibility",
+                input.clone(),
+                Some(output.clone()),
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(descriptor.input_schema, input);
+            assert_eq!(descriptor.output_schema, Some(output));
+            assert_eq!(
+                prepare_external_tool(
+                    name,
+                    &descriptor.description,
+                    descriptor.input_schema.clone(),
+                    descriptor.output_schema.clone()
+                )
+                .unwrap(),
+                descriptor
+            );
+            admitted.push(descriptor);
+        }
+        assert_eq!(admitted.len(), 7);
+        let apply = admitted
+            .iter()
+            .find(|tool| tool.remote_name == "mother_garden_apply")
+            .unwrap();
+        let request = json!({"version":2,"workspaceId":"11111111-1111-4111-8111-111111111111",
+            "generation":"22222222-2222-4222-8222-222222222222","operationId":"33333333-3333-4333-8333-333333333333",
+            "requiredExtensions":{},"items":[{"itemKey":"entity","mutation":"create","expectedRevision":0,
+            "draft":{"kind":"entity","entityType":"test:person","displayName":"Synthetic graph record","aliases":[],"extensions":{}}}]});
+        validate_external_arguments(apply, &request).unwrap();
+        let mut invalid = request;
+        invalid["items"][0]["expectedRevision"] = json!("incorrect type");
+        assert_eq!(
+            validate_external_arguments(apply, &invalid),
+            Err(ExternalToolError::ArgumentSchema)
+        );
+    }
+
+    #[test]
+    fn separate_input_and_output_schemas_share_only_the_complete_descriptor_cap() {
+        let schema = json!({"type":"object","properties":{"value":{"type":"string","maxLength":4}},
+            "required":["value"],"description":"x".repeat(9*1024)});
+        let descriptor = prepare_external_tool("pair", "", schema.clone(), Some(schema)).unwrap();
+        assert!(serde_json::to_vec(&descriptor).unwrap().len() > MAX_EXTERNAL_BYTES);
+        assert!(serde_json::to_vec(&descriptor).unwrap().len() < MAX_DESCRIPTOR_BYTES);
+        validate_external_arguments(&descriptor, &json!({"value":"safe"})).unwrap();
+        assert_eq!(
+            validate_external_arguments(&descriptor, &json!({"value":"too long"})),
+            Err(ExternalToolError::ArgumentSchema)
+        );
+    }
+
+    fn reference_diamond(levels: usize) -> Value {
+        let mut definitions = serde_json::Map::new();
+        for level in 0..levels {
+            let reference = format!("#/$defs/n{}", level + 1);
+            definitions.insert(
+                format!("n{level}"),
+                json!({"allOf":[{"$ref":reference},{"$ref":reference}]}),
+            );
+        }
+        definitions.insert(
+            format!("n{levels}"),
+            json!({"type":"object","properties":{"value":{"type":"string","maxLength":4}}}),
+        );
+        json!({"type":"object","$defs":definitions,"$ref":"#/$defs/n0"})
+    }
+
+    #[test]
+    fn schema_reference_work_is_separate_and_remains_bounded() {
+        let shared = reference_diamond(4);
+        let tool = prepare_external_tool("shared", "", shared, None).unwrap();
+        validate_external_arguments(&tool, &json!({"value":"safe"})).unwrap();
+        assert_eq!(
+            validate_external_arguments(&tool, &json!({"value":"incorrect"})),
+            Err(ExternalToolError::ArgumentSchema)
+        );
+        let bomb = reference_diamond(13);
+        assert!(bounded(&bomb, MAX_EXTERNAL_BYTES), "raw schema is small");
+        assert_eq!(safe_schema(&bomb), Err(ExternalToolError::SchemaRejected));
+        let mut forged = descriptor();
+        forged.input_schema = bomb;
+        assert_eq!(
+            validate_external_arguments(&forged, &json!({})),
+            Err(ExternalToolError::SchemaRejected)
+        );
+
+        let mut definitions = serde_json::Map::new();
+        for index in 0..MAX_SCHEMA_REFERENCE_DEPTH {
+            definitions.insert(
+                format!("n{index}"),
+                json!({"$ref":format!("#/$defs/n{}",index+1)}),
+            );
+        }
+        definitions.insert(
+            format!("n{MAX_SCHEMA_REFERENCE_DEPTH}"),
+            json!({"type":"object"}),
+        );
+        let chain = json!({"type":"object","$defs":definitions,"$ref":"#/$defs/n0"});
+        assert!(bounded(&chain, MAX_EXTERNAL_BYTES));
+        assert_eq!(safe_schema(&chain), Err(ExternalToolError::SchemaRejected));
+    }
+
+    #[test]
+    fn schema_targets_match_compiler_resolution_and_output_constraints_remain_active() {
+        let encoded = json!({"type":"object","$ref":"#/$defs/a%2fb","$defs":{
+            "a%2fb":{"type":"object"},"a":{"b":{"$ref":"#/$defs/a/b"}}
+        }});
+        assert_eq!(
+            prepare_external_tool("encoded", "", encoded, None).unwrap_err(),
+            ExternalToolError::SchemaRejected
+        );
+        let indirect = json!({"type":"object","$ref":"#/$defs/a","$defs":{
+            "a":{"$ref":"#/$defs/b"},"b":{"$ref":"#/$defs/a"}
+        }});
+        assert_eq!(
+            prepare_external_tool("cycle", "", indirect, None).unwrap_err(),
+            ExternalToolError::SchemaRejected
+        );
+        let escaped = json!({"type":"object","properties":{"value":{"$ref":"#/$defs/a~1b~0c"}},
+            "required":["value"],"$defs":{"a/b~c":{"type":"string","maxLength":4}}});
+        let tool =
+            prepare_external_tool("escaped", "", json!({"type":"object"}), Some(escaped)).unwrap();
+        validate_external_output(&tool, &json!({"value":"safe"})).unwrap();
+        assert_eq!(
+            validate_external_output(&tool, &json!({"value":"incorrect"})),
+            Err(ExternalToolError::OutputSchema)
+        );
+        let mut forged = tool;
+        forged.output_schema = Some(reference_diamond(13));
+        assert_eq!(
+            validate_external_output(&forged, &json!({})),
+            Err(ExternalToolError::SchemaRejected)
+        );
+    }
     fn descriptor() -> ExternalToolDescriptor {
         prepare_external_tool("echo","Synthetic echo",json!({"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}),Some(json!({"type":"object","properties":{"ok":{"const":true}},"required":["ok"]}))).unwrap()
     }
@@ -468,7 +623,7 @@ mod tests {
         );
     }
     #[test]
-    fn verbose_metadata_does_not_expand_individual_or_combined_schema_budgets() {
+    fn verbose_metadata_preserves_individual_schema_and_complete_descriptor_budgets() {
         assert_eq!(
             prepare_external_tool(
                 "verbose_record",
@@ -482,9 +637,9 @@ mod tests {
         assert_eq!(
             prepare_external_tool(
                 "verbose_record",
-                "",
-                json!({"type":"object","description":"s".repeat(8 * 1024)}),
-                Some(json!({"type":"object","description":"s".repeat(8 * 1024)}))
+                &"d".repeat(MAX_DESCRIPTION_BYTES),
+                json!({"type":"object","description":"s".repeat(13 * 1024)}),
+                Some(json!({"type":"object","description":"s".repeat(13 * 1024)}))
             )
             .unwrap_err(),
             ExternalToolError::DescriptorBounds
