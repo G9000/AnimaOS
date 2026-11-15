@@ -239,6 +239,58 @@ This establishes installed connection and preservation acceptance. It does not
 claim model-generated recall, actual owner TUI approval, browser visual acceptance
 or completion of every additive-provider release gate.
 
+## Publication and restart qualification (2026-11-16)
+
+The owner authorized publication and persistent startup after the pairing repair.
+The reviewed 63-file implementation was committed as `019fb26a`, fast-forwarded
+into `main` and pushed to `origin/main`. Remote readback confirmed that commit.
+The original additive worktree was retained unchanged.
+
+A packaged native supervisor was built with `bundled-ui,rust-embed/debug-embed`
+using the managed validation cache. The static embedding feature makes this
+development-profile executable carry its web assets instead of loading them from
+the source directory. The locked build passed, followed by 134 packaged unit
+tests passing, zero failing and one ignored. The installed executable's SHA-256 is
+`1276d92094bfd94e3cc26ab73bcc185d5ff9677baadaac822cf8a624c0efe39b`.
+Binary inspection confirmed the built web index was embedded; HTTP readback
+matched the qualified index after installation and restart.
+
+The executable was installed under the existing profile's versioned `bin`
+directory, outside Cargo caches. Native `config` and `autostart` commands set the
+existing local API address and enable Windows login startup. The launcher's
+workspace was aligned with the already-saved active workspace. Its private data
+paths, memory stores and owner tokens were preserved. The existing command-line
+shim and Mother's separate native owner-service startup entry were retained.
+
+Installation initially exposed the expected credential isolation between the
+historical direct daemon and the packaged `installed` namespace. Explicit owner
+maintenance copied only the active profile's existing ChatGPT login manifest and
+five immutable chunks, plus its two referenced Discord credential slots. All eight
+destinations were checked for conflicts before writes and verified by readback;
+source entries were retained. Secrets were never printed or exported. The same
+ChatGPT account and both ready Discord connectors were verified after restart.
+
+The direct daemon was drained and gracefully shut down. The installed supervisor
+was launched from the Windows system directory with the exact saved login
+command, then fully quit and cold-started again. The final workspace alignment
+was followed by another full cold start. The supervisor reported running, with
+login startup enabled and the same private data directory. Reviewed Mother MCP
+sessions were reconnected through the owner API, without changing grants, and
+both additive bindings were reread: selected publication, local personality,
+current native generation and no primary workspace binding.
+
+After the final restart, byte-for-byte native snapshot rows, all 1,320 existing
+messages and nine attachments matched the backups. Both publication tables
+retained their empty predeployment state. Existing agent configuration, local
+personality, native tool grants and unrelated agents were preserved. A read-only
+Mother audit again resolved all 175 original records and all 290 historical
+snapshots; intentional checkpoint updates retained their earlier revisions.
+
+This is full application-process restart acceptance using the login command, not
+an actual Windows reboot. No model prompt, real sharing proposal, owner approval
+or browser visual test was used as a deployment check. Private backups and repair
+evidence remain outside Git.
+
 ## Limits
 
 Automatic recall takes at most four full records, with an 8 KiB content budget
