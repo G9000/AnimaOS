@@ -20,7 +20,7 @@ import {
 } from '@animaos/sdk';
 
 import { useSaveToMemory } from '../../hooks/useSaveToMemory';
-import { setPresenceSpeaking } from '../../lib/presence';
+import { setPresenceSpeaking, setPresenceWaitingForAnswer } from '../../lib/presence';
 import { useSessionDetails } from '../../hooks/useSessionUsage';
 import { describeTrigger } from '../../lib/automations';
 import type { LiveRun } from '../../lib/session-events';
@@ -475,6 +475,13 @@ export function SessionView({
     resetKey: session?.clearGeneration,
   });
   const [outcomeDraft, setOutcomeDraft] = useState({ ...EMPTY_OUTCOME_DRAFT });
+  const waitingRunKey = JSON.stringify(interactions.clarifications
+    .filter((request) => request.status === 'pending')
+    .map((request) => request.runId));
+  useEffect(() => {
+    setPresenceWaitingForAnswer(JSON.parse(waitingRunKey));
+    return () => setPresenceWaitingForAnswer([]);
+  }, [waitingRunKey]);
   const [outcomeError, setOutcomeError] = useState<string | null>(null);
   useResetOnChange([session?.agentId, sessionId, session?.clearGeneration], () => {
     setOutcomeDraft({ ...EMPTY_OUTCOME_DRAFT });
@@ -685,6 +692,38 @@ export function SessionView({
       tail={
         <>
           {inlineResults}
+          {session?.kind === 'chat' && (
+            <div className="conversation-questions" aria-label="Conversation questions">
+              {interactions.clarifications.map((request) => (
+                <ClarificationCard
+                  key={request.id}
+                  request={request}
+                  onAnswer={interactions.answer}
+                />
+              ))}
+              {interactions.sideQuestions.map((question) => (
+                <SideQuestionCard
+                  key={question.id}
+                  question={question.question}
+                  pending={question.pending}
+                  answer={question.answer}
+                  error={question.error}
+                />
+              ))}
+              {interactions.error && (
+                <p role="status">
+                  Questions unavailable: {interactions.error}{' '}
+                  <button
+                    type="button"
+                    className={ghostBtnCls}
+                    onClick={interactions.refresh}
+                  >
+                    Retry questions
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
           {agent.workspaceRole !== 'helper' &&
           (!session ||
             (session.kind === 'chat' && session.agentId === agent.id)) ? (
@@ -785,38 +824,6 @@ export function SessionView({
         <p role="alert" className="px-4 text-sm text-danger">
           {readAloud.error}
         </p>
-      )}
-      {session?.kind === 'chat' && (
-        <div className="space-y-3 px-4" aria-label="Conversation questions">
-          {interactions.clarifications.map((request) => (
-            <ClarificationCard
-              key={request.id}
-              request={request}
-              onAnswer={interactions.answer}
-            />
-          ))}
-          {interactions.sideQuestions.map((question) => (
-            <SideQuestionCard
-              key={question.id}
-              question={question.question}
-              pending={question.pending}
-              answer={question.answer}
-              error={question.error}
-            />
-          ))}
-          {interactions.error && (
-            <p role="status">
-              Questions unavailable: {interactions.error}{' '}
-              <button
-                type="button"
-                className={ghostBtnCls}
-                onClick={interactions.refresh}
-              >
-                Retry questions
-              </button>
-            </p>
-          )}
-        </div>
       )}
       {footer.kind !== 'composer' && (
         <div className="session-tools">{sessionTools}</div>

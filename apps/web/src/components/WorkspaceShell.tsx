@@ -255,12 +255,15 @@ export function agentStatusText({
   online,
   presence,
   workingHelpers,
+  waitingForAnswer = false,
 }: {
   online: boolean;
   presence: PresenceMode;
   workingHelpers: number;
+  waitingForAnswer?: boolean;
 }): string {
   if (!online) return 'Offline';
+  if (waitingForAnswer) return 'Waiting for your answer';
   if (presence === 'speaking') return 'Speaking';
   if (presence === 'attention') return 'Waiting for your OK';
   const helpers =
@@ -481,6 +484,7 @@ export function WorkspaceShell({
     online: connection === 'online',
     presence,
     workingHelpers,
+    waitingForAnswer: Boolean(presenceSignals.waitingRunIds?.length),
   });
 
   useResetOnChange([route], () => {

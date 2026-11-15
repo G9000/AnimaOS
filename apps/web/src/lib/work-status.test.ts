@@ -19,6 +19,11 @@ function call(name: string, status: ToolStep['status']): ToolStep {
 }
 
 describe('workStatus', () => {
+  it('waits only for a run with a pending question', () => {
+    expect(workStatus([call('unknown', 'running')], ['run_1'])).toBe('Waiting for your answer');
+    expect(workStatus([call('unknown', 'running')], ['other'])).toBe('Working on it…');
+    expect(workStatus([call('unknown', 'running')], [])).toBe('Working on it…');
+  });
   it('says what the call in progress does, in plain words', () => {
     expect(workStatus([call('web_search', 'running')])).toBe('Looking that up…');
     expect(workStatus([call('memory_search', 'running')])).toBe(

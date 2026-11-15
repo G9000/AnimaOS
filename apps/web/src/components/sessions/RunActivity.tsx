@@ -25,6 +25,7 @@ import { HaloOrb } from '../halo/HaloOrb';
 import { orbPixel, useAgentOrbStyle } from '../../lib/orb-style-preferences';
 import { useAppearancePreferences } from '../../lib/appearance-preferences';
 import { workStatus } from '../../lib/work-status';
+import { usePresenceSignals } from '../../lib/presence';
 import { lookChangeResult } from '../../lib/owner-look';
 import {
   mergeAcpSnapshots,
@@ -204,7 +205,8 @@ export function ToolBlock({
         const change = lookChangeResult(step.name, step.status, step.result);
         return change ? [{ change, key: keys[index] }] : [];
       });
-  const status = workStatus(steps);
+  const { waitingRunIds } = usePresenceSignals();
+  const status = workStatus(steps, waitingRunIds);
   return (
     <div
       className="tool-block"

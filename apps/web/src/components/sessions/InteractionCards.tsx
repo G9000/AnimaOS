@@ -43,12 +43,12 @@ function ClarificationForm({ request, onAnswer }: ClarificationCardProps) {
     }));
   return (
     <section
-      className="approval-card rounded-xl border border-line bg-panel-2 p-4 text-sm"
+      className="clarification-card"
       aria-label="Question from Anima"
     >
       <p className="mb-2 font-medium">
         {pending
-          ? 'Anima needs your input'
+          ? 'Waiting for your answer'
           : request.status === 'cancelled'
             ? 'Question cancelled'
             : 'Answers saved'}
@@ -99,7 +99,7 @@ function ClarificationForm({ request, onAnswer }: ClarificationCardProps) {
               {pending ? (
                 <>
                   {question.choices.map((choice, index) => (
-                    <label key={choice.id} className="mb-1 flex gap-2">
+                    <label key={choice.id} className="clarification-choice">
                       <input
                         type={question.multiSelect ? 'checkbox' : 'radio'}
                         name={`${request.id}:${question.id}`}

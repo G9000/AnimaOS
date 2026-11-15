@@ -1070,7 +1070,7 @@ export const MessageList = memo(function MessageList({
           {tail != null && (
             <div
               ref={tailRef}
-              className="mx-auto w-full max-w-3xl px-4 pb-6 sm:px-6"
+              className="studio-message-tail mx-auto w-full max-w-3xl px-4 pb-6 sm:px-6"
             >
               {tail}
             </div>

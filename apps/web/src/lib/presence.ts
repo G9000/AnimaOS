@@ -5,6 +5,7 @@ import { useSyncExternalStore } from 'react';
  *  its words go into the input, not onto the orb. */
 export interface PresenceSignals {
   speaking: boolean;
+  waitingRunIds?: readonly string[];
 }
 
 let signals: PresenceSignals = { speaking: false };
@@ -22,6 +23,11 @@ export function setPresenceSpeaking(speaking: boolean) {
 
 export function resetPresence() {
   emit({ speaking: false });
+}
+
+export function setPresenceWaitingForAnswer(waitingRunIds: readonly string[]) {
+  if (JSON.stringify(signals.waitingRunIds ?? []) === JSON.stringify(waitingRunIds)) return;
+  emit({ ...signals, waitingRunIds });
 }
 
 export function usePresenceSignals(): PresenceSignals {
@@ -51,7 +57,7 @@ export function presenceMode({
   running: boolean;
   waiting: boolean;
 }): PresenceMode {
-  if (waiting) return 'attention';
+  if (waiting || signals.waitingRunIds?.length) return 'attention';
   if (signals.speaking) return 'speaking';
   if (running) return 'thinking';
   return 'calm';

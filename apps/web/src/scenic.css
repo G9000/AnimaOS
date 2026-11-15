@@ -1442,6 +1442,8 @@ button.scenic-thread[aria-expanded='true'] {
  * (copy, read aloud, save) appear on hover or focus, and stay visible on
  * touch screens and under the latest message. */
 
+.scenic-shell .studio-message-tail { max-width: 760px; }
+
 .scenic-shell .studio-messages {
   max-width: 760px;
   gap: 8px;
@@ -5990,6 +5992,10 @@ details.settings-item > :not(summary) {
 }
 
 /* Match the Pen main-chat transcript rhythm and composer internals. */
+.scenic-shell [data-main-chat='true'] .studio-message-tail {
+  max-width: 808px;
+}
+
 .scenic-shell [data-main-chat='true'] .studio-messages {
   gap: 14px;
   max-width: 808px;

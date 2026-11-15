@@ -9,6 +9,9 @@ import {
 afterEach(() => resetPresence());
 
 describe('presenceMode', () => {
+  it('shows attention while the current conversation needs an answer', () => {
+    expect(presenceMode({ signals: { speaking: false, waitingRunIds: ['r'] }, running: true, waiting: false })).toBe('attention');
+  });
   const quiet = { speaking: false };
   it('is calm when nothing is happening', () => {
     expect(

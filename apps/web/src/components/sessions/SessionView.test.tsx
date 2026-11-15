@@ -20,6 +20,8 @@ import { runFixture } from '../../test/live';
 import { sessionFixture } from '../../test/sessions';
 import { totalsFixture } from '../../test/usage';
 import { SessionView, type SessionViewProps } from './SessionView';
+import { getPresenceSnapshotForTest } from '../../lib/presence';
+import { agentStatusText } from '../WorkspaceShell';
 
 const agent: AgentDetail = {
   id: 'agent-main',
@@ -94,6 +96,31 @@ beforeEach(() => {
 });
 
 describe('input controls', () => {
+  it('keeps questions in the transcript and clears waiting after an answer', async () => {
+    const request = {
+      id: 'question-1', agentId: 'agent-main', sessionId: 'chat:question',
+      runId: 'run-question', toolCallId: 'tc', revision: 1, createdAtMs: 1,
+      status: 'pending' as const, response: null,
+      questions: [{ id: 'q', question: 'How often?', multiSelect: false, choices: [{ id: 'daily', label: 'Every day' }] }],
+    };
+    vi.mocked(daemon.interactions.list).mockResolvedValue([request]);
+    vi.spyOn(daemon.interactions, 'answer').mockImplementation(async () => {
+      const answered = { ...request, status: 'answered' as const, revision: 2 };
+      vi.mocked(daemon.interactions.list).mockResolvedValue([answered]);
+      return answered;
+    });
+    const view = renderView({ session: sessionFixture('chat:question', { mainChat: true }) });
+    const card = await screen.findByRole('region', { name: 'Question from Anima' });
+    expect(card.closest('.studio-message-tail')).not.toBeNull();
+    expect(card).not.toHaveClass('approval-card');
+    await waitFor(() => expect(getPresenceSnapshotForTest().waitingRunIds).toEqual(['run-question']));
+    expect(agentStatusText({ online: true, presence: 'attention', workingHelpers: 0, waitingForAnswer: true })).toBe('Waiting for your answer');
+    await userEvent.click(screen.getByRole('radio', { name: 'Every day' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
+    await waitFor(() => expect(getPresenceSnapshotForTest().waitingRunIds).toEqual([]));
+    view.rerender({ session: sessionFixture('another-chat') });
+    expect(getPresenceSnapshotForTest().waitingRunIds).toEqual([]);
+  });
   const composerWith = (plan: boolean) => ({
     draft: '',
     setDraft: vi.fn(),

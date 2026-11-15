@@ -31,7 +31,10 @@ function phrase(step: ToolStep): string {
 
 /** The one line Simple mode shows while a run works: what the call in
  *  progress is doing, or that the agent is thinking between calls. */
-export function workStatus(steps: readonly ToolStep[]): string {
+export function workStatus(steps: readonly ToolStep[], waitingRunIds: readonly string[] = []): string {
+  if (steps.some((step) => step.status === 'running' && step.runId !== null && waitingRunIds.includes(step.runId))) {
+    return 'Waiting for your answer';
+  }
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     if (steps[index].status === 'running') return `${phrase(steps[index])}…`;
   }
