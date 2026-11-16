@@ -28,6 +28,70 @@ struct Entry {
     bytes: usize,
     origin: Origin,
 }
+
+struct McpIdentity {
+    remote_name: String,
+    connection_label: String,
+}
+
+impl McpIdentity {
+    fn words(&self) -> BTreeSet<String> {
+        let mut words = BTreeSet::new();
+        for value in [&self.remote_name, &self.connection_label] {
+            let value = value.to_lowercase();
+            words.extend(
+                value
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|word| !word.is_empty())
+                    .map(str::to_owned),
+            );
+            // Keep dotted labels such as M.O.T.H.E.R discoverable as one word.
+            for word in value.split_whitespace() {
+                let compact: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
+                if !compact.is_empty() {
+                    words.insert(compact);
+                }
+            }
+        }
+        words
+    }
+}
+
+impl Entry {
+    fn summary(&self, identity: Option<&McpIdentity>) -> serde_json::Value {
+        let mut summary = json!({"name":self.descriptor.name,"description":clip(&self.descriptor.description,384),"hydrated":true});
+        if let Some(identity) = identity {
+            summary["remoteName"] = json!(identity.remote_name);
+            summary["connectionLabel"] = json!(identity.connection_label);
+        }
+        summary
+    }
+}
+
+fn mcp_identity(state: &DaemonState, entry: &Entry) -> Option<McpIdentity> {
+    let Origin::Mcp(stamp) = &entry.origin else {
+        return None;
+    };
+    let row = state.mcp_registry.connections.get(&stamp.connection_id)?;
+    if row.agent_id != stamp.agent_id || !row.enabled || row.version != stamp.connection_version {
+        return None;
+    }
+    let publication = state.mcp_publication.read().ok()?;
+    let binding = publication
+        .live
+        .get(&(stamp.agent_id.clone(), stamp.alias.clone()))?;
+    if binding.connection_id != stamp.connection_id
+        || binding.version != stamp.connection_version
+        || binding.generation != stamp.wire_generation
+        || binding.tool.descriptor.descriptor_digest != stamp.descriptor_digest
+    {
+        return None;
+    }
+    Some(McpIdentity {
+        remote_name: binding.tool.descriptor.remote_name.clone(),
+        connection_label: row.label.clone(),
+    })
+}
 enum Origin {
     Explicit(ToolDescriptor),
     MemoryAdd(ToolDescriptor),
@@ -474,10 +538,20 @@ impl RunToolCatalog {
             );
         }
         let state = self.scope(agent, run).await?;
-        let runtime_observation = {
+        let (runtime_observation, identities) = {
             let guard = state.read().await;
             self.scope_current(&guard).map_err(str::to_string)?;
-            crate::routes::capabilities::runtime_observation(&guard)
+            let identities: BTreeMap<_, _> = self
+                .entries
+                .iter()
+                .filter_map(|(name, entry)| {
+                    mcp_identity(&guard, entry).map(|identity| (name.clone(), identity))
+                })
+                .collect();
+            (
+                crate::routes::capabilities::runtime_observation(&guard),
+                identities,
+            )
         };
         let query = query.trim().to_lowercase();
         let words: Vec<_> = query
@@ -491,13 +565,19 @@ impl RunToolCatalog {
                 let name = entry.descriptor.name.to_lowercase();
                 let description = entry.descriptor.description.to_lowercase();
                 let name_words: Vec<_> = name.split(|c: char| !c.is_alphanumeric()).collect();
+                let identity = identities.get(&entry.descriptor.name);
+                let identity_words = identity.map(McpIdentity::words).unwrap_or_default();
                 let score = if name == query {
                     1_000_000
+                } else if identity
+                    .is_some_and(|identity| identity.remote_name.to_lowercase() == query)
+                {
+                    100_000
                 } else {
                     words
                         .iter()
                         .map(|word| {
-                            if name_words.contains(word) {
+                            if name_words.contains(word) || identity_words.contains(*word) {
                                 10_000
                             } else if name.contains(*word) {
                                 1_000
@@ -531,7 +611,7 @@ impl RunToolCatalog {
             {
                 continue;
             }
-            summaries.push(json!({"name":entry.descriptor.name,"description":clip(&entry.descriptor.description,384),"hydrated":true}));
+            summaries.push(entry.summary(identities.get(&entry.descriptor.name)));
             let result = json!({"tools":summaries,"runtimeObservation":runtime_observation,"schemaVisibility":SCHEMA_VISIBILITY}).to_string();
             if result.len() > MAX_RESULT_BYTES {
                 summaries.pop();
@@ -585,7 +665,10 @@ impl RunToolCatalog {
             let guard = state.read().await;
             self.check_current(&guard, agent, run, name)?;
             let runtime_observation = crate::routes::capabilities::runtime_observation(&guard);
-            json!({"name":entry.descriptor.name,"description":clip(&entry.descriptor.description,384),"hydrated":true,"runtimeObservation":runtime_observation,"schemaVisibility":SCHEMA_VISIBILITY}).to_string()
+            let mut summary = entry.summary(mcp_identity(&guard, entry).as_ref());
+            summary["runtimeObservation"] = json!(runtime_observation);
+            summary["schemaVisibility"] = json!(SCHEMA_VISIBILITY);
+            summary.to_string()
         };
         if result.len() > MAX_RESULT_BYTES {
             return Err("Tool summary exceeds the result budget".into());

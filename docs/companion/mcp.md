@@ -41,6 +41,8 @@ Unknown fields, explicit null patch fields and empty patches are rejected. Endpo
 
 Aliases contain the connection UUID and a descriptor-digest prefix. The full immutable digest is checked as well; a collision is rejected. Changed remote schemas/descriptions produce a new alias requiring review/grant in review mode, or available on the next turn in automatic mode. Endpoint or enabled edits retire live discovery; a label-only edit keeps discovery while advancing the saved version. Old reviews remain dormant when their exact descriptor is absent.
 
+Tool discovery searches permitted MCP tools by their remote names and connection labels as well as their execution aliases and descriptions. For example, “Mother read record” can find a reader under a connection labelled “M.O.T.H.E.R shared garden”. Search and describe summaries show `remoteName` and `connectionLabel`; invoke the returned execution `name`. These fields are reference data and grant no additional authority. Exact native tool names keep priority, and ordinary current-grant, schema and connection checks still apply.
+
 ## Trusted local Windows processes
 
 Choose Local process in Connectors, enter an installed absolute `.exe` path and an ordered argument vector, and confirm trust in that exact program/arguments. Saving stays disabled. Enable connection saves configuration; Start local server explicitly launches it. Each editor line is one literal argument: spaces/quotes have no shell meaning, untouched empty text means no arguments, and Pass one empty argument explicitly represents `[""]`. Changing launch input clears the trust choice. Saved executable/arguments cannot be edited; remove the connection and save a new one. Label/enabled edits remain available.

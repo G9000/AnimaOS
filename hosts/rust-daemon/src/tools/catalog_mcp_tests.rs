@@ -1,6 +1,7 @@
 //! Captured discovery stamps cannot be refreshed into new dispatch authority.
 use super::*;
 use crate::tools::catalog::RunToolCatalog;
+use anima_core::ModelToolSelector;
 
 fn catalog(f: &Fixture) -> Arc<RunToolCatalog> {
     Arc::new(RunToolCatalog::new(
@@ -30,6 +31,152 @@ async fn refuse(f: &Fixture, catalog: Arc<RunToolCatalog>) {
         0,
         "catalog staleness must refuse before transport"
     );
+    f.manager.shutdown().await;
+}
+
+async fn record_reader_catalog(remote: &str) -> Fixture {
+    let record = prepare_external_tool(
+        remote,
+        "Read one complete current record by public ID, including its status and revision.",
+        json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
+        None,
+    )
+    .unwrap();
+    let factory = Arc::new(FakeFactory {
+        discovery_descriptor: Arc::new(StdMutex::new(Some(record))),
+        ..Default::default()
+    });
+    let mut f = Fixture::with_factory(PolicyAction::Allow, factory, None, |_| {}).await;
+    let current = f.manager.get(&f.agent.id, &f.connection_id).await.unwrap();
+    let renamed = f
+        .manager
+        .update(
+            &f.agent.id,
+            &f.connection_id,
+            UpdateMcpConnection {
+                expected_version: current.record.version,
+                label: Some("M.O.T.H.E.R private garden".into()),
+                endpoint: None,
+                enabled: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.state, McpConnectionState::Ready);
+    let native = crate::tools::ToolRegistry::new()
+        .resolve_descriptors([
+            "acp_read",
+            "app_read",
+            "read_conversation_window",
+            "read_file",
+        ])
+        .unwrap();
+    f.agent.config.tools.as_mut().unwrap().extend(native);
+    f.state
+        .write()
+        .await
+        .restore_agent_config(&f.agent.id, f.agent.config.clone());
+    f
+}
+
+#[tokio::test]
+async fn tool_discovery_mcp_remote_name_beats_generic_native_readers() {
+    let f = record_reader_catalog("mother_get_record").await;
+    let catalog = catalog(&f);
+    let before = serde_json::to_value(f.state.read().await.control_plane_snapshot()).unwrap();
+    for query in [
+        "Mother shared checkpoint record-read",
+        "shared workspace Mother checkpoint read record by ID",
+        "mother_get_record",
+    ] {
+        let text = catalog.search(&f.agent, &f.run, query, 3).await.unwrap();
+        let result: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(result["tools"][0]["name"], f.alias, "query: {query}");
+        assert_eq!(result["tools"][0]["remoteName"], "mother_get_record");
+        assert_eq!(
+            result["tools"][0]["connectionLabel"],
+            "M.O.T.H.E.R private garden"
+        );
+        assert!(text.len() <= 4096);
+    }
+    assert!(catalog.visible_tool_names().contains(&f.alias));
+    assert_eq!(f.factory.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        serde_json::to_value(f.state.read().await.control_plane_snapshot()).unwrap(),
+        before,
+        "discovery must not change grants, aliases or saved state"
+    );
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_discovery_mcp_connection_label_is_searchable_without_remote_brand() {
+    let f = record_reader_catalog("fetch_record").await;
+    let catalog = catalog(&f);
+    for query in [
+        "Mother read record",
+        "M.O.T.H.E.R record",
+        "private garden record",
+    ] {
+        let result: Value =
+            serde_json::from_str(&catalog.search(&f.agent, &f.run, query, 3).await.unwrap())
+                .unwrap();
+        assert_eq!(result["tools"][0]["name"], f.alias, "query: {query}");
+        assert_eq!(result["tools"][0]["remoteName"], "fetch_record");
+    }
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_discovery_mcp_search_identity_does_not_survive_revocation() {
+    let f = record_reader_catalog("mother_get_record").await;
+    let catalog = catalog(&f);
+    catalog
+        .search(&f.agent, &f.run, "Mother record", 1)
+        .await
+        .unwrap();
+    let current = f.manager.get(&f.agent.id, &f.connection_id).await.unwrap();
+    f.manager
+        .set_grant(
+            &f.agent.id,
+            &f.connection_id,
+            &f.alias,
+            McpGrantInput {
+                expected_version: current.record.version,
+                descriptor_digest: f.descriptor_digest.clone(),
+                granted: false,
+            },
+        )
+        .await
+        .unwrap();
+    let text = catalog
+        .search(&f.agent, &f.run, "Mother record", 3)
+        .await
+        .unwrap();
+    assert!(!text.contains(&f.alias));
+    assert!(!text.contains("mother_get_record"));
+    assert!(!text.contains("M.O.T.H.E.R private garden"));
+    assert!(!catalog.visible_tool_names().contains(&f.alias));
+    assert_eq!(f.factory.calls.load(Ordering::SeqCst), 0);
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_discovery_mcp_remote_name_cannot_shadow_an_exact_native_name() {
+    let f = record_reader_catalog("read_file").await;
+    let catalog = catalog(&f);
+    let native: Value = serde_json::from_str(
+        &catalog
+            .search(&f.agent, &f.run, "read_file", 1)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(native["tools"][0]["name"], "read_file");
+    let remote: Value =
+        serde_json::from_str(&catalog.search(&f.agent, &f.run, &f.alias, 1).await.unwrap())
+            .unwrap();
+    assert_eq!(remote["tools"][0]["name"], f.alias);
     f.manager.shutdown().await;
 }
 #[tokio::test]
@@ -136,7 +283,6 @@ async fn tool_discovery_mcp_replaced_schema_cannot_refresh_catalog_descriptor() 
 
 #[tokio::test]
 async fn tool_discovery_visibility_drops_mcp_schema_after_grant_epoch_changes() {
-    use anima_core::ModelToolSelector;
     let f = Fixture::new(PolicyAction::Allow, false, false).await;
     let catalog = catalog(&f);
     catalog.describe(&f.agent, &f.run, &f.alias).await.unwrap();
