@@ -8,11 +8,50 @@ In **Profile → M.O.T.H.E.R**, convert an existing Companion or Shared-context 
 
 Existing installations keep their saved legacy behavior until this explicit conversion. An ordinary upgrade does not silently reinterpret it. Native-only M.O.T.H.E.R has retired its old pairing application and `mother connect animaos` command; the historical setup section below is not an installation guide for that release.
 
-Additive recall uses only the selected agent's reviewed MCP connection. Before each model request, the host validates workspace identity, restore generation, role and subject, searches for relevant records and fetches full current records. Each response is bounded to 16 KiB; automatic recall selects at most four records within an 8 KiB total. Oversized or flagged records are omitted, never presented as complete truncated records. This selection is not exhaustive. Returned records retain IDs, revisions, timestamps and attribution and are treated as untrusted reference data.
+Additive recall uses only the selected agent's reviewed MCP connection. Before each model request, the host validates workspace identity, restore generation, role and subject, and resolves only owner-pinned and assigned records. Bootstrap does not infer intent or search private facts from user-message words. Complete selection stays within four records and 8 KiB, with a 16 KiB per-read envelope cap. Oversized or flagged records are omitted whole. Returned records retain IDs, revisions, timestamps and attribution and are treated as untrusted reference data.
 
-AnimaOS plans up to two short literal topic queries before a bounded hybrid fallback when no literal candidates were found. It requests up to eight previews per search. Only an explicitly partial response (`shortened` or omitted blocks) permits one retry with four previews; partial data is discarded. Authority, transport and malformed-response failures do not trigger retries. This permits at most six search attempts and four distinct full-record fetches under the existing three-second recall deadline. Candidate ordering uses exact topic evidence and request-term overlap; current complete content is checked again before inclusion. Similar project-name prefixes do not establish an exact topic match. Pinned and assigned owner context retains precedence, and an absent term in a truncated preview does not discard a literal hit. Partial semantic indexing and omitted previews can still hide relevant records, so an empty bounded selection is not proof of absence. Query planning and selection belong to AnimaOS; Mother remains the shared storage provider.
+The conversation model owns query interpretation and reformulation, including mixed languages. `memory_search` defaults to native memory. With `source: "mother"`, it uses the current additive binding and existing read grants. The model supplies one concise query (1–200 UTF-16 units), `mode` (`hybrid`, `semantic` or `literal`), optional v1 `kind`, optional `exact_names` (at most two), and `include_graph` (default true). Each explicit search requests eight previews and fetches at most four complete records under a three-second deadline and 8 KiB output budget. An explicitly partial envelope permits one fresh four-preview retry; authority/transport/malformed failures do not. Pins do not consume the explicit search result budget.
 
-Selected full records appear separately from bootstrap previews, with their validated source locators before the record bodies. The harness explains that a matching record's ID can be used directly for a requested fresh full-record read. A model should not reconstruct a long literal search phrase from a selected record's title.
+Provider results include `source: "mother"`, distinct locators, complete current record data and coverage. Mother locators are not native IDs for editing, deletion, consolidation or sharing. The model compares evidence with the original question and can refine, translate or change modes through another ordinary tool call. Literal mode matches one contiguous substring. Search metadata preserves actual mode/fallback, index coverage and server omissions; local coverage reports bounded candidate/record exclusions and graph status. Empty or bounded retrieval does not establish absence. Provider errors never silently substitute native results; native recall remains independently available.
+
+No English stop-word, personal-intent, species, capitalization or citation-acronym classifier chooses queries. Native `task_result` and reflection memories remain attributed local history; old failed-recall claims do not establish current garden contents. The model uses inventory/connection state without requesting unrelated personal facts when only checking availability. The same bootstrap behavior applies in every language.
+
+Optional exact-name constraints are model-authored, normalized with Unicode NFKC/lowercase and rechecked on complete current content. Alphanumeric boundaries distinguish names such as `AsterOS` and `AsterOS2`; CJK/Kana/Hangul names can match within continuous text. These are literal entity constraints, not translations or proof of identity. Semantic/paraphrase results need not share query words, and learned/provider order is preserved. Inspect actual model coverage: Unicode handling alone is not multilingual semantics. Native recall uses its existing configured multilingual embeddings; Mother independently reports its own model and any literal fallback.
+
+Mother's MCP adapter limits context/search/history navigation JSON to 12 KiB by removing whole previews and updating omission counts, preserving category balance for unfiltered context. Required persona/pins/assigned context is never shortened. Known read replies must also fit a 48 KiB serialized MCP result budget; a full record is returned whole or produces `READ_RESULT_TOO_LARGE`. These output limits do not alter stored records or tool descriptors. AnimaOS retains its own tighter per-read/recall budgets. Transport size violations explain the size cause while keeping `outcome_unknown`, retiring the connection, joining physical work and preventing replay. Additive fallback keeps native memory active.
+
+### Optional temporal graph recall
+
+When the selected connection already has reviewed `mother_get_capabilities`,
+`mother_garden_query` and `mother_garden_get` tools, the additive adapter checks
+for the available v2 query contract and supplements v1 recall with current graph
+records. It does not review or grant tools automatically. Capability availability
+does not establish read permission: Mother independently checks `garden:read`
+on each query and Get. Existing context-only connections retain their v1 behavior;
+a graph-only credential does not replace the existing v1 binding/bootstrap.
+
+An explicit Mother search performs at most one literal graph text query and one one-hop neighbor query
+with two starts, eight edges and 32 work units. It reads at most four current
+graph records, in addition to the four-record v1 fetch budget. Both sources share
+the four-item, 8 KiB complete-output limit and the absolute three-second deadline.
+Optional graph work receives at most 750 ms, reserving 500 ms for the final v1
+authority check. Query pages are bounded selections, not exhaustive graph recall.
+
+Graph output preserves typed IDs, revisions, valid/observed/transaction times,
+attribution, evidence references, optional extensions, coverage, watermarks and
+whether another page exists. A related entity's name is included only after a
+fresh current Get. Unresolved references remain IDs. Locators use
+`mother-garden:<workspace>/<generation>/<kind>/<id>@<revision>`; graph IDs must
+not be passed to the v1 record reader. Unknown extensions remain opaque data.
+Malformed core fields, mixed epochs/watermarks and inactive current records
+discard the graph batch. No records, cursors or results persist between requests.
+
+An optional graph failure leaves v1 recall available only when the final shared
+authority check succeeds. A timeout that cancels an entered MCP call retires its
+connection, so all shared results are withheld and native memory remains active.
+A fresh turn uses existing reconnection checks. Workspace/generation mismatch or
+restart-required errors likewise invalidate shared context. This read-only slice
+does not publish graph facts, create proposals or change selected sharing.
 
 If the garden is unavailable, revoked, restored or incompatible, the same chat continues with the saved local personality and native memory. The source's tools are withheld for that run; another agent's connection is unaffected. A fresh turn can attempt recovery. A restored generation requires explicit rebinding.
 

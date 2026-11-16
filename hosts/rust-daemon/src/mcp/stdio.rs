@@ -144,7 +144,15 @@ impl Pipes {
         lock(&self.state).error.unwrap_or(fallback)
     }
     fn fail(&self, error: McpTransportError) {
-        lock(&self.state).error.get_or_insert(error);
+        {
+            let mut state = lock(&self.state);
+            if error == McpTransportError::WireLimit {
+                if let Some(control) = state.control.as_ref() {
+                    control.note_wire_limit();
+                }
+            }
+            state.error.get_or_insert(error);
+        }
         self.stop.cancel();
     }
     fn begin(&self, control: TransportControl) -> Result<Operation, McpTransportError> {
@@ -464,6 +472,9 @@ impl McpTransportSession for StdioSession {
                     bound_sdk_result(result, &call.descriptor)
                 }) => result,
             };
+            if matches!(result, Err(McpTransportError::WireLimit)) {
+                control.note_wire_limit();
+            }
             if result.is_err() {
                 inner.begin_close();
             }
@@ -1153,6 +1164,43 @@ mod tests {
             joined(&session).await;
             assert_eq!(factory.stdio_child_count(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn memory_provider_native_oversized_call_keeps_size_cause_and_joins() {
+        let temporary = tempfile::tempdir().unwrap();
+        let marker = temporary.path().join("peer.json");
+        let factory = DefaultMcpTransportFactory::default();
+        let session = factory
+            .connect(launch("oversized-call", &marker, "native-size"), control())
+            .await
+            .unwrap();
+        let descriptor = session.discover(control()).await.unwrap().tools.remove(0);
+        let ctl = control();
+        let result = session
+            .call_once(
+                McpCall {
+                    remote_name: descriptor.remote_name.clone(),
+                    arguments: json!({"value":"violet"}),
+                    descriptor,
+                },
+                ctl.clone(),
+            )
+            .await;
+        assert_eq!(result.unwrap_err(), McpTransportError::WireLimit);
+        assert!(ctl.dispatched.load(Ordering::SeqCst));
+        assert!(ctl.wire_limit_observed());
+        joined(&session).await;
+        assert_eq!(factory.stdio_child_count(), 0);
+        let peer = wait_marker(&marker, Some("tools/call")).await;
+        assert_eq!(peer["counts"]["tools/call"], 1);
+        assert!(!super::super::McpServiceError::OutcomeUnknownSize
+            .to_string()
+            .contains("synthetic-private-sentinel"));
+        assert!(
+            !control().wire_limit_observed(),
+            "cause belongs only to the failed call"
+        );
     }
 
     #[tokio::test]

@@ -397,6 +397,7 @@ pub(crate) enum McpServiceError {
     Cancelled,
     TimedOut,
     OutcomeUnknown,
+    OutcomeUnknownSize,
 }
 impl McpServiceError {
     pub(crate) fn code(self) -> &'static str {
@@ -409,7 +410,7 @@ impl McpServiceError {
             Self::Revoked => "revoked",
             Self::Cancelled => "cancelled",
             Self::TimedOut => "timed_out",
-            Self::OutcomeUnknown => "outcome_unknown",
+            Self::OutcomeUnknown | Self::OutcomeUnknownSize => "outcome_unknown",
         }
     }
     pub(crate) fn diagnostic(self) -> StaticMcpError {
@@ -429,6 +430,7 @@ impl McpServiceError {
             Self::Cancelled => "MCP call cancelled before dispatch",
             Self::TimedOut => "MCP admission deadline reached",
             Self::OutcomeUnknown => "MCP call outcome is unknown; remote effects may have occurred",
+            Self::OutcomeUnknownSize => "MCP response exceeded its size limit. MCP call outcome is unknown; remote effects may have occurred. Use smaller read requests; reconcile write receipts before retrying.",
         }
     }
 }

@@ -45,6 +45,7 @@ struct FakeFactory {
     garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
     garden_search_fixture: Arc<StdMutex<Option<GardenSearchFixture>>>,
     garden_calls: Arc<StdMutex<Vec<(String, serde_json::Value)>>>,
+    garden_graph: Arc<StdMutex<Option<GardenGraphFixture>>>,
     connects: AtomicUsize,
     stdio_launches: StdMutex<Vec<(McpStdioSpec, String)>>,
     hold_calls: AtomicBool,
@@ -57,12 +58,94 @@ struct GardenSearchFixture {
     literal_records: Vec<serde_json::Value>,
     semantic_records: Vec<serde_json::Value>,
 }
+#[derive(Clone)]
+struct GardenGraphFixture {
+    capabilities: serde_json::Value,
+    records: Vec<serde_json::Value>,
+    query_epoch: String,
+    get_epoch: String,
+    deny_reads: bool,
+    hold_remote: Option<String>,
+}
+
+impl GardenGraphFixture {
+    fn reply(&self, call: &McpCall) -> Option<(serde_json::Value, bool)> {
+        if call.remote_name == "mother_get_capabilities" {
+            return Some((self.capabilities.clone(), false));
+        }
+        if !matches!(
+            call.remote_name.as_str(),
+            "mother_garden_query" | "mother_garden_get"
+        ) {
+            return None;
+        }
+        if self.deny_reads {
+            return Some((
+                json!({"error":{"code":"FORBIDDEN","message":"Current garden:read required"}}),
+                true,
+            ));
+        }
+        let identity = json!({"version":2,"workspaceId":self.capabilities["workspace"]["workspaceId"],"generation":self.capabilities["workspace"]["generation"]});
+        let coverage = json!({"complete":true,"truncated":false,"reason":null,"canonicalWatermark":8,
+            "indexWatermark":8,"searchMode":"literal","model":null,"profile":null});
+        let mut response = identity;
+        response["coverage"] = coverage;
+        if call.remote_name == "mother_garden_get" {
+            let reference = &call.arguments["reference"];
+            let record = self.records.iter().find(|r| {
+                r["metadata"]["id"] == reference["id"] && r["draft"]["kind"] == reference["kind"]
+            });
+            response["record"] = record.cloned().unwrap_or(serde_json::Value::Null);
+            response["visibilityEpoch"] = json!(self.get_epoch);
+        } else {
+            let text = call.arguments["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_lowercase();
+            let starts: Vec<_> = call.arguments["traversal"]["start"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r["id"].as_str())
+                .collect();
+            let records: Vec<_> = self
+                .records
+                .iter()
+                .filter(|r| {
+                    if !starts.is_empty() {
+                        return r["draft"]["subject"]["id"]
+                            .as_str()
+                            .is_some_and(|id| starts.contains(&id));
+                    }
+                    r["draft"].to_string().to_lowercase().contains(&text)
+                })
+                .collect();
+            let limit = call.arguments["limit"].as_u64().unwrap_or(4) as usize;
+            response["hits"] = json!(records
+                .iter()
+                .take(limit)
+                .map(|r| json!({"record":r,"sources":[],"scores":{"lexical":1,"vector":null}}))
+                .collect::<Vec<_>>());
+            if records.len() > limit {
+                response["coverage"]["complete"] = json!(false);
+                response["coverage"]["truncated"] = json!(true);
+                response["coverage"]["reason"] = json!("page_limit");
+            }
+            response["page"] = json!({"nextCursor":null,"visibilityEpoch":self.query_epoch,
+                "snapshotId":"synthetic-snapshot","snapshotExpiresAt":"2027-01-01T00:00:00.000Z"});
+        }
+        Some((response, false))
+    }
+}
 struct FakeSession {
     fail_calls: AtomicBool,
+    wire_limit_calls: AtomicBool,
+    hold_after_wire_limit: AtomicBool,
     context_result: Arc<StdMutex<Option<serde_json::Value>>>,
     garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
     garden_search_fixture: Arc<StdMutex<Option<GardenSearchFixture>>>,
     garden_calls: Arc<StdMutex<Vec<(String, serde_json::Value)>>>,
+    garden_graph: Arc<StdMutex<Option<GardenGraphFixture>>>,
     changed_schema: AtomicBool,
     discoveries: AtomicUsize,
     calls: AtomicUsize,
@@ -79,10 +162,13 @@ impl FakeSession {
     fn new(hold: bool, context_result: Arc<StdMutex<Option<serde_json::Value>>>) -> Self {
         Self {
             fail_calls: AtomicBool::new(false),
+            wire_limit_calls: AtomicBool::new(false),
+            hold_after_wire_limit: AtomicBool::new(false),
             context_result,
             garden_records: Default::default(),
             garden_search_fixture: Default::default(),
             garden_calls: Default::default(),
+            garden_graph: Default::default(),
             changed_schema: AtomicBool::new(false),
             discoveries: AtomicUsize::new(0),
             calls: AtomicUsize::new(0),
@@ -130,6 +216,7 @@ impl McpTransportFactory for FakeFactory {
         session.garden_records = self.garden_records.clone();
         session.garden_search_fixture = self.garden_search_fixture.clone();
         session.garden_calls = self.garden_calls.clone();
+        session.garden_graph = self.garden_graph.clone();
         let session = Arc::new(session);
         self.sessions.lock().unwrap().push(session.clone());
         Box::pin(async move { Ok(session as Arc<dyn McpTransportSession>) })
@@ -144,6 +231,7 @@ impl McpTransportSession for FakeSession {
         let changed = self.changed_schema.load(Ordering::SeqCst);
         let context = self.context_result.lock().unwrap().is_some();
         let garden = self.garden_records.lock().unwrap().is_some();
+        let graph = self.garden_graph.lock().unwrap().is_some();
         Box::pin(async move {
             let mut descriptor = if context {
                 prepare_external_tool(
@@ -167,8 +255,25 @@ impl McpTransportSession for FakeSession {
             }
             let mut tools = vec![descriptor];
             if garden {
-                tools.push(prepare_external_tool("mother_search_context","Search synthetic garden",json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"mode":{"type":"string"}},"required":["query"],"additionalProperties":false}),None).unwrap());
+                tools.push(prepare_external_tool("mother_search_context","Search synthetic garden",json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"},"mode":{"type":"string"},"kind":{"type":"string"}},"required":["query"],"additionalProperties":false}),None).unwrap());
                 tools.push(prepare_external_tool("mother_get_record","Read full synthetic record",json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),None).unwrap());
+            }
+            if graph {
+                for name in [
+                    "mother_get_capabilities",
+                    "mother_garden_query",
+                    "mother_garden_get",
+                ] {
+                    tools.push(
+                        prepare_external_tool(
+                            name,
+                            "Synthetic optional graph reader",
+                            json!({"type":"object","additionalProperties":true}),
+                            None,
+                        )
+                        .unwrap(),
+                    );
+                }
             }
             Ok(McpDiscovery {
                 protocol_version: "2025-11-25".into(),
@@ -182,10 +287,25 @@ impl McpTransportSession for FakeSession {
         control: TransportControl,
     ) -> BoxFuture<'static, Result<ExternalToolResult, McpTransportError>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        self.entered.add_permits(1);
-        let hold = self.hold_calls.load(Ordering::SeqCst);
+        let hold = self.hold_calls.load(Ordering::SeqCst)
+            || self
+                .garden_graph
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|graph| {
+                    graph.hold_remote.as_deref() == Some(call.remote_name.as_str())
+                });
         let fail = self.fail_calls.load(Ordering::SeqCst);
+        let wire_limit = self.wire_limit_calls.load(Ordering::SeqCst);
+        let hold_after_wire_limit = self.hold_after_wire_limit.load(Ordering::SeqCst);
+        if wire_limit {
+            control.dispatched.store(true, Ordering::SeqCst);
+            control.note_wire_limit();
+        }
+        self.entered.add_permits(1);
         let mut context = self.context_result.lock().unwrap().clone();
+        let mut is_error = false;
         if let Some(records) = self.garden_records.lock().unwrap().as_ref() {
             self.garden_calls
                 .lock()
@@ -196,14 +316,28 @@ impl McpTransportSession for FakeSession {
                     if let Some(search) = self.garden_search_fixture.lock().unwrap().as_ref() {
                         let literal = call.arguments["mode"] == "literal";
                         let query = call.arguments["query"].as_str().unwrap().to_lowercase();
-                        let source = if literal {
-                            &search.literal_records
-                        } else {
-                            &search.semantic_records
+                        let literal_match = |r: &&serde_json::Value| {
+                            ["title", "content"].iter().any(|key| {
+                                r[key]
+                                    .as_str()
+                                    .is_some_and(|text| text.to_lowercase().contains(&query))
+                            })
                         };
-                        context["records"] = json!(source.iter().filter(|r| !literal ||
+                        let source: Vec<_> = if literal {
+                            search.literal_records.iter().collect()
+                        } else if call.arguments["mode"] == "hybrid" {
+                            search
+                                .literal_records
+                                .iter()
+                                .filter(literal_match)
+                                .chain(search.semantic_records.iter())
+                                .collect()
+                        } else {
+                            search.semantic_records.iter().collect()
+                        };
+                        context["records"] = json!(source.iter().filter(|r| call.arguments["kind"].as_str().is_none_or(|kind| r["kind"]==kind)).filter(|r| !literal ||
                             ["title", "content"].iter().any(|key| r[key].as_str().is_some_and(|text| text.to_lowercase().contains(&query))))
-                            .map(|r| json!({"id":r["id"],"title":r["title"],"revision":r["revision"],"excerpt":r["content"].as_str().unwrap().chars().take(400).collect::<String>(),"truncated":true}))
+                            .map(|r| json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"revision":r["revision"],"excerpt":r["content"].as_str().unwrap().chars().take(400).collect::<String>(),"truncated":true}))
                             .collect::<Vec<_>>());
                         context["search"] = json!({"effectiveMode":if literal {"literal"} else {"hybrid"},
                             "reason":if literal {serde_json::Value::Null} else {json!("index_incomplete")},
@@ -222,14 +356,35 @@ impl McpTransportSession for FakeSession {
                     .cloned();
             }
         }
+        if let Some((value, error)) = self
+            .garden_graph
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|graph| graph.reply(&call))
+        {
+            context = Some(value);
+            is_error = error;
+        }
         if let Some(value) = &mut context {
-            if let Some(records) = value["records"].as_array_mut() {
+            if let Some(records) = value
+                .get_mut("records")
+                .and_then(serde_json::Value::as_array_mut)
+            {
                 if let Some(limit) = call.arguments["limit"].as_u64() {
                     records.truncate(limit as usize);
                 }
             }
         }
         Box::pin(async move {
+            if wire_limit {
+                control.dispatched.store(true, Ordering::SeqCst);
+                control.note_wire_limit();
+                if hold_after_wire_limit {
+                    std::future::pending::<()>().await;
+                }
+                return Err(McpTransportError::WireLimit);
+            }
             if fail {
                 return Err(McpTransportError::Unavailable);
             }
@@ -242,7 +397,7 @@ impl McpTransportSession for FakeSession {
                 text_blocks: vec![context
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "synthetic violet record".into())],
-                is_error: false,
+                is_error,
                 omitted_blocks: 0,
                 shortened: false,
             })

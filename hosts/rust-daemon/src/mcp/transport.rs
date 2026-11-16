@@ -76,16 +76,22 @@ impl std::fmt::Display for McpTransportError {
 }
 impl std::error::Error for McpTransportError {}
 
-#[derive(Debug)]
-pub(crate) struct WireBudget(AtomicUsize);
+#[derive(Debug, Default)]
+pub(crate) struct WireBudget {
+    used: AtomicUsize,
+    limited: AtomicBool,
+}
 impl WireBudget {
     pub(super) fn consume(&self, n: usize) -> Result<(), McpTransportError> {
-        self.0
+        self.used
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
                 old.checked_add(n).filter(|new| *new <= RAW_TOTAL)
             })
             .map(|_| ())
-            .map_err(|_| McpTransportError::WireLimit)
+            .map_err(|_| {
+                self.limited.store(true, Ordering::SeqCst);
+                McpTransportError::WireLimit
+            })
     }
 }
 #[derive(Clone, Debug)]
@@ -101,10 +107,16 @@ impl TransportControl {
         Self {
             deadline,
             cancel,
-            wire_budget: Arc::new(WireBudget(AtomicUsize::new(0))),
+            wire_budget: Arc::new(WireBudget::default()),
             dispatched: Arc::new(AtomicBool::new(false)),
             node_invocation: None,
         }
+    }
+    pub(crate) fn note_wire_limit(&self) {
+        self.wire_budget.limited.store(true, Ordering::SeqCst);
+    }
+    pub(crate) fn wire_limit_observed(&self) -> bool {
+        self.wire_budget.limited.load(Ordering::SeqCst)
     }
     pub(super) fn check(&self) -> Result<(), McpTransportError> {
         if self.cancel.is_cancelled() {
@@ -372,6 +384,9 @@ impl HttpBackend {
         })
     }
     fn failure(&self, error: McpTransportError) -> StreamableHttpError<McpTransportError> {
+        if error == McpTransportError::WireLimit {
+            lock(&self.control).note_wire_limit();
+        }
         *lock(&self.error) = Some(error);
         StreamableHttpError::Client(error)
     }
@@ -555,7 +570,10 @@ impl HttpBackend {
                 match result {
                     Ok(Some(bytes))=>Ok(Some((bytes,(source,limit,active,control,stop,errors)))),
                     Ok(None)=>Ok(None),
-                    Err(error)=>{*lock(&errors)=Some(error);Err(error)},
+                    Err(error)=>{
+                        if error==McpTransportError::WireLimit {control.note_wire_limit();}
+                        *lock(&errors)=Some(error);Err(error)
+                    },
                 }
             }).boxed();
         if is_sse && !accepted {
@@ -1089,7 +1107,28 @@ pub(super) fn bound_sdk_result(
         shortened: omitted_blocks > 0,
     };
     deduplicate_structured_text(&mut result);
-    external_tools::bound_external_result(result, 1024).map_err(|_| McpTransportError::WireLimit)
+    let structured_read = result.structured_data.is_some()
+        && matches!(
+            descriptor.remote_name.as_str(),
+            "mother_get_context"
+                | "mother_search_context"
+                | "mother_get_record"
+                | "mother_get_record_history"
+                | "mother_get_receipt"
+                | "mother_get_proposal"
+                | "mother_get_capabilities"
+                | "mother_garden_get"
+                | "mother_garden_query"
+                | "mother_garden_get_proposal"
+                | "mother_garden_get_receipt"
+                | "mother_garden_changes"
+        );
+    let bounded = external_tools::bound_external_result(result, 1024)
+        .map_err(|_| McpTransportError::WireLimit)?;
+    if structured_read && bounded.structured_data.is_none() {
+        return Err(McpTransportError::WireLimit);
+    }
+    Ok(bounded)
 }
 /// SDKs may repeat structuredContent as an identical JSON text block.
 pub(super) fn deduplicate_structured_text(result: &mut ExternalToolResult) {
@@ -1275,6 +1314,9 @@ impl McpTransportSession for HttpSession {
             let result = control
                 .run(session.clone().call_inner(call, control.clone()))
                 .await;
+            if matches!(&result, Err(McpTransportError::WireLimit)) {
+                control.note_wire_limit();
+            }
             if result.is_err() {
                 session.begin_close();
             }
@@ -1433,6 +1475,31 @@ impl McpTransportFactory for DefaultMcpTransportFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_provider_mother_full_structured_read_has_an_explicit_size_failure() {
+        let descriptor = external_tools::prepare_external_tool(
+            "mother_get_record",
+            "Read complete current record",
+            serde_json::json!({"type":"object","additionalProperties":true}),
+            None,
+        )
+        .unwrap();
+        let data = serde_json::json!({"id":uuid::Uuid::new_v4().to_string(),"kind":"memory","content":"人".repeat(6_000)});
+        let raw = serde_json::json!({"content":[{"type":"text","text":data.to_string()}],"structuredContent":data,"isError":false});
+        assert!(
+            serde_json::to_vec(&raw).unwrap().len() < RAW_EVENT,
+            "fixture fits the wire but exceeds the result envelope"
+        );
+        let result = bound_sdk_result(
+            ServerResult::CallToolResult(serde_json::from_value(raw).unwrap()),
+            &descriptor,
+        );
+        assert!(
+            matches!(result, Err(McpTransportError::WireLimit)),
+            "canonical JSON must never become an unexplained empty partial result"
+        );
+    }
     use axum::{
         extract::State,
         response::{IntoResponse, Response},
@@ -2423,7 +2490,8 @@ mod tests {
         assert_eq!(session.0.backend.activity.count.load(Ordering::SeqCst), 0);
     }
     #[tokio::test]
-    async fn actual_chunked_json_and_sse_wire_overflow_fail_before_deserialization() {
+    async fn memory_provider_actual_chunked_json_and_sse_wire_overflow_latches_before_deserialization(
+    ) {
         for sse in [false, true] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
@@ -2459,16 +2527,24 @@ mod tests {
             let server = tokio::spawn(async move {
                 axum::serve(listener, app).await.unwrap();
             });
+            let ctl = control(5);
             let result = DefaultMcpTransportFactory::default()
                 .connect(
                     ValidatedMcpLaunch::Http(ValidatedMcpEndpoint(format!("http://{addr}/mcp"))),
-                    control(5),
+                    ctl.clone(),
                 )
                 .await;
             assert!(
                 matches!(result, Err(McpTransportError::WireLimit)),
                 "raw overflow must precede malformed JSON/SSE parsing"
             );
+            assert!(ctl.wire_limit_observed());
+            ctl.cancel.cancel();
+            assert!(
+                ctl.wire_limit_observed(),
+                "later cancellation must not erase the raw cause"
+            );
+            assert!(!control(5).wire_limit_observed());
             server.abort();
             let _ = server.await;
         }

@@ -1026,7 +1026,18 @@ fn registry_defines_every_registered_tool_schema() {
         ("list_helper_runs", &[][..], &["run_id", "limit"][..]),
         ("steer_helper", &["run_id", "message"][..], &[][..]),
         ("stop_helper", &["run_id"][..], &[][..]),
-        ("memory_search", &["query"][..], &["limit"][..]),
+        (
+            "memory_search",
+            &["query"][..],
+            &[
+                "limit",
+                "source",
+                "mode",
+                "kind",
+                "exact_names",
+                "include_graph",
+            ][..],
+        ),
         ("memory_add", &["content"][..], &["type", "importance"][..]),
         (
             "core_memory",
@@ -4228,6 +4239,34 @@ async fn memory_search_vector_only_owned_fact_survives_higher_foreign_and_hidden
     assert!(excluded
         .iter()
         .all(|record| !data.text.contains(&record.id)));
+}
+
+#[tokio::test]
+async fn multilingual_recall_explicit_mother_source_never_silently_searches_native() {
+    let (context, agent, message) = memory_correction_fixture(None);
+    seed_correction_memory(&context, &agent.id, "Native-only private sentinel").await;
+    let result = super::memory::execute_memory_search(
+        context,
+        agent,
+        message,
+        ToolCall {
+            id: "explicit-provider-without-binding".into(),
+            name: "memory_search".into(),
+            args: BTreeMap::from([
+                (
+                    "query".into(),
+                    DataValue::String("Native-only private sentinel".into()),
+                ),
+                ("source".into(), DataValue::String("mother".into())),
+            ]),
+        },
+    )
+    .await;
+    assert_eq!(
+        result.status,
+        TaskStatus::Error,
+        "an unavailable provider must not return native matches"
+    );
 }
 
 #[tokio::test]

@@ -4,6 +4,9 @@ use anima_core::{Content, DataValue, TaskResult, TaskStatus};
 use serde_json::Value;
 use std::path::Path;
 
+#[path = "graph_provider_acceptance.rs"]
+mod graph_provider_acceptance;
+
 const GRAPH_TOOLS: [&str; 7] = [
     "mother_garden_get",
     "mother_garden_query",

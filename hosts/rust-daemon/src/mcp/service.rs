@@ -2462,11 +2462,20 @@ impl McpManager {
             Err(error) => Err(error),
         };
         if final_result.is_err() {
+            let reason = if control.wire_limit_observed()
+                || matches!(
+                    final_result.as_ref(),
+                    Err(McpServiceError::OutcomeUnknownSize)
+                ) {
+                McpServiceError::OutcomeUnknownSize
+            } else {
+                McpServiceError::OutcomeUnknown
+            };
             control.cancel.cancel();
             let _ = self.retire_if_generation(
                 &stamp.connection_id,
                 stamp.wire_generation,
-                Some(McpServiceError::OutcomeUnknown),
+                Some(reason),
             );
             // Even a poisoned publication cannot release unjoined physical work.
             let generation = self
@@ -2486,7 +2495,7 @@ impl McpManager {
                 stamp.connection_id.clone(),
                 generation,
             );
-            return Err(McpServiceError::OutcomeUnknown);
+            return Err(reason);
         }
         drop(permits);
         let mut result = final_result?;
@@ -2565,6 +2574,7 @@ fn transport_error(error: McpTransportError) -> McpServiceError {
         McpTransportError::Cancelled => McpServiceError::Cancelled,
         McpTransportError::TimedOut => McpServiceError::TimedOut,
         McpTransportError::OutcomeUnknown => McpServiceError::OutcomeUnknown,
+        McpTransportError::WireLimit => McpServiceError::OutcomeUnknownSize,
         _ => McpServiceError::Unavailable,
     }
 }

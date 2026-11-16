@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 #[path = "record_selection_tests.rs"]
 mod record_selection_tests;
 
+#[path = "graph_read_tests.rs"]
+mod graph_read_tests;
+
 fn context(agent: &str) -> serde_json::Value {
     let persona = "Remote companion persona sentinel";
     json!({"access":{"version":1,"mode":"companion","subject":agent},"workspace":{"id":"workspace","generation":"generation"},"persona":{"content":persona,"hash":hex::encode(Sha256::digest(persona))},"records":[{"content":"Workspace reference sentinel"}]})
@@ -202,17 +205,28 @@ async fn memory_provider_mother_full_recall_checks_revision_authority_and_keeps_
         "garden".into(),
     )
     .await;
-    let result = source.current(&agent).await;
-    assert!(result.identity.is_none());
-    assert!(
-        result.reference.contains("Full garden memory sentinel"),
-        "{}",
-        result.reference
-    );
-    assert!(result.reference.contains("other-harness"));
-    assert!(result.reference.contains("revision"));
+    let bootstrap = source.current(&agent).await;
+    assert!(bootstrap.identity.is_none());
+    assert!(!bootstrap.reference.contains("Full garden memory sentinel"));
+    let plan = || {
+        crate::memory_provider::mother::RecallPlan::search("garden", "hybrid", None, &[]).unwrap()
+    };
+    let result = source
+        .search_shared(&agent.id, plan(), 4, false)
+        .await
+        .unwrap();
+    assert!(result
+        .items
+        .iter()
+        .any(|r| r.text.contains("Full garden memory sentinel")
+            && r.text.contains("other-harness")
+            && r.text.contains("revision")));
     f.factory.context_result.lock().unwrap().as_mut().unwrap()["workspace"]["generation"] =
         json!("restored");
+    assert!(source
+        .search_shared(&agent.id, plan(), 4, false)
+        .await
+        .is_err());
     let result = source.current(&agent).await;
     assert!(result.reference.contains("Shared garden unavailable"));
     assert!(!result.reference.contains("Full garden memory sentinel"));
@@ -427,6 +441,10 @@ async fn memory_provider_additive_online_then_revoked_keeps_native_recall_and_ca
         Step::Tools(vec![search_call("revoked-native-search")]),
         Step::Text(vec!["revoked complete"]),
     ]);
+    // This fixture explicitly selects a core record; bootstrap no longer guesses
+    // a topic from conversation wording.
+    f.factory.context_result.lock().unwrap().as_mut().unwrap()["pinned"] =
+        json!([{"id":remote_id}]);
     f.state.write().await.model_adapter = model.clone();
     let runs =
         crate::agent_runs::AgentRunCoordinator::new(f.state.clone(), Arc::new(Semaphore::new(4)))

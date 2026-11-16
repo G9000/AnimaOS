@@ -39,6 +39,12 @@ const LOCAL_PROVIDER: &str = "local";
 const LOCAL_MODEL: &str = "local-semantic-v1";
 const FASTEMBED_PROVIDER: &str = "fastembed";
 const DEFAULT_FASTEMBED_MODEL: &str = "intfloat/multilingual-e5-small";
+
+#[cfg(test)]
+#[path = "memory_embeddings_multilingual_tests.rs"]
+mod multilingual_acceptance;
+#[cfg(test)]
+pub(crate) use multilingual_acceptance::cached_multilingual;
 const OPENAI_PROVIDER: &str = "openai";
 const OPENAI_COMPATIBLE_PROVIDER: &str = "openai-compatible";
 const OLLAMA_PROVIDER: &str = "ollama";

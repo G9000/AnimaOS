@@ -3,8 +3,8 @@
 Scope: A1 binding and conversion, A2 agent-bound recall/native-memory retention,
 A3/A4 durable selected sharing and approval reconciliation, and the A5
 configuration/status UI. A7 cross-harness approval acceptance is recorded below.
-Pairing-app default changes (G1) and temporal graph capabilities (A6) remain
-separate work. Installed native pairing maintenance is recorded below.
+Pairing-app default changes (G1) remain separate work. The first read-only A6
+temporal-graph slice and installed native pairing maintenance are recorded below.
 
 ## Implemented behavior
 
@@ -290,6 +290,122 @@ This is full application-process restart acceptance using the login command, not
 an actual Windows reboot. No model prompt, real sharing proposal, owner approval
 or browser visual test was used as a deployment check. Private backups and repair
 evidence remain outside Git.
+
+## A6 read-only graph slice (2026-11-16)
+
+Record selection was merged and pushed first at `c9ddf98`; live `origin/main`
+readback confirmed that commit. A6 source is on `g9000/mother-graph-read` and is
+not installed in the live profile. The installed selection executable and all
+existing agent bindings, native memory and explicit selected-sharing behavior
+are preserved.
+
+The adapter supplements its existing v1 bootstrap/recall only when capability,
+query and Get descriptors were already reviewed on the selected connection and
+the available v2 query contract is advertised. Capability availability does not
+authorize graph reads; Mother checks independent `garden:read` on every query/Get.
+No live grant or tool review is added by the adapter or this validation.
+
+Queries and current Gets retain original typed graph records, valid/observed/
+transaction times, attribution and optional extensions. Core schema/semantic
+validation, consistent epoch/watermark checks and fresh subject reads reject
+malformed or mixed snapshots. Query coverage and next-page status remain visible.
+Typed graph locators distinguish graph references from v1 record IDs. Selection
+stays within four complete items/8 KiB and the same three-second absolute limit.
+There is no graph write, proposal, persistent cursor or graph cache in this slice.
+
+Development evidence is retained privately: the first graph regression run had
+three passes/four failures; the first implementation had 43 passes/one failure.
+That failure demonstrated that a canceled entered MCP call retires its connection.
+The adapter therefore withholds all shared results if final authority cannot be
+validated, retaining native fallback and existing fresh-turn recovery. A review
+finding on core wire validation reproduced as one pass/eight failures and then
+passed all nine pure-module checks. An earlier compile-only failure is retained
+separately and is not counted as a behavioral regression. Read-only final source
+review found no remaining P1/P2 issues. All 55 integrated focused checks passed.
+The real native executable acceptance also passed on a disposable synthetic
+store: automatic typed neighbor recall, another harness's correction, retained
+historical revision, propose-only scope denial and unchanged native fact.
+It used no installed private client configuration or live database. The initial
+native fixture was rejected because a Windows temp ancestor allowed replacement;
+the same test passed under an owner-private root with ownership checks intact.
+The full `bun run rust:test` retry, `bun run rust:lint` and locked bundled native
+build (`bundled-ui,rust-embed/debug-embed`) passed at the same Rust source hashes
+as the focused and native acceptance checks. Existing warnings remain.
+The full retry recorded 6,001 passes, zero failures and 68 ignored tests across
+115 groups. The native graph acceptance above was selected explicitly in its
+separate run. Qualification retained a bundled executable privately; it did not
+install A6, widen live graph grants or run a live model conversation for graph
+recall. Graph write/proposal mapping and persistent change-feed caching remain
+later slices. The completed plan and private qualification manifest record source
+hashes, failed trials, preservation checks and completed owned-scratch cleanup.
+The first full run ended with code 4 during an existing compaction test, without
+an assertion failure, around a temporary tool-host disconnection. That exact
+test passed separately on unchanged source. The interrupted log is retained;
+its cause is unconfirmed and it is not counted as a passing full run.
+
+Read-only preservation checks confirmed all 375 original native memories, five
+entities, 1,363 messages and nine attachments unchanged. The existing profile has
+378 memories and 1,408 messages at the first audit. The post-test audit had
+382 memories and 1,422 messages, retaining every original entry. Metadata shows
+four additional private runtime task results for the existing Mother agent;
+their initiating activity was not inspected. This task initiated no live model
+conversation. All four agent configurations, profile settings/credentials, selected
+sharing queue/mappings and installed selection binary match their snapshots.
+Mother MCP verified all 175 original records and 290 original historical snapshots
+with no differences, plus successful reads through all seven existing clients.
+Its native generation, installed binary and historical archive remain unchanged.
+
+## Bounded reads and citation recall (17 November 2026)
+
+Mother's native direct server and owner-service bridge now bound whole navigation
+previews to 12 KiB of compact UTF-8 JSON and read replies to 48 KiB of serialized
+MCP output. Required context and canonical records remain whole or return an
+explicit size error. Category balance, inventory, search coverage and omission
+counts survive byte trimming. The live existing-client `limit: 100` read produced
+24,148 wire bytes, with 185 stored records and 140 recallable records reported
+independently of its two returned previews. No database migration or grant change
+was used. The qualified Mother artifact contains the bounded-read patch on its
+native-only base; separate garden-explorer work remains preserved and excluded.
+
+AnimaOS keeps native memory and local intelligence active. Personal queries use
+bounded memory-category searches, whole-word and requested-species checks, and
+retain explicit named-topic constraints. Citation acronyms such as `record ID`
+cannot override an Owner query's subject; genuine technical topics remain intact.
+Health/inventory requests avoid discovering unrelated private facts. Size failures
+retain their cause and `outcome_unknown`, connection retirement and physical
+cleanup; unknown mutations are never replayed automatically.
+
+Windows qualification passed at frozen per-codebase source hashes: Mother fmt,
+218 tests (five opt-in tests ignored), locked release build, strict Clippy and the
+normal/build dependency audit excluding SQLite; AnimaOS full Rust tests with
+6,019 passes, zero failures and 69 ignored tests across 115 groups, lint and the
+locked bundled build. Three native interoperability cases were then selected
+explicitly and passed. They include real native personal recall with citation
+wording, a large synthetic persona and older facts behind substring distractors.
+The separate 100-record native fixture verified both direct and service-bridge
+wire bounds and whole-record-or-explicit-error reads. Existing lint warnings remain.
+
+The first approved Discord exchange confirmed bounded search and native recall,
+but exposed the citation-acronym bug. After its narrow fix was qualified, installed
+and restart-verified, the owner explicitly approved one additional exchange. The
+identical diagnostic then discovered and read the correct current Mother record,
+cited its ID and revision, recalled the stored pet name, successfully used native
+memory search and received a settled Discord delivery receipt. Neither the answer,
+record ID nor exact Mother tool name was supplied in either prompt. Only discovery
+and reads executed; no garden publication or proposal occurred. Private facts,
+transcripts and record IDs remain outside this repository.
+
+The final audit verified all 175 original Mother IDs, 290 archival historical
+snapshots and seven unchanged clients. Its generation is unchanged. Nine later
+excluded checkpoints cannot be enumerated through ordinary MCP; that navigation
+coverage limit is recorded privately. All 382 original native memories, five
+entities, 1,422 messages and nine attachments remain unchanged. The final native
+store has 385 memories and 1,440 messages; new memory entries are private. Agent
+configurations and selected-sharing tables remain unchanged. Actual supervisor
+and daemon images, both additive pairings and the served bundled UI were verified
+after clean supervisor restarts. This was not a full Windows reboot. Existing live
+graph grants were preserved. Backups, failed trials, source hashes, binaries and
+delivery/preservation receipts are retained privately; source remains unpublished.
 
 ## Limits
 

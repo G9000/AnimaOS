@@ -1,159 +1,10 @@
-//! Selected garden evidence must match the requested topic, not just semantic proximity.
+//! Model-authored searches retain complete-record and authority boundaries.
 use super::*;
-use anima_memory::ExternalMemoryProvider;
 use serde_json::Value;
-
-#[tokio::test]
-async fn memory_provider_mother_selection_large_preview_window_retries_smaller_complete_window() {
-    let right = record(
-        "AsterOS native startup published",
-        &format!(
-            "AsterOS native login startup and cold restart verified. Budget-topic sentinel. {}",
-            "x".repeat(350)
-        ),
-    );
-    let mut records = vec![right];
-    records.extend((0..7).map(|i| {
-        record(
-            &format!("AsterOS reference {i}"),
-            &format!("AsterOS reference note. {}", "y".repeat(390)),
-        )
-    }));
-    let (f, agent) = selection_fixture(records.clone(), records, vec![]).await;
-    {
-        let persona = "p".repeat(11_000);
-        let mut context = f.factory.context_result.lock().unwrap();
-        context.as_mut().unwrap()["persona"] =
-            json!({"content":persona,"hash":hex::encode(Sha256::digest(persona.as_bytes()))});
-    }
-    let source = crate::workspace_context::WorkspaceRunContext::load_for_query(
-        f.state.clone(),
-        Some(f.manager.clone()),
-        &agent,
-        &run(&f),
-        CancelSignal::new(),
-        "Check Mother AsterOS native login startup and cold restart".into(),
-    )
-    .await;
-    let context = source.current(&agent).await;
-    assert!(
-        context.reference.contains("Budget-topic sentinel"),
-        "{}",
-        context.reference
-    );
-    assert!(!context.reference.contains("Shared garden unavailable"));
-    assert!(
-        context.withheld_tools.is_empty(),
-        "partial search must not disable authorized readers after a complete bounded retry"
-    );
-    let searches: Vec<_> = f
-        .factory
-        .garden_calls
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(name, _)| name == "mother_search_context")
-        .map(|(_, args)| args.clone())
-        .collect();
-    assert!(searches.iter().any(|args| args["limit"] == 8));
-    assert!(searches.iter().any(|args| args["limit"] == 4));
-    assert!(searches.len() <= 2);
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_shared_topic_wins_over_separate_native_query_phrase() {
-    let native = record(
-        "Native citation note",
-        "foundation and repo native memory citation blocker. Separate-query sentinel.",
-    );
-    let project=record("AsterOS additive startup published","AsterOS additive-provider implementation published; native login startup and cold restart verified. Shared-topic sentinel.");
-    let records = vec![native, project];
-    let (f, agent) = selection_fixture(records.clone(), records, vec![]).await;
-    let query="Read-only recall diagnostic. Check Mother shared memories about publishing the AsterOS additive-provider implementation and verifying native login startup and cold restarts. Also search your own native memory for the exact phrase \"foundation and repo\" and report its citation blocker.";
-    let items = recall(&f, &agent, query, 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Shared-topic sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_event_in_content_beats_unrelated_title() {
-    let theme = record(
-        "AsterOS theme",
-        "AsterOS palette adjusted. Unrelated-theme sentinel.",
-    );
-    let event = record(
-        "Native startup verified",
-        "AsterOS native login cold restart verified. Event-content sentinel.",
-    );
-    let records = vec![theme, event];
-    let (f, agent) = selection_fixture(records.clone(), records, vec![]).await;
-    let items = recall(&f, &agent, "Check AsterOS native login cold restart", 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Event-content sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_quoted_topic_beats_protocol_acronym() {
-    let wrong = record(
-        "MCP transport",
-        "MCP native startup verified. Protocol-only sentinel.",
-    );
-    let right = record(
-        "lilt startup",
-        "lilt native startup verified. Quoted-topic sentinel.",
-    );
-    let (f, agent) = selection_fixture(
-        vec![wrong.clone(), right.clone()],
-        vec![wrong.clone(), right],
-        vec![wrong],
-    )
-    .await;
-    let items = recall(&f, &agent, "Use MCP to recall \"lilt\" native startup", 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Quoted-topic sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_mixed_case_project_beats_protocol_acronyms() {
-    let wrong = record(
-        "API UI startup",
-        "API UI startup verified. Protocol-only sentinel.",
-    );
-    let right = record(
-        "AsterOS startup",
-        "AsterOS startup verified. Explicit-project sentinel.",
-    );
-    let (f, agent) = selection_fixture(
-        vec![wrong.clone(), right.clone()],
-        vec![wrong.clone(), right],
-        vec![wrong],
-    )
-    .await;
-    let items = recall(&f, &agent, "API UI AsterOS startup", 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Explicit-project sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
+#[path = "multilingual_recall_tests.rs"]
+mod multilingual_recall_tests;
+#[path = "personal_recall_tests.rs"]
+mod personal_recall_tests;
 
 fn record(title: &str, content: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"revision":2,"title":title,"content":content,
@@ -206,40 +57,48 @@ async fn selection_fixture(
     (f, agent)
 }
 
-async fn recall(
+async fn planned_recall(
     f: &Fixture,
     agent: &anima_core::AgentState,
     query: &str,
+    mode: &str,
+    kind: Option<&str>,
+    names: &[&str],
     limit: usize,
-) -> Vec<anima_memory::RecalledItem> {
-    let provider = crate::memory_provider::mother::MotherProvider::new(
+) -> crate::memory_provider::mother::SharedRecall {
+    let source = crate::workspace_context::WorkspaceRunContext::load_for_query(
         f.state.clone(),
-        f.manager.clone(),
-        crate::memory_provider::binding::binding(&agent.config)
-            .unwrap()
-            .unwrap(),
-        agent.clone(),
-        run(f),
+        Some(f.manager.clone()),
+        agent,
+        &run(f),
         CancelSignal::new(),
-    );
-    provider
-        .recall(anima_memory::RecallRequest {
-            agent_id: agent.id.clone(),
-            query: query.into(),
+        String::new(),
+    )
+    .await;
+    source
+        .search_shared(
+            &agent.id,
+            crate::memory_provider::mother::RecallPlan::search(
+                query,
+                mode,
+                kind,
+                &names.iter().map(|n| (*n).into()).collect::<Vec<_>>(),
+            )
+            .unwrap(),
             limit,
-            deadline: Duration::from_secs(3),
-        })
+            false,
+        )
         .await
         .unwrap()
 }
 
 #[tokio::test]
 async fn memory_provider_mother_selection_exact_topic_recovers_from_partial_semantic_index() {
-    let wrong = record(
-        "Aster v1 browser review",
-        "Aster browser acceptance is underway. Wrong-project sentinel.",
+    let wrong = record("Aster browser", "Wrong-project sentinel.");
+    let right = record(
+        "AsterOS startup",
+        "Native login cold restart verified. Correct-project sentinel.",
     );
-    let right = record("AsterOS additive startup published", "AsterOS additive-provider implementation published; native login startup and cold restart verified. Correct-project sentinel.");
     let (f, agent) = selection_fixture(
         vec![wrong.clone(), right.clone()],
         vec![wrong.clone(), right.clone()],
@@ -247,37 +106,29 @@ async fn memory_provider_mother_selection_exact_topic_recovers_from_partial_sema
     )
     .await;
     let before = serde_json::to_value(f.state.read().await.control_plane_snapshot()).unwrap();
-    let query = format!("Read-only recall diagnostic. {} Check Mother shared memories about publishing the AsterOS additive-provider implementation and verifying native login startup and cold restarts.", "Find the appropriate shared evidence without guessing. ".repeat(5));
-    let items = recall(&f, &agent, &query, 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Correct-project sentinel"),
-        "{}",
-        items[0].text
+    // The conversation model chooses an exact entity search after incomplete semantics.
+    let partial = planned_recall(
+        &f,
+        &agent,
+        "混合语言 startup",
+        "semantic",
+        None,
+        &["AsterOS"],
+        4,
+    )
+    .await;
+    assert!(partial.items.is_empty());
+    assert_eq!(
+        partial.coverage["searches"][0]["search"]["reason"],
+        "index_incomplete"
     );
-    assert!(!items[0].text.contains("Wrong-project sentinel"));
-    assert!(items[0]
+    let found = planned_recall(&f, &agent, "AsterOS", "literal", None, &["AsterOS"], 1).await;
+    assert!(found.items[0].text.contains("Correct-project sentinel"));
+    assert!(found.items[0]
         .source_id
         .as_ref()
         .unwrap()
         .ends_with(&format!("/{}@2", right["id"].as_str().unwrap())));
-    let calls = f.factory.garden_calls.lock().unwrap().clone();
-    assert!(calls
-        .iter()
-        .any(|(name, args)| name == "mother_search_context"
-            && args["mode"] == "literal"
-            && args["query"] == "AsterOS"));
-    assert!(
-        calls
-            .iter()
-            .filter(|(name, _)| name == "mother_search_context")
-            .count()
-            <= 3
-    );
-    assert!(calls.iter().all(|(name, _)| matches!(
-        name.as_str(),
-        "mother_get_context" | "mother_search_context" | "mother_get_record"
-    )));
     assert_eq!(
         serde_json::to_value(f.state.read().await.control_plane_snapshot()).unwrap(),
         before
@@ -286,53 +137,18 @@ async fn memory_provider_mother_selection_exact_topic_recovers_from_partial_sema
 }
 
 #[tokio::test]
-async fn memory_provider_mother_selection_intent_beats_newer_same_project_preview() {
-    let theme = record(
-        "AsterOS theme updated",
-        "AsterOS theme palette adjusted. Unrelated-theme sentinel.",
-    );
-    let mut release = record("AsterOS native login startup published", "AsterOS additive-provider implementation published; native login startup and cold restart verified. Older-release sentinel.");
-    release["updatedAt"] = json!("2026-11-01T00:00:00.000Z");
-    let (f, agent) = selection_fixture(
-        vec![theme.clone(), release.clone()],
-        vec![theme.clone(), release],
-        vec![theme],
-    )
-    .await;
-    let items = recall(
-        &f,
-        &agent,
-        "What did we publish for AsterOS additive-provider native login startup and cold restart?",
-        1,
-    )
-    .await;
-    assert_eq!(items.len(), 1);
+async fn memory_provider_mother_selection_rechecks_topic_in_current_full_record() {
+    let preview = record("AsterOS startup", "AsterOS evidence");
+    let mut current = preview.clone();
+    current["title"] = json!("OtherProject");
+    current["content"] = json!("OtherProject replaced the attribution");
+    current["revision"] = json!(3);
+    let (f, agent) = selection_fixture(vec![current], vec![preview], vec![]).await;
     assert!(
-        items[0].text.contains("Older-release sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_similar_project_name_is_not_exact_evidence() {
-    let wrong = record(
-        "Aster v1 native startup",
-        "Aster implementation published and cold restart verified. Wrong-project sentinel.",
-    );
-    let (f, agent) = selection_fixture(vec![wrong.clone()], vec![wrong.clone()], vec![wrong]).await;
-    let items = recall(
-        &f,
-        &agent,
-        "Find AsterOS native startup and cold restart evidence",
-        4,
-    )
-    .await;
-    assert!(
-        items.is_empty(),
-        "similar project must not establish recall: {}",
-        items[0].text
+        planned_recall(&f, &agent, "AsterOS", "literal", None, &["AsterOS"], 4)
+            .await
+            .items
+            .is_empty()
     );
     f.manager.shutdown().await;
 }
@@ -340,204 +156,154 @@ async fn memory_provider_mother_selection_similar_project_name_is_not_exact_evid
 #[tokio::test]
 async fn memory_provider_mother_selection_literal_hit_after_excerpt_still_resolves_full_record() {
     let right = record(
-        "Native startup evidence",
+        "Native startup",
         &format!(
-            "{} AsterOS native login and cold restart verified. Late-topic sentinel.",
-            "Synthetic background. ".repeat(30)
+            "{} AsterOS verified. Late-topic sentinel.",
+            "Background. ".repeat(60)
         ),
     );
-    let wrong = record(
-        "Aster browser service",
-        "Aster browser acceptance underway.",
-    );
-    let (f, agent) =
-        selection_fixture(vec![wrong.clone(), right.clone()], vec![right], vec![wrong]).await;
-    let items = recall(
-        &f,
-        &agent,
-        "Check AsterOS native login and cold restart evidence",
-        1,
-    )
-    .await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Late-topic sentinel"),
-        "{}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_rechecks_topic_in_current_full_record() {
-    let preview = record("AsterOS native startup", "AsterOS native startup evidence.");
-    let mut current = preview.clone();
-    current["title"] = json!("OtherProject startup");
-    current["content"] = json!("OtherProject replaced the old attribution. Stale-topic sentinel.");
-    current["revision"] = json!(3);
-    let (f, agent) = selection_fixture(vec![current], vec![preview.clone()], vec![preview]).await;
-    let items = recall(&f, &agent, "Check AsterOS native startup evidence", 1).await;
-    assert!(
-        items.is_empty(),
-        "stale preview must not authorize unrelated current evidence: {}",
-        items[0].text
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_prompt_context_contains_current_topic_without_record_id()
-{
-    let wrong = record(
-        "Aster v1 service",
-        "Aster browser review only. Wrong-project sentinel.",
-    );
-    let right = record("AsterOS additive implementation published", "AsterOS additive-provider native login startup and cold restart verified. Full-topic sentinel.");
-    let (f, agent) = selection_fixture(
-        vec![wrong.clone(), right.clone()],
-        vec![wrong.clone(), right],
-        vec![wrong],
-    )
-    .await;
-    let source = crate::workspace_context::WorkspaceRunContext::load_for_query(
-        f.state.clone(),Some(f.manager.clone()),&agent,&run(&f),CancelSignal::new(),
-        "Check Mother shared memories about AsterOS additive-provider native login startup and cold restart".into()).await;
-    let context = source.current(&agent).await;
-    assert!(
-        context.identity.is_none(),
-        "local identity must remain independent"
-    );
-    assert!(context.reference.contains("ADDITIVE memory provider"));
-    assert!(
-        context.reference.contains("Full-topic sentinel"),
-        "{}",
-        context.reference
-    );
-    assert!(!context.reference.contains("Wrong-project sentinel"));
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_older_exact_topic_survives_newer_prefix_previews() {
-    let mut records: Vec<_> = (0..5)
-        .map(|index| {
-            record(
-                &format!("AsterOS{index} startup"),
-                "Similar prefix implementation only.",
-            )
-        })
-        .collect();
-    let right = record(
-        "AsterOS native startup published",
-        "AsterOS native login and cold restart verified. Exact-topic sentinel.",
-    );
-    records.push(right);
-    let (f, agent) =
-        selection_fixture(records.clone(), records.clone(), vec![records[0].clone()]).await;
-    let items = recall(&f, &agent, "Find AsterOS native login and cold restart", 1).await;
-    assert_eq!(items.len(), 1);
-    assert!(
-        items[0].text.contains("Exact-topic sentinel"),
-        "{}",
-        items[0].text
-    );
-    assert!(
-        f.factory
-            .garden_calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(name, _)| name == "mother_get_record")
-            .count()
-            <= 4
-    );
-    f.manager.shutdown().await;
-}
-
-#[tokio::test]
-async fn memory_provider_mother_selection_owner_context_keeps_precedence_and_deduplicates_ids() {
-    let pinned = record("Owner core", "Owner-pinned sentinel.");
-    let assigned = record("Owner assignment", "Owner-assigned sentinel.");
-    let right = record(
-        "AsterOS startup",
-        "AsterOS native startup verified. Topic sentinel.",
-    );
-    let (f, agent) = selection_fixture(
-        vec![pinned.clone(), assigned.clone(), right.clone()],
-        vec![right.clone(), right.clone()],
-        vec![],
-    )
-    .await;
-    {
-        let mut context = f.factory.context_result.lock().unwrap();
-        let context = context.as_mut().unwrap();
-        context["pinned"] = json!([pinned]);
-        context["assignedToYou"] = json!([assigned, right]);
-    }
-    let items = recall(&f, &agent, "Check AsterOS native startup", 4).await;
-    assert_eq!(items.len(), 3);
-    for (item, sentinel) in items.iter().zip([
-        "Owner-pinned sentinel",
-        "Owner-assigned sentinel",
-        "Topic sentinel",
-    ]) {
-        assert!(item.text.contains(sentinel), "{}", item.text);
-    }
-    assert_eq!(
-        f.factory
-            .garden_calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(name, _)| name == "mother_get_record")
-            .count(),
-        3
-    );
+    let (f, agent) = selection_fixture(vec![right.clone()], vec![right], vec![]).await;
+    let r = planned_recall(&f, &agent, "AsterOS", "literal", None, &["AsterOS"], 1).await;
+    assert!(r.items[0].text.contains("Late-topic sentinel"));
     f.manager.shutdown().await;
 }
 
 #[tokio::test]
 async fn memory_provider_mother_selection_complete_record_budget_is_not_a_truncation_budget() {
-    let records: Vec<_> = (0..2)
-        .map(|index| {
+    let values: Vec<_> = (0..2)
+        .map(|i| {
             record(
-                "AsterOS native startup",
-                &format!(
-                    "AsterOS native startup {} Complete-record-{index} sentinel.",
-                    "x".repeat(4_200)
-                ),
+                "AsterOS",
+                &format!("{} Complete-record-{i} sentinel.", "x".repeat(4200)),
             )
         })
         .collect();
-    let (f, agent) = selection_fixture(records.clone(), records, vec![]).await;
-    let items = recall(&f, &agent, "Check AsterOS native startup", 4).await;
-    assert_eq!(items.len(), 1);
-    assert!(items.iter().map(|item| item.text.len()).sum::<usize>() <= 8 * 1024);
-    assert!(items[0].text.contains("Complete-record-0 sentinel."));
+    let (f, agent) = selection_fixture(values.clone(), values, vec![]).await;
+    let r = planned_recall(&f, &agent, "AsterOS", "literal", None, &[], 4).await;
+    assert_eq!(r.items.len(), 1);
+    assert!(r.items[0].text.contains("Complete-record-0 sentinel."));
+    assert!(r.items.iter().map(|i| i.text.len()).sum::<usize>() <= 8192);
+    assert_eq!(r.coverage["excludedResolvedRecords"], 1);
     f.manager.shutdown().await;
 }
 
 #[tokio::test]
 async fn memory_provider_mother_selection_preserves_attributed_contradictions_and_excludes_retractions(
 ) {
-    let mut first = record("AsterOS native startup", "AsterOS startup uses port5151.");
-    first["actor"] = json!("synthetic-first-harness");
-    let mut second = record("AsterOS native startup", "AsterOS startup uses port6161.");
-    second["actor"] = json!("synthetic-second-harness");
-    let mut old = record(
-        "AsterOS native startup",
-        "AsterOS startup uses retired port7171.",
-    );
+    let mut a = record("AsterOS", "Port5151");
+    a["actor"] = json!("first-harness");
+    let mut b = record("AsterOS", "Port6161");
+    b["actor"] = json!("second-harness");
+    let mut old = record("AsterOS", "Port7171");
     old["status"] = json!("retracted");
-    let records = vec![old, first, second];
-    let (f, agent) = selection_fixture(records.clone(), records, vec![]).await;
-    let items = recall(&f, &agent, "Check AsterOS native startup", 4).await;
-    assert_eq!(items.len(), 2);
-    assert!(
-        items[0].text.contains("port5151") && items[0].text.contains("synthetic-first-harness")
+    let (f, agent) = selection_fixture(
+        vec![old.clone(), a.clone(), b.clone()],
+        vec![old, a, b],
+        vec![],
+    )
+    .await;
+    let r = planned_recall(&f, &agent, "AsterOS", "literal", None, &[], 4).await;
+    assert_eq!(r.items.len(), 2);
+    assert!(r
+        .items
+        .iter()
+        .any(|r| r.text.contains("first-harness") && r.text.contains("5151")));
+    assert!(r
+        .items
+        .iter()
+        .any(|r| r.text.contains("second-harness") && r.text.contains("6161")));
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn memory_provider_mother_selection_large_preview_window_retries_smaller_complete_window() {
+    let values: Vec<_> = (0..8)
+        .map(|i| record("AsterOS", &format!("Budget-{i} {}", "x".repeat(600))))
+        .collect();
+    let (f, agent) = selection_fixture(values.clone(), values, vec![]).await;
+    let persona = "p".repeat(11000);
+    f.factory.context_result.lock().unwrap().as_mut().unwrap()["persona"] =
+        json!({"content":persona,"hash":hex::encode(Sha256::digest(persona.as_bytes()))});
+    let r = planned_recall(&f, &agent, "AsterOS", "literal", None, &[], 4).await;
+    assert!(!r.items.is_empty());
+    let calls = f.factory.garden_calls.lock().unwrap().clone();
+    let searches: Vec<_> = calls
+        .iter()
+        .filter(|(n, _)| n == "mother_search_context")
+        .collect();
+    assert_eq!(searches.len(), 2);
+    assert_eq!(searches[0].1["limit"], 8);
+    assert_eq!(searches[1].1["limit"], 4);
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn memory_provider_mother_selection_pins_do_not_consume_explicit_search_budget() {
+    let pin = record("Owner core", "Pinned sentinel");
+    let fact = record("AsterOS", "Search sentinel");
+    let (f, agent) = selection_fixture(vec![pin.clone(), fact.clone()], vec![fact], vec![]).await;
+    f.factory.context_result.lock().unwrap().as_mut().unwrap()["pinned"] = json!([pin]);
+    let r = planned_recall(&f, &agent, "AsterOS", "literal", None, &[], 1).await;
+    assert_eq!(r.items.len(), 1);
+    assert!(r.items[0].text.contains("Search sentinel"));
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn multilingual_recall_semantic_order_is_not_replaced_by_english_overlap() {
+    let correct = record(
+        "Household fact",
+        "My cat is called Vega. 跨语言正确 sentinel.",
     );
-    assert!(
-        items[1].text.contains("port6161") && items[1].text.contains("synthetic-second-harness")
+    let wrong = record("叫什么名字", "叫什么名字 language lesson. Wrong sentinel.");
+    let (f, agent) = selection_fixture(
+        vec![correct.clone(), wrong.clone()],
+        vec![],
+        vec![correct, wrong],
+    )
+    .await;
+    let r = planned_recall(&f, &agent, "叫什么名字", "semantic", None, &[], 1).await;
+    assert!(r.items[0].text.contains("跨语言正确 sentinel"));
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn multilingual_recall_exact_name_filters_do_not_reorder_semantic_results() {
+    let correct = record(
+        "Deployment evidence",
+        "AsterOS startup was verified. Provider-top sentinel",
     );
+    let wrong = record(
+        "AsterOS title",
+        "Unrelated palette. Lower-provider sentinel",
+    );
+    let (f, agent) = selection_fixture(
+        vec![correct.clone(), wrong.clone()],
+        vec![],
+        vec![correct, wrong],
+    )
+    .await;
+    for mode in ["hybrid", "semantic"] {
+        let result = planned_recall(&f, &agent, "启动验证", mode, None, &["AsterOS"], 1).await;
+        assert!(result.items[0].text.contains("Provider-top sentinel"));
+    }
+    f.manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn multilingual_recall_coverage_counts_rejected_complete_records() {
+    let preview = record("AsterOS", "AsterOS evidence");
+    let mut wrong = preview.clone();
+    wrong["title"] = json!("OtherProject");
+    wrong["content"] = json!("OtherProject correction");
+    let mut old = record("AsterOS", "Retracted evidence");
+    old["status"] = json!("retracted");
+    let (f, agent) = selection_fixture(vec![wrong, old.clone()], vec![preview, old], vec![]).await;
+    let result = planned_recall(&f, &agent, "AsterOS", "literal", None, &["AsterOS"], 4).await;
+    assert!(result.items.is_empty());
+    assert_eq!(result.coverage["candidateRecords"], 2);
+    assert_eq!(result.coverage["fetchedRecords"], 2);
+    assert_eq!(result.coverage["unresolvedCandidates"], 0);
+    assert_eq!(result.coverage["excludedResolvedRecords"], 2);
     f.manager.shutdown().await;
 }

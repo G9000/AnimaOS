@@ -154,7 +154,8 @@ fn service_error(error: McpServiceError) -> Response {
         McpServiceError::Revoked
         | McpServiceError::Cancelled
         | McpServiceError::TimedOut
-        | McpServiceError::OutcomeUnknown => ApiError::service_unavailable(
+        | McpServiceError::OutcomeUnknown
+        | McpServiceError::OutcomeUnknownSize => ApiError::service_unavailable(
             "MCP operation did not complete; inspect connection state",
         ),
     };

@@ -79,6 +79,7 @@ fn run() -> io::Result<()> {
         "blocked-call",
         "stderr-flood",
         "oversized-line",
+        "oversized-call",
         "no-newline",
         "malformed",
         "idle-flood",
@@ -182,6 +183,13 @@ fn run() -> io::Result<()> {
                 "inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}]})
             }
             "tools/call" => {
+                if mode == "oversized-call" {
+                    emit(
+                        &json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":format!("synthetic-private-sentinel {}", "x".repeat(70*1024))}],"isError":false}}),
+                        false,
+                    )?;
+                    hold(None);
+                }
                 if mode == "blocked-call" {
                     hold(None);
                 }

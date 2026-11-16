@@ -1500,7 +1500,7 @@ impl ToolRegistry {
         registry.register(
             tool_descriptor(
                 "memory_search",
-                "Search your durable memories. Returns each visible record's ID, type and full content. To correct a current fact, use memory_update with its exact ID and content; search with an adequate limit and update every obsolete duplicate fact. Historical reflections need not be rewritten.",
+                "Search your durable memories. source defaults to native, retaining your own memory. Choose source mother explicitly for a configured additive shared garden; formulate a concise query from the user's intent in any language, translate or reformulate if coverage is limited, and judge complete records against the original question. Mother mode is hybrid, semantic or literal (contiguous substring); kind optionally narrows v1 records. exact_names are optional explicit entity constraints, never inferred from capitalization. include_graph defaults true and adds bounded A6 literal graph reads under existing grants. Mother results carry distinct provider locators, current records and coverage; they are not native IDs for editing or sharing. No publication occurs. Native results return each visible ID, type and full content; correct facts with memory_update and exact current text, including obsolete duplicates. Historical reflections need not be rewritten.",
                 object_parameters(vec![
                     required_parameter(
                         "query",
@@ -1510,6 +1510,11 @@ impl ToolRegistry {
                         "limit",
                         integer_parameter("Maximum number of memories to return", 1),
                     ),
+                    optional_parameter("source", string_enum_parameter("Memory source; default native. Mother requires the current additive binding and existing read grants", &["native", "mother"])),
+                    optional_parameter("mode", string_enum_parameter("Mother search mode; default hybrid. Inspect actual semantic availability and coverage", &["hybrid", "semantic", "literal"])),
+                    optional_parameter("kind", string_enum_parameter("Optional Mother v1 category; graph reads have their own typed kinds", &["memory", "decision", "task", "checkpoint", "artifact", "action"])),
+                    optional_parameter("exact_names", array_parameter("At most two explicit entity names; complete records must contain at least one. Omit for semantic translation or paraphrases", non_blank_string_parameter("Exact entity name, up to 200 UTF-16 units"), None)),
+                    optional_parameter("include_graph", boolean_parameter("Mother only: include bounded literal A6 graph recall under existing grants; default true")),
                 ]),
             ),
             memory::execute_memory_search,

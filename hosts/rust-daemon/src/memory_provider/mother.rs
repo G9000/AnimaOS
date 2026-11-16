@@ -10,7 +10,9 @@ use std::{collections::BTreeSet, time::Duration};
 
 #[path = "selection.rs"]
 mod selection;
-use selection::RecallPlan;
+pub(crate) use selection::RecallPlan;
+#[path = "graph.rs"]
+mod graph;
 
 const MAX_RESULT_BYTES: usize = 16 * 1024;
 const MAX_RECALL_BYTES: usize = 8 * 1024;
@@ -22,6 +24,7 @@ const MAX_CANDIDATES: usize = 8;
 enum ReadFailure {
     Unavailable,
     Partial,
+    Authority,
 }
 
 struct Candidate {
@@ -35,6 +38,19 @@ struct ResolvedRecord {
     record: Value,
     owner_order: usize,
     rank: selection::Rank,
+}
+
+struct SelectedRecord {
+    text: String,
+    source_id: String,
+    dedup_key: String,
+    owner_order: usize,
+    rank: selection::Rank,
+}
+
+pub(crate) struct SharedRecall {
+    pub(crate) items: Vec<RecalledItem>,
+    pub(crate) coverage: Value,
 }
 
 pub(crate) struct MotherProvider {
@@ -88,10 +104,17 @@ impl MotherProvider {
         // This bootstrap privilege is deliberately unavailable to mutation tools.
         if !matches!(
             remote,
-            "mother_get_context" | "mother_search_context" | "mother_get_record"
-        ) || !self.current().await
-        {
+            "mother_get_context"
+                | "mother_search_context"
+                | "mother_get_record"
+                | "mother_get_capabilities"
+                | "mother_garden_query"
+                | "mother_garden_get"
+        ) {
             return Err(ReadFailure::Unavailable);
+        }
+        if !self.current().await {
+            return Err(ReadFailure::Authority);
         }
         let tool = self
             .manager
@@ -122,7 +145,7 @@ impl MotherProvider {
             .await
             .map_err(|_| ReadFailure::Unavailable)?;
         if !self.current().await {
-            return Err(ReadFailure::Unavailable);
+            return Err(ReadFailure::Authority);
         }
         self.manager
             .revalidate_workspace_context(&stamp)
@@ -131,8 +154,19 @@ impl MotherProvider {
         complete_envelope(&content.text)
     }
 
-    async fn search(&self, query: &str, mode: &str) -> Result<Value, ExternalMemoryError> {
-        let arguments = |limit| json!({"query":query,"limit":limit,"mode":mode});
+    async fn search(
+        &self,
+        query: &str,
+        mode: &str,
+        kind: Option<&str>,
+    ) -> Result<Value, ExternalMemoryError> {
+        let arguments = |limit| {
+            let mut value = json!({"query":query,"limit":limit,"mode":mode});
+            if let Some(kind) = kind {
+                value["kind"] = json!(kind);
+            }
+            value
+        };
         match self
             .read_complete("mother_search_context", arguments(MAX_CANDIDATES))
             .await
@@ -144,7 +178,7 @@ impl MotherProvider {
                 self.read("mother_search_context", arguments(MAX_CANDIDATES / 2))
                     .await
             }
-            Err(ReadFailure::Unavailable) => Err(unavailable()),
+            Err(ReadFailure::Unavailable | ReadFailure::Authority) => Err(unavailable()),
         }
     }
 
@@ -168,14 +202,21 @@ impl MotherProvider {
     async fn recall_inner(
         &self,
         request: &RecallRequest,
-    ) -> Result<Vec<RecalledItem>, ExternalMemoryError> {
+        deadline: tokio::time::Instant,
+        plan: &RecallPlan,
+        owner_context: bool,
+        include_graph: bool,
+    ) -> Result<SharedRecall, ExternalMemoryError> {
         if request.agent_id != self.agent.id || !self.current().await {
             return Err(unavailable());
         }
         let context = self.read("mother_get_context", json!({"limit":1})).await?;
         self.authority(&context)?;
         let mut ids = Vec::new();
-        for collection in ["pinned", "assignedToYou"] {
+        for collection in ["pinned", "assignedToYou"]
+            .into_iter()
+            .filter(|_| owner_context)
+        {
             for value in context[collection].as_array().into_iter().flatten() {
                 if let Some(id) = value["id"].as_str() {
                     ids.push(id.to_owned());
@@ -183,11 +224,15 @@ impl MotherProvider {
             }
         }
         let owner_ids = ids.clone();
-        let plan = RecallPlan::new(&request.query);
         let mut candidates: Vec<Candidate> = Vec::new();
-        for query in &plan.literal_queries {
-            let search = self.search(query, "literal").await?;
+        let mut searches = Vec::new();
+        if !plan.inventory_only() && request.limit > 0 {
+            let search = self
+                .search(&plan.query, &plan.mode, plan.kind.as_deref())
+                .await?;
             self.authority(&search)?;
+            searches.push(json!({"requestedMode":plan.mode,"kind":plan.kind,"search":search["search"],
+                "selection":search["selection"],"omitted":search["omitted"],"responseBudget":search["responseBudget"]}));
             for value in search["records"]
                 .as_array()
                 .ok_or_else(unavailable)?
@@ -195,7 +240,7 @@ impl MotherProvider {
                 .take(MAX_CANDIDATES)
             {
                 if let Some(id) = value["id"].as_str() {
-                    let rank = plan.rank(value, true);
+                    let rank = plan.rank(value, plan.mode == "literal");
                     if let Some(existing) =
                         candidates.iter_mut().find(|candidate| candidate.id == id)
                     {
@@ -209,27 +254,13 @@ impl MotherProvider {
                 }
             }
         }
-        if candidates.is_empty() && !plan.hybrid_query.is_empty() {
-            let search = self.search(&plan.hybrid_query, "hybrid").await?;
-            self.authority(&search)?;
-            for value in search["records"]
-                .as_array()
-                .ok_or_else(unavailable)?
-                .iter()
-                .take(MAX_CANDIDATES)
-            {
-                if let Some(id) = value["id"].as_str() {
-                    candidates.push(Candidate {
-                        id: id.to_owned(),
-                        rank: plan.rank(value, false),
-                    });
-                }
-            }
-        }
         candidates.sort_by(|left, right| right.rank.cmp(&left.rank));
         ids.extend(candidates.into_iter().map(|candidate| candidate.id));
+        let candidate_count = ids.iter().collect::<BTreeSet<_>>().len();
         let mut seen_ids = BTreeSet::new();
         let mut resolved = Vec::new();
+        let mut fetched_count = 0;
+        let mut rejected_count = 0;
         for id in ids
             .into_iter()
             .filter(|id| seen_ids.insert(id.clone()))
@@ -239,6 +270,7 @@ impl MotherProvider {
                 return Err(unavailable());
             }
             let record = self.read("mother_get_record", json!({"id":id})).await?;
+            fetched_count += 1;
             let revision = record["revision"]
                 .as_f64()
                 .filter(|v| v.is_finite() && *v >= 1.0 && v.fract() == 0.0)
@@ -250,6 +282,7 @@ impl MotherProvider {
                 record["status"].as_str(),
                 Some("retracted" | "superseded" | "cancelled")
             ) {
+                rejected_count += 1;
                 continue;
             }
             record["content"].as_str().ok_or_else(unavailable)?;
@@ -257,7 +290,14 @@ impl MotherProvider {
                 .iter()
                 .position(|owner_id| owner_id == &id)
                 .unwrap_or(usize::MAX);
-            if owner_order == usize::MAX && !plan.matches_current(&record) {
+            if owner_order == usize::MAX
+                && (!plan.matches_current(&record)
+                    || plan
+                        .kind
+                        .as_deref()
+                        .is_some_and(|kind| record["kind"] != kind))
+            {
+                rejected_count += 1;
                 continue;
             }
             resolved.push(ResolvedRecord {
@@ -275,14 +315,13 @@ impl MotherProvider {
                 .cmp(&right.owner_order)
                 .then_with(|| right.rank.cmp(&left.rank))
         });
-        let mut seen_text = BTreeSet::new();
-        let mut items = Vec::new();
-        let mut bytes = 0;
+        let mut selected = Vec::new();
         for ResolvedRecord {
             id,
             revision,
             record,
-            ..
+            owner_order,
+            rank,
         } in resolved
         {
             let content = record["content"].as_str().ok_or_else(unavailable)?;
@@ -291,32 +330,96 @@ impl MotherProvider {
                 .collect::<Vec<_>>()
                 .join(" ")
                 .to_lowercase();
-            if !seen_text.insert(normalized) {
-                continue;
-            }
-            // Preserve complete records, provenance and contradictory assertions; never cut a record mid-content.
             let text = json!({"provider":"mother","workspaceId":self.binding.workspace_id,"generation":self.binding.generation,"record":record}).to_string();
-            if bytes + text.len() > MAX_RECALL_BYTES
-                || !crate::threat_scan::blocking_ids(&text).is_empty()
+            selected.push(SelectedRecord {
+                text,
+                source_id: format!(
+                    "mother:{}/{}/{}@{}",
+                    self.binding.workspace_id, self.binding.generation, id, revision
+                ),
+                dedup_key: format!("v1:{normalized}"),
+                owner_order,
+                rank,
+            });
+        }
+        // Optional graph latency must not consume the final v1 authority check.
+        let reserve = Duration::from_millis(500);
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let mut graph_coverage = json!({"status":"not_requested","mode":"literal"});
+        if include_graph && request.limit > 0 && !plan.inventory_only() {
+            graph_coverage["status"] = json!("deadline_excluded");
+        }
+        if include_graph && request.limit > 0 && remaining > reserve && !plan.inventory_only() {
+            let budget = (remaining - reserve).min(Duration::from_millis(750));
+            match tokio::time::timeout(budget, graph::collect(self, plan, &mut graph_coverage))
+                .await
+            {
+                Ok(Ok(records)) => selected.extend(records),
+                Ok(Err(ReadFailure::Authority)) => return Err(unavailable()),
+                Ok(Err(ReadFailure::Unavailable | ReadFailure::Partial)) => {
+                    graph_coverage["status"] = json!("unavailable");
+                }
+                Err(_) => {
+                    graph_coverage["status"] = json!("deadline_excluded");
+                }
+            }
+        }
+        selected.sort_by(|left, right| {
+            left.owner_order
+                .cmp(&right.owner_order)
+                .then_with(|| right.rank.cmp(&left.rank))
+        });
+        let mut seen_text = BTreeSet::new();
+        let mut items = Vec::new();
+        let mut bytes = 0;
+        let selected_count = selected.len();
+        for record in selected {
+            if items.len() >= request.limit.min(MAX_RECORDS) {
+                break;
+            }
+            // Keep complete records and attribution; never cut a record mid-content.
+            if !seen_text.insert(record.dedup_key)
+                || bytes + record.text.len() > MAX_RECALL_BYTES
+                || !crate::threat_scan::blocking_ids(&record.text).is_empty()
             {
                 continue;
             }
-            bytes += text.len();
+            bytes += record.text.len();
             items.push(RecalledItem {
-                text,
+                text: record.text,
                 score: 1.0,
-                source_id: Some(format!(
-                    "mother:{}/{}/{}@{}",
-                    self.binding.workspace_id, self.binding.generation, id, revision
-                )),
+                source_id: Some(record.source_id),
             });
-            if items.len() == request.limit.min(MAX_RECORDS) {
-                break;
-            }
         }
         // A restore or grant change during record fetch discards the whole result. No cached read is reused.
         self.authority(&self.read("mother_get_context", json!({"limit":1})).await?)?;
-        Ok(items)
+        Ok(SharedRecall {
+            coverage: json!({"status":if items.is_empty() {"no_selected_records"} else {"selected_records"},
+            "exhaustive":false,"searches":searches,"graph":graph_coverage,"candidateRecords":candidate_count,
+            "fetchedRecords":fetched_count,"unresolvedCandidates":candidate_count.saturating_sub(fetched_count),
+            "excludedResolvedRecords":rejected_count+selected_count.saturating_sub(items.len()),"returnedRecords":items.len(),
+            "maxRecords":request.limit.min(MAX_RECORDS),"maxRecallBytes":MAX_RECALL_BYTES}),
+            items,
+        })
+    }
+
+    pub(crate) async fn recall_search(
+        &self,
+        plan: RecallPlan,
+        limit: usize,
+        include_graph: bool,
+    ) -> Result<SharedRecall, ExternalMemoryError> {
+        let request = RecallRequest {
+            agent_id: self.agent.id.clone(),
+            query: plan.query.clone(),
+            limit,
+            deadline: Duration::from_secs(3),
+        };
+        let deadline = tokio::time::Instant::now() + request.deadline;
+        tokio::select! {
+            result=tokio::time::timeout_at(deadline,self.recall_inner(&request,deadline,&plan,false,include_graph)) => result.map_err(|_|unavailable())?,
+            _=self.cancel.cancelled()=>Err(unavailable()),
+        }
     }
 }
 
@@ -342,6 +445,24 @@ fn complete_envelope(text: &str) -> Result<Value, ReadFailure> {
         .filter(|v| v.is_finite() && *v >= 0.0 && v.fract() == 0.0)
         .ok_or(ReadFailure::Unavailable)?;
     if value["isError"] != false {
+        let text_error: Option<Value> = value["textBlocks"]
+            .as_array()
+            .filter(|blocks| blocks.len() == 1)
+            .and_then(|blocks| blocks[0].as_str())
+            .and_then(|text| serde_json::from_str(text).ok());
+        let code = value["structuredData"]["error"]["code"]
+            .as_str()
+            .or_else(|| {
+                text_error
+                    .as_ref()
+                    .and_then(|error| error["error"]["code"].as_str())
+            });
+        if matches!(
+            code,
+            Some("WORKSPACE_MISMATCH" | "GENERATION_MISMATCH" | "RESTART_REQUIRED")
+        ) {
+            return Err(ReadFailure::Authority);
+        }
         return Err(ReadFailure::Unavailable);
     }
     if shortened || omitted > 0.0 {
@@ -372,8 +493,10 @@ impl ExternalMemoryProvider for MotherProvider {
         &self,
         request: RecallRequest,
     ) -> Result<Vec<RecalledItem>, ExternalMemoryError> {
+        let deadline = tokio::time::Instant::now() + request.deadline.min(Duration::from_secs(3));
+        let plan = RecallPlan::new(&request.query);
         tokio::select! {
-            result=tokio::time::timeout(request.deadline.min(Duration::from_secs(3)),self.recall_inner(&request)) => result.map_err(|_|unavailable())?,
+            result=tokio::time::timeout_at(deadline,self.recall_inner(&request,deadline,&plan,true,true)) => result.map_err(|_|unavailable())?.map(|r|r.items),
             _=self.cancel.cancelled()=>Err(unavailable()),
         }
     }
