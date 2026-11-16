@@ -43,6 +43,8 @@ fn candidate() -> anima_core::ExternalToolDescriptor {
 struct FakeFactory {
     context_result: Arc<StdMutex<Option<serde_json::Value>>>,
     garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
+    garden_search_fixture: Arc<StdMutex<Option<GardenSearchFixture>>>,
+    garden_calls: Arc<StdMutex<Vec<(String, serde_json::Value)>>>,
     connects: AtomicUsize,
     stdio_launches: StdMutex<Vec<(McpStdioSpec, String)>>,
     hold_calls: AtomicBool,
@@ -50,10 +52,17 @@ struct FakeFactory {
     bearer_launches: StdMutex<Vec<(String, super::credentials::McpBearerToken)>>,
     oauth_launches: StdMutex<Vec<Arc<dyn McpAccessTokenProvider>>>,
 }
+#[derive(Clone)]
+struct GardenSearchFixture {
+    literal_records: Vec<serde_json::Value>,
+    semantic_records: Vec<serde_json::Value>,
+}
 struct FakeSession {
     fail_calls: AtomicBool,
     context_result: Arc<StdMutex<Option<serde_json::Value>>>,
     garden_records: Arc<StdMutex<Option<Vec<serde_json::Value>>>>,
+    garden_search_fixture: Arc<StdMutex<Option<GardenSearchFixture>>>,
+    garden_calls: Arc<StdMutex<Vec<(String, serde_json::Value)>>>,
     changed_schema: AtomicBool,
     discoveries: AtomicUsize,
     calls: AtomicUsize,
@@ -72,6 +81,8 @@ impl FakeSession {
             fail_calls: AtomicBool::new(false),
             context_result,
             garden_records: Default::default(),
+            garden_search_fixture: Default::default(),
+            garden_calls: Default::default(),
             changed_schema: AtomicBool::new(false),
             discoveries: AtomicUsize::new(0),
             calls: AtomicUsize::new(0),
@@ -117,6 +128,8 @@ impl McpTransportFactory for FakeFactory {
             self.context_result.clone(),
         );
         session.garden_records = self.garden_records.clone();
+        session.garden_search_fixture = self.garden_search_fixture.clone();
+        session.garden_calls = self.garden_calls.clone();
         let session = Arc::new(session);
         self.sessions.lock().unwrap().push(session.clone());
         Box::pin(async move { Ok(session as Arc<dyn McpTransportSession>) })
@@ -174,12 +187,33 @@ impl McpTransportSession for FakeSession {
         let fail = self.fail_calls.load(Ordering::SeqCst);
         let mut context = self.context_result.lock().unwrap().clone();
         if let Some(records) = self.garden_records.lock().unwrap().as_ref() {
+            self.garden_calls
+                .lock()
+                .unwrap()
+                .push((call.remote_name.clone(), call.arguments.clone()));
             if call.remote_name == "mother_search_context" {
                 if let Some(context) = &mut context {
-                    context["records"] = json!(records
-                        .iter()
-                        .map(|r| json!({"id":r["id"],"excerpt":"preview only"}))
-                        .collect::<Vec<_>>());
+                    if let Some(search) = self.garden_search_fixture.lock().unwrap().as_ref() {
+                        let literal = call.arguments["mode"] == "literal";
+                        let query = call.arguments["query"].as_str().unwrap().to_lowercase();
+                        let source = if literal {
+                            &search.literal_records
+                        } else {
+                            &search.semantic_records
+                        };
+                        context["records"] = json!(source.iter().filter(|r| !literal ||
+                            ["title", "content"].iter().any(|key| r[key].as_str().is_some_and(|text| text.to_lowercase().contains(&query))))
+                            .map(|r| json!({"id":r["id"],"title":r["title"],"revision":r["revision"],"excerpt":r["content"].as_str().unwrap().chars().take(400).collect::<String>(),"truncated":true}))
+                            .collect::<Vec<_>>());
+                        context["search"] = json!({"effectiveMode":if literal {"literal"} else {"hybrid"},
+                            "reason":if literal {serde_json::Value::Null} else {json!("index_incomplete")},
+                            "eligibleRecords":140,"indexedRecords":if literal {0} else {13},"unindexedRecords":127});
+                    } else {
+                        context["records"] = json!(records
+                            .iter()
+                            .map(|r| json!({"id":r["id"],"excerpt":"preview only"}))
+                            .collect::<Vec<_>>());
+                    }
                 }
             } else if call.remote_name == "mother_get_record" {
                 context = records

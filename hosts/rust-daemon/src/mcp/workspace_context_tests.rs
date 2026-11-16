@@ -2,6 +2,9 @@ use super::*;
 use anima_core::{runtime::prompt_context::PromptContextSource, DataValue};
 use sha2::{Digest, Sha256};
 
+#[path = "record_selection_tests.rs"]
+mod record_selection_tests;
+
 fn context(agent: &str) -> serde_json::Value {
     let persona = "Remote companion persona sentinel";
     json!({"access":{"version":1,"mode":"companion","subject":agent},"workspace":{"id":"workspace","generation":"generation"},"persona":{"content":persona,"hash":hex::encode(Sha256::digest(persona))},"records":[{"content":"Workspace reference sentinel"}]})
