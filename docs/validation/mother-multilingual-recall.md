@@ -100,8 +100,20 @@ and nine attachments unchanged. Selected-sharing queue and mapping rows remained
 identical. Mother reads verified all 183 pre-update snapshots and 290 original
 historical revisions through the existing authenticated MCP bridge; private evidence records
 the enumeration limits. The stopped native owner service was started with its
-existing launcher, database and generation. No Mother binary, client credential,
-grant, store location or existing folder ACL was changed.
+existing launcher, database and generation. This rollout did not replace Mother's
+binary or change client credentials, grants, store locations or existing folder
+ACLs.
+
+A separate Mother update (`be28b60`) replaced its executable during final checks.
+The replacement matched that checkout's release build. A repeat read-only audit
+again verified all 183 snapshots, 290 historical revisions and seven clients.
+The three additional native interoperability fixtures could not start their
+synthetic owner: the disposable directories inherited `CodexSandboxUsers` read
+access, which Mother's owner-only target check rejects. A separate owned probe
+confirmed `MIGRATION_FENCED`; no ACL was changed to force a pass. Those three cases
+remain failed fixture starts, not passing acceptance of the replacement. The
+current installed connections and memory reads were reverified independently.
+This report does not certify the separate update's new ancestor-SID exception.
 
 The proposed live mixed-language exchange was blocked before submission for
 specific provider/payload consent. The owner then chose to keep the update and
