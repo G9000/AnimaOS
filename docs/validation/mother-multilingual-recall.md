@@ -73,5 +73,40 @@ personality/model settings, installed binaries and startup configuration are
 outside this source slice. The only live garden write is the explicitly required
 technical continuation checkpoint. Neither consumed Discord test allowance is
 reused. No paid model call or Discord post is part of these tests. Source changes
-remain local and unpublished; the installed application still runs the preceding
-qualified version until an explicit deployment.
+were local and unpublished at the end of source qualification. The subsequent
+owner-authorized publication and installation are recorded below.
+
+## Publication and installed qualification (17 November 2026)
+
+The 30-file A6, bounded-read and multilingual implementation was committed as
+`6ddd336e`, fast-forwarded into `main` and pushed to the owner's verified
+`G9000/AnimaOS` repository. Remote readback confirmed the commit. Fresh full Rust
+qualification passed 6,009 tests, zero failures and 70 ignored tests; repository
+lint and the locked bundled build passed at unchanged Rust source hashes.
+
+The bundled executable was installed in the existing profile's versioned binary
+directory. Its SHA-256 is
+`81e389648b650e070cf5b487370e76e61a3a060347822fcd3d21878caa34e4cb`.
+The actual supervisor and daemon images, served UI, saved login startup and a
+full cold application restart were verified. This was not a Windows reboot.
+Both additive pairings and existing Discord connectors became ready with the
+same account, reviewed tools, grants, local personality and selected-sharing
+policy. Startup refreshed the built-in `memory_search` description and its five
+provider-read arguments on all four agents; every other owner configuration and
+tool descriptor remained unchanged.
+
+The native audit retained all 385 original memories, five entities, 1,440 messages
+and nine attachments unchanged. Selected-sharing queue and mapping rows remained
+identical. Mother reads verified all 183 pre-update snapshots and 290 original
+historical revisions through the existing authenticated MCP bridge; private evidence records
+the enumeration limits. The stopped native owner service was started with its
+existing launcher, database and generation. No Mother binary, client credential,
+grant, store location or existing folder ACL was changed.
+
+The proposed live mixed-language exchange was blocked before submission for
+specific provider/payload consent. The owner then chose to keep the update and
+skip that exchange. The prepared local diagnostic chat has zero messages. No
+live model call, Discord post or garden publication was made, and live model
+recall is not claimed. The earlier scripted routing and actual offline E5/native
+Mother acceptance remain the evidence for multilingual recall. Rollback binaries,
+data backups and preservation reports are retained privately.
